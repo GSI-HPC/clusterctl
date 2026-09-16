@@ -1,0 +1,7 @@
+# Derived from site-config/hostnames.conf, sourced before this file
+export CLUSTER_HTTP_SERVER=${CLUSTER_HOST_INSTALL:-}
+export CLUSTER_HTTP_SERVER_ROOT=/var/www/html
+export CLUSTER_HTTP_CINC_ARCHIVE_PATH=$CLUSTER_HTTP_SERVER_ROOT/cinc
+export CLUSTER_PXESRV_SERVER=${CLUSTER_HOST_INSTALL:-}
+export CLUSTER_PXESRV_ROOT=/srv/pxesrv
+export CLUSTER_PXESRV_BOOT_PATH=$CLUSTER_PXESRV_ROOT/boot

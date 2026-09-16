@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+#
+# Copyright 2020-2022 Victor Penso
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+# script exits on the first unset variable encountered
+set -u    # nounset
+# script stops on first command failure
+set -e    # errexit
+# ensures that if any command in a set of piped commands failed, the overall
+# exit status is the status of the failed command
+set -o pipefail
+
+VERSION=0.1
+
+# Filename of this script
+SCRIPT=${0##*/}
+
+# Help text for this script
+HELP=\
+"usage: $SCRIPT [-h] [--version] nodeset
+
+Set the boot-path on the PXESrv server for nodes depending on their cluster and architecture
+
+positional arguments:
+  nodeset              list of nodes
+
+optional arguments:
+  -d, --debug          enable verbose output
+  -h, --help           show this help message
+  --version            program version number "
+
+_DEBUG=${_DEBUG:-false}
+_debug() {
+        if [ "$_DEBUG" = "true" ]; then
+                echo 1>&2 "Debug: $@"
+        fi
+}
+
+_error() {
+        echo 1>&2 "Error: $@"
+	exit 1
+}
+
+# Parse the command line options
+ARGS=$(getopt -o dh -l "debug,help,version" -- "$@")
+eval set -- "$ARGS"
+while true; do
+        case "$1" in
+        -d|--debug)
+                _DEBUG=true
+                shift
+                ;;
+        -h|--help)
+                echo "$HELP"
+                exit 0
+                ;;
+        --version)
+                echo $VERSION
+                exit 0
+                ;;
+        --)
+                shift
+                break 
+                ;;
+        *) 
+                break 
+                ;;
+        esac
+done
+
+# check dependencies...
+for cmd in \
+        nodeset \
+        cluster-pxesrv
+do
+        command -v $cmd &>/dev/null || _error "$cmd command not in \$PATH"
+done
+
+# Require one argument (the nodeset)
+if (( $# == 1 ))
+then
+        nodeset=$1
+else
+        _error "One argument (the nodeset) required!"
+fi
+
+shopt -s extglob
+
+BOOTPATH_FILE=${BOOTPATH_FILE:-$CLUSTER_TOOLS_PATH/site-config/bootpaths.conf}
+boot_path=""
+# loop of individual nodes from the nodeset
+for node in $(nodeset -e "$nodeset")
+do
+        # match each node to a boot-path (see `cluster-pxesrv list`)
+        boot_path=""
+        multiple=false
+        while read line; do
+                line=${line%%#*}
+                if [ -z "$line" ]; then
+                        continue
+                fi
+                read -r ns bp <<< $line
+                read -a expanded_ns < <(nodeset -e $ns)
+                for i in "${expanded_ns[@]}"; do
+                        if [ "$i" == "$node" ]; then
+                                if [ -n "$boot_path" ]; then
+                                        multiple=true
+                                        continue
+                                else
+                                        boot_path=$bp
+                                fi
+                        fi
+                done
+        done<$BOOTPATH_FILE
+
+        if [ -z "$boot_path" ]; then
+                echo "ERROR: no bootpath found for $node in $BOOTPATH_FILE !"
+        elif [ "$multiple" = true ]; then
+                echo "ERROR: multiple bootpaths found for node $node in $BOOTPATH_FILE!"
+        else
+                # configure boot path on the PXESrv server
+                cluster-pxesrv boot $node $boot_path
+        fi
+done
+
+exit 0

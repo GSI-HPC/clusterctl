@@ -1,0 +1,368 @@
+#!/usr/bin/env bash
+#
+# Copyright 2021-2022 Victor Penso
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+# script exits on the first unset variable encountered
+set -u    # nounset
+# script stops on first command failure
+set -e    # errexit
+# ensures that if any command in a set of piped commands failed, the overall
+# exit status is the status of the failed command
+set -o pipefail
+
+VERSION=0.3
+
+# Filename of this script
+SCRIPT=${0##*/}
+
+
+# Help text for this script
+HELP=\
+"Usage: $SCRIPT [-h] [--version] [arg]
+
+This script use cluster-login to access a compute cluster and run
+commands again the Slurm user interface, processes the output and
+aggregates the information.
+
+Positional arguments:
+
+  alloc [<user>]                
+
+    List all nodes with running jobs optionally limited to s specification
+    user. The list includes job IDs usernames, account and partition.
+
+  defect
+
+    List nodes in non-production aka state=drain,draining,drained,down.
+    This includes the reason provided by the system or an administrator.
+
+  drain <reason> <nodeset>
+
+    Set state=drain for a nodeset to remove nodes from production. 
+    Provide a reason preferably with a reference to a trouble ticket
+    of an issue in version control. Use the resume subcommand to move 
+    nodes back to production.
+
+  idle
+
+    List nodes in state=idle with corresponding information on the 
+    partition, default and max run-time, memory, features and GRES.
+
+  jobs [<nodeset>]
+
+    List jobs executed on nodes with user, account, working-directory
+    and command executed. Optionally add a nodeset as argument to limit
+    the output to a specific set of nodes.
+
+  nodeset [alloc|drain|down|respond]   
+
+    Returns a nodeset for machines managed by the system. By default a 
+    list of all nodes is returned. Optionally limit the list to nodes in 
+    a set of states with one of the following arguments:
+   
+      alloc -- alloc,allocated,mix,mixed,comp,completing
+      drain -- drain,draining,draine
+      down  -- down,no_respond,power_down,unk,unknown
+
+   Use the argument respond to get a nodeset of machines current in 
+   communication with the slurmctld.
+
+
+  state [<nodeset>]
+
+    Show the state of nodes, optionally limited to a given nodeset.
+
+  partition [<name>]
+
+    List all partitions with number of nodes, job run-time limits and a
+    nodeset. Optionally limit the output to a specific partition by
+    providing the partition name as argument.
+
+  resources
+
+    Show resources in partitions: number of nodes, memory per node, CPU
+    configuration and allocation, and access configuration for accounts.
+
+  resume <nodeset>
+    
+    Set state=resume for a nodeset to move machines back to production.
+    Use the drain sub-command to remove a node from production.
+  
+  runtime [<nodeset>]
+
+    List run-time limits for jobs. Optionally limit the output to a given
+    set of nodes.
+
+Optional arguments:
+  -d, --debug                          Enable verbose output
+  -D, --date                           Print time-stamp ahead of output
+  -h, --help                           Show this help message
+  --version                            Program version number"
+
+_DEBUG=${_DEBUG:-false}
+function _debug() {
+        if [ "$_DEBUG" = "true" ]; then
+                echo 1>&2 "$SCRIPT debug -- $@"
+        fi
+}
+
+function _error() {
+        echo 1>&2 "Error: $@"
+	exit 1
+}
+
+# check dependency programs
+for cmd in \
+        column \
+        nodeset \
+        cluster-login
+do
+        command -v $cmd &>/dev/null || _error "$cmd program missing"
+done
+
+# Parse the command line options
+ARGS=$(getopt -o dDh -l "debug,date,help,version" -- "$@")
+eval set -- "$ARGS"
+while true; do
+        case "$1" in
+        -d|--debug)
+                export _DEBUG=true
+                shift
+                ;;
+        -D|--date)
+                date
+                shift
+                ;;
+        -h|--help)
+                echo "$HELP"
+                exit 0
+                ;;
+        --version)
+                echo $VERSION
+                exit 0
+                ;;
+        --)
+                shift
+                break 
+                ;;
+        *) 
+                break 
+                ;;
+        esac
+done
+
+##
+# List nodes with running jobs
+#
+alloc() {
+        local format="%12i %10u %10a %10P %N"
+        local user=
+        if [ "$#" -eq 1 ]
+        then
+                user="--user '$1'"
+        fi
+        cluster-login -- "squeue --states r --format '$format' $user"
+
+}
+
+defect() {
+        cluster-login -- "sinfo -o '%4D %10T %20E %N' -S '-D' -t drain,draining,drained,down"
+}
+
+##
+# Drain a list of nodes
+#
+drain() {
+        local reason="${1:?Specify a reason for node draining}"
+        local nodeset="${2:?Specify a set of nodes to be drained}"
+        cluster-login -- "scontrol update state=drain nodename='$nodeset' reason='$reason'"
+}
+
+##
+# List idle nodes with resource specification
+#
+idle() {
+        cluster-login -- "
+                sinfo --format='%P %L %l %m %f %G %N' \
+                      --noheader \
+                      --state=idle \
+                      --sort P
+                " \
+                | column --table \
+                         --table-columns 'PARTITION,DEFAULTTIME,MAXTIME,REALMEMORY,FEATURES,GRES,NODES'
+}
+
+##
+# Show jobs working directory and command executed
+#
+jobs() {
+        echo "# Nodeset,Nodes,User,Account,WorkingDirectory,Executed"
+        local format="%N %D %u %a %Z %o"
+        local options=
+        if [ "$#" -eq 1 ]
+        then
+                options="--nodelist='$1'"
+        fi
+        cluster-login -- "squeue --noheader --states RUNNING --sort 'N' --format '$format' $options"
+}
+
+##
+# List the running jobs on nodes with maximum run-time and run-time consumed
+#
+runtime() {
+        if [ "$#" -eq 1 ]
+        then
+                nodeslist="--nodelist '$1'"
+        else
+                nodeslist=""
+        fi
+        cluster-login -- "
+                squeue --format '%A %u %N %l %M' \
+                       --sort '-M,-I' \
+                       --noheader \
+                       $nodeslist" \
+                | tr -s ' ' \
+                | cut -d' ' -f2- \
+                | uniq -c \
+                | tr -s ' ' \
+                | column \
+                        --table \
+                        --table-columns 'JOBS,USER,NODES,MAXTIME,RUNTIME'
+}
+
+##
+# Return a complete nodeset for a cluster, or a selected subset
+#
+_nodeset() {
+        # list all nodes by default
+        local subcommand=${1:-all}
+        case "$subcommand" in
+                all)
+                        exec="sinfo -h -N -o '%n'"
+                        ;;
+                alloc)
+                        exec="sinfo -h -N -o '%n' -t alloc,allocated,mix,mixed,comp,completing"
+                        ;;
+                drain)
+                        exec="sinfo -h -N -o '%n' -t drain,draining,drained"
+                        ;;
+                down)
+                        exec="sinfo -h -N -o '%n' -t down,no_respond,power_down,unk,unknown"
+                        ;;
+                respond)
+                        exec="sinfo -h -r -o '%n'"
+                        ;;
+                *)
+                        _error "Subcommand $subcommand not supported!"
+                        ;;
+        esac
+        cluster-login -- "$exec" | nodeset -f
+
+}
+
+##
+# List node and run-time configuration of partitions
+#
+partition() {
+        local format="%9P %.5a %6g %5D %11L %10l %N"
+        local options=
+        if [ "$#" -eq 1 ]
+        then
+                options="--partition='$1'"
+        fi
+        cluster-login -- "sinfo --format='$format' $options"
+}
+
+##
+# Print hardware resources in all partitions
+#
+resources() {
+        local format="%9P %6g %4c %6z %6m %5D %20C"
+        cluster-login -- "sinfo --format='$format'"
+}
+
+##
+# Resume nodes into production
+#
+resume() {
+        if [ "$#" -eq 1 ]
+        then
+                cluster-login -- "scontrol update state=resume nodename='$1'"
+        else
+                _error 'Nodeset argument required'
+        fi
+}
+
+state() {
+        if [ "$#" -eq 1 ]
+        then
+                nodes="--nodes '$1'"
+        else
+                nodes=''
+        fi
+        cluster-login -- "sinfo -o '%.10T %.5D %N' -S -D $nodes"
+}
+
+
+
+# use a default sub-command unless specified
+_command="${1:-help}"
+test "$#" -eq 0 || shift
+# evaluate sub-commands
+case "$_command" in
+        alloc)
+                alloc "$@"
+                ;;
+        defect)
+                defect $@
+                ;;
+        drain)
+                drain "$@"
+                ;;
+        idle)
+                idle
+                ;;
+        jobs)
+                jobs "$@"
+                ;;
+        nodeset)
+                _nodeset $@
+                ;;
+        state)
+                state $@
+                ;;
+        partition|part)
+                partition "$@"
+                ;;
+        resources|rsrc)
+                resources
+                ;;
+        resume)
+                resume $@
+                ;;
+        runtime)
+                runtime $@
+                ;;
+        *)
+                echo "$HELP" 
+                exit 1
+                ;;
+esac
+
+exit 0
+
+

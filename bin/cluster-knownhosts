@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+
+# Copyright 2025 Victor Penso
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+# script exits on the first unset variable encountered
+set -u    # nounset
+# ensures that if any command in a set of piped commands failed, the overall
+# exit status is the status of the failed command
+set -o pipefail
+
+VERSION=0.1
+
+# Filename of this script
+SCRIPT=${0##*/}
+
+# Help text for this script
+HELP=\
+"usage: $SCRIPT [-h] [--version] <nodeset>
+
+Add a node's public key to the known_hosts list. Remove possible already existing
+entries if the overwrite option is passed.
+
+positional arguments:
+  nodeset              list of nodes
+
+optional arguments:
+  -d, --debug          enable verbose output
+  -h, --help           show this help message
+  -o, --overwrite      overwrite existing keys
+  --version            program version number "
+
+_DEBUG=${_DEBUG:-false}
+_debug() {
+        if [ "$_DEBUG" = "true" ]; then
+                echo 1>&2 "Debug: $@"
+        fi
+}
+
+_error() {
+        echo 1>&2 "Error: $@"
+	exit 1
+}
+
+ssh_overwrite_key=false
+# Parse the command line options
+ARGS=$(getopt -o dho -l "debug,help,overwrite,version" -- "$@")
+eval set -- "$ARGS"
+while true; do
+        case "$1" in
+        -d|--debug)
+                _DEBUG=true
+                shift
+                ;;
+        -h|--help)
+                echo "$HELP"
+                exit 0
+                ;;
+        -o|--overwrite)
+                ssh_overwrite_key=true
+                shift
+                ;;
+        --version)
+                echo $VERSION
+                exit 0
+                ;;
+        --)
+                shift
+                break 
+                ;;
+        *) 
+                break 
+                ;;
+        esac
+done
+
+# check dependencies...
+for cmd in \
+        nodeset \
+        ssh-keyscan
+do
+        command -v $cmd &>/dev/null || _error "$cmd command not in \$PATH"
+done
+
+if (( $# >= 1 ))
+then
+        nodeset=$1 ; shift
+else
+        _error "Requires a nodeset argument!"
+fi
+
+known_hosts_file=${CLUSTER_KNOWN_HOSTS_FILE:-${CLUSTER_LOGIN_SSH_KNOWN_HOSTS:-$CLUSTER_TOOLS_PATH/site-config/ssh-known-hosts}}
+_debug "known_hosts file: $known_hosts_file"
+
+# loop over individual nodes from the nodeset
+for node in $(nodeset -e "$nodeset")
+do
+        if [[ ! "$node" == *"."* ]]
+        then
+                node=$node.${CLUSTER_DOMAIN_HPC:-}
+        else
+                domain=${node#*.}
+                if ! [[ "$domain" == ${CLUSTER_DOMAIN_HPC:-} || "$domain" == ${CLUSTER_DOMAIN_MGMT_HPC:-} ]]
+                then
+                        echo "\"$domain\" is not a valid domain. Skipping $node"
+                        continue
+                fi
+        fi
+        host_key=$(ssh-keyscan -t ed25519 $node | grep ed25519) 
+        if [ ! "$host_key" ]
+        then
+                echo "ssh-keyscan could not get the key from $node"
+                continue
+        fi
+        _debug "host_key: $host_key"
+        known_key=$(ssh-keygen -t ed25519 -f $known_hosts_file -F $node | grep ed25519)
+        _debug "known_key: $known_key"
+        # if the host and known keys are equal, replace it the overwrite option was given
+        if  [[ "$host_key" == "$known_key" ]]
+        then
+                echo "Host key from $node and known key are equal."
+                continue
+        elif [ "$known_key" ]
+        then
+                if [ "$ssh_overwrite_key" = true ]
+                then
+                        # remove key from known hosts list
+                        ssh-keygen -q -f $known_hosts_file -R $node 1>/dev/null
+                        echo "key for $node removed from known hosts list"
+                else
+                        echo "A different key for $node already exists in the known hosts file (use '-o' to replace)"
+                        continue
+                fi
+        fi
+        echo "$host_key" >> $known_hosts_file
+        echo "$node key added to the known_hosts file"
+done
+# sort the host keys, keep comments on top
+sorted=$(grep '^#' "$known_hosts_file"; grep -v -e '^#' -e '^$' "$known_hosts_file" | sort)
+[ -n "$sorted" ] && printf '%s\n' "$sorted" > "$known_hosts_file"
+
+exit 0
+
+

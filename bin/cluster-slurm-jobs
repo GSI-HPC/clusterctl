@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+#
+# Copyright 2022 Victor Penso
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+# script exits on the first unset variable encountered
+set -u    # nounset
+# script stops on first command failure
+set -e    # errexit
+# ensures that if any command in a set of piped commands failed, the overall
+# exit status is the status of the failed command
+set -o pipefail
+
+VERSION=0.1
+
+# Filename of this script
+SCRIPT=${0##*/}
+
+
+# Help text for this script
+HELP=\
+"Usage: $SCRIPT [-h] [--version] [arg]
+
+This script use cluster-login to access a compute cluster and run
+commands again the Slurm user interface, processes the output and
+aggregates the information.
+
+Positional arguments:
+
+  completes [<user>[,<user>,...]]
+
+    List completed jobs since begin-time (see option -b).
+    Optionally add a list of Linux user names.
+
+  failed [<user>[,<user>,...]]
+
+    List failed jobs with exit code since begin-time (see option -b).
+    Optionally add a list of Linux user names.
+
+  pending
+
+    Number of pending jobs by user in alphabetical order.
+
+  priority
+
+    List pending jobs in order of priority.
+
+  running
+
+    Number of running jobs by user in alphabetical order.
+
+  runtime
+
+    List of jobs by runtime.
+
+  state <job_id>[,<job_id>,...]
+
+    Show information for specified job IDs from the accounting.
+
+  user <name>
+
+    List all running jobs for s specified user including the
+    job working directory and the executed command.
+
+Options:
+
+  -b, --begin-time <[0-9]* [hour|day]> 
+     hours/days to look back in the accounting, default to 1 hour
+
+  -d, --debug   Enable verbose output
+  -h, --help    Show this help message
+  --version     Program version number
+
+Environment variables:
+
+  PAGER         Pager program to be used (defaults to less)"
+
+_DEBUG=${_DEBUG:-false}
+function _debug() {
+        if [ "$_DEBUG" = "true" ]; then
+                echo 1>&2 "$SCRIPT debug -- $@"
+        fi
+}
+
+function _error() {
+        echo 1>&2 "Error: $@"
+	exit 1
+}
+
+# check dependency programs
+for cmd in \
+        awk \
+        cluster-login \
+        column \
+        less \
+        nodeset \
+        tr \
+        uniq
+do
+        command -v $cmd &>/dev/null || _error "$cmd program missing"
+done
+
+PAGER=${PAGER:-less}
+
+date_format="%Y-%m-%dT%H:%M"
+begin_time='1 hour'
+# Parse the command line options
+ARGS=$(getopt -o b:dh -l "begin-time:,debug,help,version" -- "$@")
+eval set -- "$ARGS"
+while true; do
+        case "$1" in
+                -b|--begin-time)
+                        shift
+                        begin_time=$1
+                        shift
+                        ;;
+                -d|--debug)
+                        export _DEBUG=true
+                        shift
+                        ;;
+                -h|--help)
+                        echo "$HELP"
+                        exit 0
+                        ;;
+                --version)
+                        echo $VERSION
+                        exit 0
+                        ;;
+                --)
+                        shift
+                        break 
+                        ;;
+                *) 
+                        break 
+                        ;;
+        esac
+done
+
+##
+# List completed jobs, optionally limited to a list of users
+#
+completed() {
+        local users='--allusers'
+        if [ "$#" -eq 1 ] ; then
+                users="--user='$1'"
+        fi
+        local start=$(date --date="$begin_time ago" +"$date_format")
+        local end=$(date +"$date_format")
+        local states='completed'
+        local format='user,account,jobid,nodelist,elapsed,end,start,submit'
+        local o_format='USER,ACCOUNT,JOB_ID,NODELIST,ELAPSED,END_TIME,START_TIME,SUBMIT_TIME'
+        local command="sacct --noheader --parsable --allocations $users --state='$states' --starttime='$start' --endtime='$end' --format='$format'"
+        cluster-login -- "$command" \
+                | column --separator '|' --table --table-columns $o_format \
+                | $PAGER
+}
+
+##
+# List failed jobs, optionally limited to a list of users
+#
+failed() {
+        local users='--allusers'
+        if [ "$#" -eq 1 ] ; then
+                users="--user='$1'"
+        fi
+        local start=$(date --date="$begin_time ago" +"$date_format")
+        local end=$(date +"$date_format")
+        local states='failed,node_fail,timeout'
+        local format='user,account,jobid,state,exitcode,end,nodelist'
+        local o_format='USER,ACCOUNT,JOB_ID,STATE,EXIT_CODE,END_TIME,NODE_LIST'
+        local command="sacct --noheader --parsable2 --allocations $users --state='$states' --starttime='$start' --endtime='$end' --format='$format'"
+        cluster-login -- "$command" \
+                | column --separator '|' --table --table-columns $o_format \
+                | $PAGER
+}
+
+##
+# Number of pending jobs by user
+#
+pending() {
+        local format='%9T %8u %9P %10a'
+        local sort='u'
+        local o_format='USER,ACCOUNT,PARTITION,JOBS'
+        local command="squeue --noheader --state=PENDING --format='$format' --sort='$sort'"
+        cluster-login -- "$command" \
+                | uniq -c \
+                | tr -s ' ' \
+                | awk '{$1=$1};1' \
+                | awk '{print $3, $5, $4, $1}' \
+                | column --table --table-columns $o_format
+}
+
+##
+# Pending jobs in order or priority
+#
+priority() {
+        local format='%8Q %8u %10a %9P %.4C %5D %11l %8f %6b %6q %r'
+        local sort='-Q,P,u,C,D,l,t'
+        local o_format='PRIORITY,JOBS,USER,ACCOUNT,PARTITION,CPUS,NODES,TIME_LIMIT,FEATURES,GRES,QOS,REASON'
+        local command="squeue --noheader --all --state=PENDING --format='$format' --sort='$sort'"
+        cluster-login -- "$command" \
+                | uniq -c \
+                | tr -s ' ' \
+                | awk '{$1=$1};1' \
+                | awk '{print $2, $1, $3, $4, $5, $6, $7, $8, $9, $10, $11,$12}' \
+                | column --table --table-columns $o_format
+}
+
+##
+# Number of running jobs by user
+#
+running() {
+        local format='%8u %9P %9T'
+        local sort='u,P'
+        local o_format='USER,PARTITION,JOBS'
+        local command="squeue --noheader --states=RUNNING --format='$format' --sort='$sort'"
+        cluster-login -- "$command" \
+                | uniq -c \
+                | tr -s ' ' \
+                | awk '{$1=$1};1' \
+                | awk '{print $2, $3, $1}' \
+                | column --table --table-columns $o_format
+}
+
+##
+# List of all jobs by runtime, longest first
+#
+runtime() {
+        local format='%9T %.11M %.11L %9P %8u %10a'
+        local sort='-M,L'
+        local command="squeue --states=RUNNING --format='$format' --sort='$sort'"
+        cluster-login -- "$command" | $PAGER
+}
+
+##
+# Query the accounting for a specified list of job IDs
+#
+state() {
+        if [ "$#" -eq 1 ]
+        then
+                local job_ids=$1
+                local format="jobid,user,state,submit,start,end,cputime,timelimit,exitcode,jobname,comment,nodelist"
+                local command="sacct --format=$format --jobs $job_ids"
+                cluster-login -- "$command"
+        else
+                _error "Requires Slurm job IDs as argument!"
+        fi
+}
+
+##
+# List jobs executed by a specified user
+#
+user() {
+        if [ "$#" -eq 1 ]
+        then
+                local user=$1
+                local sort='P,N'
+                local states='RUNNING'
+                local format='%N %a %P %Cx%D %Z %o'
+                local o_format='NODES,JOBS,USER,PARTITION,CPUSxNODES,WORK_DIR,COMMAND'
+                local command="squeue --noheader --format='$format' --sort='$sort' --states='$states' --user='$user'"
+                cluster-login -- "$command" \
+                        | uniq -c \
+                        | tr -s ' ' \
+                        | awk '{$1=$1};1' \
+                        | awk '{print $2, $1, $3, $4, $5, $6, $7}' \
+                        | column --table --table-columns $o_format \
+                        | $PAGER
+        else
+                _error "Requires a Linux user name as argument!"
+        fi
+}
+
+
+# use a default sub-command unless specified
+_command="${1:-running}"
+test "$#" -eq 0 || shift
+# evaluate sub-commands
+case "$_command" in
+        completed)
+                completed "$@"
+                ;;
+        failed)
+                failed "$@"
+                ;;
+        pending)
+                pending
+                ;;
+        priority)
+                priority
+                ;;
+        running)
+                running
+                ;;
+        runtime)
+                runtime
+                ;;
+        state)
+                state "$@"
+                ;;
+        user)
+                user "$@"
+                ;;
+        *)
+                echo "$HELP" 
+                exit 1
+                ;;
+esac
+
+exit 0
+
+

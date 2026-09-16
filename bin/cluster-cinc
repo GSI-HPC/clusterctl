@@ -1,0 +1,430 @@
+#!/usr/bin/env bash
+#
+# Copyright 2021-2025 Victor Penso
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# script exits on the first unset variable encountered
+set -u    # nounset
+# ensures that if any command in a set of piped commands failed, the overall
+# exit status is the status of the failed command
+set -o pipefail
+
+VERSION=0.23
+
+# Filename of this script
+SCRIPT=${0##*/}
+
+##
+# Help text for this script
+#
+HELP=\
+"Usage: $SCRIPT [<options>] <command> [<args>]
+
+Commands:
+
+  archive <archive_path>
+
+    Create a Chef configuration archive including the base cookbook and all
+    configuration roles specified using option -r/--roles-path or the environment 
+    variable CLUSTER_CINC_ROLES. The archive is stored to the <archive_path> 
+    directory using a time stamp (%Y%m%dT%H%M%S) for the name. Use options
+    -l/--relink-latest to adjust the symbolic link latest to the new archive.
+
+  config <node_name> <archive_url>
+
+    Configure the URL to the configuration archive in /etc/cinc/solo on a 
+    target nodes. Use option -o/--override-runlist to customice the node
+    run-list in addtion.
+
+  git-pull 
+
+    Pull the configuration repository on the boot server specified by the
+    environment variable CLUSTER_HTTP_SERVER in the path defined by another
+    environment variable CLUSTER_HTTP_CINC_ARCHIVE_PATH.
+
+  run <node_name>
+
+    Execute CINC solo on a specified node using the configuration from the 
+    /etc/cinc/solo file.
+
+  shell
+
+    Login to the HTTP server specified.
+
+  solo <node_name>
+
+    Upload the Chef base cookbook and Chef roles to the target node and execute 
+    cinc-solo with a specified run-list. Use option -r, --roles-path or the 
+    environment variable CLUSTER_CINC_ROLES to specify the path to the Chef roles. 
+    Option -o, --override-runlist defines the node run-list to execute.
+
+Options:
+
+  -d, --debug                  Enable verbose output
+  -h, --help                   Show this help message
+
+  -l, --relink-latest
+
+    Reference a newly created archive with a symbolic link called latest.
+
+  -o, --override-runlist <role|recipe[,role|recipe,...]>
+
+    Specify a run-list for the target node replacing the configuration in
+    /etc/cinc for a single run.
+
+  -r, --roles-path <directory>
+
+    Path to the directory storing all required configuration roles. Use the
+    environment variable CLUSTER_CINC_ROLES instead.
+
+  --version                    Program version number
+
+Environment:
+
+  CLUSTER_CINC_ROLES           
+    
+    Path to the directory storing all required configuration roles
+ 
+  CLUSTER_HTTP_SERVER
+
+    Hostname of the service node hosting the HTTP server.
+
+  CLUSTER_HTTP_CINC_ARCHIVE_PATH
+
+    Path to the configuration archives on the HTTP server."
+
+##
+# Print debug output if _DEBUG=true
+#
+_debug() {
+        if [ "$_DEBUG" = "true" ]; then
+                echo -e 1>&2 "$SCRIPT debug -- $@"
+        fi
+}
+
+##
+# Print an error message and exit the program
+#
+_error() {
+        echo 1>&2 "$SCRIPT error -- $@"
+	exit 1
+}
+
+##
+# Check if a proper roles directory was passed as option
+#
+__cinc_roles_path_set() {
+        # the user must specify a path to the chef roles
+        test -z "$cinc_roles_path" \
+                && _error "Requires path to the directory storing roles for the archive!"
+        # the roles directory must exist
+        test -d "$cinc_roles_path" \
+                || _error "Cluster roles directory $cinc_roles_path missing!"
+        # use the absolute path
+        cinc_roles_path=$(realpath $cinc_roles_path)
+        _debug "Using CINC roles from path $cinc_roles_path"
+}
+
+##
+# Check if the HTTP server and document path are correctly configured
+#
+__http_server_set() {
+        test -z "$http_server" \
+                && _error "Requires the environment variable CLUSTER_HTTP_SERVER"
+        test -z "$http_cinc_archive_path" \
+                && _error "Requires the environment variable CLUSTER_HTTP_CINC_ARCHIVE_PATH"
+}
+
+##
+# Login or run a command on the HTTP server
+#
+__http_shell() {
+        __http_server_set
+        echo "Using HTTP server $http_server:$http_cinc_archive_path"
+        # enable ssh key forwarding
+        cluster-login --root -A --node $http_server -- "$@"
+}
+
+##
+# Create a configuration TAR archive from the directory given as first argument
+# including the base cookbook and store it to the path of the second argument
+# using a time stamp as filename.
+#
+cinc_archive() {
+        __cinc_roles_path_set
+
+        # make sure the user provides the archive path
+        local archive_path=${1:-''} ; shift
+        test -z "$archive_path" \
+                && _error "Requires path to the directory for storing the archive!"
+        test -d "$archive_path" \
+                || _error "Archive directory $archive_path missing!"
+        archive_path=$(realpath $archive_path)
+
+        # make sure the target path exists
+        mkdir $archive_path 2>/dev/null
+        # use a time stamp for the archive name
+        local archive_name=$(date +%Y%m%dT%H%M%S).tgz
+        # absolute path to the archive
+        local archive=$archive_path/$archive_name
+
+        # work in a temporary directory
+        cache=$(mktemp --directory) && cd $cache
+        mkdir cookbooks roles
+
+        # add the Chef base cookbook archive
+        git clone -q $base_cookbook cookbooks/base
+        rm -rf cookbooks/base/.git
+        rm -rf cookbooks/base/test
+
+        # add the Chef roles from this repository
+        rsync -r --exclude=.git $cinc_roles_path/*.rb roles/
+
+        _debug "Archive content\n$(tree $PWD | tail -n+2)"
+
+        # create an archive
+        tar --create --gzip --file $archive .
+        echo "Archive $archive created"
+
+        # clean up
+        cd - >/dev/null
+        rm -rf $cache
+
+        # symlink `latest` to the created archive if requested by the user
+        if [ "$cinc_archive_relink" = true ] ; then
+                cd $archive_path
+                echo -n "Relink archive "
+                ln -svf $archive_name latest | tr -d "'"
+                cd - >/dev/null
+        fi
+}
+
+##
+# Configure the CINC solo configuration on a specified node
+#
+cinc_config() {
+        # check if the required input arguments are set
+        local node=${1:-""}
+        test -z "$node" && _error "Requires a node name as argument"
+        local archive_url=${2:-''}
+        test -z "$archive_url" && _error "Requires the URL to the configuration archive a second argument"
+        # path the CINC solo configuration file
+        # check if a configuration exits already
+        if ! cluster-login -rn $node -- test -f $cinc_solo_config_path
+        then
+                #...if note a run-list is required
+                test -z "$cinc_runlist" && _error "Requires to specify a node run-list!"
+                # write the configuration file
+                local cinc_solo_config="CHEF_RECIPE_URL=$archive_url\nCHEF_RUN_LIST=$cinc_runlist"
+                cluster-login -rn $node -- "echo -e \"$cinc_solo_config\" > $cinc_solo_config_path"
+        # overwrite the existing configuration
+        else
+                # escape forward slash from the archive URL
+                archive_url=$(echo "$archive_url" | sed "s|/|\\\/|g")
+                # modify the archive URL in place on the target node
+                cluster-login -rn $node \
+                        -- "sed -i 's/CHEF_RECIPE_URL=.*/CHEF_RECIPE_URL=$archive_url/g' $cinc_solo_config_path"
+                # if a node run-list is set by options, modify the run-list in place on the target node
+                test -n "$cinc_runlist" \
+                        && cluster-login -rn $node \
+                        -- "sed -i 's/CHEF_RUN_LIST=.*/CHEF_RUN_LIST=$cinc_runlist/g' $cinc_solo_config_path"
+        fi
+        echo -n "$node "
+        cluster-login -rn $node -- "tail -v $cinc_solo_config_path"
+}
+
+##
+# Run CINC solo using a configuration archive on a specified node
+#
+cinc_run() {
+        # check if the required input arguments are set
+        local node_name=${1:-""}
+        test -z "$node_name" && _error "Requires a node name as argument"
+        cluster-login -rn $node_name -- "
+                source $cinc_solo_config_path ;
+                cinc-solo --minimal-ohai --recipe-url \$CHEF_RECIPE_URL --override-runlist \$CHEF_RUN_LIST
+        "
+}
+
+##
+# Upload all required Chef artifacts (i.e. cookbooks, roles) to the 
+# target node and run cinc-solo with a specified run-list.
+#
+cinc_solo() {
+        local node=${1:-""}
+        if [ -z "$node" ]
+        then
+                _error "Requires a node name as argument"
+        else
+                __cinc_roles_path_set 
+               
+                # the user must specify a run-list
+                if [ -z "$cinc_runlist" ] ; then
+                        _error "Requires you to override the run-list!"
+                fi
+
+                # in case of a role which changes the node type ("__*") require that the cinc role
+                # for that node type is already set on the node in $cinc_solo_config_path
+                if cluster-login -rn $node -- test -f /etc/cinc/solo
+                then
+                        cinc_runlist_on_node=$(cluster-login -rn $node -- grep CINC_RUN_LIST $cinc_solo_config_path | cut -d= -f2)
+                        if [[ $cinc_runlist == 'role[__*' ]] && [ "$cinc_runlist" != "$cinc_runlist_on_node" ]; then
+                                _error "You are changing the node type: '$cinc_runlist_on_node' -> '$cinc_runlist'. First update CINC_RUN_LIST in $cinc_solo_config_path on the node!"
+                        fi
+                fi
+
+                # deploy the base Chef cookbook if missing
+                if ! cluster-login -rn $node -- test -d $cinc_cookbooks/base
+                then
+                        cluster-login -rn $node -- "
+                                mkdir -vp $cinc_cookbooks ;
+                                git clone $base_cookbook $cinc_cookbooks/base
+                        "
+                fi
+
+                # create the roles sub-directory in the cinc configuration
+                if ! cluster-login -rn $node -- test -d $cinc_roles
+                then
+                        cluster-login -rn $node -- mkdir -v $cinc_roles
+                fi
+
+                echo "Copy chef roles $cinc_roles_path to $node:$cinc_roles/"
+                cluster_ssh_known_hosts=${CLUSTER_LOGIN_SSH_KNOWN_HOSTS:-''}
+                if [[ -n "$cluster_ssh_known_hosts" ]]
+                then
+                        rsync -e "ssh -o UserKnownHostsFile=$CLUSTER_LOGIN_SSH_KNOWN_HOSTS -o StrictHostKeyChecking=yes" \
+                              -a $cinc_roles_path/*.rb root@$node:$cinc_roles/
+                else
+                        rsync -a $cinc_roles_path/*.rb root@$node:$cinc_roles/
+                fi
+                # upload all chef roles to target node
+
+                # execute cinc on the target node
+                echo "Execute cinc-solo with run-list $cinc_runlist"
+                cluster-login -rn $node -- cinc-solo -l $cinc_log_level -o "'$cinc_runlist'"
+        fi
+}
+
+##
+# Default Variables
+#
+_DEBUG=${_DEBUG:-false}
+cinc_path=/var/cinc
+cinc_cookbooks=$cinc_path/cookbooks
+cinc_roles=$cinc_path/roles
+cinc_log_level=error
+base_cookbook=${CLUSTER_BASE_COOKBOOK:-}
+cinc_archive_relink=false
+cinc_solo_config_path=/etc/cinc/solo
+cinc_runlist=
+
+##
+# Read environment variables if set
+#
+cinc_roles_path=${CLUSTER_CINC_ROLES:-''}
+http_server=${CLUSTER_HTTP_SERVER:-''}
+http_cinc_archive_path=${CLUSTER_HTTP_CINC_ARCHIVE_PATH:-''}
+
+##
+# Parse command-line arguments
+#
+ARGS=$(getopt -o dhlo:r: -l "debug,help,relink-latest,override-runlist:,roles-path:,version" -- "$@")
+eval set -- "$ARGS"
+while true; do
+        case "$1" in
+        -d|--debug)
+                shift
+                export _DEBUG=true
+                cinc_log_level=debug
+                ;;
+        -h|--help)
+                echo "$HELP"
+                exit 0
+                ;;
+        -l|--relink-latest)
+                shift
+                cinc_archive_relink=true
+                ;;
+        # keep the name in line with the original cinc-solo command
+        -o|--override-runlist)
+                shift
+                cinc_runlist=$1
+                shift
+                ;;
+        -r|--roles-path)
+                shift
+                cinc_roles_path=$1
+                shift
+                ;;
+        --version)
+                echo $VERSION
+                exit 0
+                ;;
+        --)
+                shift
+                break 
+                ;;
+        *) 
+                break 
+                ;;
+        esac
+done
+
+##
+# Check dependency programs
+#
+for cmd in \
+        cluster-login \
+        git \
+        rsync \
+        tree
+do
+        command -v $cmd &>/dev/null || _error "$cmd program missing"
+done
+
+##
+# Global variables
+#
+
+##
+# Run the command argument
+#
+command=${1:-'solo'}
+[ $# -gt 0 ] && shift
+case "$command" in
+        archive)
+                cinc_archive $@
+                ;;
+        config)
+                cinc_config $@
+                ;;
+        git-pull)
+                __http_shell "cd $http_cinc_archive_path ; git pull"
+                ;;
+        run)
+                cinc_run $@
+                ;;
+        shell) 
+                __http_shell $@
+                ;;
+        solo)
+                cinc_solo $@
+                ;;
+        *)
+                _error "Command $command not supported"
+                ;;
+esac
+
+exit 0

@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+#
+# Copyright 2022-2025 Victor Penso
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# script exits on the first unset variable encountered
+set -u    # nounset
+# script stops on first command failure
+#set -e    # errexit
+# ensures that if any command in a set of piped commands failed, the overall
+# exit status is the status of the failed command
+#set -o pipefail
+
+VERSION=1.1
+
+# Filename of this script
+SCRIPT=${0##*/}
+
+# Help text for this script
+HELP=\
+"Usage: $SCRIPT [<options>]
+
+Gather hardware related information from a set of nodes
+and present these as a ASCII table.
+
+Options:
+
+  -d, --debug          Enable debug output
+  -h, --help           Show this help message
+  -n, --nodes <nodeset>   Specify the nodeset to process on
+  --version            Program version number
+
+Environment variables:
+
+  CLUSTER_NODES           Specify the nodeset to process on"
+
+
+_DEBUG=${_DEBUG:-false}
+function _debug() {
+        if [ "$_DEBUG" = "true" ]; then
+                echo 1>&2 "$SCRIPT debug -- $@"
+        fi
+}
+
+function _error() {
+        echo 1>&2 "$SCRIPT error: $@"
+	exit 1
+}
+
+##
+# Read environment variables, and set defaults
+#
+cluster_nodes=${CLUSTER_NODES:-''}
+
+# Parse the command line options
+ARGS=$(getopt -o dhn: -l "debug,help,nodes:,version" -- "$@")
+eval set -- "$ARGS"
+while true; do
+        case "$1" in
+        -d|--debug)
+                shift
+                export _DEBUG=true
+                ;;
+        -h|--help)
+                echo "$HELP"
+                exit 0
+                ;;
+        -n|--nodes)
+                shift
+                cluster_nodes=$1
+                shift
+                ;;
+        --version)
+                echo $VERSION
+                exit 0
+                ;;
+        --)
+                shift
+                break 
+                ;;
+        *) 
+                break 
+                ;;
+        esac
+done
+
+
+
+##
+# Check dependency programs
+#
+for cmd in \
+        cluster-node-fqdn \
+        column \
+        clush \
+        nodeset \
+        sed \
+        sort
+do
+        command -v $cmd &>/dev/null || _error "$cmd program missing"
+done
+
+# check if a nodeset for processing is available
+if ! [ -n "$cluster_nodes" ]
+then
+        _error "Nodeset required! Use option -n or the CLUSTER_NODES environment variable..."
+fi
+# append domain if required
+cluster_nodes=$(cluster-node-fqdn "$cluster_nodes") || exit 1
+
+_debug "Using nodeset: $cluster_nodes"
+
+clush --user root \
+      -w "$cluster_nodes" \
+      --connect_timeout=30 \
+      --fanout 64 \
+      --options '-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -q' \
+      -- echo \
+         "\$(cat /sys/class/dmi/id/{sys_vendor,product_name})," \
+         "\$(cat /sys/class/dmi/id/board_{vendor,name})," \
+         "\$(cat /sys/class/dmi/id/bios_{vendor,version,date} | tr '\n' ' ')," \
+         "\$(lspci | grep -o -e 'MT[0-9]*' -e '\[ConnectX.*\]' | tr '\n' ' ')" \
+   | sed 's/^\([^:]*\):/\1,/' \
+   | sort --field-separator ',' --key 1 \
+   | column \
+           --separator ',' \
+           --table \
+           --table-columns 'NODE, VENDOR, BOARD, BIOS, INFINIBAND'
+
+exit 0
+

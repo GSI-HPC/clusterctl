@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+#
+# Copyright 2021-2023 Victor Penso
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# script exits on the first unset variable encountered
+set -u    # nounset
+# ensures that if any command in a set of piped commands failed, the overall
+# exit status is the status of the failed command
+set -o pipefail
+
+VERSION=0.4
+
+# Filename of this script
+SCRIPT=${0##*/}
+
+##
+# Help text for this script
+#
+HELP=\
+"Usage: $SCRIPT [<options>] <command> [<args>]
+
+$SCRIPT reads configurations log files and debugging information
+from the DHCP server. Read the \$CLUSTER_NODES environment variable
+
+Commands:
+
+   client-identifier|iden [<nodeset>]
+     Read the HCA client identifier for a specified nodeset
+
+   filename|file [<nodeset>]
+     Read the DHCP filename option for a specified nodeset
+
+   mac-address|mac [<nodeset>]
+     Print the MAC-addresses for a nodeset
+
+   ip-address|ip [<nodeset>]
+     Print the IP-addresses for a nodeset
+
+   response
+     Print DHCP reposes from the system log on the DHCP servers
+
+   shell
+     Open a shell on the cluster DHCP server
+
+   tcpdump [<interface>]
+     Run tcpdump for DHCP traffic on an network interface.
+     The interface defaults to ib0.
+
+Options:
+
+  -d, --debug                  Enable verbose output
+  -h, --help                   Show this help message
+  -s, --dhcp-server <NAME>     Specify the DHCP server name
+  -T                           Print a timer stamp '%Z %Y/%m/%d %H:%M'
+  --version                    Program version number
+
+Environment variables:
+
+  CLUSTER_DHCP_SERVER          Node name for the DHCP server
+  CLUSTER_NODES                Define a nodeset to work with"
+
+
+##
+# Print debug output if _DEBUG=true
+#
+_debug() {
+        if [ "$_DEBUG" = "true" ]; then
+                echo 1>&2 "$SCRIPT debug -- $@"
+        fi
+}
+
+##
+# Print an error message and exit the program
+#
+_error() {
+        echo 1>&2 "$SCRIPT error -- $@"
+	exit 1
+}
+
+##
+# Open a shell on the DHCP server via the admin network
+#
+dhcp_shell() {
+        # recent SSH clients have RSA support disabled by default
+        export CLUSTER_LOGIN_SSH_OPTIONS='-o PubkeyAcceptedKeyTypes=+ssh-rsa'
+        cluster-login \
+                --root \
+                --jump ${CLUSTER_HOST_MGMT_GATEWAY:-} \
+                --node $CLUSTER_DHCP_SERVER \
+                -- "$@"
+}
+
+##
+# Retrieve the DHCP from the DHCP server unless a recent copy is available
+#
+dhcp_config() {
+        # where to write the DHCP configuration file
+        local cache_file_prefix=/tmp/cluster-dhcp-$(echo $CLUSTER_DHCP_SERVER | cut -d. -f1)
+        # get a list of available cache files
+        local cache_files=$(ls -1 $cache_file_prefix* 2>/dev/null)
+        # if the list of cache files is not empty
+        if [ -n "$cache_files" ]
+        then
+                # sort the list and get the last file
+                local cache_file=$(echo "$cache_files" | sort | tail -n 1)
+                # time stamp of the latest file
+                local cache_epoch=$(echo $(basename $cache_file) | cut -d. -f2)
+                # time now minus 2 minutes
+                local epoch_now=$(expr $(date +%s) - 120)
+                # if the cached file is not outdated
+                if ! [[ $cache_epoch -lt $epoch_now ]]
+                then
+                        # make sure the file is not empty, this can be an artifact from 
+                        # failed SSH connection to the DHCP server
+                        if [ $(wc -l $cache_file | cut -d' ' -f1) -gt 1 ] 
+                        then
+                                _debug "Reading DHCP configuration from cache file $cache_file"
+                                # print the DHCP configuration
+                                cat "$cache_file"
+                                return 0
+                        fi
+                else
+                        _debug "DHCP cache file $cache_file to old"
+                fi
+        else
+                _debug "No DHCP cache files available"
+        fi
+        # create a new cache file
+        cache_file=$cache_file_prefix.$(date +%s)
+        if dhcp_shell 'cat /etc/dhcp/dhcpd.conf' 1> $cache_file
+        then
+                _debug "DHCP cache file create at $cache_file"
+                # print the DHCP configuration
+                cat "$cache_file"
+        else
+                _error "Could not retrieve the DHCP configuration from the server"
+        fi
+}
+
+##
+# Read the MAC-address of a node from the DHCP configuration
+#
+dhcp_mac() {
+        local nodes=${1:-$CLUSTER_NODES}
+        if [ -z "$nodes" ]
+        then
+                _error "Requires a nodeset as argument"
+        else
+                for node_name in $(nodeset -e "$nodes") 
+                do 
+                        # read the MAC-address from the DHCP configuration
+                        mac=$(
+                                dhcp_config \
+                                        | grep ".*#.*$node_name" -A3 \
+                                        | grep hardware \
+                                        | tr -s ' ' \
+                                        | cut -d' ' -f4 \
+                                        | tr -d ';'
+                        )
+                        # flatten multiple MAC-addresses into a single line
+                        echo "$node_name dhcp_mac="$(echo "$mac" | tr "\n" " ")
+                done
+        fi
+}
+
+dhcp_ip() {
+        local nodes=${1:-$CLUSTER_NODES}
+        if [ -z "$nodes" ]
+        then
+                _error "Requires a nodeset as argument"
+        else
+                for node_name in $(nodeset -e "$nodes") 
+                do 
+                        # read the MAC-address from the DHCP configuration
+                        ip=$(
+                                dhcp_config \
+                                        | grep ".*#.*$node_name" -A3 \
+                                        | grep address \
+                                        | tr -s ' ' \
+                                        | cut -d' ' -f3 \
+                                        | tr -d ';'
+                        )
+                        # flatten multiple MAC-addresses into a single line
+                        echo "$node_name dhcp_ip="$(echo "$ip" | tr "\n" " ")
+                done
+        fi
+}
+
+##
+# Read the filename option from the DHCP server
+#
+dhcp_filename() {
+        local nodes=${1:-$CLUSTER_NODES}
+        if [ -z "$nodes" ]
+        then
+                _error "Requires nodeset name as argument"
+        else
+                for node_name in $(nodeset -e "$nodes") 
+                do 
+                        filename=$(
+                                dhcp_config \
+                                        | grep ".*#.*$node_name" -A9 \
+                                        | grep filename \
+                                        | tr -s ' ' \
+                                        | cut -d' ' -f3 \
+                                        | tr -d ';' \
+                                        | tr -d '"'
+                        )
+                        echo "$node_name dhcp_filename="$(echo "$filename" | tr "\n" " ")
+                done
+        fi
+}
+
+dhcp_client_identifier() {
+        local nodes=${1:-$CLUSTER_NODES}
+        if [ -z "$nodes" ]
+        then
+                _error "Requires nodeset name as argument"
+        else
+                for node_name in $(nodeset -e "$nodes") 
+                do 
+                        client_identifier=$(
+                                dhcp_config \
+                                        | grep ".*#.*$node_name" -A9 \
+                                        | grep dhcp-client-identifier \
+                                        | tr -s ' ' \
+                                        | cut -d' ' -f4 \
+                                        | tr -d ';'
+                        )
+                        # flatten multiple client identifiers into a single line
+                        echo "$node_name dhcp_guid="$(echo "$client_identifier" | tr "\n" " ")
+                done
+        fi
+}
+
+##
+# Search for a specified node in the DHCP server log
+#
+dhcp_response() {
+        dhcp_shell 'grep --no-filename -e DHCPREQUEST -e DHCPOFFER /var/log/syslog* | ip2host'
+}
+
+
+##
+# Default Variables
+#
+_DEBUG=${_DEBUG:-false}
+
+##
+# Read environment variables if set
+#
+export CLUSTER_DHCP_SERVER=${CLUSTER_DHCP_SERVER:-}
+
+##
+# Parse command-line arguments
+#
+ARGS=$(getopt -o dhs:T -l "debug,help,dhcp-server:,version" -- "$@")
+eval set -- "$ARGS"
+while true; do
+        case "$1" in
+        -d|--debug)
+                shift
+                export _DEBUG=true
+                ;;
+        -h|--help)
+                echo "$HELP"
+                exit 0
+                ;;
+        -s|--dhcp-server)
+                shift
+                CLUSTER_DHCP_SERVER=$1
+                shift
+                ;;
+        -T)
+                shift
+                date '+%Z %Y/%m/%d %H:%M'
+                ;;
+        --version)
+                echo $VERSION
+                exit 0
+                ;;
+        --)
+                shift
+                break 
+                ;;
+        *) 
+                break 
+                ;;
+        esac
+done
+
+##
+# Check dependency programs
+#
+for cmd in \
+        cluster-login \
+        nodeset
+do
+        command -v $cmd &>/dev/null || _error "$cmd program missing"
+done
+
+##
+# Global variables
+#
+
+##
+# Run the command argument
+#
+command=${1:-'shell'}
+[ $# -gt 0 ] && shift
+case "$command" in
+        client-identifier|iden)
+                dhcp_client_identifier "$@"
+                ;;
+        config)
+                dhcp_config
+                ;;
+        filename|file)
+                dhcp_filename "$@"
+                ;;
+        mac-address|mac)
+                dhcp_mac "$@"
+                ;;
+        ip-address|ip)
+                dhcp_ip "$@"
+                ;;
+        response)
+                dhcp_response "$@"
+                ;;
+        shell)
+                dhcp_shell "$@"
+                ;;
+        tcpdump)
+                dhcp_shell "tcpdump -i ${1:-ib0} -pvn port 67 or port 68"
+                ;;
+        *)
+                _error "Command $command not supported"
+                ;;
+esac
+
+exit 0

@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+#
+# Copyright 2021-2025 Victor Penso
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# script exits on the first unset variable encountered
+set -u    # nounset
+# script stops on first command failure
+set -e    # errexit
+# ensures that if any command in a set of piped commands failed, the overall
+# exit status is the status of the failed command
+set -o pipefail
+
+VERSION=0.25
+
+# Filename of this script
+SCRIPT=${0##*/}
+
+##
+# Help text for this script
+#
+HELP=\
+"Usage: $SCRIPT [<options>] <command> [<args>]
+
+$SCRIPT configures boot paths on a PXESrv server
+
+Nodes connect to the PXESrv server during network boot and query the service
+for a boot path. The boot path references a PXE configuration file. Boot
+configuration files are maintained in version control, use the command 
+git-pull to synchronise with the repository. The list command will print all
+available PXE configuration files and the absolute path to them. That status
+command will print boot paths already configured on the server. Boot paths
+are configured for each node individually and operate in two distinguished 
+modes. By default a boot path is configured to be used once (for a single
+client request) only. Option --static is used to configure a persistent boot
+path (until explicitly removed). Use the boot command to set a boot path for
+a specific node.
+
+Commands:
+
+  boot <nodeset> <boot_path>   Set the path to a boot configuration for a node.
+  git-pull                     Run a git pull on the PXESrv server configuration.
+  list                         Show the path to the available boot configurations.
+  logs                         Show the PXESrv server log file.
+  shell                        Open a shell on the PXESrv server.
+  remove <nodeset>             Delete a boot configuration from the server.
+  status                       List nodes with a boot configuration on the PXESrv 
+                               server. This is the default command if non is 
+                               specified.
+
+Options:
+
+  -d, --debug                  Enable verbose output
+  -h, --help                   Show this help message
+  -s, --static                 Operate on a static boot configuration
+  -T                           Print a timer stamp '%Z %Y/%m/%d %H:%M' before the login
+  --version                    Program version number
+
+Environment variables:
+
+  CLUSTER_DNS                  Hostname of the DNS server        
+  CLUSTER_PXESRV_SERVER        Hostname of the PXESrv server
+  CLUSTER_PXESRV_ROOT          Path to the configuration on the PXESrv server
+  CLUSTER_PXESRV_BOOT_PATH     Path to the PXE boot configuration files"
+
+##
+# Configure a specified boot path for a node
+#
+boot_path() {
+        if ! [ "$#" -eq 2 ]
+        then
+                _error "Specify a nodeset and a path to the boot configuration"
+        else
+
+                local nodes=$1
+                local boot_path=$2
+                # check if the boot configuration paths exists
+                if cluster-login --root --node $cluster_pxesrv_server \
+                        -- "ls $boot_path >/dev/null 2>/dev/null"
+                then
+                        # iterate over all nodes
+                        for node_name in $(nodeset -e "$nodes") 
+                        do
+                                local node_ip=$(node_ip $node_name)
+                                # check for an IP address
+                                if [ -n "$node_ip" ]
+                                then
+                                        cluster-login -r -n $cluster_pxesrv_server \
+                                                -- "ln -sfv $boot_path $cluster_pxesrv_root_path/$node_ip"
+                                fi
+                        done
+                else
+                        _error "Boot path missing: $boot_path"
+                fi
+        fi
+}
+
+##
+# Print debug output if _DEBUG=true
+#
+_debug() {
+        if [ "$_DEBUG" = "true" ]; then
+                echo 1>&2 "$SCRIPT debug -- $@"
+        fi
+}
+
+##
+# Print an error message and exit the program
+#
+_error() {
+        echo 1>&2 "$SCRIPT error -- $@"
+	exit 1
+}
+
+##
+# Append the domain name to a node name if missing
+#
+node_fqdn() {
+        local cluster_node=${1:-Node name required}
+        if [[ "$cluster_node" != *"."* ]]
+        then
+                cluster_node=$(cluster-node-fqdn "$cluster_node")
+        	_debug "Append domain suffix: $cluster_node"
+        fi
+	echo "$cluster_node"
+}
+
+##
+# Resolve the IP address of a node name querying the cluster DNS server
+#
+node_ip() {
+        local node_name=${1:?Node name required}
+        local dns_response=$(host $(node_fqdn $node_name) $cluster_dns | tail -n1 )
+        # check for a valid response...
+        if echo $dns_response | grep 'not found' --silent
+        then
+                _error "Could not resolve IP for node '$node_name' from DNS $cluster_dns"
+                echo ""
+        # ...print the node IP address
+        else
+                echo "$dns_response"  | cut -d' ' -f 4
+        fi
+}
+
+##
+# Resolve the node name for a given IP address by querying the cluster DNS server
+#
+node_name() {
+        local node_ip=${1:?IP address required}
+        host $node_ip $cluster_dns \
+                | grep 'domain name pointer' \
+                | cut -d' ' -f5 \
+                | cut -d. -f1
+}
+
+##
+# Remove a boot path from the configuration
+#
+remove() {
+        if ! [ "$#" -eq 1 ]
+        then
+                _error "Specify a nodeset to remove the configuration(s)"
+        else
+                # iterate over all nodes
+                local nodes=$1
+                for node in $(nodeset -e "$nodes") 
+                do
+                        # path to the boot configuration link
+                        local path="$cluster_pxesrv_root_path/$(node_ip $node)"
+                        # remove the link if possible
+                        if cluster-login -r -n $cluster_pxesrv_server -- "rm $path 2>/dev/null"
+                        then
+                                echo "Removed $node -> $cluster_pxesrv_server:$path"
+                        fi
+                done
+        fi
+}
+
+##
+# Print nodes with a configuration on the PXESrv
+#
+status() {
+        # get the list of nodes with configuration and iterate over it
+        for line in $(
+                cluster-login -r -n $cluster_pxesrv_server \
+                        -- "find $cluster_pxesrv_root_path -name '[0-9]*' -printf '%p:%l\n'"
+        )
+        do     
+                # path on the PXESrv
+                _path=$(echo $line | cut -d: -f1)
+                # IP address of the node
+                ip=$(echo $_path| cut -d/ -f5)
+                # link to the boot configuration
+                target=$(echo $line | cut -d: -f2)
+                echo "$(node_name $ip) $cluster_pxesrv_server:$_path $target"
+        # alphabetical order by hostname
+        done | sort | column -t
+}
+
+##
+# Default Variables
+#
+_DEBUG=${_DEBUG:-false}
+
+##
+# Read environment variables if set
+#
+cluster_dns=${CLUSTER_DNS:-}}
+cluster_pxesrv_server=${CLUSTER_PXESRV_SERVER:?Set CLUSTER_PXESRV_SERVER environemt variable}
+cluster_pxesrv_root=${CLUSTER_PXESRV_ROOT:?Set CLUSTER_PXESRV_ROOT environemt variable}
+cluster_pxesrv_boot_path=${CLUSTER_PXESRV_BOOT_PATH:?Set CLUSTER_PXESRV_BOOT_PATH environment variable}
+# operate on "once" boot configuration by default
+cluster_pxesrv_root_path=$cluster_pxesrv_root/once
+
+##
+# Parse command-line arguments
+#
+ARGS=$(getopt -o dhTs -l "debug,help,static,version" -- "$@")
+eval set -- "$ARGS"
+while true; do
+        case "$1" in
+        -d|--debug)
+                shift
+                export _DEBUG=true
+                ;;
+        -h|--help)
+                echo "$HELP"
+                exit 0
+                ;;
+        -T)
+                shift
+                date '+%Z %Y/%m/%d %H:%M'
+                ;;
+        -s|--static)
+                shift
+                cluster_pxesrv_root_path=$cluster_pxesrv_root/static
+                ;;
+        --version)
+                echo $VERSION
+                exit 0
+                ;;
+        --)
+                shift
+                break 
+                ;;
+        *) 
+                break 
+                ;;
+        esac
+done
+
+##
+# Check dependency programs
+#
+for cmd in \
+        cluster-login \
+        cluster-node-fqdn \
+        host \
+        grep \
+        sort \
+        column
+do
+        command -v $cmd &>/dev/null || _error "$cmd program missing"
+done
+
+##
+# Global variables
+#
+
+##
+# Run the command argument
+#
+command=${1:-'status'}
+[ $# -gt 0 ] && shift
+case "$command" in
+        boot|boot-path)
+                boot_path "$@"
+                ;;
+        git-pull)
+                # run a Git pull in the PXESrv root directory
+                cluster-login -A -r -n $cluster_pxesrv_server -- "cd $cluster_pxesrv_boot_path && git pull"
+                ;;
+        list)
+                cluster-login -r -n $cluster_pxesrv_server \
+                        -- "find -L $cluster_pxesrv_boot_path -type f -name '*ipxe*'" | sort
+                ;;
+        remove)
+                remove "$@"
+                ;;
+        shell)
+                # open a shell on the PXESrv, pass a command if available 
+                cluster-login -A -r -n $cluster_pxesrv_server -- "$@"
+                ;;
+        status)
+                status
+                ;;
+        logs)
+                # trail the PXESrv log file on the PXESrv server
+                cluster-login -r -n $cluster_pxesrv_server -- 'tail -f /var/log/pxesrv.log | grep --line-buffered INFO'
+                ;;
+        *)
+                _error "Command $command not supported"
+                ;;
+esac
+
+exit 0

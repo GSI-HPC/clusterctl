@@ -1,0 +1,1 @@
+export SSHUTTLE_CONFIGS=$CLUSTER_TOOLS_PATH/var/sshuttle

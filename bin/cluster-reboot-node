@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# Copyright 2022 Victor Penso, Matteo Dessalvi
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#
+# Schedule a reboot and send a warning email to all logged in users.
+#
+
+VERSION=0.1
+
+#
+# Reject further login from all users other than root:
+#
+touch /etc/nologin
+
+#
+# Schedule reboot:
+#
+/usr/sbin/shutdown -r +60
+
+#
+# Send the warning email:
+#
+USERS=$(who | cut -f 1 -d ' ' | sort | uniq | grep -v root)
+HOSTNAME=`hostname`
+
+for u in $USERS;
+do
+	/bin/echo "A reboot for maintenance of $HOSTNAME will be performed in one hour from now." | mailx -s "[${CLUSTER_NAME:-Cluster}] Reboot of submit node -> $HOSTNAME" -S smtp=smtp://${CLUSTER_HOST_SMTP:-} -S from="root@$HOSTNAME.${CLUSTER_DOMAIN_SITE:-}" $u@${CLUSTER_DOMAIN_SITE:-}
+done

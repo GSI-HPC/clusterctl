@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#
+# Copyright 2025-2026 Victor Penso
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+# script exits on the first unset variable encountered
+set -u    # nounset
+# script stops on first command failure
+set -e    # errexit
+# ensures that if any command in a set of piped commands failed, the overall
+# exit status is the status of the failed command
+set -o pipefail
+
+VERSION=0.2
+
+# Filename of this script
+SCRIPT=${0##*/}
+
+# Help text for this script
+HELP=\
+"usage: $SCRIPT [-dh] [--version] <nodeset>
+
+Execute the post-installation configuration on a set of nodes.
+
+positional arguments:
+  nodeset              list of nodes
+
+optional arguments:
+  -d, --debug          enable verbose output
+  -h, --help           show this help message
+  --version            program version number "
+
+_DEBUG=${_DEBUG:-false}
+_debug() {
+        if [ "$_DEBUG" = "true" ]; then
+                echo 1>&2 "Debug: $@"
+        fi
+}
+
+_error() {
+        echo 1>&2 "Error: $@"
+	exit 1
+}
+
+# Parse the command line options
+ARGS=$(getopt -o dh -l "debug,help,version" -- "$@")
+eval set -- "$ARGS"
+while true; do
+        case "$1" in
+        -d|--debug)
+                _DEBUG=true
+                shift
+                ;;
+        -h|--help)
+                echo "$HELP"
+                exit 0
+                ;;
+        --version)
+                echo $VERSION
+                exit 0
+                ;;
+        --)
+                shift
+                break 
+                ;;
+        *) 
+                break 
+                ;;
+        esac
+done
+
+# check dependencies...
+for cmd in \
+        age
+do
+        command -v $cmd &>/dev/null || _error "$cmd command not in \$PATH"
+done
+
+# Require at least one sub-command
+if (( $# >= 1 ))
+then
+        nodeset=$1 ; shift
+else
+        _error "Requires a nodeset argument!"
+fi
+
+age -d $CLUSTER_CINC_CONFIG_PATH/etc/munge.key.age | cluster-clush -w $nodeset 'cat >/etc/munge/munge.key'
+age -d $CLUSTER_CINC_CONFIG_PATH/etc/nslcd.keytab.age | cluster-clush -w $nodeset 'cat >/etc/nslcd.keytab'
+
+# Restart SSD service for UID resolution via LDAP:
+cluster-clush -b -w $nodeset 'systemctl restart --no-block sssd.service'
+
+# should adjust permissions for munge.key, and start munged & slurmd
+cluster-clush -b -w $nodeset 'systemctl start --no-block cinc-solo'
+
+exit 0
+
+
