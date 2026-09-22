@@ -116,3 +116,9 @@ manual at <http://localhost:1313>.
 
 The site is published to GitHub Pages on every push to the default branch and
 on every release, by `.github/workflows/pages.yml`.
+
+Publishing needs Pages switched on once per repository, with GitHub Actions as
+its source: *Settings → Pages → Build and deployment → Source*. The workflow
+does not switch it on itself, because that needs a token other than the
+`GITHUB_TOKEN` it runs with. Until it is on, the build job stops at
+`actions/configure-pages` with "Get Pages site failed".

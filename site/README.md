@@ -46,7 +46,8 @@ what they describe. Both are gitignored and built in CI.
 
 `.github/workflows/pages.yml` builds and deploys on every push to the default
 branch that touches the site, the design notes or the command tree, and on
-every release.
+every release. It needs GitHub Pages switched on for the repository, with
+GitHub Actions as the source; `doc/release.md` says how.
 
 Hextra fetches its search index library from a CDN while the site builds. An
 air-gapped build needs the theme vendored and `params.search.enable` set to
