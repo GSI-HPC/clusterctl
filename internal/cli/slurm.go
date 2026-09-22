@@ -36,35 +36,11 @@ up reported against the wrong node.`,
 }
 
 // slurmClient builds the client from the resolved configuration.
-func slurmClient(a *app.App) (*slurm.Client, error) {
-	role := a.Spec.Slurm.Role
-	if role == "" {
-		return nil, exitcode.Errorf(exitcode.Usage,
-			"no host role runs the Slurm clients; set slurm.role in the cluster document")
-	}
-	target, err := a.Role(role)
-	if err != nil {
-		return nil, err
-	}
-	return &slurm.Client{
-		Runner:  a.Runner,
-		Target:  target,
-		Spec:    a.Spec.Slurm,
-		Timeout: a.Timeout().Get(),
-	}, nil
-}
+func slurmClient(a *app.App) (*slurm.Client, error) { return a.Slurm() }
 
 // statesFor turns a state group name, or a list of states, into the states to
 // ask Slurm for.
-func statesFor(arg string) []string {
-	if arg == "" {
-		return nil
-	}
-	if group, ok := slurm.StateGroups()[strings.ToLower(arg)]; ok {
-		return group
-	}
-	return strings.Split(arg, ",")
-}
+func statesFor(arg string) []string { return slurm.States(arg) }
 
 func newSlurmNodeCommand(r *root) *cobra.Command {
 	return group("node", "Read and change the state of the nodes", `
