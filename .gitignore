@@ -1,0 +1,13 @@
+# Build output
+/bin/
+/dist/
+
+# Test and coverage output
+*.out
+*.test
+
+# Documentation site build output
+/site/public/
+/site/resources/
+/site/.hugo_build.lock
+/site/content/reference/

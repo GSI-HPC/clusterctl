@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+
+// Package version reports the build provenance of the clusterctl binary.
+//
+// No version number is stored in the source tree. Release builds inject one
+// from the signed git tag through -ldflags; every other build derives what it
+// can from the VCS stamps the Go toolchain embeds.
+package version
+
+import (
+	"fmt"
+	"runtime"
+	"runtime/debug"
+	"strings"
+)
+
+// Values injected by the release build. Keep the names in sync with the
+// ldflags in .goreleaser.yaml.
+var (
+	version string
+	commit  string
+	date    string
+)
+
+// Info describes the running binary.
+type Info struct {
+	// Version is the release version, "v1.4.0" style, or "devel" when the
+	// binary was not built from a tag.
+	Version string `json:"version" yaml:"version"`
+	// Commit is the git revision the binary was built from, empty when the
+	// build carried no VCS information.
+	Commit string `json:"commit,omitempty" yaml:"commit,omitempty"`
+	// Date is the build or commit timestamp in RFC 3339 form.
+	Date string `json:"date,omitempty" yaml:"date,omitempty"`
+	// Dirty reports whether the working tree held uncommitted changes.
+	Dirty bool `json:"dirty,omitempty" yaml:"dirty,omitempty"`
+	// GoVersion is the toolchain that produced the binary.
+	GoVersion string `json:"goVersion" yaml:"goVersion"`
+	// Platform is the target the binary was built for.
+	Platform string `json:"platform" yaml:"platform"`
+}
+
+// Get assembles the build provenance, preferring values injected at release
+// time and falling back to the VCS stamps in the build info.
+func Get() Info {
+	info := Info{
+		Version:   version,
+		Commit:    commit,
+		Date:      date,
+		GoVersion: runtime.Version(),
+		Platform:  runtime.GOOS + "/" + runtime.GOARCH,
+	}
+
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if info.Version == "" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			info.Version = bi.Main.Version
+		}
+		for _, s := range bi.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				if info.Commit == "" {
+					info.Commit = s.Value
+				}
+			case "vcs.time":
+				if info.Date == "" {
+					info.Date = s.Value
+				}
+			case "vcs.modified":
+				info.Dirty = s.Value == "true"
+			}
+		}
+	}
+
+	if info.Version == "" {
+		info.Version = "devel"
+	}
+	return info
+}
+
+// String renders the provenance as a single human readable line.
+func (i Info) String() string {
+	var b strings.Builder
+	b.WriteString(i.Version)
+	if i.Commit != "" {
+		rev := i.Commit
+		if len(rev) > 12 {
+			rev = rev[:12]
+		}
+		fmt.Fprintf(&b, " (%s", rev)
+		if i.Dirty {
+			b.WriteString("-dirty")
+		}
+		b.WriteString(")")
+	}
+	if i.Date != "" {
+		fmt.Fprintf(&b, " built %s", i.Date)
+	}
+	fmt.Fprintf(&b, " %s %s", i.GoVersion, i.Platform)
+	return b.String()
+}
