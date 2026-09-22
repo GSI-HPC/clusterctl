@@ -105,6 +105,11 @@ func (inv *Inventory) apply(name string, defaults v1alpha1.NodeDefaults, e v1alp
 	}
 	setIf(&node.Rack, e.Rack)
 	setIf(&node.Level, e.Level)
+	// The rack and the level are also exposed as attributes, so that a
+	// group source reading an attribute can build one group per rack
+	// without the rack having to be written twice.
+	setAttr(node.Attributes, "rack", node.Rack)
+	setAttr(node.Attributes, "level", node.Level)
 	setIf(&node.Address, e.Address)
 	setIf(&node.BMCAddress, e.BMCAddress)
 	setIf(&node.CID, e.CID)
@@ -118,6 +123,15 @@ func setIf(dst *string, value string) {
 	if value != "" {
 		*dst = value
 	}
+}
+
+// setAttr mirrors a field into the attribute table, leaving an attribute the
+// entry set explicitly alone.
+func setAttr(attrs map[string]string, key, value string) {
+	if value == "" {
+		return
+	}
+	attrs[key] = value
 }
 
 // Len reports how many nodes the inventory knows.

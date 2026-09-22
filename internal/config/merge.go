@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -57,11 +58,42 @@ func (t *Tree) Paths() []string {
 // because a list of naming rules or of protected hosts only makes sense as a
 // whole.
 func (t *Tree) MergeDocument(layer string, doc *Document, from, into string) {
+	t.MergeDocumentExcept(layer, doc, from, into)
+}
+
+// MergeDocumentExcept is MergeDocument without the named top level keys of
+// the merged subtree.
+//
+// It keeps a document's own overrides table out of the merged tree: the
+// overrides are applied by path, and mirroring them as data as well would
+// show every override twice, once under its own path and once nested under
+// the table it was written in.
+func (t *Tree) MergeDocumentExcept(layer string, doc *Document, from, into string, except ...string) {
 	value := lookup(doc.Data, from)
 	if value == nil {
 		return
 	}
+	if len(except) > 0 {
+		if m, ok := value.(map[string]any); ok {
+			filtered := make(map[string]any, len(m))
+			for k, v := range m {
+				if !contains(except, k) {
+					filtered[k] = v
+				}
+			}
+			value = filtered
+		}
+	}
 	t.mergeValue(layer, doc, from, into, value)
+}
+
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // MergeMap merges a plain tree that did not come from a file.
@@ -216,6 +248,14 @@ func FormatValue(v any) string {
 			parts[i] = FormatValue(e)
 		}
 		return "[" + strings.Join(parts, ",") + "]"
+	case map[string]any:
+		// A structured value is rendered as compact JSON rather than as Go
+		// syntax, so that it can be read and pasted back.
+		encoded, err := json.Marshal(t)
+		if err != nil {
+			return fmt.Sprint(v)
+		}
+		return string(encoded)
 	default:
 		return fmt.Sprint(v)
 	}

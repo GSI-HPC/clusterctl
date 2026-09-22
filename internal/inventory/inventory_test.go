@@ -117,8 +117,13 @@ func TestQueries(t *testing.T) {
 	if got, want := strings.Join(inv.AttributeValues("class"), ","), "exe,wlm"; got != want {
 		t.Errorf("AttributeValues = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(inv.AttributeKeys(), ","), "class,os,vendor"; got != want {
+	// The rack is mirrored into the attributes, so a group source reading
+	// an attribute can build one group per rack.
+	if got, want := strings.Join(inv.AttributeKeys(), ","), "class,level,os,rack,vendor"; got != want {
 		t.Errorf("AttributeKeys = %q, want %q", got, want)
+	}
+	if got, want := inv.WithAttribute("rack", "R02").String(), "exe[1-4]"; got != want {
+		t.Errorf("grouping by the rack attribute = %q, want %q", got, want)
 	}
 	if got, want := strings.Join(inv.Racks(), ","), "R01,R02"; got != want {
 		t.Errorf("Racks = %q, want %q", got, want)

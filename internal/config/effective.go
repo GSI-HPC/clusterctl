@@ -120,7 +120,7 @@ func (b *Bundle) Resolve(opts ResolveOptions) (*Resolved, error) {
 	// 4. the workstation
 	wsDoc := b.workstationFor(ctx)
 	if wsDoc != nil {
-		tree.MergeDocument(v1alpha1.LayerWorkstation, wsDoc, "spec", "workstation")
+		tree.MergeDocumentExcept(v1alpha1.LayerWorkstation, wsDoc, "spec", "workstation", "overrides")
 		if err := applyOverrides(tree, v1alpha1.LayerWorkstation, wsDoc, "spec.overrides"); err != nil {
 			return nil, err
 		}
@@ -271,3 +271,7 @@ func decodeInto(data map[string]any, target any) error {
 	}
 	return nil
 }
+
+// Decode converts a parsed document into a typed value, rejecting keys the
+// type does not define.
+func Decode(data map[string]any, target any) error { return decodeInto(data, target) }

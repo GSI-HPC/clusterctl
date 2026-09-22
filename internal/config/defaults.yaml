@@ -43,11 +43,9 @@ ssh:
   controlPersist: 5m
   binary: ssh
   scpBinary: scp
-  options:
-    # ssh appends to the known_hosts file without locking when it checks the
-    # address as well as the name, which corrupts a shared file.
-    CheckHostIP: "no"
-    HashKnownHosts: "no"
+  # CheckHostIP and HashKnownHosts are not listed here: the generated
+  # configuration always sets them, because ssh appends address based entries
+  # to the shared host key file without taking a lock when they are on.
 
 safety:
   confirmAbove: 8
