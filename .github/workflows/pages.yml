@@ -27,6 +27,10 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  # The Go release line, as in CI.
+  GO_VERSION: '1.26'
+
 jobs:
   build:
     name: Build
@@ -38,7 +42,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
           check-latest: true
 
       - uses: peaceiris/actions-hugo@v3

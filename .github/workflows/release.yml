@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # The Go release line, as in CI. The newest patch of it builds the release,
+  # so every release carries the standard library's latest security fixes.
+  GO_VERSION: '1.26'
+
 jobs:
   verify-tag:
     name: Verify the tag is signed
@@ -57,7 +62,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
           check-latest: true
       - run: make lint
       - run: go test ./...
@@ -78,7 +83,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
           check-latest: true
 
       - uses: goreleaser/goreleaser-action@v6

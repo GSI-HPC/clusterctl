@@ -8,7 +8,8 @@
 # site/README.md says which version to install.
 
 [tools]
-# The version go.mod requires. A newer toolchain works; this is what CI uses.
+# The Go release line CI and the release build with; mise takes its newest
+# patch, as they do. go.mod states the oldest version the code compiles with.
 go = "1.26"
 
 # The major version .golangci.yml is written against.

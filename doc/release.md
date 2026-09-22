@@ -22,7 +22,7 @@ whereas a signed tag is a statement by a person with a key.
 
 ```
 $ clusterctl version
-v1.4.0 (a1b2c3d4e5f6) built 2026-09-22T14:42:30Z go1.26.0 linux/amd64
+v1.4.0 (a1b2c3d4e5f6) built 2026-09-22T14:42:30Z go1.26.8 linux/amd64
 ```
 
 ## Cutting a release
@@ -51,7 +51,22 @@ The archive name carries no version, so
 version is in the tag, the release and the binary itself.
 
 The binary is built with `-trimpath` and with the version, commit and build
-date injected, so two builds of the same tag produce the same binary.
+date injected, so two builds of the same tag with the same toolchain produce
+the same binary.
+
+## The Go toolchain
+
+`go.mod` says `go 1.26.0`: the oldest Go that compiles the module, which is
+what someone running `go install` needs to know. The workflows build with the
+newest patch of the 1.26 line instead — `GO_VERSION` in each workflow, resolved
+with `check-latest` — because Go ships security fixes to the standard library
+as patch releases, and a binary is only as patched as the toolchain that linked
+it. `govulncheck` runs in CI against that same toolchain, so a vulnerability
+reachable from clusterctl fails the build until a patch release fixes it.
+
+`clusterctl version` reports the toolchain a binary was built with. Moving to
+the next Go release line means changing `GO_VERSION` in the three workflows and
+`go` in `mise.toml`; raising the minimum means changing `go.mod`.
 
 ## Provenance
 
