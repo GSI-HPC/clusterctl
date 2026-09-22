@@ -63,7 +63,15 @@ Each of those has a counterpart here, described in [`doc/`](doc/).
 
 ## Install
 
-Download the binary for your platform from the
+With [mise](https://mise.jdx.dev), which pins a version per project and
+verifies the download:
+
+```console
+$ mise use -g github:GSI-HPC/clusterctl
+$ clusterctl version
+```
+
+Or take the binary for your platform from the
 [releases](https://github.com/GSI-HPC/clusterctl/releases):
 
 ```console

@@ -20,3 +20,4 @@ A decision is superseded by a later record, never edited.
 | [0008](0008-lgpl.md) | LGPL-3.0-or-later | accepted |
 | [0009](0009-hugo-for-the-manual.md) | Hugo and Hextra for the manual | accepted |
 | [0010](0010-public-nodeset-package.md) | Publish `nodeset`, keep the rest internal | accepted |
+| [0011](0011-installable-from-release-assets.md) | Release assets are consumable by a version manager | accepted |

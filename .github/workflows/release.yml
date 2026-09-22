@@ -66,6 +66,11 @@ jobs:
     name: Build and publish
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Minting a Sigstore signing certificate and storing the attestation.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v5
         with:
@@ -82,3 +87,14 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Attest every published archive. checksums.txt already names each
+      # artifact and its digest, so one call covers the whole release.
+      #
+      # This is what lets an installer verify where a binary came from without
+      # a key exchange: mise checks GitHub artifact attestations by default,
+      # and "gh attestation verify" does the same by hand.
+      - name: Attest the release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/checksums.txt

@@ -6,6 +6,37 @@ weight: 1
 clusterctl is one static binary. It needs no interpreter, no virtual
 environment and nothing installed on the nodes.
 
+## With mise
+
+[mise](https://mise.jdx.dev) installs from the release assets, picks the build
+for your platform, and checks the download against the release checksums and
+the build provenance attestation:
+
+```console
+$ mise use -g github:GSI-HPC/clusterctl
+$ clusterctl version
+```
+
+Pin a version for a team by putting it in the project's `mise.toml`:
+
+```toml
+[tools]
+"github:GSI-HPC/clusterctl" = "1.4.0"
+```
+
+`mise install` then gives everyone the same binary, and `mise lock` records the
+digest so a later install is checked against it:
+
+```console
+$ mise lock
+$ git add mise.toml mise.lock
+```
+
+{{< callout type="info" >}}
+There is no `mise use clusterctl` shorthand. mise's registry only takes widely
+used tools, so the backend has to be named: `github:GSI-HPC/clusterctl`.
+{{< /callout >}}
+
 ## From a release
 
 ```console
@@ -21,6 +52,16 @@ Releases carry `checksums.txt`. Verify before installing:
 ```console
 $ sha256sum -c checksums.txt --ignore-missing
 ```
+
+Every archive is also attested, which says which workflow, commit and tag
+produced it:
+
+```console
+$ gh attestation verify clusterctl_linux_amd64.tar.gz --repo GSI-HPC/clusterctl
+```
+
+The checksum answers "are these the published bytes"; the attestation answers
+"who published them, from what". A download is worth both.
 
 Archives exist for `linux_amd64`, `linux_arm64`, `darwin_amd64` and
 `darwin_arm64`.

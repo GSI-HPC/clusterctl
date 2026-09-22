@@ -39,14 +39,34 @@ that a signature is there at all and says so in the job log.
 
 The workflow then builds, tests, and publishes:
 
-- `clusterctl_<version>_linux_amd64.tar.gz` — the binary asked for by the
-  review, statically linked with `CGO_ENABLED=0`
+- `clusterctl_linux_amd64.tar.gz` — the binary asked for by the review,
+  statically linked with `CGO_ENABLED=0`
 - the same for `linux/arm64`, `darwin/amd64` and `darwin/arm64`
-- `checksums.txt` and its signature
+- `checksums.txt`, covering all four
+- a build provenance attestation for every artifact
 - release notes generated from the commits since the previous tag
+
+The archive name carries no version, so
+`releases/latest/download/clusterctl_linux_amd64.tar.gz` is a stable URL. The
+version is in the tag, the release and the binary itself.
 
 The binary is built with `-trimpath` and with the version, commit and build
 date injected, so two builds of the same tag produce the same binary.
+
+## Provenance
+
+Every artifact is attested with `actions/attest`, which binds its digest to the
+workflow, the commit and the tag that produced it, and signs that statement with
+a short-lived Sigstore certificate. Nothing has to be published for a consumer
+to check it:
+
+```console
+$ gh attestation verify clusterctl_linux_amd64.tar.gz --repo GSI-HPC/clusterctl
+```
+
+`checksums.txt` answers "are these the bytes that were published"; the
+attestation answers "who published them, from which source". A download is
+worth both.
 
 ## Version numbers
 
