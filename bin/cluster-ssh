@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-
-known_hosts=${CLUSTER_KNOWN_HOSTS_FILE:-${CLUSTER_LOGIN_SSH_KNOWN_HOSTS:-$CLUSTER_TOOLS_PATH/site-config/ssh-known-hosts}}
-
-exec ssh \
-    -F $CLUSTER_TOOLS_PATH/site-config/ssh_config \
-    -o "UserKnownHostsFile=$known_hosts" \
-    "$@"

@@ -1,4 +1,0 @@
-site-config/ssh-known-hosts.old
-# read by the clush sshpass-file mode
-password.txt
-
