@@ -171,6 +171,29 @@ func completeRoles(r *root) func(*cobra.Command, []string, string) ([]string, co
 	}
 }
 
+// completeGroups offers the configured groups, which is what a node set
+// expression most often starts with.
+func completeGroups(r *root) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		a, err := r.App()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		var out []string
+		for _, source := range a.Groups.Sources() {
+			names, err := a.Groups.List(source)
+			if err != nil {
+				continue
+			}
+			for _, name := range names {
+				out = append(out, "@"+source+":"+name)
+			}
+		}
+		sort.Strings(out)
+		return out, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
 // fixed offers a fixed list of words for completion.
 func fixed(words ...string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {

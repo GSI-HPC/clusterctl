@@ -163,6 +163,7 @@ evaluated, strictly from left to right.
 		})
 	cmd.Flags().BoolVarP(&expand, "expand", "e", false, "print one node per line instead of folding")
 	cmd.Flags().BoolVarP(&count, "count", "c", false, "print how many nodes the expression names")
+	cmd.ValidArgsFunction = completeGroups(r)
 	return cmd
 }
 

@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/credentials"
@@ -44,14 +46,18 @@ type Streams struct {
 }
 
 // DefaultStreams returns the process streams.
+//
+// Whether there is a terminal decides whether a destructive command may ask
+// for a confirmation or has to refuse, so it is asked of the terminal itself
+// rather than inferred from the file mode: /dev/null is a character device
+// too, and a command run with stdin closed would otherwise be prompted and
+// then read an immediate end of file.
 func DefaultStreams() Streams {
-	info, err := os.Stdin.Stat()
-	tty := err == nil && (info.Mode()&os.ModeCharDevice) != 0
 	return Streams{
 		In:       os.Stdin,
 		Out:      os.Stdout,
 		Err:      os.Stderr,
-		IsTTY:    tty,
+		IsTTY:    term.IsTerminal(int(os.Stdin.Fd())),
 		StateDir: config.StateDir(),
 		CacheDir: config.CacheDir(),
 	}

@@ -159,6 +159,7 @@ func TestJSONPath(t *testing.T) {
 		{"jsonpath={.nodes[0:1].name}", "exe0001\n"},
 		{"jsonpath=total: {.total}", "total: 2\n"},
 		{"jsonpath={.missing}", "\n"},
+		{"jsonpath={.nodes[*]['name']}", "exe0001 exe0002\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.spec, func(t *testing.T) {
@@ -166,6 +167,22 @@ func TestJSONPath(t *testing.T) {
 				t.Errorf("%s = %q, want %q", tc.spec, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestJSONPathOverATopLevelArray covers the shape a command result usually
+// has: a list, not an object with a list in it.
+func TestJSONPathOverATopLevelArray(t *testing.T) {
+	t.Parallel()
+
+	r := output.Result{Object: []any{
+		map[string]any{"name": "exe0001"},
+		map[string]any{"name": "exe0002"},
+	}}
+	for _, spec := range []string{"jsonpath={.[*].name}", "jsonpath={[*].name}"} {
+		if got, want := render(t, spec, r), "exe0001 exe0002\n"; got != want {
+			t.Errorf("%s = %q, want %q", spec, got, want)
+		}
 	}
 }
 

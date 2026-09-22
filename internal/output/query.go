@@ -133,6 +133,11 @@ func parsePath(expr string) ([]pathStep, error) {
 				s = s[1:]
 				continue
 			}
+			// A dot before a bracket, as in "{.[*].name}" over a top level
+			// array, selects nothing of its own.
+			if strings.HasPrefix(s, "[") {
+				continue
+			}
 			end := strings.IndexAny(s, ".[")
 			if end < 0 {
 				end = len(s)
