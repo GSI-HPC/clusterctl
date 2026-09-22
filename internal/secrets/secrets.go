@@ -64,7 +64,7 @@ func Decrypt(path string, identities []age.Identity) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the secret %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	r, err := age.Decrypt(f, identities...)
 	if err != nil {

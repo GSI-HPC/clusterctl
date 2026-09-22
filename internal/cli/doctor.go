@@ -94,8 +94,8 @@ func localChecks(a *app.App) []check {
 	}
 
 	known := a.Path(a.Spec.SSH.KnownHostsFile)
-	switch {
-	case known == "":
+	switch known {
+	case "":
 		checks = append(checks, check{"host key file", statusFail,
 			"none is configured; set ssh.knownHostsFile"})
 	default:

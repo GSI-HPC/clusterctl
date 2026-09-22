@@ -184,10 +184,12 @@ func report(streams app.Streams, err error) int {
 		return exitcode.OK
 	}
 	if errors.Is(err, context.Canceled) {
-		fmt.Fprintln(streams.Err, "clusterctl: interrupted")
+		_, _ = fmt.Fprintln(streams.Err, "clusterctl: interrupted")
 		return exitcode.Interrupted
 	}
-	fmt.Fprintf(streams.Err, "clusterctl: %v\n", err)
+	// The exit code is what a caller acts on; a message that cannot be
+	// written changes nothing about it.
+	_, _ = fmt.Fprintf(streams.Err, "clusterctl: %v\n", err)
 	return exitcode.From(err)
 }
 
@@ -207,8 +209,7 @@ takes it from the signed git tag.`),
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			if format.Kind == output.FormatTable || format.Kind == output.FormatWide {
-				fmt.Fprintln(cmd.OutOrStdout(), info.String())
-				return nil
+				return say(cmd, "%s\n", info)
 			}
 			return format.Write(cmd.OutOrStdout(), output.Result{Object: info})
 		},

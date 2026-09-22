@@ -295,7 +295,7 @@ that the key it comes back with can be collected cleanly.`,
 			t := output.NewTable(output.Cols("HOST", "REMOVED")...)
 			err = hostkeys.Modify(a.Context(), path, func(f *hostkeys.File) error {
 				for _, node := range ns.Expand() {
-					name := node
+					var name string
 					if bmc {
 						name, err = a.Namer.BMC(node)
 					} else {

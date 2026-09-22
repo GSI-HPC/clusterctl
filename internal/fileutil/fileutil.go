@@ -30,8 +30,10 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	name := tmp.Name()
 	defer func() {
-		tmp.Close()
-		os.Remove(name)
+		// Both are best effort: on the happy path the file has already
+		// been closed and renamed away.
+		_ = tmp.Close()
+		_ = os.Remove(name)
 	}()
 
 	if err := tmp.Chmod(perm); err != nil {

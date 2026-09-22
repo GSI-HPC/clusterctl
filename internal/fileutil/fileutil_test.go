@@ -4,6 +4,7 @@ package fileutil_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,7 +96,7 @@ func TestUpdateReportsChangeErrors(t *testing.T) {
 	err := fileutil.Update(context.Background(), path, 0o600, func([]byte) ([]byte, error) {
 		return nil, want
 	})
-	if err != want {
+	if !errors.Is(err, want) {
 		t.Errorf("Update returned %v, want %v", err, want)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

@@ -13,7 +13,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func newNodeCommand(r *root) *cobra.Command {
@@ -146,20 +145,21 @@ evaluated, strictly from left to right.
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
 			switch {
 			case count:
-				fmt.Fprintln(out, ns.Len())
+				return say(cmd, "%d\n", ns.Len())
 			case expand:
 				for _, name := range ns.Expand() {
-					fmt.Fprintln(out, name)
+					if err := say(cmd, "%s\n", name); err != nil {
+						return err
+					}
 				}
+				return nil
 			case a.Format.IsMachine():
 				return a.Print(output.Result{Nodes: ns, Object: ns.Expand()})
 			default:
-				fmt.Fprintln(out, ns.String())
+				return say(cmd, "%s\n", ns)
 			}
-			return nil
 		})
 	cmd.Flags().BoolVarP(&expand, "expand", "e", false, "print one node per line instead of folding")
 	cmd.Flags().BoolVarP(&count, "count", "c", false, "print how many nodes the expression names")
@@ -195,8 +195,7 @@ what the out-of-band commands connect to.`,
 			if a.Format.IsMachine() {
 				return a.Print(output.Result{Nodes: names, Object: names.Expand()})
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), names.String())
-			return nil
+			return say(cmd, "%s\n", names)
 		})
 	cmd.Flags().BoolVarP(&bmc, "bmc", "b", false, "print the service processor names")
 	return cmd
@@ -420,13 +419,4 @@ func sortedMapKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// nodesetOf builds a set from names, ignoring those that are not host names.
-func nodesetOf(names []string) *nodeset.NodeSet {
-	ns := nodeset.New()
-	for _, name := range names {
-		_ = ns.Add(name)
-	}
-	return ns
 }

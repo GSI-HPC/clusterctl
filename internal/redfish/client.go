@@ -17,6 +17,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -186,7 +187,7 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, body any) ([]by
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: %w", c.Host, unwrapURLError(err))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
@@ -202,18 +203,10 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, body any) ([]by
 // whole URL and hides the cause.
 func unwrapURLError(err error) error {
 	var urlErr *url.Error
-	if ok := asURLError(err, &urlErr); ok && urlErr.Err != nil {
+	if errors.As(err, &urlErr) && urlErr.Err != nil {
 		return urlErr.Err
 	}
 	return err
-}
-
-func asURLError(err error, target **url.Error) bool {
-	e, ok := err.(*url.Error)
-	if ok {
-		*target = e
-	}
-	return ok
 }
 
 // redfishMessage pulls the human readable part out of an error body.

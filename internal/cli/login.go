@@ -3,7 +3,6 @@
 package cli
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,15 +15,13 @@ import (
 // loginFlags are the connection options shared by login and the commands
 // that open a shell on a service host.
 type loginFlags struct {
-	user      string
-	root      bool
-	agent     bool
-	x11       bool
-	tty       bool
-	noTTY     bool
-	jump      string
-	sshDebug  bool
-	sshOption []string
+	user  string
+	root  bool
+	agent bool
+	x11   bool
+	tty   bool
+	noTTY bool
+	jump  string
 }
 
 func (f *loginFlags) register(cmd *cobra.Command) {
@@ -124,20 +121,19 @@ it was given, so globs, quotes and whitespace survive:
 			if err != nil {
 				return err
 			}
-			name := ""
 			// Everything after -- is the remote command; cobra hands both
 			// halves over, so the split is found here.
-			argv := args
+			var (
+				name string
+				argv []string
+			)
 			if at := cmd.ArgsLenAtDash(); at >= 0 {
 				if at > 0 {
 					name = args[0]
 				}
 				argv = args[at:]
-			} else {
-				if len(args) > 0 {
-					name = args[0]
-				}
-				argv = nil
+			} else if len(args) > 0 {
+				name = args[0]
 			}
 
 			target, err := resolveTarget(a, name)
@@ -161,8 +157,7 @@ it was given, so globs, quotes and whitespace survive:
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\n", strings.Join(line, " "))
-				return nil
+				return say(cmd, "%s\n", strings.Join(line, " "))
 			}
 			return a.SSH.Interactive(a.Context(), target, req)
 		})

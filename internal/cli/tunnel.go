@@ -40,10 +40,14 @@ func manager(a *app.App) *tunnel.Manager {
 		Binary:   a.Spec.Workstation.SshuttleBinary,
 		Vars:     vars,
 		Host: func(role string) (string, string, error) {
+			// A profile may name a host directly rather than a role, so a
+			// name that is not a role is used as it is.
+			if _, ok := a.Spec.Hosts[role]; !ok {
+				return role, "", nil
+			}
 			target, err := a.Role(role)
 			if err != nil {
-				// A profile may name a host directly rather than a role.
-				return role, "", nil
+				return "", "", err
 			}
 			return target.Host, target.User, nil
 		},
@@ -120,8 +124,7 @@ for the local password.`,
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			if a.DryRun() {
-				fmt.Fprintln(cmd.OutOrStdout(), strings.Join(argv, " "))
-				return nil
+				return say(cmd, "%s\n", strings.Join(argv, " "))
 			}
 			if err := m.Start(a.Context(), args[0]); err != nil {
 				return exitcode.Wrap(exitcode.Transport, err)

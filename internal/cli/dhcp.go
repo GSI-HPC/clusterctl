@@ -165,8 +165,7 @@ a node is not coming up.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), result.Output())
-			return nil
+			return say(cmd, "%s\n", result.Output())
 		})
 	cmd.Flags().IntVarP(&lines, "lines", "l", 50, "how many log lines to show")
 	return cmd
@@ -224,8 +223,7 @@ running by accident.`,
 				if err != nil {
 					return err
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), strings.Join(line, " "))
-				return nil
+				return say(cmd, "%s\n", strings.Join(line, " "))
 			}
 			a.Printf("capturing on %s for %ds\n", device, seconds)
 			// The capture is watched live, so it is wired to the terminal
@@ -261,8 +259,7 @@ func roleShell(r *root, cmd *cobra.Command, args []string, role func(*app.App) s
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), strings.Join(line, " "))
-		return nil
+		return say(cmd, "%s\n", strings.Join(line, " "))
 	}
 	return a.SSH.Interactive(a.Context(), target, req)
 }

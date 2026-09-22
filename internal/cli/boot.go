@@ -352,8 +352,7 @@ configurations it offers match what is in version control.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), result.Output())
-			return nil
+			return say(cmd, "%s\n", result.Output())
 		})
 }
 
@@ -384,8 +383,8 @@ for a boot configuration and does not get the expected one.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), result.Output())
-			return nil
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output())
+			return err
 		})
 	cmd.Flags().IntVarP(&lines, "lines", "l", 50, "how many log lines to show")
 	return cmd

@@ -4,6 +4,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -125,7 +126,7 @@ func ValidateDocument(doc *Document) error {
 
 	if err := compiled[doc.Kind].Validate(toJSON(doc.Data)); err != nil {
 		var verr *validator.ValidationError
-		if ok := asValidationError(err, &verr); ok {
+		if errors.As(err, &verr) {
 			problems = append(problems, describe(doc, verr)...)
 		} else {
 			problems = append(problems, err.Error())
@@ -138,14 +139,6 @@ func ValidateDocument(doc *Document) error {
 	}
 	sort.Strings(problems)
 	return fmt.Errorf("%s is not valid:\n  %s", doc.File, strings.Join(problems, "\n  "))
-}
-
-func asValidationError(err error, target **validator.ValidationError) bool {
-	v, ok := err.(*validator.ValidationError)
-	if ok {
-		*target = v
-	}
-	return ok
 }
 
 // printer renders validation messages in English.

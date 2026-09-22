@@ -9,6 +9,7 @@ package safety
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -151,8 +152,8 @@ func (errDryRun) Error() string { return "dry run: nothing was done" }
 
 // IsDryRun reports whether an error is the dry run signal.
 func IsDryRun(err error) bool {
-	_, ok := err.(errDryRun)
-	return ok
+	var signal errDryRun
+	return errors.As(err, &signal)
 }
 
 func (g *Gate) read() (string, error) {
@@ -170,7 +171,8 @@ func (g *Gate) printf(format string, args ...any) {
 	if g.Out == nil {
 		return
 	}
-	fmt.Fprintf(g.Out, format, args...)
+	// A prompt that cannot be written is reported by the read that follows.
+	_, _ = fmt.Fprintf(g.Out, format, args...)
 }
 
 func plural(n int) string {

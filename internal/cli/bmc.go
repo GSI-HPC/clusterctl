@@ -134,10 +134,7 @@ turned off, because powering off a running job loses it.`,
 				Targets: nodes,
 				Detail:  "through " + transportName(a, useIPMI, firstNode(nodes)),
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
-				return err
+				return dryRunOrError(err)
 			}
 
 			if action == ipmi.ActionOn {
@@ -369,8 +366,11 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string) error {
 	if a.Spec.Slurm.Role == "" {
 		return nil
 	}
+	// The check is a safeguard, not a dependency: a cluster whose workload
+	// manager cannot be reached still has to be able to power a node off.
 	target, err := a.Role(a.Spec.Slurm.Role)
 	if err != nil {
+		a.Printf("the Slurm host role is not usable (%v); continuing without the job check\n", err)
 		return nil
 	}
 	result, err := a.Runner.Run(a.Context(), target, transport.Request{
@@ -379,8 +379,8 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string) error {
 		TTY:     transport.TTYNone,
 	})
 	if err != nil || result.Failed() {
-		a.Printf("could not ask Slurm about these nodes; continuing without that check\n")
-		return nil
+		a.Printf("could not ask Slurm about these nodes; continuing without the job check\n")
+		return nil //nolint:nilerr // the check is a safeguard, not a dependency
 	}
 
 	busy := nodeset.New()
@@ -445,10 +445,7 @@ machine reinstalling in a loop, so --persistent has to be asked for.
 				Targets: nodes,
 				Detail:  fmt.Sprintf("to %s, %s", target, mode),
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
-				return err
+				return dryRunOrError(err)
 			}
 			results := forEachBMC(a, nodes, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				if err := c.SetBootOverride(ctx, target, persistent); err != nil {
@@ -473,10 +470,7 @@ Remove the boot source override, so the nodes boot their usual way again.`,
 				return err
 			}
 			if err := a.Gate.Confirm(safety.Action{Verb: "clear the boot source override of", Targets: nodes}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
-				return err
+				return dryRunOrError(err)
 			}
 			results := forEachBMC(a, nodes, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				if err := c.ClearBootOverride(ctx); err != nil {
@@ -591,10 +585,7 @@ any other destructive command, and it is never retried.`,
 				Targets: nodes,
 				Detail:  args[1],
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
-				return err
+				return dryRunOrError(err)
 			}
 			return redfishRequest(a, nodes, "POST", args[0], body)
 		})
@@ -696,8 +687,8 @@ func jsonOut(a *app.App, object any) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(a.Out, string(encoded))
-	return nil
+	_, err = fmt.Fprintln(a.Out, string(encoded))
+	return err
 }
 
 func newBMCWebCommand(r *root) *cobra.Command {
@@ -715,7 +706,9 @@ one is configured.`,
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			url := "https://" + host
-			fmt.Fprintln(cmd.OutOrStdout(), url)
+			if _, err := fmt.Fprintln(cmd.OutOrStdout(), url); err != nil {
+				return err
+			}
 
 			browser := a.Spec.Workstation.Browser
 			if browser == "" || a.DryRun() {
@@ -873,8 +866,8 @@ Connect to the power distribution unit of a rack, or run one command on it.
 				if err != nil {
 					return err
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), strings.Join(line, " "))
-				return nil
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), strings.Join(line, " "))
+				return err
 			}
 			return a.SSH.Interactive(a.Context(), target, req)
 		})

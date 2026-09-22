@@ -44,6 +44,16 @@ func leaf(use, short, long string, args cobra.PositionalArgs, run func(*cobra.Co
 	}
 }
 
+// say writes to a command's output.
+//
+// The error is returned rather than discarded: a closed pipe, which is what
+// happens when output is piped into head, should stop the command instead of
+// leaving it running against nothing.
+func say(cmd *cobra.Command, format string, args ...any) error {
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), format, args...)
+	return err
+}
+
 // selection resolves the node set a command acts on, from its argument or
 // from -n.
 func selection(a *app.App, args []string) (*nodeset.NodeSet, error) {

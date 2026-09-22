@@ -406,7 +406,9 @@ func (a *App) Print(r output.Result) error {
 // Printf writes a message to the error stream, which is where progress and
 // notes go so that they never mix into parsed output.
 func (a *App) Printf(format string, args ...any) {
-	fmt.Fprintf(a.Err, format, args...)
+	// Progress goes to the error stream. A note that cannot be written is
+	// not worth failing a command that is otherwise succeeding.
+	_, _ = fmt.Fprintf(a.Err, format, args...)
 }
 
 // StatePath returns a path inside the state directory.

@@ -4,7 +4,7 @@ package cli
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net"
 	"strings"
 	"time"
@@ -158,12 +158,12 @@ this is how to see which machines are currently in it.`,
 		})
 }
 
-// cleanDNSError strips the repeated wrapper the resolver adds.
+// cleanDNSError strips the repeated wrapper the resolver adds, which
+// otherwise buries the cause under the whole query it was answering.
 func cleanDNSError(err error) string {
 	var dnsErr *net.DNSError
-	if e, ok := err.(*net.DNSError); ok {
-		dnsErr = e
-		return fmt.Sprintf("%s", dnsErr.Err)
+	if errors.As(err, &dnsErr) {
+		return dnsErr.Err
 	}
 	return err.Error()
 }

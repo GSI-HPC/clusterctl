@@ -142,11 +142,12 @@ environment variable that selects a context for a single shell.`,
 			if _, err := a.Resolved.Bundle.Context(name); err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
-			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "For this shell:\n  export %s=%s\n\n", config.EnvContext, name)
-			fmt.Fprintf(out, "For one command:\n  clusterctl --context %s ...\n\n", name)
-			fmt.Fprintf(out, "Permanently, in the Config document:\n  currentContext: %s\n", name)
-			return nil
+			_, err = fmt.Fprintf(cmd.OutOrStdout(),
+				"For this shell:\n  export %s=%s\n\n"+
+					"For one command:\n  clusterctl --context %s ...\n\n"+
+					"Permanently, in the Config document:\n  currentContext: %s\n",
+				config.EnvContext, name, name, name)
+			return err
 		})
 	cmd.ValidArgsFunction = func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		a, err := r.App()
@@ -221,15 +222,16 @@ Without an argument every kind is printed as one object keyed by kind.`,
 				if err != nil {
 					return exitcode.Wrap(exitcode.Usage, err)
 				}
-				fmt.Fprintln(out, string(data))
-				return nil
+				return say(cmd, "%s\n", data)
 			}
 			for _, kind := range config.SchemaKinds() {
 				data, err := config.SchemaJSON(kind)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "// %s\n%s\n", kind, data)
+				if _, err := fmt.Fprintf(out, "// %s\n%s\n", kind, data); err != nil {
+					return err
+				}
 			}
 			return nil
 		})

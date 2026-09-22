@@ -269,7 +269,7 @@ func scanOne(ctx context.Context, dial func(context.Context, string, string) (ne
 	if err != nil {
 		return Entry{}, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	var collected ssh.PublicKey

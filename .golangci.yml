@@ -25,7 +25,11 @@ linters:
       # rather than an oversight.
       check-blank: false
     misspell:
-      locale: UK
+      # No locale is set on purpose. Slurm's own field is spelled
+      # "Organization", and a locale would rewrite an identifier the
+      # accounting database defines.
+      ignore-rules:
+        - organization
 
   exclusions:
     rules:

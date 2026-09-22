@@ -246,8 +246,7 @@ group, ready to be passed to another command.
 			if a.Format.IsMachine() {
 				return a.Print(output.Result{Nodes: ns, Object: ns.Expand()})
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), ns.String())
-			return nil
+			return say(cmd, "%s\n", ns)
 		})
 	cmd.ValidArgsFunction = fixed(stateGroupNames()...)
 	return cmd

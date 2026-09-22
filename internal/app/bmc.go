@@ -36,9 +36,10 @@ func (a *App) promptPassword(prompt string) (string, error) {
 		return "", exitcode.Errorf(exitcode.Usage,
 			"a password is needed but there is no terminal to ask on; configure another password source")
 	}
-	fmt.Fprint(a.Err, prompt)
+	_, _ = fmt.Fprint(a.Err, prompt)
 	secret, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Fprintln(a.Err)
+	// The terminal echoed nothing, so the cursor is still on the prompt.
+	_, _ = fmt.Fprintln(a.Err)
 	if err != nil {
 		return "", err
 	}

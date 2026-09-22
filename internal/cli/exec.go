@@ -171,9 +171,13 @@ func printExec(a *app.App, cmd *cobra.Command, results []*transport.Result, dedu
 	out := cmd.OutOrStdout()
 	if dedup {
 		for _, g := range fanout.GroupByOutput(results) {
-			fmt.Fprintf(out, "%s (%d)\n", g.Nodes, g.Nodes.Len())
+			if _, err := fmt.Fprintf(out, "%s (%d)\n", g.Nodes, g.Nodes.Len()); err != nil {
+				return err
+			}
 			for _, line := range strings.Split(g.Output, "\n") {
-				fmt.Fprintf(out, "  %s\n", line)
+				if _, err := fmt.Fprintf(out, "  %s\n", line); err != nil {
+					return err
+				}
 			}
 		}
 	} else {
@@ -182,7 +186,9 @@ func printExec(a *app.App, cmd *cobra.Command, results []*transport.Result, dedu
 				if line == "" && res.Stdout == "" {
 					continue
 				}
-				fmt.Fprintf(out, "%s: %s\n", res.Target.Name, line)
+				if _, err := fmt.Fprintf(out, "%s: %s\n", res.Target.Name, line); err != nil {
+					return err
+				}
 			}
 		}
 	}

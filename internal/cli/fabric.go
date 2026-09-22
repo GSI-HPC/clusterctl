@@ -213,8 +213,7 @@ connected to.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), result.Output())
-			return nil
+			return say(cmd, "%s\n", result.Output())
 		})
 	cmd.Flags().BoolVar(&uplink, "uplink", false, "read the switch port instead of the node port")
 	return cmd
