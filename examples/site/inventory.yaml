@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The nodes. One document replaces the genders file, the rack spreadsheet and
+# the boot path table.
+# yaml-language-server: $schema=https://gsi-hpc.github.io/clusterctl/schema/v1alpha1/nodeinventory.json
+apiVersion: clusterctl/v1alpha1
+kind: NodeInventory
+metadata:
+  name: example
+spec:
+  defaults:
+    attributes:
+      os: el9
+      cluster: prod
+  nodes:
+    - nodes: wlm01
+      attributes: {vendor: vendor1, cpu: intel, cpu-type: xeon, class: wlm}
+      rack: R01
+      level: "1"
+      address: 10.0.1.1
+      cid: "123456789"
+    - nodes: dbm01
+      attributes: {vendor: vendor1, cpu: intel, cpu-type: xeon, class: dbm}
+      rack: R01
+      level: "2"
+      address: 10.0.1.2
+      cid: "123456790"
+    - nodes: exe[0001-0010]
+      attributes: {vendor: vendor2, cpu: amd, cpu-type: epyc, class: exe}
+      rack: R02
+    - nodes: sub[0001-0002]
+      attributes: {vendor: vendor2, cpu: amd, cpu-type: epyc, class: sub}
+      rack: R03
+    # Later entries refine earlier ones for the nodes they name.
+    - nodes: exe0001
+      level: "1"
+      address: 10.0.2.1
+      cid: "223456789"
+      macs: ["00:11:22:33:44:55"]

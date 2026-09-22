@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The built-in defaults, the first layer every configuration is merged onto.
+# A value set here is reported by "clusterctl config view --show-sources" as
+# coming from the defaults layer.
+
+naming:
+  rules:
+    - fqdn: "{name}"
+      bmc: "{bmcPrefix}{name}"
+
+bmc:
+  # Redfish first: IPMI over LAN ships disabled on current iLO, XCC and iDRAC
+  # firmware, so trying it first only produces timeouts.
+  order: [redfish, ipmi]
+  ipmi:
+    backend: ipmipower
+    driver: LAN_2_0
+    # The password is written to a mode 0600 file on the gateway instead of
+    # being passed in argv, where ps would show it to every other user.
+    passwordTransport: file
+    ipmipowerPath: /usr/sbin/ipmipower
+    ipmitoolPath: /usr/bin/ipmitool
+    timeout: 60s
+  redfish:
+    timeout: 30s
+    maxConcurrent: 8
+    minTlsVersion: "1.2"
+    systemPath: /redfish/v1/Systems/1
+  pdu:
+    nameFormat: "pdu%s-%s"
+    user: admin
+
+ssh:
+  # The generated -F file includes the system configuration, so that crypto
+  # policies, GSSAPI settings and site defaults keep applying.
+  include:
+    - /etc/ssh/ssh_config
+  connectTimeout: 10s
+  connectionAttempts: 2
+  serverAliveInterval: 60s
+  serverAliveCountMax: 3
+  controlPersist: 5m
+  binary: ssh
+  scpBinary: scp
+  options:
+    # ssh appends to the known_hosts file without locking when it checks the
+    # address as well as the name, which corrupts a shared file.
+    CheckHostIP: "no"
+    HashKnownHosts: "no"
+
+safety:
+  confirmAbove: 8
+  powerOnBatch: 8
+  powerOnStagger: 5s
+
+fanout:
+  max: 16
+  connectTimeout: 30s
+  commandTimeout: 10m
+  offloadAbove: 512
+
+slurm:
+  lookBack: 1h
+
+services:
+  dhcp:
+    configPath: /etc/dhcp/dhcpd.conf
+    cacheTtl: 2m
+    logPath: /var/log/syslog
+    interface: ib0
+  pxesrv:
+    root: /srv/pxesrv
+    bootPath: /srv/pxesrv/boot
+    logPath: /var/log/pxesrv.log
+  tftp:
+    root: /srv/tftp
+    grubPath: /srv/tftp/grub
+    logPath: /var/log/syslog
+  http:
+    root: /var/www/html
+  cinc:
+    soloConfigPath: /etc/cinc/solo
+    binary: cinc-solo
+  fabric:
+    guidFormat: mellanox
+  dns:
+    timeout: 5s
+  mail:
+    subjectPrefix: "[cluster]"

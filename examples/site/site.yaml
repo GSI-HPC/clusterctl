@@ -1,0 +1,186 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# Everything the clusters of one site share.
+# yaml-language-server: $schema=https://gsi-hpc.github.io/clusterctl/schema/v1alpha1/site.json
+apiVersion: clusterctl/v1alpha1
+kind: Site
+metadata:
+  name: example
+  description: Example site, adapt every value to your own
+spec:
+  domains:
+    hpc: hpc.example.org
+    site: example.org
+    mgmt: mgmt.example.org
+    mgmtHpc: mgmt.hpc.example.org
+    infra: infra.example.org
+
+  naming:
+    # The first rule that matches a short node name decides its host name and
+    # the name of its service processor. The last rule matches everything.
+    rules:
+      - match:
+          prefixes: [exe, sub, wlm, dbm]
+        fqdn: "{name}.{domains.hpc}"
+        bmc: "{name}.{domains.mgmtHpc}"
+      - fqdn: "{name}.{domains.site}"
+        bmc: "{bmcPrefix}{name}.{domains.mgmt}"
+    bmcPrefix: ""
+
+  hosts:
+    login:
+      host: login.hpc.example.org
+      description: Cluster login node, where the Slurm clients run
+    mgmt:
+      host: mgmt-gw.example.org
+      forwardAgent: true
+      controlMaster: true
+      description: Management network gateway, reaches the service processors
+    install:
+      host: installer.hpc.example.org
+      user: root
+      forwardAgent: true
+      description: Boot, PXE and HTTP install server
+    mirror:
+      host: mirror.hpc.example.org
+      user: root
+      forwardAgent: true
+    ifs:
+      host: ifs01.hpc.example.org
+      forwardAgent: true
+      description: Infrastructure services
+    pool:
+      host: pool.example.org
+    dhcp:
+      host: dhcp01.example.org
+      user: root
+      proxyJump: mgmt
+      # This server still runs an sshd that only offers ssh-rsa host keys.
+      legacyAlgorithms: true
+    tftp:
+      host: tftp.example.org
+      user: root
+    fabric:
+      host: ibgw01.example.org
+      user: root
+    wlm:
+      host: wlm01.hpc.example.org
+      user: root
+    db:
+      host: dbm01.hpc.example.org
+      user: root
+
+  networks:
+    ipmi: 10.0.0.0/8
+    internal: 10.10.0.0/16
+
+  credentials:
+    bmc:
+      username: admin
+      password:
+        fromEnv: BMC_PASSWORD
+    bmc-vault:
+      username: admin
+      password:
+        ageFile: secrets/bmc-admin.age
+    pdu:
+      username: admin
+      password:
+        prompt: true
+
+  bmc:
+    credential: bmc
+    order: [redfish, ipmi]
+    ipmi:
+      # The IPMI tools run on the management gateway, which is the only host
+      # with a route into the service network.
+      via: mgmt
+      backend: ipmipower
+      driver: LAN_2_0
+      passwordTransport: file
+    redfish:
+      pinStore: ~/.local/state/clusterctl/bmc-pins
+      minTlsVersion: "1.2"
+    pdu:
+      nameFormat: "pdu%s-%s"
+      domain: mgmt.example.org
+      credential: pdu
+    vendors:
+      vendor2:
+        # This firmware rejects GracefulShutdown and only offers these.
+        resetTypes: [On, ForceOff, ForceRestart, GracefulRestart, PowerCycle]
+
+  ssh:
+    knownHostsFile: ssh-known-hosts
+    include:
+      - /etc/ssh/ssh_config
+    connectTimeout: 10s
+    sendEnv:
+      - APPTAINER_CONTAINER
+
+  tunnels:
+    ipmi:
+      remote: mgmt
+      subnets: [ipmi]
+      excludes: ["{workstation.host}"]
+      description: Reach the service processors directly
+    internal:
+      remote: pool
+      subnets: [internal]
+      dns: true
+
+  safety:
+    protectedHosts:
+      - wlm01
+      - dbm01
+    confirmAbove: 8
+    slurmAware: true
+    powerOnBatch: 8
+    powerOnStagger: 5s
+
+  fanout:
+    max: 24
+    offloadAbove: 512
+    offload: login
+
+  services:
+    dhcp:
+      role: dhcp
+      configPath: /etc/dhcp/dhcpd.conf
+      interface: ib0
+    pxesrv:
+      role: install
+      root: /srv/pxesrv
+      bootPath: /srv/pxesrv/boot
+      repoPath: /srv/pxesrv/boot
+    tftp:
+      role: tftp
+      root: /srv/tftp
+      grubPath: /srv/tftp/grub
+    http:
+      role: install
+      root: /var/www/html
+      baseUrl: http://installer.hpc.example.org
+    cinc:
+      archivePath: /var/www/html/cinc
+      baseCookbook: https://git.example.org/hpc/cluster/base-cookbook.git
+      rolesPath: ../cinc-roles
+      secrets:
+        - source: secrets/munge.key.age
+          target: /etc/munge/munge.key
+          mode: "0400"
+          owner: munge
+          group: munge
+        - source: secrets/nslcd.keytab.age
+          target: /etc/nslcd.keytab
+          mode: "0600"
+    mail:
+      host: smtp.example.org
+      domain: example.org
+      subjectPrefix: "[example]"
+    fabric:
+      role: fabric
+    dns:
+      aliases:
+        - submit
+        - login

@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# What differs between the clusters of a site.
+# yaml-language-server: $schema=https://gsi-hpc.github.io/clusterctl/schema/v1alpha1/cluster.json
+apiVersion: clusterctl/v1alpha1
+kind: Cluster
+metadata:
+  name: cluster1
+spec:
+  site: example
+
+  slurm:
+    role: login
+    organization: example
+    defaultAccount: default
+    partitions: [main, debug]
+    lookBack: 1h
+
+  groups:
+    defaultSource: inventory
+    sources:
+      inventory:
+        # One group per value of the class attribute, so @class:exe and the
+        # bare @exe both work; this replaces the genders file.
+        attribute: class
+      rack:
+        attribute: rack
+      static:
+        static:
+          infra: wlm01,dbm01
+          compute: "@class:exe"
+      slurm:
+        # Resolved by asking the workload manager, the way ClusterShell's
+        # group sources do. Arguments are passed as a vector, never through a
+        # shell, so $GROUP cannot be expanded by anything but clusterctl.
+        cacheTtl: 60s
+        exec:
+          role: login
+          map: [sinfo, -h, -o, "%N", -p, $GROUP]
+          all: [sinfo, -h, -o, "%N"]
+          list: [sinfo, -h, -o, "%R"]
+          reverse: [sinfo, -h, -N, -o, "%R", -n, $NODE]
+
+  bootPaths:
+    - nodes: wlm01
+      path: /srv/pxesrv/boot/cluster/1.0/wlm01/ipxe.net2
+    - nodes: dbm01
+      path: /srv/pxesrv/boot/cluster/1.0/dbm01/ipxe.net2
+    - nodes: exe[0001-0010]
+      path: /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2
+---
+apiVersion: clusterctl/v1alpha1
+kind: Cluster
+metadata:
+  name: cluster2
+spec:
+  site: example
+  slurm:
+    role: login
+    organization: example
+  groups:
+    defaultSource: inventory
+    sources:
+      inventory:
+        attribute: class

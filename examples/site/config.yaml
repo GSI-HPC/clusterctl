@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The per administrator document: which clusters this installation knows and
+# which one commands act on by default. Keep it in ~/.config/clusterctl/ and
+# the site documents next to it, or point CLUSTERCTL_CONFIG at both.
+# yaml-language-server: $schema=https://gsi-hpc.github.io/clusterctl/schema/v1alpha1/config.json
+apiVersion: clusterctl/v1alpha1
+kind: Config
+currentContext: cluster1
+contexts:
+  - name: cluster1
+    cluster: cluster1
+    user: alice_adm
+  - name: cluster2
+    cluster: cluster2
+    user: alice_adm
+    overrides:
+      # This cluster sits behind a slower link.
+      fanout.max: 6
+      ssh.connectTimeout: 20s

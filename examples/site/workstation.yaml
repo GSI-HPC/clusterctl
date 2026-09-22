@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# What is true of this machine rather than of the site. Name the document
+# after the host to keep several machines in one file.
+# yaml-language-server: $schema=https://gsi-hpc.github.io/clusterctl/schema/v1alpha1/workstation.json
+apiVersion: clusterctl/v1alpha1
+kind: Workstation
+spec:
+  host: desk01.example.org
+  identities:
+    - ~/.ssh/id_ed25519
+  overrides:
+    # This machine is on a slow link, so give connections longer. A context
+    # override still wins over this, because the context layer is applied
+    # after the workstation layer.
+    ssh.connectTimeout: 15s
