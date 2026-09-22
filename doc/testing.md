@@ -19,7 +19,11 @@ what went in.
 **A fuzz target** checks the two properties a node set expression must satisfy:
 parsing never panics, and folding is idempotent. It runs in CI for a bounded
 time and locally with `go test -fuzz`. It is how the adjacent-numeric-parts
-ambiguity was found.
+ambiguity was found. A fuzzing worker gives up on any input that runs for ten
+seconds, so the target lowers the expansion limits to 2¹² and skips inputs
+longer than a kilobyte: every input stays cheap, and the time goes into
+variety. Size is a separate test, which folds sets of a quarter of a million
+hosts and would take more than a minute if folding were quadratic.
 
 **A fake BMC** serves the Redfish surface clusterctl uses, over TLS, from
 `httptest`. It is how the reset-type check, the once-only action and the boot
