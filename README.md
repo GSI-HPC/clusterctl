@@ -41,26 +41,6 @@ Would reinstall 10 hosts: exe[0001-0010]
 | **Administer Slurm** | Nodes and their drain reasons, the queue and the accounting database, accounts, users and fair share. |
 | **Serve several clusters** | Domains, naming, roles, networks and the inventory live in YAML, not in the code. |
 
-## Why a rewrite
-
-It replaces a toolkit of 27 Bash scripts. A review of that toolkit found, worst
-first:
-
-1. Commands changed on the way to the remote host — a glob expanded on the
-   workstation, whitespace collapsed, an apostrophe broke the command.
-2. Destructive actions had no preview, confirmation or dry run; one tool
-   scheduled a reboot when asked for its help text.
-3. Node sets were passed unquoted, so `exe[01-10]` became `exe1` when a file
-   of that name existed.
-4. The BMC password appeared in the remote argument vector, where `ps` shows
-   it to everyone on the gateway.
-5. Option order changed what happened.
-6. Several features looked like they worked and did nothing.
-7. The same flag meant different things in different tools.
-8. Four SSH paths with different trust settings coexisted.
-
-Each of those has a counterpart here, described in [`doc/`](doc/).
-
 ## Install
 
 With [mise](https://mise.jdx.dev), which pins a version per project and
@@ -102,7 +82,7 @@ $ clusterctl node list
 `examples/site/` is a complete configuration to copy. The
 [manual](https://gsi-hpc.github.io/clusterctl/) walks through it, and
 [`doc/migration.md`](doc/migration.md) maps every command and setting of the
-old toolkit to its replacement.
+shell toolkit clusterctl replaces to its counterpart.
 
 ## Shell completion
 
