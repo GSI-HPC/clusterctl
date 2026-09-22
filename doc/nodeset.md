@@ -127,3 +127,6 @@ folds a one-dimensional set and expands anything else.
 
 A single range is capped at 2²⁰ elements and a whole set at 2²⁰ hosts. A typo
 such as `exe[1-100000000]` is reported rather than exhausting memory.
+
+Folding costs O(n log n) in the number of hosts. Parsing and printing a set of
+a million hosts takes a few seconds.

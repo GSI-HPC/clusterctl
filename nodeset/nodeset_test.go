@@ -129,6 +129,22 @@ func TestFoldRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFoldLargeSets folds sets far larger than any cluster. Folding has to stay
+// close to linear: merging a dimension one host at a time and sorting it after
+// every merge turns this test from milliseconds into minutes.
+func TestFoldLargeSets(t *testing.T) {
+	t.Parallel()
+
+	for _, expr := range []string{"exe[1-262144]", "rack[1-256]-exe[1-256]"} {
+		t.Run(expr, func(t *testing.T) {
+			t.Parallel()
+			if got := nodeset.MustParse(expr).String(); got != expr {
+				t.Errorf("String() = %.60q, want %q", got, expr)
+			}
+		})
+	}
+}
+
 func TestAutostep(t *testing.T) {
 	t.Parallel()
 

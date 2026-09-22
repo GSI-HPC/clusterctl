@@ -71,9 +71,13 @@ func foldPattern(pattern string, nodes []node, pads []int, autostep int) []vecto
 
 // foldAxis unions the values of one dimension across every pair of vectors
 // that agree on all other dimensions.
+//
+// Values are collected first and put in order once per merged vector, so a
+// pass costs O(n log n) however many vectors fold into one.
 func foldAxis(vectors []vector, axis, autostep int) ([]vector, bool) {
 	groups := make(map[string]int, len(vectors))
 	out := make([]vector, 0, len(vectors))
+	grown := make([]bool, 0, len(vectors))
 	changed := false
 
 	for _, v := range vectors {
@@ -81,12 +85,18 @@ func foldAxis(vectors []vector, axis, autostep int) ([]vector, bool) {
 		if idx, ok := groups[key]; ok {
 			target := out[idx].dims[axis]
 			target.values = append(target.values, v.dims[axis].values...)
-			target.sortUnique()
+			grown[idx] = true
 			changed = true
 			continue
 		}
 		groups[key] = len(out)
 		out = append(out, v)
+		grown = append(grown, false)
+	}
+	for idx, g := range grown {
+		if g {
+			out[idx].dims[axis].sortUnique()
+		}
 	}
 	return out, changed
 }
