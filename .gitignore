@@ -11,3 +11,4 @@
 /site/resources/
 /site/.hugo_build.lock
 /site/content/reference/
+/site/static/schema/

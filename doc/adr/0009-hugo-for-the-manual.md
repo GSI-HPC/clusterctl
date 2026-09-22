@@ -43,5 +43,7 @@ committed, so they cannot drift from the binary they describe.
 
 - Hextra pins a Hugo version range; a Hugo upgrade can need a theme upgrade.
   Both are pinned in the workflow.
-- Hugo's module system needs network access at build time. The pages workflow
-  has it; an air-gapped build of the manual would need the theme vendored.
+- Hugo's module system needs network access at build time, and Hextra's search
+  index fetches FlexSearch from a CDN while the site is built. The pages
+  workflow has both; an air-gapped build would need the theme vendored and
+  `params.search.enable` set to false.
