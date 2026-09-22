@@ -89,15 +89,15 @@ func (g *Gate) Check(a Action) error {
 // Confirm runs the full gate: the protected host check, then the preview and
 // the prompt. It returns nil when the action may proceed.
 func (g *Gate) Confirm(a Action) error {
-	if err := g.Check(a); err != nil {
+	p, err := g.Preview(a)
+	if err != nil {
 		return err
 	}
-	count := a.Targets.Len()
 
 	if g.DryRun {
-		g.printf("Would %s %d host%s: %s\n", a.Verb, count, plural(count), a.Targets)
-		if a.Detail != "" {
-			g.printf("  %s\n", a.Detail)
+		g.printf("Would %s\n", p.Summary())
+		if p.Detail != "" {
+			g.printf("  %s\n", p.Detail)
 		}
 		return ErrDryRun
 	}
@@ -109,32 +109,82 @@ func (g *Gate) Confirm(a Action) error {
 			"%s needs a confirmation but there is no terminal to ask on; pass -y to confirm in advance", a.Verb)
 	}
 
-	g.printf("About to %s %d host%s: %s\n", a.Verb, count, plural(count), a.Targets)
-	if a.Detail != "" {
-		g.printf("  %s\n", a.Detail)
+	g.printf("About to %s\n", p.Summary())
+	if p.Detail != "" {
+		g.printf("  %s\n", p.Detail)
 	}
-
-	// Above the threshold a yes is too easy to type by reflex, so the count
-	// has to be read off the preview and typed back.
-	if g.ConfirmAbove > 0 && count > g.ConfirmAbove {
-		g.printf("This is more than %d hosts. Type the number of hosts to continue: ", g.ConfirmAbove)
-		answer, err := g.read()
-		if err != nil {
-			return err
-		}
-		n, err := strconv.Atoi(strings.TrimSpace(answer))
-		if err != nil || n != count {
-			return exitcode.Errorf(exitcode.Interrupted, "not confirmed, nothing was done")
-		}
-		return nil
-	}
-
-	g.printf("Continue? [y/N] ")
+	g.printf("%s ", p.Question())
 	answer, err := g.read()
 	if err != nil {
 		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
+	return p.Accept(answer)
+}
+
+// Preview is an action that passed the checks and waits for an answer. It
+// carries everything the question is asked from, so that a caller without a
+// terminal can put the same question some other way and have the answer
+// judged by the same rule.
+type Preview struct {
+	// Verb is what is being done.
+	Verb string `json:"verb"`
+	// Targets is the folded node set the action touches.
+	Targets string `json:"targets"`
+	// Count is how many hosts that is.
+	Count int `json:"count"`
+	// Detail is the extra line shown before the question.
+	Detail string `json:"detail,omitempty"`
+	// CountRequired says that a yes is not enough: the host count has to be
+	// read off the preview and given back.
+	CountRequired bool `json:"countRequired"`
+	// ConfirmAbove is the host count above which the count is required.
+	ConfirmAbove int `json:"confirmAbove,omitempty"`
+}
+
+// Preview runs the checks of the gate and describes the question it would
+// ask, without asking it.
+func (g *Gate) Preview(a Action) (Preview, error) {
+	if err := g.Check(a); err != nil {
+		return Preview{}, err
+	}
+	count := a.Targets.Len()
+	return Preview{
+		Verb:    a.Verb,
+		Targets: a.Targets.String(),
+		Count:   count,
+		Detail:  a.Detail,
+		// Above the threshold a yes is too easy to give by reflex.
+		CountRequired: g.ConfirmAbove > 0 && count > g.ConfirmAbove,
+		ConfirmAbove:  g.ConfirmAbove,
+	}, nil
+}
+
+// Summary says what is about to happen, for example "drain 3 hosts:
+// exe[1-3]".
+func (p Preview) Summary() string {
+	return fmt.Sprintf("%s %d host%s: %s", p.Verb, p.Count, plural(p.Count), p.Targets)
+}
+
+// Question is what the administrator is asked.
+func (p Preview) Question() string {
+	if p.CountRequired {
+		return fmt.Sprintf("This is more than %d hosts. Type the number of hosts to continue:", p.ConfirmAbove)
+	}
+	return "Continue? [y/N]"
+}
+
+// Accept judges an answer to the question: the host count when it is
+// required, a yes otherwise. It returns nil when the action may proceed.
+func (p Preview) Accept(answer string) error {
+	answer = strings.TrimSpace(answer)
+	if p.CountRequired {
+		n, err := strconv.Atoi(answer)
+		if err != nil || n != p.Count {
+			return exitcode.Errorf(exitcode.Interrupted, "not confirmed, nothing was done")
+		}
+		return nil
+	}
+	switch strings.ToLower(answer) {
 	case "y", "yes":
 		return nil
 	default:
@@ -180,4 +230,37 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// Effect says what running a command does to the site. The command tree
+// records it on every command, so that anything driving the tree on behalf
+// of someone else, such as the MCP server, can tell a question from a change
+// without keeping its own list.
+type Effect string
+
+const (
+	// EffectRead only looks. It may contact hosts, but changes nothing on
+	// them.
+	EffectRead Effect = "read"
+	// EffectChange changes or destroys something, or may do so depending on
+	// its arguments.
+	EffectChange Effect = "change"
+	// EffectInteractive needs a terminal, opens a program or keeps running
+	// until it is stopped.
+	EffectInteractive Effect = "interactive"
+)
+
+// EffectAnnotation is the key under which a command records its effect.
+const EffectAnnotation = "clusterctl.effect"
+
+// EffectOf reads the effect a command recorded in its annotations. An
+// unmarked command counts as a change, so that forgetting to classify one
+// never makes it look harmless.
+func EffectOf(annotations map[string]string) Effect {
+	switch effect := Effect(annotations[EffectAnnotation]); effect {
+	case EffectRead, EffectChange, EffectInteractive:
+		return effect
+	default:
+		return EffectChange
+	}
 }

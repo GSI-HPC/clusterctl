@@ -150,6 +150,18 @@ func StateGroups() map[string][]string {
 	}
 }
 
+// States turns a state group name, or a comma separated list of states, into
+// the states to ask Slurm for. An empty argument asks for every state.
+func States(arg string) []string {
+	if arg == "" {
+		return nil
+	}
+	if group, ok := StateGroups()[strings.ToLower(arg)]; ok {
+		return group
+	}
+	return strings.Split(arg, ",")
+}
+
 // Drain removes nodes from production with a reason.
 //
 // The reason is mandatory: a drained node with no reason is a node nobody

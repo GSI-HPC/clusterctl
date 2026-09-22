@@ -161,3 +161,85 @@ func TestNewGateRejectsBadProtectedHosts(t *testing.T) {
 		t.Error("a malformed protected host expression should be reported")
 	}
 }
+
+func TestPreviewAsksWithoutPrompting(t *testing.T) {
+	t.Parallel()
+
+	g, out := gate(t, "")
+	g.Interactive = false
+
+	small, err := g.Preview(safety.Action{Verb: "drain", Targets: nodeset.MustParse("exe[1-3]"), Detail: "reason: DIMM"})
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
+	if small.CountRequired || small.Count != 3 || small.Targets != "exe[1-3]" {
+		t.Errorf("preview = %+v, want 3 hosts exe[1-3] without the count", small)
+	}
+	if got, want := small.Summary(), "drain 3 hosts: exe[1-3]"; got != want {
+		t.Errorf("Summary() = %q, want %q", got, want)
+	}
+	if out.Len() != 0 {
+		t.Errorf("a preview printed something:\n%s", out)
+	}
+
+	large, err := g.Preview(action("drain", "exe[1-10]"))
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
+	if !large.CountRequired || !strings.Contains(large.Question(), "more than 4 hosts") {
+		t.Errorf("preview = %+v, question %q; want the count required above 4", large, large.Question())
+	}
+
+	if _, err := g.Preview(action("drain", "exe1,wlm01")); err == nil {
+		t.Error("a preview touching a protected host should be refused")
+	}
+}
+
+func TestAcceptJudgesAnswersLikeThePrompt(t *testing.T) {
+	t.Parallel()
+
+	small := safety.Preview{Verb: "drain", Targets: "exe[1-2]", Count: 2}
+	large := safety.Preview{Verb: "drain", Targets: "exe[1-10]", Count: 10, CountRequired: true, ConfirmAbove: 4}
+	tests := []struct {
+		preview safety.Preview
+		answer  string
+		ok      bool
+	}{
+		{small, "y", true},
+		{small, " YES\n", true},
+		{small, "n", false},
+		{small, "", false},
+		{large, "10", true},
+		{large, "10\n", true},
+		{large, "yes", false},
+		{large, "9", false},
+	}
+	for _, tc := range tests {
+		err := tc.preview.Accept(tc.answer)
+		if (err == nil) != tc.ok {
+			t.Errorf("Accept(%q) on %d hosts = %v, want ok %v", tc.answer, tc.preview.Count, err, tc.ok)
+		}
+		if err != nil && exitcode.From(err) != exitcode.Interrupted {
+			t.Errorf("Accept(%q) exit code = %d, want %d", tc.answer, exitcode.From(err), exitcode.Interrupted)
+		}
+	}
+}
+
+func TestEffectOfTreatsUnknownAsChange(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		annotations map[string]string
+		want        safety.Effect
+	}{
+		{nil, safety.EffectChange},
+		{map[string]string{safety.EffectAnnotation: "read"}, safety.EffectRead},
+		{map[string]string{safety.EffectAnnotation: "interactive"}, safety.EffectInteractive},
+		{map[string]string{safety.EffectAnnotation: "harmless"}, safety.EffectChange},
+	}
+	for _, tc := range tests {
+		if got := safety.EffectOf(tc.annotations); got != tc.want {
+			t.Errorf("EffectOf(%v) = %q, want %q", tc.annotations, got, tc.want)
+		}
+	}
+}

@@ -101,6 +101,13 @@ var builtRoots = map[*cobra.Command]*root{}
 
 // NewRootCommand builds the command tree.
 func NewRootCommand(ctx context.Context, streams app.Streams) *cobra.Command {
+	cmd, r := newRoot(ctx, streams)
+	builtRoots[cmd] = r
+	return cmd
+}
+
+// newRoot builds the command tree and returns the state its flags write to.
+func newRoot(ctx context.Context, streams app.Streams) (*cobra.Command, *root) {
 	r := &root{streams: streams, ctx: ctx}
 
 	cmd := &cobra.Command{
@@ -136,7 +143,6 @@ are about to do and ask before doing it.`),
 	flags.IntVar(&r.fanout, "fanout", 0, "how many hosts to work on at once (default: from the configuration)")
 
 	registerCompletions(cmd, r)
-	builtRoots[cmd] = r
 
 	cmd.AddCommand(
 		newConfigCommand(r),
@@ -158,9 +164,11 @@ are about to do and ask before doing it.`),
 		newDNSCommand(r),
 		newSlurmCommand(r),
 		newDoctorCommand(r),
+		newMCPCommand(r),
 		newVersionCommand(r),
 	)
-	return cmd
+	annotateEffects(cmd)
+	return cmd, r
 }
 
 // Execute runs the command tree and returns the process exit code.
