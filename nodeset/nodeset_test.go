@@ -274,6 +274,9 @@ func TestParseErrors(t *testing.T) {
 		"exe[1-", "exe1]", "exe[]", "exe[5-1]", "exe[1-2/0]",
 		"exe[a-b]", "exe[1-2/x]", "exe[3/2]", "exe[1,,2]",
 		"exe[1-100000000]",
+		// A step is a plain decimal number like a bound, so it can neither
+		// carry a sign nor be large enough to wrap around.
+		"exe[1-9/+2]", "exe[5-999999999999999999/9223372036854775807]",
 		// Adjacent numeric parts cannot be told apart once expanded.
 		"exe0[0,10]", "exe[1-2][3-4]", "[1-2]0",
 	}

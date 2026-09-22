@@ -63,7 +63,7 @@ func parseRangeSet(spec string) (*rangeSet, error) {
 		step := 1
 		if slash := strings.IndexByte(part, '/'); slash >= 0 {
 			var err error
-			step, err = strconv.Atoi(part[slash+1:])
+			step, err = parseNumber(part[slash+1:])
 			if err != nil || step < 1 {
 				return nil, fmt.Errorf("invalid step %q in range %q", part[slash+1:], spec)
 			}

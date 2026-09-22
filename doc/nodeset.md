@@ -131,5 +131,8 @@ evaluation, so `a[1-600000],b[1-600000]!b[1-600000]` is refused even though it
 ends up smaller. A typo such as `exe[1-100000000]` is reported rather than
 exhausting memory.
 
+Bounds and steps are plain decimal numbers of at most eighteen digits, so no
+arithmetic on them can overflow.
+
 Folding costs O(n log n) in the number of hosts. Parsing and printing a set of
 a million hosts, the most an expression may name, takes a few seconds.
