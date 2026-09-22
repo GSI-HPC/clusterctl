@@ -66,6 +66,7 @@ contexts:
 | `hosts` | Infrastructure roles: `host`, `user`, `forwardAgent`, `forwardX11`, `proxyJump`, `controlMaster`, `legacyAlgorithms`, `options`, `description` |
 | `networks` | Named CIDRs, used by tunnels |
 | `credentials` | Named accounts and where their password is read from |
+| `secrets.recipients` | age or OpenSSH public keys that `secrets encrypt` encrypts to |
 | `bmc` | Out-of-band access: `credential`, `order`, `ipmi`, `redfish`, `pdu`, `vendors` |
 | `ssh` | Transport: `knownHostsFile`, `include`, timeouts, `sendEnv`, `options`, `binary` |
 | `tunnels` | sshuttle profiles: `remote`, `subnets`, `excludes`, `dns`, `method` |
@@ -88,6 +89,7 @@ Exactly one per credential:
 | `fromEnv` | An environment variable |
 | `file` | The first line of a file |
 | `ageFile` | An age encrypted file, with `workstation.identities` |
+| `age` | age ciphertext written inline, with `workstation.identities` |
 | `command` | The standard output of a helper |
 | `prompt` | The terminal |
 

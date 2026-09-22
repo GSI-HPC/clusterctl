@@ -10,8 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"filippo.io/age"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/credentials"
+	"github.com/GSI-HPC/clusterctl/internal/secrets"
 )
 
 func resolver(t *testing.T, creds map[string]v1alpha1.Credential, env map[string]string) *credentials.Resolver {
@@ -178,5 +181,68 @@ func TestPasswordIsReadOncePerProcess(t *testing.T) {
 	}
 	if asked != 1 {
 		t.Errorf("the password was asked for %d times, want once", asked)
+	}
+}
+
+func TestInlineAgePassword(t *testing.T) {
+	t.Parallel()
+
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "identity"), []byte(id.String()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := secrets.EncryptArmored([]byte("hunter2\n"), []age.Recipient{id.Recipient()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := secrets.EncryptArmored([]byte("\n"), []age.Recipient{id.Recipient()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := &credentials.Resolver{
+		BaseDir:    dir,
+		Identities: []string{"identity"},
+		Credentials: map[string]v1alpha1.Credential{
+			"bmc":   {Username: "admin", Password: v1alpha1.PasswordSource{Age: sealed}},
+			"empty": {Username: "admin", Password: v1alpha1.PasswordSource{Age: empty}},
+			"two":   {Username: "admin", Password: v1alpha1.PasswordSource{Age: sealed, FromEnv: "X"}},
+		},
+		Env: func(string) string { return "" },
+	}
+
+	cred, err := r.Get(context.Background(), "bmc")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got, want := cred.Password(), "hunter2"; got != want {
+		t.Errorf("password = %q, want %q", got, want)
+	}
+	if _, err := r.Get(context.Background(), "empty"); err == nil {
+		t.Error("an empty encrypted password should be refused")
+	}
+	if _, err := r.Get(context.Background(), "two"); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Errorf("an age value beside another source should be refused, got %v", err)
+	}
+}
+
+func TestInlineAgePasswordNeedsAnIdentity(t *testing.T) {
+	t.Parallel()
+
+	id, _ := age.GenerateX25519Identity()
+	sealed, err := secrets.EncryptArmored([]byte("hunter2"), []age.Recipient{id.Recipient()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := resolver(t, map[string]v1alpha1.Credential{
+		"bmc": {Username: "admin", Password: v1alpha1.PasswordSource{Age: sealed}},
+	}, nil)
+	_, err = r.Get(context.Background(), "bmc")
+	if err == nil || !strings.Contains(err.Error(), "identities") {
+		t.Errorf("Get = %v, want it to say that no identity is configured", err)
 	}
 }

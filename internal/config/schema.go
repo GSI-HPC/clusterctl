@@ -133,6 +133,8 @@ func ValidateDocument(doc *Document) error {
 		}
 	}
 
+	problems = append(problems, checkSecrets(doc)...)
+
 	problems = dedup(problems)
 	if len(problems) == 0 {
 		return nil

@@ -5,10 +5,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"filippo.io/age"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -27,13 +30,15 @@ import (
 func newSecretsCommand(r *root) *cobra.Command {
 	return group("secrets", "Distribute the encrypted files the nodes need", `
 Decrypt the files a site keeps beside its configuration and write them onto
-the nodes.
+the nodes, and encrypt the values the configuration carries inline.
 
 The plaintext never touches this workstation's disk: it is decrypted into
 memory and streamed to each node over standard input, which is what keeps a
 cluster key off a laptop.`,
 		newSecretsListCommand(r),
 		newSecretsPushCommand(r),
+		newSecretsEncryptCommand(r),
+		newSecretsCheckCommand(r),
 	)
 }
 
@@ -52,7 +57,11 @@ List the encrypted files and where each one lands on a node.`,
 				if s.Group != "" {
 					owner += ":" + s.Group
 				}
-				t.Add(a.Path(s.Source), s.Target, s.Mode, owner)
+				source := a.Path(s.Source)
+				if s.Age != "" {
+					source = "(inline)"
+				}
+				t.Add(source, s.Target, s.Mode, owner)
 			}
 			t.Caption = fmt.Sprintf("%d secrets", t.Len())
 			return a.Print(output.Result{Table: t, Object: a.Spec.Services.Cinc.Secrets})
@@ -94,9 +103,9 @@ This overwrites files on the nodes, so it asks first.
 				return dryRunOrError(err)
 			}
 
-			identities, err := secrets.Identities(a.IdentityPaths())
+			identities, err := a.Identities()
 			if err != nil {
-				return exitcode.Wrap(exitcode.Usage, err)
+				return err
 			}
 			targets, err := a.NodeTargets(ns)
 			if err != nil {
@@ -106,9 +115,9 @@ This overwrites files on the nodes, so it asks first.
 			t := output.NewTable(output.Cols("NODE", "SECRET", "STATUS")...)
 			failed := 0
 			for _, file := range files {
-				plaintext, err := secrets.Decrypt(a.Path(file.Source), identities)
+				plaintext, err := a.SecretContent(file, identities)
 				if err != nil {
-					return exitcode.Wrap(exitcode.Usage, err)
+					return err
 				}
 				mode := file.Mode
 				if mode == "" {
@@ -152,6 +161,215 @@ This overwrites files on the nodes, so it asks first.
 			}
 			return nil
 		})
+}
+
+func newSecretsEncryptCommand(r *root) *cobra.Command {
+	var (
+		file       string
+		recipients []string
+		armorOnly  bool
+		indent     int
+	)
+	cmd := leaf("encrypt", "Encrypt a value to write inline in the configuration", `
+Encrypt a password or a file to the site's recipients and print it as an age
+field, ready to be pasted into a document:
+
+  $ clusterctl secrets encrypt
+  Secret: 
+  Again: 
+  age: |
+    -----BEGIN AGE ENCRYPTED FILE-----
+    ...
+    -----END AGE ENCRYPTED FILE-----
+
+On a terminal the value is asked for twice without echo. Otherwise it is read
+from standard input as it is, so a trailing newline is kept; a password
+resolved from an age field has its trailing newline removed either way.
+
+The recipients are secrets.recipients of the site document, or the
+--recipient flags when given. Nothing is decrypted, so no identity is needed.
+
+  clusterctl secrets encrypt --file munge.key --indent 10 >> site.yaml`,
+		cobra.NoArgs,
+		func(cmd *cobra.Command, _ []string) error {
+			a, err := r.App()
+			if err != nil {
+				return err
+			}
+			if indent < 0 {
+				return exitcode.Errorf(exitcode.Usage, "--indent must not be negative")
+			}
+			if len(recipients) == 0 {
+				recipients = a.Spec.Secrets.Recipients
+			}
+			recs, err := secrets.ParseRecipients(recipients)
+			if err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
+			}
+
+			var plaintext []byte
+			if file != "" {
+				if plaintext, err = os.ReadFile(file); err != nil {
+					return exitcode.Wrap(exitcode.Usage, err)
+				}
+			} else if plaintext, err = a.ReadSecret("Secret"); err != nil {
+				return err
+			}
+			if len(plaintext) == 0 {
+				return exitcode.Errorf(exitcode.Usage, "there is nothing to encrypt")
+			}
+
+			armored, err := secrets.EncryptArmored(plaintext, recs)
+			if err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
+			}
+			return say(cmd, "%s", ageField(armored, indent, armorOnly))
+		})
+	cmd.Flags().StringVar(&file, "file", "", "encrypt this file instead of reading the value")
+	cmd.Flags().StringArrayVar(&recipients, "recipient", nil, "encrypt to this age or ssh public key instead of secrets.recipients (repeatable)")
+	cmd.Flags().BoolVar(&armorOnly, "armor", false, "print the armored ciphertext alone, without the age key")
+	cmd.Flags().IntVar(&indent, "indent", 0, "indent the output by this many spaces, to paste it at its depth")
+	return cmd
+}
+
+// ageField renders armored ciphertext as an age field of a document, or as
+// the bare armor, indented by the given number of spaces.
+func ageField(armored string, indent int, armorOnly bool) string {
+	pad := strings.Repeat(" ", indent)
+	var b strings.Builder
+	body := pad
+	if !armorOnly {
+		b.WriteString(pad + "age: |\n")
+		body += "  "
+	}
+	for _, line := range strings.Split(strings.TrimRight(armored, "\n"), "\n") {
+		b.WriteString(body + line + "\n")
+	}
+	return b.String()
+}
+
+// sealed is one encrypted value of the configuration.
+type sealed struct {
+	name   string
+	form   string
+	inline string
+	file   string
+}
+
+// sealedValues lists every encrypted value the configuration carries, in a
+// stable order: the credentials by name, then the secret files.
+func sealedValues(a *app.App) []sealed {
+	var out []sealed
+	names := make([]string, 0, len(a.Spec.Credentials))
+	for name := range a.Spec.Credentials {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		pw := a.Spec.Credentials[name].Password
+		switch {
+		case pw.Age != "":
+			out = append(out, sealed{name: "credential " + name, form: "inline", inline: pw.Age})
+		case pw.AgeFile != "":
+			out = append(out, sealed{name: "credential " + name, form: a.Path(pw.AgeFile), file: a.Path(pw.AgeFile)})
+		}
+	}
+	for _, f := range a.Spec.Services.Cinc.Secrets {
+		switch {
+		case f.Age != "":
+			out = append(out, sealed{name: "file " + f.Target, form: "inline", inline: f.Age})
+		case f.Source != "":
+			out = append(out, sealed{name: "file " + f.Target, form: a.Path(f.Source), file: a.Path(f.Source)})
+		}
+	}
+	return out
+}
+
+func newSecretsCheckCommand(r *root) *cobra.Command {
+	var decrypt bool
+	cmd := leaf("check", "Check every encrypted value of the configuration", `
+List every encrypted value the configuration carries, inline or in a file,
+check that it is a complete age file and name the kinds of recipient it is
+encrypted to. No identity is needed for this.
+
+With --decrypt each value is also decrypted with the configured identities,
+in memory, and the result is thrown away: it proves this workstation can
+read every secret before a reinstall needs one. Nothing is printed of the
+plaintext.`,
+		cobra.NoArgs,
+		func(cmd *cobra.Command, _ []string) error {
+			a, err := r.App()
+			if err != nil {
+				return err
+			}
+			var identities []age.Identity
+			if decrypt {
+				if identities, err = a.Identities(); err != nil {
+					return err
+				}
+			}
+
+			t := output.NewTable(output.Cols("SECRET", "SOURCE", "RECIPIENTS", "STATUS")...)
+			failed := 0
+			for _, s := range sealedValues(a) {
+				var stanzas []string
+				if s.inline != "" {
+					stanzas, err = secrets.Inspect(s.inline)
+				} else {
+					stanzas, err = secrets.InspectFile(s.file)
+				}
+				status := "ok"
+				switch {
+				case err != nil:
+					status = "invalid: " + err.Error()
+				case decrypt:
+					if s.inline != "" {
+						_, err = secrets.DecryptArmored(s.inline, identities)
+					} else {
+						_, err = secrets.Decrypt(s.file, identities)
+					}
+					status = "decrypts"
+					if err != nil {
+						status = "fails: " + err.Error()
+					}
+				}
+				if err != nil {
+					failed++
+				}
+				t.Add(s.name, s.form, summarizeStanzas(stanzas), status)
+			}
+			t.Caption = fmt.Sprintf("%d encrypted values", t.Len())
+			if err := a.Print(output.Result{Table: t}); err != nil {
+				return err
+			}
+			if failed > 0 {
+				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d encrypted values failed the check", failed, t.Len())
+			}
+			return nil
+		})
+	cmd.Flags().BoolVar(&decrypt, "decrypt", false, "also decrypt each value in memory with the configured identities")
+	return cmd
+}
+
+// summarizeStanzas renders the recipient stanza types of an age file as a
+// count per type, for example "2 X25519, 1 ssh-ed25519".
+func summarizeStanzas(types []string) string {
+	if len(types) == 0 {
+		return "-"
+	}
+	counts := map[string]int{}
+	var order []string
+	for _, t := range types {
+		if counts[t] == 0 {
+			order = append(order, t)
+		}
+		counts[t]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, t := range order {
+		parts = append(parts, fmt.Sprintf("%d %s", counts[t], t))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func newCincCommand(r *root) *cobra.Command {

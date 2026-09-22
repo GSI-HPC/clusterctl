@@ -52,8 +52,11 @@ type SiteSpec struct {
 	// BMC address checks.
 	Networks map[string]string `json:"networks,omitempty" yaml:"networks,omitempty" jsonschema:"description=Named CIDRs"`
 	// Credentials are the accounts used for BMCs and PDUs. A password is
-	// never written here, only where to read it from.
-	Credentials map[string]Credential `json:"credentials,omitempty" yaml:"credentials,omitempty" jsonschema:"description=Named credentials; passwords are referenced, never inlined"`
+	// never written here in the clear, only where to read it from or as an
+	// age encrypted value.
+	Credentials map[string]Credential `json:"credentials,omitempty" yaml:"credentials,omitempty" jsonschema:"description=Named credentials; passwords are referenced or age encrypted, never written in the clear"`
+	// Secrets says who the inline secrets of this site are encrypted to.
+	Secrets SecretsSpec `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 	// BMC configures out-of-band access.
 	BMC BMCSpec `json:"bmc,omitempty" yaml:"bmc,omitempty"`
 	// SSH configures the transport every remote command uses.
@@ -136,6 +139,10 @@ type PasswordSource struct {
 	File string `json:"file,omitempty" yaml:"file,omitempty" jsonschema:"description=File whose first line is the password"`
 	// AgeFile decrypts an age encrypted file with the configured identities.
 	AgeFile string `json:"ageFile,omitempty" yaml:"ageFile,omitempty" jsonschema:"description=age encrypted file holding the password"`
+	// Age is the password encrypted with age and ASCII armored, written
+	// inline as a block scalar. It is decrypted with the configured
+	// identities only when the credential is used.
+	Age string `json:"age,omitempty" yaml:"age,omitempty" jsonschema:"pattern=^\\s*-----BEGIN AGE ENCRYPTED FILE-----,description=Inline ASCII armored age ciphertext of the password (clusterctl secrets encrypt)"`
 	// Command runs a helper and reads the password from its standard output.
 	Command []string `json:"command,omitempty" yaml:"command,omitempty" jsonschema:"description=Helper command printing the password"`
 	// Prompt asks the administrator on the terminal.
@@ -390,8 +397,11 @@ type CincService struct {
 // workstation's disk.
 type SecretFile struct {
 	// Source is the age encrypted file, relative to the configuration
-	// directory unless absolute.
-	Source string `json:"source" yaml:"source" jsonschema:"required"`
+	// directory unless absolute. Exactly one of source and age is set.
+	Source string `json:"source,omitempty" yaml:"source,omitempty" jsonschema:"description=age encrypted file; exactly one of source and age"`
+	// Age is the content encrypted with age and ASCII armored, written
+	// inline as a block scalar instead of kept in a file of its own.
+	Age string `json:"age,omitempty" yaml:"age,omitempty" jsonschema:"pattern=^\\s*-----BEGIN AGE ENCRYPTED FILE-----,description=Inline ASCII armored age ciphertext of the content; exactly one of source and age"`
 	// Target is the absolute path on the node.
 	Target string `json:"target" yaml:"target" jsonschema:"required"`
 	// Mode is the octal permission of the target, written as a string so
@@ -400,6 +410,15 @@ type SecretFile struct {
 	// Owner and Group are set after the file is written.
 	Owner string `json:"owner,omitempty" yaml:"owner,omitempty"`
 	Group string `json:"group,omitempty" yaml:"group,omitempty"`
+}
+
+// SecretsSpec says who can read the secrets a site writes inline.
+type SecretsSpec struct {
+	// Recipients are the public keys "clusterctl secrets encrypt" encrypts
+	// to: age recipients (age1...), post-quantum ones (age1pq1...) or
+	// OpenSSH public keys. Every administrator who has to read a secret is
+	// listed, and so is a recovery key kept offline.
+	Recipients []string `json:"recipients,omitempty" yaml:"recipients,omitempty" jsonschema:"description=age or OpenSSH public keys inline secrets are encrypted to"`
 }
 
 // MailService is how a node warns its users before a reboot.

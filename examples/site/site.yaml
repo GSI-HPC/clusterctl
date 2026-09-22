@@ -74,6 +74,14 @@ spec:
     ipmi: 10.0.0.0/8
     internal: 10.10.0.0/16
 
+  # Who "clusterctl secrets encrypt" encrypts inline secrets to: one entry
+  # per administrator and a recovery key kept offline. OpenSSH public keys
+  # work as well.
+  secrets:
+    recipients:
+      - age1lxcfm86sdpga06z6gfpzpaygss37ylm8cp5eqqjqntxun7d4qq9sdt9c4t  # admin1
+      - age18w0s3fv06tpljr632hfjfeyqg3055l07hgrrel5sghymannl7pyqujyj9c  # recovery
+
   credentials:
     bmc:
       username: admin
@@ -83,6 +91,22 @@ spec:
       username: admin
       password:
         ageFile: secrets/bmc-admin.age
+    # The password encrypted inline, written by "clusterctl secrets encrypt".
+    # The ciphertext is safe in version control; only the holders of an
+    # identity for one of secrets.recipients can read it.
+    bmc-inline:
+      username: admin
+      password:
+        age: |
+          -----BEGIN AGE ENCRYPTED FILE-----
+          YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBXTld0aGJxdlBtMmx0b3Zl
+          QTRYOG9GY2FkbWRXSTNrMkc5T0kzL28zNlJzCnBYdENQcEZMUGV1SmxNckJqd2hh
+          ZEo2Q01sMlpDTWN2SjFObXIzVXJqYzgKLT4gWDI1NTE5IHdQdW9zVEFaNElKRk1m
+          RmZyRjdHaDh5OG54RE4yOVA2OXZxOVJhWFQ4RTgKcitrOWxoNUxQemx2dk43QTVL
+          U2ZZNGdqbGxZVlB5RFRBWWJQR1Bnbm9qcwotLS0gVmJsLzRVSkdxSHJTSzNoZXBi
+          WkhaU1pBQStNTXMvcUlCWXA5MXk2T2orSQpu+6RuWHSjqcPc1YO+aPyBAlr+vHZe
+          naMNJJw2J9e6q9zXt7vaVcErBglZYKgVKsrIpKU=
+          -----END AGE ENCRYPTED FILE-----
     pdu:
       username: admin
       password:
@@ -174,6 +198,22 @@ spec:
         - source: secrets/nslcd.keytab.age
           target: /etc/nslcd.keytab
           mode: "0600"
+        # A small secret can live inline instead of in a file of its own.
+        - target: /etc/slurm/jwt_hs256.key
+          mode: "0600"
+          owner: slurm
+          group: slurm
+          age: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBtK1ZmUzZRWENDSzN3N2JZ
+            VjBXeHBqdE5RbHpreUl1cEthZWg5QTlZWmlZCnArOENJZEF3QnJUcFQweFliRVBw
+            SWdjQ1dHdTRDNHpDODIxeVUrOTVFa2MKLT4gWDI1NTE5IE1ySFdEQy91K2V4THhG
+            ZlZ5b2lHZnpreXlHTVdEZXNudWdMQkR2SDVEa3cKdEJoMkZXb0tRRmhGU2lIbEl2
+            QWoxczBROSttMXA1d3kvMkRFODlxN2JuOAotLS0gTkcrN21SZG1IeDVTWEM3Ymhp
+            a1U2aW5OU2NpK1o5WVBlVmtla2IxQWF5bwqEjSWE+yWgSfIzAu3mJDTjDnb13fvn
+            tOjvGp+2Guo4IzFl313EWLPZOp9ItBuWobjvnB/A2g4oaAlTWL1Kqm+cEM4PzPnH
+            EQg=
+            -----END AGE ENCRYPTED FILE-----
     mail:
       host: smtp.example.org
       domain: example.org

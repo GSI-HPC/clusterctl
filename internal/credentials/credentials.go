@@ -5,7 +5,8 @@
 //
 // A password is never written in the configuration, only where to read it
 // from: an environment variable, a file, an age encrypted file, a helper
-// command or the terminal. Once resolved it is passed to a backend over a
+// command or the terminal. The one exception is a password encrypted with age
+// and written inline, which is ciphertext rather than a password. Once resolved it is passed to a backend over a
 // file or standard input, never in an argument vector where ps would show it
 // to everyone on the host.
 package credentials
@@ -47,7 +48,7 @@ type Resolver struct {
 	Credentials map[string]v1alpha1.Credential
 	// BaseDir is what relative file paths resolve against.
 	BaseDir string
-	// Identities are the age identities used for an ageFile source.
+	// Identities are the age identities used for an ageFile or age source.
 	Identities []string
 	// Env reads environment variables; nil reads the process environment.
 	Env func(string) string
@@ -101,7 +102,7 @@ func (r *Resolver) names() []string {
 
 func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordSource) (string, error) {
 	sources := 0
-	for _, set := range []bool{src.FromEnv != "", src.File != "", src.AgeFile != "", len(src.Command) > 0, src.Prompt} {
+	for _, set := range []bool{src.FromEnv != "", src.File != "", src.AgeFile != "", src.Age != "", len(src.Command) > 0, src.Prompt} {
 		if set {
 			sources++
 		}
@@ -142,6 +143,20 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		value, err := secrets.DecryptString(r.path(src.AgeFile), ids)
 		if err != nil {
 			return "", fmt.Errorf("credential %q: %w", name, err)
+		}
+		return value, nil
+
+	case src.Age != "":
+		ids, err := r.identities()
+		if err != nil {
+			return "", fmt.Errorf("credential %q: %w", name, err)
+		}
+		value, err := secrets.DecryptArmoredString(src.Age, ids)
+		if err != nil {
+			return "", fmt.Errorf("credential %q: %w", name, err)
+		}
+		if value == "" {
+			return "", fmt.Errorf("credential %q: the encrypted password is empty", name)
 		}
 		return value, nil
 

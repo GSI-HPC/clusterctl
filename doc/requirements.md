@@ -108,6 +108,8 @@ hardware, and **deferred** when it is deliberately not done.
 | R67 | Shell completion | cobra, `cli/helpers.go` | met |
 | R68 | Check an installation before it is needed | `cli/doctor.go` | met |
 | R69 | A static binary with no runtime dependencies of its own | `CGO_ENABLED=0` | met |
+| R70 | Keep secrets in the documents, age encrypted, and check them without decrypting | `config/sealed.go`, `secrets` | met |
+| R71 | Encrypt a value to the site's recipients and check every secret can be read | `cli/provision.go` | met |
 
 ## Deferred, and why
 

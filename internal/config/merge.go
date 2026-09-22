@@ -3,11 +3,14 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/GSI-HPC/clusterctl/internal/secrets"
 )
 
 // Tree is a configuration tree being built up layer by layer, together with
@@ -235,6 +238,11 @@ func FormatValue(v any) string {
 	case nil:
 		return "null"
 	case string:
+		// An inline secret is a dozen lines of base64 that say nothing to
+		// the reader and would break the table; its size is what is useful.
+		if secrets.IsArmored(t) {
+			return fmt.Sprintf("<age encrypted, %d bytes>", len(t))
+		}
 		return t
 	case bool:
 		return strconv.FormatBool(t)
@@ -251,12 +259,42 @@ func FormatValue(v any) string {
 	case map[string]any:
 		// A structured value is rendered as compact JSON rather than as Go
 		// syntax, so that it can be read and pasted back.
-		encoded, err := json.Marshal(t)
-		if err != nil {
+		// HTML escaping is off, so that "<age encrypted ...>" reads as
+		// written.
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(summarizeSealed(t)); err != nil {
 			return fmt.Sprint(v)
 		}
-		return string(encoded)
+		return strings.TrimSuffix(buf.String(), "\n")
 	default:
 		return fmt.Sprint(v)
+	}
+}
+
+// summarizeSealed returns a copy of a tree with every inline secret replaced
+// by what FormatValue prints for it.
+func summarizeSealed(v any) any {
+	switch t := v.(type) {
+	case string:
+		if secrets.IsArmored(t) {
+			return FormatValue(t)
+		}
+		return t
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			out[k] = summarizeSealed(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = summarizeSealed(e)
+		}
+		return out
+	default:
+		return v
 	}
 }

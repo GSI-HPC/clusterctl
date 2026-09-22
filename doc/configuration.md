@@ -134,6 +134,53 @@ A password is never one of these. It is named by the `Site` document as a
 source, and `BMC_PASSWORD` is read only because a credential says `fromEnv:
 BMC_PASSWORD`.
 
+## Secrets written inline
+
+A password, or a small file pushed onto the nodes, can be kept in the document
+itself, encrypted with age. The ciphertext goes into a field named `age`, as
+the ASCII armor in a block scalar; [ADR 0013](adr/0013-inline-age-secrets.md)
+records why.
+
+```yaml
+spec:
+  secrets:
+    recipients:
+      - age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p  # admin1
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... admin2@desk02
+  credentials:
+    bmc:
+      username: admin
+      password:
+        age: |
+          -----BEGIN AGE ENCRYPTED FILE-----
+          YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBXTld0aGJxdlBtMmx0b3Zl
+          ...
+          -----END AGE ENCRYPTED FILE-----
+```
+
+| Field | Instead of |
+| --- | --- |
+| `credentials.NAME.password.age` | `ageFile`, or any other password source |
+| `services.cinc.secrets[].age` | `source` |
+
+`clusterctl secrets encrypt` writes the block, encrypted to
+`secrets.recipients`, at the indentation it is pasted at. Nothing is decrypted
+while the configuration loads: a command that does not use the secret needs no
+identity. The validator still reads the armor and the age header of every
+inline secret, so a truncated paste is reported at its line:
+
+```
+$ clusterctl config validate
+clusterctl: site.yaml is not valid:
+  site.yaml:84:9: spec.credentials.bmc.password.age: the inline secret is truncated: it does not end with "-----END AGE ENCRYPTED FILE-----"
+```
+
+Ciphertext under any other key is refused rather than used as the literal text
+it is. `config view --show-sources` and `config explain` print an inline
+secret as `<age encrypted, N bytes>`. `clusterctl secrets check --decrypt`
+proves the identities of this workstation open every secret, inline or file,
+without printing any of them.
+
 ## State and cache
 
 | Directory | Holds |

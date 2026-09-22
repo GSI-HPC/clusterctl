@@ -110,6 +110,40 @@ The plaintext is decrypted into memory on your workstation and streamed to the
 node over standard input. It never lands on either disk, and it never appears
 in an argument vector.
 
+A small secret can be kept in the site document instead of a file of its own.
+`secrets encrypt` encrypts it to the site's `secrets.recipients` and prints the
+field to paste:
+
+```console
+$ clusterctl secrets encrypt --file jwt_hs256.key --indent 10
+          age: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBtK1ZmUzZRWENDSzN3N2JZ
+            ...
+            -----END AGE ENCRYPTED FILE-----
+```
+
+```yaml
+      secrets:
+        - target: /etc/slurm/jwt_hs256.key
+          mode: "0600"
+          owner: slurm
+          age: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            ...
+```
+
+The same works for a password: `password: {age: ...}` in a credential. Before
+a reinstall that needs them, check that your identities open every one:
+
+```console
+$ clusterctl secrets check --decrypt
+SECRET                         SOURCE                                  RECIPIENTS  STATUS
+credential bmc                 inline                                  2 X25519    decrypts
+file /etc/munge/munge.key      /etc/clusterctl/secrets/munge.key.age   2 X25519    decrypts
+file /etc/slurm/jwt_hs256.key  inline                                  2 X25519    decrypts
+```
+
 ## Boot configurations
 
 ```console

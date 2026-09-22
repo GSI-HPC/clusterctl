@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"filippo.io/age"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/secrets"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -244,7 +247,7 @@ func TestSecretsListShowsWhereEachFileLands(t *testing.T) {
 		t.Fatalf("secrets list failed: %v", err)
 	}
 	out := h.out.String()
-	for _, want := range []string{"/etc/munge/munge.key", "0400", "munge:munge"} {
+	for _, want := range []string{"/etc/munge/munge.key", "0400", "munge:munge", "(inline)", "/etc/slurm/jwt_hs256.key"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output is missing %q:\n%s", want, out)
 		}
@@ -402,5 +405,73 @@ func TestBMCForgetRemovesAPin(t *testing.T) {
 	}
 	if !strings.Contains(h.errOut.String(), "exe0001.mgmt.hpc.example.org") {
 		t.Errorf("the forgotten host is not named:\n%s", h.errOut)
+	}
+}
+
+func TestSecretsEncryptPrintsAnAgeField(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := run(t, harnessOptions{stdin: "hunter2"},
+		"secrets", "encrypt", "--recipient", id.Recipient().String(), "--indent", "8")
+	if err != nil {
+		t.Fatalf("secrets encrypt failed: %v", err)
+	}
+	out := h.out.String()
+	if !strings.HasPrefix(out, "        age: |\n          -----BEGIN AGE ENCRYPTED FILE-----\n") {
+		t.Fatalf("the output is not an indented age field:\n%s", out)
+	}
+	if strings.Contains(out, "hunter2") {
+		t.Fatal("the plaintext appeared in the output")
+	}
+	// The YAML parser removes the block indentation; so does the test.
+	body := strings.ReplaceAll(strings.TrimPrefix(out, "        age: |\n"), "          ", "")
+	got, err := secrets.DecryptArmoredString(body, []age.Identity{id})
+	if err != nil {
+		t.Fatalf("the output does not decrypt: %v", err)
+	}
+	if got != "hunter2" {
+		t.Errorf("plaintext = %q, want %q", got, "hunter2")
+	}
+}
+
+func TestSecretsEncryptUsesTheSiteRecipients(t *testing.T) {
+	h, err := run(t, harnessOptions{stdin: "hunter2"}, "secrets", "encrypt", "--armor")
+	if err != nil {
+		t.Fatalf("secrets encrypt failed: %v", err)
+	}
+	// The example site lists two recipients.
+	types, err := secrets.Inspect(h.out.String())
+	if err != nil {
+		t.Fatalf("the output is not an age file: %v", err)
+	}
+	if len(types) != 2 {
+		t.Errorf("encrypted to %d recipients, want the 2 of the site", len(types))
+	}
+
+	if _, err := run(t, harnessOptions{}, "secrets", "encrypt", "--armor"); exitcode.From(err) != exitcode.Usage {
+		t.Errorf("empty input: err = %v, want a usage error", err)
+	}
+	if _, err := run(t, harnessOptions{stdin: "x"}, "secrets", "encrypt", "--recipient", "nope"); exitcode.From(err) != exitcode.Usage {
+		t.Errorf("bad recipient: err = %v, want a usage error", err)
+	}
+}
+
+func TestSecretsCheckReportsEveryEncryptedValue(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "secrets", "check")
+	// The example names files it does not ship, so the check fails, and
+	// says which ones.
+	if exitcode.From(err) != exitcode.TargetFailed {
+		t.Fatalf("secrets check: err = %v, want the missing files reported", err)
+	}
+	out := h.out.String()
+	for _, want := range []string{
+		"credential bmc-inline", "2 X25519", "ok",
+		"file /etc/slurm/jwt_hs256.key", "file /etc/munge/munge.key", "invalid",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
 	}
 }
