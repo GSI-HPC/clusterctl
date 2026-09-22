@@ -1,0 +1,236 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+
+package nodeset
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// maxRangeElements caps how far a single bracket range may expand, so that a
+// typo such as exe[1-100000000] is reported instead of exhausting memory.
+const maxRangeElements = 1 << 20
+
+// maxSetElements caps the size of a whole node set for the same reason.
+const maxSetElements = 1 << 20
+
+// node is one host: a pattern with a %s for each numeric dimension, plus the
+// value of each dimension. Padding is not part of a host's identity, so it is
+// held per pattern by the NodeSet rather than here.
+type node struct {
+	pattern string
+	vals    []int
+}
+
+// key identifies the host inside a NodeSet.
+func (n node) key() string {
+	var b strings.Builder
+	b.WriteString(n.pattern)
+	for _, v := range n.vals {
+		b.WriteByte(0)
+		b.WriteString(strconv.Itoa(v))
+	}
+	return b.String()
+}
+
+// name renders the host name with the given per dimension padding.
+func (n node) name(pads []int) string {
+	if len(n.vals) == 0 {
+		return strings.ReplaceAll(n.pattern, "%%", "%")
+	}
+	args := make([]any, len(n.vals))
+	for i, v := range n.vals {
+		pad := 0
+		if i < len(pads) {
+			pad = pads[i]
+		}
+		args[i] = format(v, pad)
+	}
+	return fmt.Sprintf(n.pattern, args...)
+}
+
+type operator byte
+
+const (
+	opUnion        operator = ','
+	opDifference   operator = '!'
+	opIntersection operator = '&'
+	opSymmetric    operator = '^'
+)
+
+// parseExpression evaluates a full node set expression left to right.
+func parseExpression(expr string, res Resolver, depth int) (*NodeSet, error) {
+	if depth > maxGroupDepth {
+		return nil, fmt.Errorf("group references nested more than %d levels deep", maxGroupDepth)
+	}
+	result := New()
+	op := opUnion
+	pending := strings.Builder{}
+	depthBracket := 0
+
+	flush := func() error {
+		term := strings.TrimSpace(pending.String())
+		pending.Reset()
+		if term == "" {
+			return nil
+		}
+		ts, err := parseTerm(term, res, depth)
+		if err != nil {
+			return err
+		}
+		apply(result, op, ts)
+		op = opUnion
+		return nil
+	}
+
+	for i := 0; i < len(expr); i++ {
+		c := expr[i]
+		switch {
+		case c == '[':
+			depthBracket++
+			pending.WriteByte(c)
+		case c == ']':
+			depthBracket--
+			if depthBracket < 0 {
+				return nil, fmt.Errorf("unbalanced ] in %q", expr)
+			}
+			pending.WriteByte(c)
+		case depthBracket > 0:
+			pending.WriteByte(c)
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			if err := flush(); err != nil {
+				return nil, err
+			}
+		case c == byte(opUnion) || c == byte(opDifference) ||
+			c == byte(opIntersection) || c == byte(opSymmetric):
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			op = operator(c)
+		default:
+			pending.WriteByte(c)
+		}
+	}
+	if depthBracket != 0 {
+		return nil, fmt.Errorf("unbalanced [ in %q", expr)
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func apply(dst *NodeSet, op operator, src *NodeSet) {
+	switch op {
+	case opDifference:
+		dst.subtract(src)
+	case opIntersection:
+		dst.intersect(src)
+	case opSymmetric:
+		dst.symmetricDifference(src)
+	default:
+		dst.merge(src)
+	}
+}
+
+// parseTerm parses a single term: either a group reference or a node pattern.
+func parseTerm(term string, res Resolver, depth int) (*NodeSet, error) {
+	if strings.HasPrefix(term, "@") {
+		return resolveGroup(term[1:], res, depth)
+	}
+	return parsePattern(term)
+}
+
+// parsePattern turns one node pattern into the hosts it names.
+func parsePattern(term string) (*NodeSet, error) {
+	var (
+		pattern strings.Builder
+		dims    []*rangeSet
+		// Two numeric parts with nothing between them cannot be told apart
+		// again once expanded: exe0[0,10] would print exe00, which reads as
+		// a single number. Such a name is rejected rather than folded wrong.
+		prevNumeric bool
+	)
+	for i := 0; i < len(term); {
+		c := term[i]
+		numeric := c == '[' || (c >= '0' && c <= '9')
+		if numeric && prevNumeric {
+			return nil, fmt.Errorf("in %q: two numeric parts are adjacent at offset %d; separate them with a literal character", term, i)
+		}
+		prevNumeric = numeric
+
+		switch {
+		case c == '[':
+			end := strings.IndexByte(term[i:], ']')
+			if end < 0 {
+				return nil, fmt.Errorf("unbalanced [ in %q", term)
+			}
+			rs, err := parseRangeSet(term[i+1 : i+end])
+			if err != nil {
+				return nil, fmt.Errorf("in %q: %w", term, err)
+			}
+			dims = append(dims, rs)
+			pattern.WriteString("%s")
+			i += end + 1
+		case c >= '0' && c <= '9':
+			j := i
+			for j < len(term) && term[j] >= '0' && term[j] <= '9' {
+				j++
+			}
+			lit := term[i:j]
+			n, err := parseNumber(lit)
+			if err != nil {
+				return nil, fmt.Errorf("in %q: %w", term, err)
+			}
+			dims = append(dims, &rangeSet{values: []int{n}, pad: padOf(lit)})
+			pattern.WriteString("%s")
+			i = j
+		case c == ']':
+			return nil, fmt.Errorf("unbalanced ] in %q", term)
+		case c == '%':
+			pattern.WriteString("%%")
+			i++
+		default:
+			pattern.WriteByte(c)
+			i++
+		}
+	}
+	if pattern.Len() == 0 && len(dims) == 0 {
+		return nil, fmt.Errorf("empty node name")
+	}
+
+	total := 1
+	for _, d := range dims {
+		total *= len(d.values)
+		if total > maxSetElements {
+			return nil, fmt.Errorf("%q expands to more than %d hosts", term, maxSetElements)
+		}
+	}
+
+	ns := New()
+	pat := pattern.String()
+	pads := make([]int, len(dims))
+	for i, d := range dims {
+		pads[i] = d.pad
+	}
+	if len(dims) > 0 {
+		ns.pads[pat] = pads
+	}
+
+	vals := make([]int, len(dims))
+	var walk func(int)
+	walk = func(d int) {
+		if d == len(dims) {
+			n := node{pattern: pat, vals: append([]int(nil), vals...)}
+			ns.nodes[n.key()] = n
+			return
+		}
+		for _, v := range dims[d].values {
+			vals[d] = v
+			walk(d + 1)
+		}
+	}
+	walk(0)
+	return ns, nil
+}
