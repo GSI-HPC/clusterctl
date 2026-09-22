@@ -125,8 +125,11 @@ folds a one-dimensional set and expands anything else.
 
 ## Limits
 
-A single range is capped at 2²⁰ elements and a whole set at 2²⁰ hosts. A typo
-such as `exe[1-100000000]` is reported rather than exhausting memory.
+A bracket is capped at 2²⁰ elements, counting all of its parts together, and
+an expression at 2²⁰ hosts. The expression cap holds at every step of the
+evaluation, so `a[1-600000],b[1-600000]!b[1-600000]` is refused even though it
+ends up smaller. A typo such as `exe[1-100000000]` is reported rather than
+exhausting memory.
 
 Folding costs O(n log n) in the number of hosts. Parsing and printing a set of
-a million hosts takes a few seconds.
+a million hosts, the most an expression may name, takes a few seconds.

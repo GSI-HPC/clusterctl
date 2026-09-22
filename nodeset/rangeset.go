@@ -91,8 +91,10 @@ func parseRangeSet(spec string) (*rangeSet, error) {
 		} else if step != 1 {
 			return nil, fmt.Errorf("step given for the single value %q", part)
 		}
-		if (end-start)/step+1 > maxRangeElements {
-			return nil, fmt.Errorf("range %q expands to more than %d elements", part, maxRangeElements)
+		// Every element counts, including those of earlier parts, so a range
+		// written as many parts is capped like one written as a single part.
+		if len(rs.values)+(end-start)/step+1 > maxRangeElements {
+			return nil, fmt.Errorf("range %q expands to more than %d elements", spec, maxRangeElements)
 		}
 		for n := start; n <= end; n += step {
 			rs.values = append(rs.values, n)

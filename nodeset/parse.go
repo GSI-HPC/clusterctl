@@ -8,12 +8,16 @@ import (
 	"strings"
 )
 
-// maxRangeElements caps how far a single bracket range may expand, so that a
-// typo such as exe[1-100000000] is reported instead of exhausting memory.
-const maxRangeElements = 1 << 20
-
-// maxSetElements caps the size of a whole node set for the same reason.
-const maxSetElements = 1 << 20
+// The expansion limits, so that a typo such as exe[1-100000000] is reported
+// instead of exhausting memory. They are variables only so that tests can
+// lower them.
+var (
+	// maxRangeElements caps how far a single bracket range may expand.
+	maxRangeElements = 1 << 20
+	// maxSetElements caps how many hosts a whole expression may name, at
+	// every step of its evaluation.
+	maxSetElements = 1 << 20
+)
 
 // node is one host: a pattern with a %s for each numeric dimension, plus the
 // value of each dimension. Padding is not part of a host's identity, so it is
@@ -81,6 +85,9 @@ func parseExpression(expr string, res Resolver, depth int) (*NodeSet, error) {
 		}
 		apply(result, op, ts)
 		op = opUnion
+		if result.Len() > maxSetElements {
+			return fmt.Errorf("%q expands to more than %d hosts", expr, maxSetElements)
+		}
 		return nil
 	}
 

@@ -388,6 +388,45 @@ func TestLargeSetIsRejected(t *testing.T) {
 	}
 }
 
+// TestExpressionLimits lowers the limits, so it must not run in parallel.
+func TestExpressionLimits(t *testing.T) {
+	nodeset.LowerLimits(t, 100)
+
+	for _, expr := range []string{
+		"exe[1-100]", "exe[1-50,51-100]", "exe[1-10]-ib[1-10]",
+		"exe[1-100],exe[1-100]", "exe[1-100]!exe[1-50],sub[1-50]",
+	} {
+		if _, err := nodeset.Parse(expr); err != nil {
+			t.Errorf("Parse(%q) failed within the limits: %v", expr, err)
+		}
+	}
+
+	rejected := []struct{ expr, mentions string }{
+		{"exe[1-101]", "elements"},
+		// A range written as several parts is capped as a whole.
+		{"exe[1-60,61-120]", "elements"},
+		{"exe[1-10]-ib[1-11]", "hosts"},
+		// So is an expression made of several terms, at every step.
+		{"exe[1-60],sub[1-60]", "hosts"},
+		{"exe[1-60] sub[1-60]!sub[1-60]", "hosts"},
+	}
+	for _, tc := range rejected {
+		_, err := nodeset.Parse(tc.expr)
+		if err == nil {
+			t.Errorf("Parse(%q) should exceed the limits", tc.expr)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.mentions) {
+			t.Errorf("Parse(%q) error = %v, want it to mention %s", tc.expr, err, tc.mentions)
+		}
+	}
+
+	res := nodeset.NewMapResolver("local", map[string]string{"big": "exe[1-60],sub[1-60]"})
+	if _, err := nodeset.ParseWith("@big", res); err == nil {
+		t.Error("a group beyond the limits should be rejected")
+	}
+}
+
 func equal(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
