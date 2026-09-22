@@ -139,12 +139,21 @@ fmt.Println(ns.Len())    // 9
 
 ## Contributing
 
+The repository carries a `mise.toml`, so the toolchain comes from
+[mise](https://mise.jdx.dev) if you use it:
+
+```console
+$ mise install  # Go and golangci-lint, at the versions CI uses
+```
+
 ```console
 $ make test     # unit and command tests
 $ make lint     # vet and formatting
 $ make cover    # coverage
 $ make build    # bin/clusterctl
 ```
+
+The documentation site needs Hugo **extended**; see [`site/README.md`](site/README.md).
 
 Commits are [Conventional Commits](https://www.conventionalcommits.org/).
 Design notes and the decision records are in [`doc/`](doc/); a change that

@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The tools needed to work on clusterctl, so that everyone builds and lints it
+# with the same ones. Install them with "mise install".
+#
+# Hugo is deliberately absent: the documentation site needs the extended build,
+# and neither mise's registry nor aqua ships a package that guarantees it.
+# site/README.md says which version to install.
+
+[tools]
+# The version go.mod requires. A newer toolchain works; this is what CI uses.
+go = "1.26"
+
+# The major version .golangci.yml is written against.
+golangci-lint = "2"

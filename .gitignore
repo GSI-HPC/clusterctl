@@ -1,3 +1,6 @@
+# Personal mise overrides
+/mise.local.toml
+
 # Build output
 /bin/
 /dist/
