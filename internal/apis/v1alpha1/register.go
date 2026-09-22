@@ -14,11 +14,12 @@ const (
 	KindCluster       = "Cluster"
 	KindNodeInventory = "NodeInventory"
 	KindWorkstation   = "Workstation"
+	KindSecret        = "Secret"
 )
 
 // Kinds lists every kind in the order documentation and validation use.
 func Kinds() []string {
-	return []string{KindConfig, KindSite, KindCluster, KindNodeInventory, KindWorkstation}
+	return []string{KindConfig, KindSite, KindCluster, KindNodeInventory, KindWorkstation, KindSecret}
 }
 
 // TypeMeta identifies the schema a document is written against. Every kind

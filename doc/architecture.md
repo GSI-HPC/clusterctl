@@ -56,7 +56,7 @@ every command rather than in the ones that remembered to implement them.
 | `internal/redfish` | The Redfish client, its certificate pinning and its reset semantics. |
 | `internal/ipmi` | The FreeIPMI and ipmitool backends, run on a host that can reach the service network. |
 | `internal/credentials` | Resolving an account and its password from a configured source. |
-| `internal/secrets` | Decrypting age encrypted files into memory. |
+| `internal/secrets` | Decrypting age encrypted files and sops encrypted Secret documents into memory. |
 | `internal/slurm` | Reading and changing the state of the workload manager. |
 | `internal/dhcp` | Parsing an ISC dhcpd configuration. |
 | `internal/hostkeys` | Reading, writing and collecting SSH host keys. |

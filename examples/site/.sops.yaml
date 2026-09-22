@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The rules sops encrypts the Secret documents of this directory with. sops
+# finds this file itself; clusterctl does not read hidden files.
+#
+# Only data and binaryData are encrypted: clusterctl reads the kind, the name
+# and the keys of a Secret without a key, and decrypts only when a command
+# uses one of its values.
+#
+# The recipients below are examples whose private keys no longer exist.
+# Replace them with one age or ssh public key per administrator and a
+# recovery key kept offline, then run "sops updatekeys secrets.sops.yaml".
+creation_rules:
+  - path_regex: \.sops\.yaml$
+    encrypted_regex: ^(data|binaryData)$
+    age: >-
+      age1q7s67naehahvsur60y7w3p0dlm67lwlzvsafzak28e6s46f5t52qhlswpx,
+      age16xuk8xvqs2gxjkk90vtf4sxqulrgcla4zzqpdsx8mq7905w8z97qn6lzgx

@@ -56,7 +56,7 @@ func TestGenerate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(schemas), 5; got != want {
+	if got, want := len(schemas), 6; got != want {
 		t.Errorf("%d schemas were written, want %d", got, want)
 	}
 }

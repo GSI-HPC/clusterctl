@@ -52,7 +52,8 @@ type SiteSpec struct {
 	// BMC address checks.
 	Networks map[string]string `json:"networks,omitempty" yaml:"networks,omitempty" jsonschema:"description=Named CIDRs"`
 	// Credentials are the accounts used for BMCs and PDUs. A password is
-	// never written here, only where to read it from.
+	// never written here, only where to read it from: a Secret document is
+	// one of the places.
 	Credentials map[string]Credential `json:"credentials,omitempty" yaml:"credentials,omitempty" jsonschema:"description=Named credentials; passwords are referenced, never inlined"`
 	// BMC configures out-of-band access.
 	BMC BMCSpec `json:"bmc,omitempty" yaml:"bmc,omitempty"`
@@ -136,6 +137,9 @@ type PasswordSource struct {
 	File string `json:"file,omitempty" yaml:"file,omitempty" jsonschema:"description=File whose first line is the password"`
 	// AgeFile decrypts an age encrypted file with the configured identities.
 	AgeFile string `json:"ageFile,omitempty" yaml:"ageFile,omitempty" jsonschema:"description=age encrypted file holding the password"`
+	// SecretRef reads the password from a key of a sops encrypted Secret
+	// document. It is decrypted only when the credential is used.
+	SecretRef *SecretKeyRef `json:"secretRef,omitempty" yaml:"secretRef,omitempty" jsonschema:"description=Key of a sops encrypted Secret document holding the password"`
 	// Command runs a helper and reads the password from its standard output.
 	Command []string `json:"command,omitempty" yaml:"command,omitempty" jsonschema:"description=Helper command printing the password"`
 	// Prompt asks the administrator on the terminal.
@@ -390,8 +394,11 @@ type CincService struct {
 // workstation's disk.
 type SecretFile struct {
 	// Source is the age encrypted file, relative to the configuration
-	// directory unless absolute.
-	Source string `json:"source" yaml:"source" jsonschema:"required"`
+	// directory unless absolute. Exactly one of source and secretRef is set.
+	Source string `json:"source,omitempty" yaml:"source,omitempty" jsonschema:"description=age encrypted file; exactly one of source and secretRef"`
+	// SecretRef takes the content from a key of a sops encrypted Secret
+	// document instead of a file of its own.
+	SecretRef *SecretKeyRef `json:"secretRef,omitempty" yaml:"secretRef,omitempty" jsonschema:"description=Key of a sops encrypted Secret document holding the content; exactly one of source and secretRef"`
 	// Target is the absolute path on the node.
 	Target string `json:"target" yaml:"target" jsonschema:"required"`
 	// Mode is the octal permission of the target, written as a string so
@@ -401,6 +408,17 @@ type SecretFile struct {
 	Owner string `json:"owner,omitempty" yaml:"owner,omitempty"`
 	Group string `json:"group,omitempty" yaml:"group,omitempty"`
 }
+
+// SecretKeyRef names one key of a Secret document.
+type SecretKeyRef struct {
+	// Name is the metadata.name of the Secret document.
+	Name string `json:"name" yaml:"name" jsonschema:"required,description=metadata.name of the Secret document"`
+	// Key is the key under data or binaryData.
+	Key string `json:"key" yaml:"key" jsonschema:"required,description=Key under data or binaryData of that document"`
+}
+
+// String renders the reference the way messages and tables print it.
+func (r SecretKeyRef) String() string { return r.Name + "/" + r.Key }
 
 // MailService is how a node warns its users before a reboot.
 type MailService struct {
@@ -595,4 +613,25 @@ type WorkstationSpec struct {
 	SshuttleBinary string `json:"sshuttleBinary,omitempty" yaml:"sshuttleBinary,omitempty"`
 	// Overrides are applied on top of the cluster layer on this machine.
 	Overrides map[string]any `json:"overrides,omitempty" yaml:"overrides,omitempty" jsonschema:"description=Dotted path overrides applied on this machine"`
+}
+
+// Secret holds values that must not be readable in version control. The file
+// is encrypted with sops, with only data and binaryData encrypted, so that
+// clusterctl can read the kind, the name and the keys without a key and
+// decrypt only when a command uses one of the values:
+//
+//	sops --encrypt --encrypted-regex '^(data|binaryData)$' --in-place secrets.sops.yaml
+//
+// Other documents refer to a value with secretRef: {name, key}.
+type Secret struct {
+	TypeMeta `json:",inline" yaml:",inline"`
+	Metadata ObjectMeta `json:"metadata" yaml:"metadata" jsonschema:"required"`
+	// Data are text values, such as passwords.
+	Data map[string]string `json:"data,omitempty" yaml:"data,omitempty" jsonschema:"description=Text values by key; encrypted by sops"`
+	// BinaryData are base64 encoded values, such as a munge key, decoded
+	// before they are used.
+	BinaryData map[string]string `json:"binaryData,omitempty" yaml:"binaryData,omitempty" jsonschema:"description=Base64 encoded values by key; encrypted by sops"`
+	// Sops is the metadata sops writes: the recipients, the encrypted data
+	// key and the message authentication code. It is never edited by hand.
+	Sops map[string]any `json:"sops,omitempty" yaml:"sops,omitempty" jsonschema:"description=Written by sops; do not edit"`
 }

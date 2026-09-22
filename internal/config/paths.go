@@ -126,7 +126,8 @@ func ExpandEntries(entries []string) ([]string, error) {
 	return files, nil
 }
 
-// yamlFilesIn lists the YAML files of a directory in name order.
+// yamlFilesIn lists the YAML files of a directory in name order, leaving out
+// hidden ones.
 func yamlFilesIn(dir string) ([]string, error) {
 	items, err := os.ReadDir(dir)
 	if err != nil {
@@ -134,7 +135,9 @@ func yamlFilesIn(dir string) ([]string, error) {
 	}
 	var out []string
 	for _, item := range items {
-		if item.IsDir() {
+		// A hidden file is not configuration: .sops.yaml holds the rules
+		// sops encrypts with, and an editor keeps its swap files there.
+		if item.IsDir() || strings.HasPrefix(item.Name(), ".") {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(item.Name())) {

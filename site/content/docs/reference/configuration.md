@@ -15,6 +15,7 @@ Several may share a file, separated by `---`.
 | `Cluster` | One cluster in a site |
 | `NodeInventory` | The nodes |
 | `Workstation` | The machine clusterctl runs on |
+| `Secret` | Values encrypted with sops, alone in their file |
 
 The authoritative field list is the JSON Schema:
 
@@ -88,6 +89,7 @@ Exactly one per credential:
 | `fromEnv` | An environment variable |
 | `file` | The first line of a file |
 | `ageFile` | An age encrypted file, with `workstation.identities` |
+| `secretRef` | `{name, key}` of a `Secret` document |
 | `command` | The standard output of a helper |
 | `prompt` | The terminal |
 
@@ -169,6 +171,35 @@ spec:
 ```
 
 Name the document after the host to keep several machines in one file.
+
+## Secret
+
+```yaml
+apiVersion: clusterctl/v1alpha1
+kind: Secret
+metadata:
+  name: example                  # what secretRef.name refers to
+data:
+  bmc-password: ENC[AES256_GCM,...]   # text
+binaryData:
+  munge-key: ENC[AES256_GCM,...]      # base64, decoded before use
+sops: {}                         # written by sops
+```
+
+Encrypt only the values, so that the kind, the name and the keys stay readable:
+
+```console
+$ sops --encrypt --encrypted-regex '^(data|binaryData)$' --in-place secrets.sops.yaml
+```
+
+A reference, `secretRef: {name: example, key: bmc-password}`, is a password
+source in a credential and replaces `source` in `services.cinc.secrets`. It is
+checked against the keys when the configuration loads and decrypted when a
+command uses it: with `workstation.identities` first, then with the keys sops
+finds itself (`SOPS_AGE_KEY_FILE`, a PGP agent, cloud KMS credentials).
+
+Hidden files in a configuration directory are not read, so `.sops.yaml` can sit
+next to the documents.
 
 ## Paths
 

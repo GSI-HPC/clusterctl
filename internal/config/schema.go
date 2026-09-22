@@ -40,6 +40,7 @@ func kindTypes() map[string]any {
 		v1alpha1.KindCluster:       &v1alpha1.Cluster{},
 		v1alpha1.KindNodeInventory: &v1alpha1.NodeInventory{},
 		v1alpha1.KindWorkstation:   &v1alpha1.Workstation{},
+		v1alpha1.KindSecret:        &v1alpha1.Secret{},
 	}
 }
 
@@ -111,6 +112,9 @@ func SchemaKinds() []string { return v1alpha1.Kinds() }
 // ValidateDocument checks a document against the schema of its kind and
 // reports every problem with the position it was written at.
 func ValidateDocument(doc *Document) error {
+	if err := checkSopsDocument(doc); err != nil {
+		return err
+	}
 	if err := v1alpha1.CheckTypeMeta(v1alpha1.TypeMeta{APIVersion: doc.APIVersion, Kind: doc.Kind}); err != nil {
 		return fmt.Errorf("%s: %w", doc.Position("kind"), err)
 	}
@@ -132,6 +136,8 @@ func ValidateDocument(doc *Document) error {
 			problems = append(problems, err.Error())
 		}
 	}
+
+	problems = append(problems, checkSecret(doc)...)
 
 	problems = dedup(problems)
 	if len(problems) == 0 {

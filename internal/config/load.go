@@ -31,6 +31,9 @@ type Bundle struct {
 	Clusters     map[string]*Document
 	Inventories  map[string]*Document
 	Workstations map[string]*Document
+	// Secrets are the sops encrypted Secret documents, indexed by name.
+	// Their values stay encrypted until a command asks for one.
+	Secrets map[string]*Document
 }
 
 // Load reads the configuration files, validates every document against the
@@ -45,6 +48,7 @@ func Load(files []string) (*Bundle, error) {
 		Clusters:     map[string]*Document{},
 		Inventories:  map[string]*Document{},
 		Workstations: map[string]*Document{},
+		Secrets:      map[string]*Document{},
 	}
 
 	configDocs := make([]*Document, 0, 2)
@@ -55,6 +59,9 @@ func Load(files []string) (*Bundle, error) {
 		}
 		docs, err := ParseDocuments(file, data)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkSecretFile(file, data, docs); err != nil {
 			return nil, err
 		}
 		for _, doc := range docs {
@@ -74,6 +81,8 @@ func Load(files []string) (*Bundle, error) {
 				b.Inventories[name] = doc
 			case v1alpha1.KindWorkstation:
 				b.Workstations[name] = doc
+			case v1alpha1.KindSecret:
+				b.Secrets[name] = doc
 			}
 		}
 	}
