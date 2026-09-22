@@ -29,13 +29,15 @@ updates:
 
   # The actions the workflows use, one pull request each: the release and
   # Pages workflows do not run on pull requests, so a new major version of one
-  # of their actions is reviewed on its own release notes.
+  # of their actions is reviewed on its own release notes. The limit is above
+  # the number of actions in use, so that none waits for another to merge.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
+    open-pull-requests-limit: 15
     commit-message:
       prefix: ci
       include: scope
