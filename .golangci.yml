@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+version: "2"
+
+linters:
+  enable:
+    # Errors that are checked nowhere are the ones that surprise an
+    # administrator at the worst moment.
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - misspell
+    - nilerr
+    - rowserrcheck
+    - unconvert
+    - usestdlibvars
+
+  settings:
+    errcheck:
+      # A deliberate discard is written as _ = f(), which reads as a decision
+      # rather than an oversight.
+      check-blank: false
+    misspell:
+      locale: UK
+
+  exclusions:
+    rules:
+      # A test may ignore an error where the failure it is provoking is the
+      # point of the test.
+      - path: _test\.go
+        linters: [errcheck]
+
+formatters:
+  enable:
+    - gofmt

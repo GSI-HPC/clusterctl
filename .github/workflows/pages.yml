@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+name: Manual
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'doc/**'
+      - 'internal/cli/**'
+      - 'internal/apis/**'
+      - 'internal/tools/gendocs/**'
+      - '.github/workflows/pages.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and a running one is allowed to finish so a
+# half-published site is never live.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: '0.152.0'
+          extended: true
+
+      - uses: actions/configure-pages@v5
+        id: pages
+
+      # The command reference and the JSON Schemas describe the binary they
+      # are generated from, so they are built here and never committed.
+      - name: Generate the reference and the schemas
+        run: go run ./internal/tools/gendocs
+
+      - name: Build the site
+        working-directory: site
+        env:
+          HUGO_ENVIRONMENT: production
+        run: hugo --minify --baseURL "${{ steps.pages.outputs.base_url }}/"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/public
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

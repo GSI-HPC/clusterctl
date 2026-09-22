@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# Copy this to .github/allowed_signers and list the keys that may sign a
+# release tag. With this file present, the release workflow verifies who
+# signed the tag; without it, it can only check that a signature is there.
+#
+# One line per signer, in the format git's gpg.ssh.allowedSignersFile takes:
+#
+#   name@example.org namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...

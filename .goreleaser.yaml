@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The release build. The version comes from the signed git tag and is injected
+# here; nothing in the source tree carries one.
+
+version: 2
+
+project_name: clusterctl
+
+before:
+  hooks:
+    - go mod download
+    - go mod verify
+
+builds:
+  - id: clusterctl
+    main: ./cmd/clusterctl
+    binary: clusterctl
+    env:
+      # A static binary: no interpreter, no libc dependency, one file that
+      # runs on every supported distribution.
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/GSI-HPC/clusterctl/internal/version.version={{ .Version }}
+      - -X github.com/GSI-HPC/clusterctl/internal/version.commit={{ .FullCommit }}
+      - -X github.com/GSI-HPC/clusterctl/internal/version.date={{ .CommitDate }}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: clusterctl
+    ids: [clusterctl]
+    # The asset the review asks for is clusterctl_linux_amd64.tar.gz.
+    name_template: 'clusterctl_{{ .Os }}_{{ .Arch }}'
+    formats: [tar.gz]
+    files:
+      - README.md
+      - COPYING
+      - COPYING.LESSER
+      - src: examples/site/*.yaml
+        dst: examples/site
+      - src: doc/*.md
+        dst: doc
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Documentation
+      regexp: '^docs(\(.+\))?!?:'
+      order: 2
+    - title: Other
+      order: 99
+  filters:
+    exclude:
+      - '^test(\(.+\))?:'
+      - '^chore(\(.+\))?:'
+      - '^ci(\(.+\))?:'
+
+release:
+  github:
+    owner: GSI-HPC
+    name: clusterctl
+  prerelease: auto
+  header: |
+    ## clusterctl {{ .Tag }}
+
+    Download the binary for your platform below, or:
+
+    ```console
+    $ go install github.com/GSI-HPC/clusterctl/cmd/clusterctl@{{ .Tag }}
+    ```
+  footer: |
+    ---
+
+    The [manual](https://gsi-hpc.github.io/clusterctl/) covers every command.
+    Verify a download against `checksums.txt`.

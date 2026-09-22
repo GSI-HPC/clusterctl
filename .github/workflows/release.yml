@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  verify-tag:
+    name: Verify the tag is signed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # The version of a release exists only in its tag, so the tag has to be
+      # a statement by a person holding a key rather than a label anyone with
+      # write access can move.
+      - name: Refuse an unsigned or lightweight tag
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+
+          if [ "$(git cat-file -t "$tag")" != "tag" ]; then
+            echo "::error::$tag is a lightweight tag; releases are cut from signed annotated tags"
+            echo "  git tag -s $tag -m 'clusterctl $tag'"
+            exit 1
+          fi
+
+          if ! git cat-file tag "$tag" | grep -qE 'BEGIN (PGP|SSH) SIGNATURE'; then
+            echo "::error::$tag carries no signature; releases are cut from signed tags"
+            exit 1
+          fi
+
+          if [ -f .github/allowed_signers ]; then
+            git config gpg.ssh.allowedSignersFile .github/allowed_signers
+            if git verify-tag "$tag"; then
+              echo "::notice::$tag is signed by a listed signer"
+            else
+              echo "::error::$tag is signed, but not by anyone in .github/allowed_signers"
+              exit 1
+            fi
+          else
+            echo "::notice::$tag is signed; add .github/allowed_signers to verify who signed it"
+          fi
+
+  test:
+    name: Test
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: make lint
+      - run: go test ./...
+
+  release:
+    name: Build and publish
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
