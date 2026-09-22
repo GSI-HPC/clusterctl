@@ -113,6 +113,24 @@ func (ns *NodeSet) Contains(name string) bool {
 	return false
 }
 
+// Canonical returns the name this set uses for a host.
+//
+// It differs from the name given when the two were written with different
+// padding: a set holding exe0001 answers "exe0001" when asked about "exe1",
+// because padding is a display property and both name one host.
+func (ns *NodeSet) Canonical(name string) (string, bool) {
+	other, err := parsePattern(name)
+	if err != nil || len(other.nodes) != 1 {
+		return "", false
+	}
+	for k := range other.nodes {
+		if n, ok := ns.nodes[k]; ok {
+			return n.name(ns.pads[n.pattern]), true
+		}
+	}
+	return "", false
+}
+
 // Expand returns the host names in ascending order: by pattern first, then by
 // each numeric dimension from left to right.
 func (ns *NodeSet) Expand() []string {

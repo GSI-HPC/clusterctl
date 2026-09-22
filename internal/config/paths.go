@@ -91,7 +91,14 @@ func SearchPath(env func(string) string) ([]string, error) {
 	} else {
 		entries = ConfigDirs()
 	}
+	return ExpandEntries(entries)
+}
 
+// ExpandEntries turns files and directories into the list of files to read,
+// in the order they are layered. A directory contributes its YAML files in
+// name order; an entry that does not exist is skipped, because the search
+// path names places a site may or may not use.
+func ExpandEntries(entries []string) ([]string, error) {
 	var files []string
 	for _, entry := range entries {
 		entry = strings.TrimSpace(entry)

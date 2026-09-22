@@ -139,7 +139,15 @@ func (inv *Inventory) Len() int { return len(inv.nodes) }
 
 // Lookup returns a node by name.
 func (inv *Inventory) Lookup(name string) (*Node, bool) {
-	n, ok := inv.nodes[name]
+	if n, ok := inv.nodes[name]; ok {
+		return n, true
+	}
+	// The name may have been written with different padding.
+	canonical, ok := inv.NodeSet().Canonical(name)
+	if !ok {
+		return nil, false
+	}
+	n, ok := inv.nodes[canonical]
 	return n, ok
 }
 
@@ -168,15 +176,27 @@ func (inv *Inventory) NodeSet() *nodeset.NodeSet {
 
 // Select returns the nodes of a set that the inventory knows, and the names
 // of those it does not.
+//
+// A name is matched through the node set, so that a set written as exe[1-2]
+// finds the nodes an inventory wrote as exe0001 and exe0002: padding is a
+// display property, not part of a host's identity.
 func (inv *Inventory) Select(ns *nodeset.NodeSet) (known []*Node, unknown []string) {
+	all := inv.NodeSet()
 	for _, name := range ns.Expand() {
-		if n, ok := inv.nodes[name]; ok {
-			known = append(known, n)
+		canonical, ok := all.Canonical(name)
+		if !ok {
+			unknown = append(unknown, name)
 			continue
 		}
-		unknown = append(unknown, name)
+		known = append(known, inv.nodes[canonical])
 	}
 	return known, unknown
+}
+
+// Resolve returns the name the inventory uses for a host, which may differ
+// from the name given only in padding.
+func (inv *Inventory) Resolve(name string) (string, bool) {
+	return inv.NodeSet().Canonical(name)
 }
 
 // AttributeValues lists the distinct values of an attribute, in sorted order.

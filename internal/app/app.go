@@ -79,6 +79,10 @@ type Options struct {
 	Fanout int
 	// Env reads environment variables; nil reads the process environment.
 	Env func(string) string
+	// Runner replaces the ssh transport for everything a command runs. A
+	// dry run sets it to a recorder, and the tests use it to drive the
+	// commands without a cluster.
+	Runner transport.Runner
 }
 
 // App is the resolved context a command runs against.
@@ -118,13 +122,19 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		env = os.Getenv
 	}
 
-	files := opts.ConfigFiles
-	if len(files) == 0 {
-		found, err := config.SearchPath(env)
-		if err != nil {
-			return nil, exitcode.Wrap(exitcode.Usage, err)
-		}
-		files = found
+	var (
+		files []string
+		err   error
+	)
+	if len(opts.ConfigFiles) > 0 {
+		// --config accepts files and directories, the same way the search
+		// path does.
+		files, err = config.ExpandEntries(opts.ConfigFiles)
+	} else {
+		files, err = config.SearchPath(env)
+	}
+	if err != nil {
+		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 	if len(files) == 0 {
 		return nil, exitcode.Errorf(exitcode.Usage,
@@ -136,6 +146,7 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
+
 	resolved, err := bundle.Resolve(config.ResolveOptions{
 		Context: opts.Context,
 		Env:     env,
@@ -180,15 +191,22 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		DefaultUser:    a.Spec.DefaultUser,
 	})
 	a.Runner = a.SSH
+	if opts.Runner != nil {
+		a.Runner = opts.Runner
+	}
 	if opts.DryRun {
 		a.DryRunRecorder = &transport.Recorder{}
 		a.Runner = a.DryRunRecorder
 	}
 
+	groupRunner := transport.Runner(a.SSH)
+	if opts.Runner != nil {
+		groupRunner = opts.Runner
+	}
 	a.Groups = groups.New(groups.Options{
 		Spec:      a.Spec.Groups,
 		Inventory: a.Inventory,
-		Runner:    a.SSH, // group lookups only read, so a dry run still resolves them
+		Runner:    groupRunner, // group lookups only read, so a dry run still resolves them
 		Target:    a.Role,
 		CacheDir:  streams.CacheDir,
 		Context:   ctx,
@@ -328,7 +346,30 @@ func (a *App) Select(expr string) (*nodeset.NodeSet, error) {
 	if ns.IsEmpty() {
 		return nil, exitcode.Errorf(exitcode.Usage, "%q names no node", expr)
 	}
-	return ns, nil
+	return a.canonicalize(ns), nil
+}
+
+// canonicalize replaces each name with the one the inventory uses for that
+// host.
+//
+// Padding is a display property, so exe1 and exe0001 name the same machine.
+// An administrator who types the short form should reach the host the site
+// wrote down, and see it under the name the site gave it. A node the
+// inventory does not know is left exactly as it was typed.
+func (a *App) canonicalize(ns *nodeset.NodeSet) *nodeset.NodeSet {
+	if a.Inventory == nil || a.Inventory.Len() == 0 {
+		return ns
+	}
+	out := nodeset.New()
+	for _, name := range ns.Expand() {
+		if canonical, ok := a.Inventory.Resolve(name); ok {
+			name = canonical
+		}
+		if err := out.Add(name); err != nil {
+			return ns
+		}
+	}
+	return out
 }
 
 // SelectOptional is Select without the requirement that anything is

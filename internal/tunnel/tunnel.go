@@ -11,6 +11,7 @@ package tunnel
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,8 +105,8 @@ func (m *Manager) Args(name string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tunnel %q: subnet %q: %w", name, subnet, err)
 		}
-		if value == "" {
-			return nil, fmt.Errorf("tunnel %q names subnet %q, which resolves to nothing", name, subnet)
+		if err := validateSubnet(value); err != nil {
+			return nil, fmt.Errorf("tunnel %q: subnet %q: %w", name, subnet, err)
 		}
 		args = append(args, value)
 	}
@@ -125,6 +126,26 @@ func (m *Manager) resolve(value string) (string, error) {
 		return cidr, nil
 	}
 	return value, nil
+}
+
+// validateSubnet checks that a routed subnet is an address or a network.
+//
+// A name that is neither a configured network nor an address is almost always
+// a typo, and sshuttle would either route nothing or, worse, route something
+// else, so it is reported here.
+func validateSubnet(value string) error {
+	// sshuttle allows a port or a port range after the network.
+	network := value
+	if i := strings.LastIndexByte(network, ':'); i >= 0 && strings.Count(network, ":") == 1 {
+		network = network[:i]
+	}
+	if _, _, err := net.ParseCIDR(network); err == nil {
+		return nil
+	}
+	if net.ParseIP(network) != nil {
+		return nil
+	}
+	return fmt.Errorf("it is neither a configured network name nor an address or a network in CIDR form")
 }
 
 // PIDFile is where a running profile records its process id.

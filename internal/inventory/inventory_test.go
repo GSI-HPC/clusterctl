@@ -139,6 +139,32 @@ func TestQueries(t *testing.T) {
 	}
 }
 
+func TestLookupIgnoresPadding(t *testing.T) {
+	t.Parallel()
+
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe[0001-0004]", Attributes: map[string]string{"class": "exe"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An administrator types exe1; the inventory wrote exe0001.
+	node, ok := inv.Lookup("exe1")
+	if !ok {
+		t.Fatal("exe1 did not find exe0001")
+	}
+	if got, want := node.Name, "exe0001"; got != want {
+		t.Errorf("Lookup(exe1).Name = %q, want %q", got, want)
+	}
+	known, unknown := inv.Select(nodeset.MustParse("exe[1-2],exe9"))
+	if got, want := len(known), 2; got != want {
+		t.Errorf("Select found %d nodes, want %d", got, want)
+	}
+	if got, want := strings.Join(unknown, ","), "exe9"; got != want {
+		t.Errorf("unknown = %q, want %q", got, want)
+	}
+}
+
 func TestSelectReportsUnknownNodes(t *testing.T) {
 	t.Parallel()
 	inv := exampleInventory(t)

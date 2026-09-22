@@ -22,6 +22,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/internal/version"
 )
 
@@ -39,6 +40,9 @@ type root struct {
 	assumeYes   bool
 	force       bool
 	fanout      int
+
+	// runner replaces the transport; only the tests set it.
+	runner transport.Runner
 
 	cached *app.App
 }
@@ -68,6 +72,7 @@ func (r *root) App() (*app.App, error) {
 		AssumeYes:   r.assumeYes,
 		Force:       r.force,
 		Fanout:      r.fanout,
+		Runner:      r.runner,
 	})
 	if err != nil {
 		return nil, err
@@ -89,6 +94,10 @@ func (r *root) context() context.Context {
 	}
 	return context.Background()
 }
+
+// builtRoots remembers which root state belongs to which command tree, so
+// that a test can reach the flags of a tree it did not build itself.
+var builtRoots = map[*cobra.Command]*root{}
 
 // NewRootCommand builds the command tree.
 func NewRootCommand(ctx context.Context, streams app.Streams) *cobra.Command {
@@ -127,6 +136,7 @@ are about to do and ask before doing it.`),
 	flags.IntVar(&r.fanout, "fanout", 0, "how many hosts to work on at once (default: from the configuration)")
 
 	registerCompletions(cmd, r)
+	builtRoots[cmd] = r
 
 	cmd.AddCommand(
 		newConfigCommand(r),
