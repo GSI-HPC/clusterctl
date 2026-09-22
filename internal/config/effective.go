@@ -152,6 +152,9 @@ func (b *Bundle) Resolve(opts ResolveOptions) (*Resolved, error) {
 	if err := decodeInto(tree.Data(), &resolved.Spec); err != nil {
 		return nil, fmt.Errorf("the merged configuration is not valid: %w", err)
 	}
+	if err := resolved.checkSecretRefs(); err != nil {
+		return nil, err
+	}
 	return resolved, nil
 }
 

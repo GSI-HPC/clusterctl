@@ -25,6 +25,7 @@ func (a *App) Credentials() *credentials.Resolver {
 			BaseDir:     a.Resolved.BaseDir,
 			Identities:  a.Spec.Workstation.Identities,
 			Prompt:      a.promptPassword,
+			Secret:      a.SecretValue,
 		}
 	}
 	return a.credentials

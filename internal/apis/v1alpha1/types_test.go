@@ -89,7 +89,7 @@ func TestDurationOr(t *testing.T) {
 func TestLayersAndKindsAreComplete(t *testing.T) {
 	t.Parallel()
 
-	if got, want := len(v1alpha1.Kinds()), 5; got != want {
+	if got, want := len(v1alpha1.Kinds()), 6; got != want {
 		t.Errorf("Kinds() has %d entries, want %d", got, want)
 	}
 	if got, want := len(v1alpha1.Layers()), 7; got != want {

@@ -134,9 +134,10 @@ cat > "$secret"
 /usr/sbin/ipmipower --config-file "$secret" --hostname 'exe[1-10]' --off
 ```
 
-The same path carries the cluster's own secrets: an age encrypted file is
-decrypted into memory on the workstation and written onto the node over
-standard input, so the plaintext never touches either disk.
+The same path carries the cluster's own secrets: an age encrypted file, or a
+value of a sops encrypted Secret document, is decrypted into memory on the
+workstation and written onto the node over standard input, so the plaintext
+never touches either disk.
 
 ## Host keys
 

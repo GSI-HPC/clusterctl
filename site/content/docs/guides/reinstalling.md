@@ -99,16 +99,35 @@ $ clusterctl slurm node resume -n exe0007
 
 ```console
 $ clusterctl secrets list
-SOURCE                                TARGET               MODE  OWNER
-/etc/clusterctl/secrets/munge.key.age /etc/munge/munge.key 0400  munge:munge
-/etc/clusterctl/secrets/nslcd.keytab.age /etc/nslcd.keytab 0600
+SOURCE                                    TARGET                MODE  OWNER
+secret example/munge-key                  /etc/munge/munge.key  0400  munge:munge
+/etc/clusterctl/secrets/nslcd.keytab.age  /etc/nslcd.keytab     0600
 
 $ clusterctl secrets push -n exe0007
 ```
 
 The plaintext is decrypted into memory on your workstation and streamed to the
 node over standard input. It never lands on either disk, and it never appears
-in an argument vector.
+in an argument vector. Every secret is decrypted before the first is written,
+so a key you lack leaves the node untouched.
+
+A secret can come from a sops encrypted `Secret` document instead of a file of
+its own:
+
+```yaml
+      secrets:
+        - target: /etc/munge/munge.key
+          mode: "0400"
+          secretRef: {name: example, key: munge-key}
+```
+
+Before a reinstall that needs them, check that you can open every one:
+
+```console
+$ clusterctl secrets check --decrypt
+SECRET   FILE                               KEYS  ENCRYPTED TO  USED  STATUS
+example  /etc/clusterctl/secrets.sops.yaml  2     3 age         2     decrypts
+```
 
 ## Boot configurations
 

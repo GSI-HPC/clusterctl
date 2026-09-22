@@ -37,7 +37,7 @@ Would reinstall 10 hosts: exe[0001-0010]
 | **Reach everything** | One host key file the team keeps in version control, one generated ssh configuration, and sshuttle profiles for the networks behind a gateway. |
 | **Select and fan out** | ClusterShell node sets, groups from node attributes, tables or the workload manager, and bounded parallel execution that reports every node. |
 | **Operate hardware** | Redfish with a pinned certificate, FreeIPMI and ipmitool run on a host that can reach the service network, rack power units, and the InfiniBand fabric. |
-| **Reinstall nodes** | DHCP inspection, per-node PXE and GRUB boot paths, age encrypted secrets streamed to the node, and the configuration management client. |
+| **Reinstall nodes** | DHCP inspection, per-node PXE and GRUB boot paths, age or sops encrypted secrets streamed to the node, and the configuration management client. |
 | **Administer Slurm** | Nodes and their drain reasons, the queue and the accounting database, accounts, users and fair share. |
 | **Serve several clusters** | Domains, naming, roles, networks and the inventory live in YAML, not in the code. |
 

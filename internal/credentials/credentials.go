@@ -4,8 +4,8 @@
 // power distribution units.
 //
 // A password is never written in the configuration, only where to read it
-// from: an environment variable, a file, an age encrypted file, a helper
-// command or the terminal. Once resolved it is passed to a backend over a
+// from: an environment variable, a file, an age encrypted file, a key of a
+// sops encrypted Secret document, a helper command or the terminal. Once resolved it is passed to a backend over a
 // file or standard input, never in an argument vector where ps would show it
 // to everyone on the host.
 package credentials
@@ -53,6 +53,8 @@ type Resolver struct {
 	Env func(string) string
 	// Prompt asks the administrator for a password.
 	Prompt func(prompt string) (string, error)
+	// Secret reads a key of a Secret document for a secretRef source.
+	Secret func(ref v1alpha1.SecretKeyRef) ([]byte, error)
 
 	mu     sync.Mutex
 	cache  map[string]Credential
@@ -101,7 +103,7 @@ func (r *Resolver) names() []string {
 
 func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordSource) (string, error) {
 	sources := 0
-	for _, set := range []bool{src.FromEnv != "", src.File != "", src.AgeFile != "", len(src.Command) > 0, src.Prompt} {
+	for _, set := range []bool{src.FromEnv != "", src.File != "", src.AgeFile != "", src.SecretRef != nil, len(src.Command) > 0, src.Prompt} {
 		if set {
 			sources++
 		}
@@ -142,6 +144,20 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		value, err := secrets.DecryptString(r.path(src.AgeFile), ids)
 		if err != nil {
 			return "", fmt.Errorf("credential %q: %w", name, err)
+		}
+		return value, nil
+
+	case src.SecretRef != nil:
+		if r.Secret == nil {
+			return "", fmt.Errorf("credential %q reads Secret %s, but no Secret documents were loaded", name, src.SecretRef)
+		}
+		data, err := r.Secret(*src.SecretRef)
+		if err != nil {
+			return "", fmt.Errorf("credential %q: %w", name, err)
+		}
+		value := strings.TrimRight(string(data), "\r\n")
+		if value == "" {
+			return "", fmt.Errorf("credential %q: Secret %s is empty", name, src.SecretRef)
 		}
 		return value, nil
 

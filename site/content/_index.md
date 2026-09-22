@@ -47,7 +47,7 @@ layout: hextra-home
   >}}
   {{< hextra/feature-card
     title="Secrets that stay put"
-    subtitle="Passwords never reach a remote argument vector. age encrypted files are decrypted into memory and streamed to the node."
+    subtitle="Passwords never reach a remote argument vector. age and sops encrypted secrets are decrypted into memory and streamed to the node."
   >}}
   {{< hextra/feature-card
     title="One static binary"

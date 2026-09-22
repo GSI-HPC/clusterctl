@@ -16,7 +16,7 @@ $ clusterctl config validate
 `examples/site/` ships with the release and is a complete, working
 configuration. Copy it and replace the values.
 
-## The five kinds
+## The six kinds
 
 | Kind | What it says |
 | --- | --- |
@@ -25,6 +25,7 @@ configuration. Copy it and replace the values.
 | `Cluster` | Which site it belongs to, its Slurm, its groups, its boot paths |
 | `NodeInventory` | The nodes: attributes, racks, addresses, boot paths |
 | `Workstation` | What is true of this machine rather than of the site |
+| `Secret` | Passwords and keys, encrypted with sops |
 
 ## A minimal site
 
@@ -107,8 +108,8 @@ $ clusterctl --config ./examples/site config validate
 Both take files and directories, most general first.
 
 {{< callout type="info" >}}
-Keep the `Site`, `Cluster` and `NodeInventory` documents in version control
-with the host key file next to them. Paths in a document resolve against the
+Keep the `Site`, `Cluster`, `NodeInventory` and sops encrypted `Secret`
+documents in version control with the host key file next to them. Paths in a document resolve against the
 directory of the `Site` document, so the checkout moves as a unit.
 {{< /callout >}}
 

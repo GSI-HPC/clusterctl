@@ -3,10 +3,15 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"filippo.io/age"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -244,7 +249,7 @@ func TestSecretsListShowsWhereEachFileLands(t *testing.T) {
 		t.Fatalf("secrets list failed: %v", err)
 	}
 	out := h.out.String()
-	for _, want := range []string{"/etc/munge/munge.key", "0400", "munge:munge"} {
+	for _, want := range []string{"/etc/munge/munge.key", "0400", "munge:munge", "secret example/munge-key"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output is missing %q:\n%s", want, out)
 		}
@@ -402,5 +407,103 @@ func TestBMCForgetRemovesAPin(t *testing.T) {
 	}
 	if !strings.Contains(h.errOut.String(), "exe0001.mgmt.hpc.example.org") {
 		t.Errorf("the forgotten host is not named:\n%s", h.errOut)
+	}
+}
+
+func TestSecretsCheckReadsTheSecretsWithoutAKey(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "secrets", "check")
+	if err != nil {
+		t.Fatalf("secrets check failed: %v", err)
+	}
+	out := h.out.String()
+	for _, want := range []string{"example", "secrets.sops.yaml", "2 age", "ok"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
+	}
+
+	// The example is encrypted to keys nobody has, so decrypting it fails,
+	// and says so.
+	h, err = run(t, harnessOptions{}, "secrets", "check", "--decrypt")
+	if exitcode.From(err) != exitcode.TargetFailed {
+		t.Fatalf("secrets check --decrypt: err = %v, want the failure reported", err)
+	}
+	if !strings.Contains(h.out.String(), "fails: ") {
+		t.Errorf("the failure is not in the table:\n%s", h.out)
+	}
+}
+
+// decryptableSecret writes a Secret named example, encrypted to a fresh key,
+// and a Workstation whose identities open it, into a directory the harness
+// reads after the example configuration.
+func decryptableSecret(t *testing.T) string {
+	t.Helper()
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, ".identity")
+	secret := sopstest.Encrypt(t, "apiVersion: clusterctl/v1alpha1\nkind: Secret\nmetadata:\n  name: example\n"+
+		"data:\n  bmc-password: hunter2\nbinaryData:\n  munge-key: czNjcjN0LWtleQ==\n", id.Recipient().String())
+	files := map[string]string{
+		".identity":         id.String() + "\n",
+		"secrets.sops.yaml": string(secret),
+		"workstation.yaml":  "apiVersion: clusterctl/v1alpha1\nkind: Workstation\nspec:\n  identities:\n    - " + keyFile + "\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestSecretsPushStreamsASecretRef(t *testing.T) {
+	dir := decryptableSecret(t)
+
+	h, err := run(t, harnessOptions{config: []string{dir}}, "secrets", "check", "--decrypt")
+	if err != nil {
+		t.Fatalf("secrets check --decrypt failed: %v\n%s", err, h.out)
+	}
+	if !strings.Contains(h.out.String(), "decrypts") || strings.Contains(h.out.String(), "hunter2") {
+		t.Errorf("the check should decrypt and print nothing of the secret:\n%s", h.out)
+	}
+
+	h, err = run(t, harnessOptions{config: []string{dir}, tty: true, stdin: "y\n"}, "secrets", "push", "-n", "exe0001")
+	// The example's nslcd keytab is a file it does not ship. Everything is
+	// decrypted before anything is written, so nothing is.
+	if err == nil || !strings.Contains(err.Error(), "nslcd.keytab.age") {
+		t.Fatalf("secrets push: err = %v, want it to stop at the missing keytab", err)
+	}
+	if calls := h.recorder.Commands(); len(calls) != 0 {
+		t.Fatalf("a secret was written although another could not be read: %q", calls)
+	}
+
+	// With the keytab taken from the Secret as well, the push goes through.
+	override := filepath.Join(dir, "override.yaml")
+	if err := os.WriteFile(override, []byte(`apiVersion: clusterctl/v1alpha1
+kind: Config
+contexts:
+  - name: cluster1
+    cluster: cluster1
+    overrides:
+      services.cinc.secrets:
+        - target: /etc/munge/munge.key
+          secretRef: {name: example, key: munge-key}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h, err = run(t, harnessOptions{config: []string{dir}, tty: true, stdin: "y\n"}, "secrets", "push", "-n", "exe0001")
+	if err != nil {
+		t.Fatalf("secrets push failed: %v", err)
+	}
+	commands := h.recorder.Commands()
+	if len(commands) != 1 || !strings.Contains(commands[0], "/etc/munge/munge.key") {
+		t.Fatalf("commands = %q, want the munge key written", commands)
+	}
+	// The decoded key travels on standard input, never in the command.
+	if strings.Contains(commands[0], "s3cr3t") || strings.Contains(commands[0], "czNjcjN0") {
+		t.Errorf("the secret travelled in the command: %q", commands[0])
 	}
 }

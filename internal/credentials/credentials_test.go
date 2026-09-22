@@ -180,3 +180,45 @@ func TestPasswordIsReadOncePerProcess(t *testing.T) {
 		t.Errorf("the password was asked for %d times, want once", asked)
 	}
 }
+
+func TestFromSecretRef(t *testing.T) {
+	t.Parallel()
+
+	asked := 0
+	r := &credentials.Resolver{
+		Credentials: map[string]v1alpha1.Credential{
+			"bmc":   {Username: "admin", Password: v1alpha1.PasswordSource{SecretRef: &v1alpha1.SecretKeyRef{Name: "vault", Key: "bmc"}}},
+			"empty": {Username: "admin", Password: v1alpha1.PasswordSource{SecretRef: &v1alpha1.SecretKeyRef{Name: "vault", Key: "empty"}}},
+			"two":   {Username: "admin", Password: v1alpha1.PasswordSource{SecretRef: &v1alpha1.SecretKeyRef{Name: "vault", Key: "bmc"}, FromEnv: "X"}},
+		},
+		Env: func(string) string { return "" },
+		Secret: func(ref v1alpha1.SecretKeyRef) ([]byte, error) {
+			asked++
+			return map[string][]byte{"bmc": []byte("hunter2\n"), "empty": []byte("\n")}[ref.Key], nil
+		},
+	}
+
+	cred, err := r.Get(context.Background(), "bmc")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	// A block scalar leaves a newline behind; a password has none.
+	if got, want := cred.Password(), "hunter2"; got != want {
+		t.Errorf("password = %q, want %q", got, want)
+	}
+	if _, err := r.Get(context.Background(), "empty"); err == nil {
+		t.Error("an empty value should be refused")
+	}
+	if _, err := r.Get(context.Background(), "two"); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Errorf("secretRef beside another source should be refused, got %v", err)
+	}
+	if asked != 2 {
+		t.Errorf("the Secret was read %d times, want 2", asked)
+	}
+
+	r.Secret = nil
+	r.Credentials["late"] = r.Credentials["bmc"]
+	if _, err := r.Get(context.Background(), "late"); err == nil {
+		t.Error("a secretRef without a Secret reader should be reported")
+	}
+}

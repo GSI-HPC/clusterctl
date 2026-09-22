@@ -22,3 +22,4 @@ A decision is superseded by a later record, never edited.
 | [0010](0010-public-nodeset-package.md) | Publish `nodeset`, keep the rest internal | accepted |
 | [0011](0011-installable-from-release-assets.md) | Release assets are consumable by a version manager | accepted |
 | [0012](0012-dependabot.md) | Dependabot proposes the dependency updates | accepted |
+| [0013](0013-sops-secret-documents.md) | Secrets live in sops encrypted Secret documents | accepted |

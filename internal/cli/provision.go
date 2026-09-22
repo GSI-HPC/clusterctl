@@ -5,13 +5,18 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/app"
+	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
@@ -26,14 +31,15 @@ import (
 
 func newSecretsCommand(r *root) *cobra.Command {
 	return group("secrets", "Distribute the encrypted files the nodes need", `
-Decrypt the files a site keeps beside its configuration and write them onto
-the nodes.
+Decrypt the files a site keeps beside its configuration, or the values of its
+sops encrypted Secret documents, and write them onto the nodes.
 
 The plaintext never touches this workstation's disk: it is decrypted into
 memory and streamed to each node over standard input, which is what keeps a
 cluster key off a laptop.`,
 		newSecretsListCommand(r),
 		newSecretsPushCommand(r),
+		newSecretsCheckCommand(r),
 	)
 }
 
@@ -52,7 +58,11 @@ List the encrypted files and where each one lands on a node.`,
 				if s.Group != "" {
 					owner += ":" + s.Group
 				}
-				t.Add(a.Path(s.Source), s.Target, s.Mode, owner)
+				source := a.Path(s.Source)
+				if s.SecretRef != nil {
+					source = "secret " + s.SecretRef.String()
+				}
+				t.Add(source, s.Target, s.Mode, owner)
 			}
 			t.Caption = fmt.Sprintf("%d secrets", t.Len())
 			return a.Print(output.Result{Table: t, Object: a.Spec.Services.Cinc.Secrets})
@@ -94,22 +104,25 @@ This overwrites files on the nodes, so it asks first.
 				return dryRunOrError(err)
 			}
 
-			identities, err := secrets.Identities(a.IdentityPaths())
-			if err != nil {
-				return exitcode.Wrap(exitcode.Usage, err)
-			}
 			targets, err := a.NodeTargets(ns)
 			if err != nil {
 				return err
 			}
 
+			// Every secret is decrypted before the first is written, so a
+			// key that is missing for one of them leaves the nodes as they
+			// were rather than half provisioned.
+			contents := make([][]byte, len(files))
+			for i, file := range files {
+				if contents[i], err = a.SecretContent(file); err != nil {
+					return err
+				}
+			}
+
 			t := output.NewTable(output.Cols("NODE", "SECRET", "STATUS")...)
 			failed := 0
-			for _, file := range files {
-				plaintext, err := secrets.Decrypt(a.Path(file.Source), identities)
-				if err != nil {
-					return exitcode.Wrap(exitcode.Usage, err)
-				}
+			for i, file := range files {
+				plaintext := contents[i]
 				mode := file.Mode
 				if mode == "" {
 					mode = "0600"
@@ -152,6 +165,95 @@ This overwrites files on the nodes, so it asks first.
 			}
 			return nil
 		})
+}
+
+func newSecretsCheckCommand(r *root) *cobra.Command {
+	var decrypt bool
+	cmd := leaf("check", "Check the sops encrypted Secret documents", `
+List every Secret document with its keys, the master keys sops encrypted it
+to and how many references use it. None of this needs a key: the names, the
+keys and the sops metadata are readable, and a reference to a key that does
+not exist is already refused when the configuration loads.
+
+With --decrypt each document is also decrypted, in memory, and the result
+is thrown away. It proves this workstation can read every secret before a
+reinstall needs one, and prints nothing of the plaintext.
+
+  clusterctl secrets check --decrypt`,
+		cobra.NoArgs,
+		func(cmd *cobra.Command, _ []string) error {
+			a, err := r.App()
+			if err != nil {
+				return err
+			}
+			used := map[string]int{}
+			for _, ref := range secretRefsOf(a.Spec) {
+				used[ref.Name]++
+			}
+
+			t := output.NewTable(output.Cols("SECRET", "FILE", "KEYS", "ENCRYPTED TO", "USED", "STATUS")...)
+			objects := []map[string]any{}
+			failed := 0
+			bundle := a.Resolved.Bundle
+			names := make([]string, 0, len(bundle.Secrets))
+			for name := range bundle.Secrets {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				doc := bundle.Secrets[name]
+				keys := config.SecretKeys(doc)
+				status := "ok"
+				var info secrets.SopsInfo
+				raw, err := os.ReadFile(doc.File)
+				if err == nil {
+					info, err = secrets.InspectSops(raw)
+				}
+				if err == nil && decrypt {
+					status = "decrypts"
+					_, err = a.SecretValues(name)
+				}
+				if err != nil {
+					status = "fails: " + err.Error()
+					failed++
+				}
+				t.Add(name, doc.File, strconv.Itoa(len(keys)), info.Summary(), strconv.Itoa(used[name]), status)
+				recipients := make([]string, 0, len(info.Keys))
+				for _, k := range info.Keys {
+					recipients = append(recipients, k.Type+":"+k.ID)
+				}
+				objects = append(objects, map[string]any{
+					"name": name, "file": doc.File, "keys": keys,
+					"encryptedTo": recipients, "used": used[name], "status": status,
+				})
+			}
+			t.Caption = fmt.Sprintf("%d Secret documents", t.Len())
+			if err := a.Print(output.Result{Table: t, Object: objects}); err != nil {
+				return err
+			}
+			if failed > 0 {
+				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d Secret documents failed the check", failed, t.Len())
+			}
+			return nil
+		})
+	cmd.Flags().BoolVar(&decrypt, "decrypt", false, "also decrypt each document in memory")
+	return cmd
+}
+
+// secretRefsOf lists the secretRefs of the merged configuration.
+func secretRefsOf(spec v1alpha1.EffectiveSpec) []v1alpha1.SecretKeyRef {
+	var out []v1alpha1.SecretKeyRef
+	for _, c := range spec.Credentials {
+		if c.Password.SecretRef != nil {
+			out = append(out, *c.Password.SecretRef)
+		}
+	}
+	for _, f := range spec.Services.Cinc.Secrets {
+		if f.SecretRef != nil {
+			out = append(out, *f.SecretRef)
+		}
+	}
+	return out
 }
 
 func newCincCommand(r *root) *cobra.Command {

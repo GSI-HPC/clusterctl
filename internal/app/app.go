@@ -119,6 +119,7 @@ type App struct {
 	opts        Options
 	ctx         context.Context
 	credentials *credentials.Resolver
+	secrets     secretStore
 }
 
 // New resolves the configuration and builds the command context.

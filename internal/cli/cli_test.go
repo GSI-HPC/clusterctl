@@ -50,7 +50,11 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 	cmd := NewRootCommand(context.Background(), streams)
 	cmd.SetOut(h.out)
 	cmd.SetErr(h.errOut)
-	cmd.SetArgs(append([]string{"--config", exampleDir}, args...))
+	config := []string{"--config", exampleDir}
+	for _, extra := range opts.config {
+		config = append(config, "--config", extra)
+	}
+	cmd.SetArgs(append(config, args...))
 
 	// The root holds the flags; reach it to install the fake transport.
 	h.root = builtRoots[cmd]
@@ -63,6 +67,9 @@ type harnessOptions struct {
 	recorder *transport.Recorder
 	stdin    string
 	tty      bool
+	// config are read after the example configuration, so their documents
+	// replace the example's of the same kind and name.
+	config []string
 }
 
 // rootOf digs the root state out of a built command tree.
