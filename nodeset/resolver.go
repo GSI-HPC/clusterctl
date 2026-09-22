@@ -34,12 +34,12 @@ func resolveGroup(ref string, res Resolver, depth int) (*NodeSet, error) {
 	if res == nil {
 		return nil, fmt.Errorf("group @%s cannot be resolved: no group source is configured", ref)
 	}
+	// The source is passed on exactly as written, empty included, so that a
+	// resolver backed by several sources can search them all for a bare
+	// @group reference rather than being limited to its default.
 	source, group := "", ref
 	if colon := strings.IndexByte(ref, ':'); colon >= 0 {
 		source, group = ref[:colon], ref[colon+1:]
-	}
-	if source == "" {
-		source = res.DefaultSource()
 	}
 	if group == "" {
 		return nil, fmt.Errorf("empty group name in @%s", ref)
@@ -80,8 +80,11 @@ func NewMapResolver(source string, groups map[string]string) *MapResolver {
 	}
 }
 
-// Resolve implements Resolver.
+// Resolve implements Resolver. An empty source means the default one.
 func (m *MapResolver) Resolve(source, group string) (string, error) {
+	if source == "" {
+		source = m.Default
+	}
 	groups, ok := m.Groups[source]
 	if !ok {
 		return "", fmt.Errorf("unknown group source %q", source)
@@ -93,8 +96,11 @@ func (m *MapResolver) Resolve(source, group string) (string, error) {
 	return expr, nil
 }
 
-// List implements Resolver.
+// List implements Resolver. An empty source means the default one.
 func (m *MapResolver) List(source string) ([]string, error) {
+	if source == "" {
+		source = m.Default
+	}
 	groups, ok := m.Groups[source]
 	if !ok {
 		return nil, fmt.Errorf("unknown group source %q", source)

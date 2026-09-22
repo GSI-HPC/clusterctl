@@ -28,7 +28,7 @@ spec:
       static:
         static:
           infra: wlm01,dbm01
-          compute: "@class:exe"
+          compute: "@inventory:exe"
       slurm:
         # Resolved by asking the workload manager, the way ClusterShell's
         # group sources do. Arguments are passed as a vector, never through a
