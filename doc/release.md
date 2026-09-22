@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: LGPL-3.0-or-later -->
 
-# Versioning, releases and the documentation site
+# Versioning, releases, the documentation site and dependencies
 
 ## No version in the source tree
 
@@ -67,6 +67,31 @@ reachable from clusterctl fails the build until a patch release fixes it.
 `clusterctl version` reports the toolchain a binary was built with. Moving to
 the next Go release line means changing `GO_VERSION` in the three workflows and
 `go` in `mise.toml`; raising the minimum means changing `go.mod`.
+
+## Keeping dependencies current
+
+Dependabot opens the pull requests, weekly, as `.github/dependabot.yml`
+configures and [ADR 0012](adr/0012-dependabot.md) explains:
+
+- `build(deps)` for the requirements in `go.mod`, with the minor and patch
+  releases grouped into one pull request;
+- `ci(deps)` for each action the workflows use.
+
+It proposes a release once it has been out for a week, and a security update at
+once. The pull requests run CI like any other. An action used only by the
+release workflow is not exercised until the next release, so read its release
+notes before merging.
+
+The rest is updated by hand:
+
+| What | Where | How |
+| --- | --- | --- |
+| The Hextra theme | `site/go.mod` | `hugo mod get -u github.com/imfing/hextra`, then `hugo mod tidy`, in `site/`. Never `go mod tidy`: it removes the requirement. |
+| Hugo | `hugo-version` in `ci.yml` and `pages.yml` | Change both, and the minimum in `site/README.md`. |
+| The Go release line | `GO_VERSION` in the workflows, `go` in `mise.toml` | As described under [the Go toolchain](#the-go-toolchain). |
+
+golangci-lint and govulncheck need nothing, and neither does GoReleaser within
+its major version: the workflows take their latest release every time.
 
 ## Provenance
 

@@ -21,6 +21,10 @@ $ cd site && hugo server
 Hugo **extended** 0.152 or newer. The manual is then at
 <http://localhost:1313>.
 
+Dependabot does not update the theme, because tidying a Hugo module as it does
+removes the requirement. Update it here with
+`hugo mod get -u github.com/imfing/hextra && hugo mod tidy`.
+
 ## What is written and what is generated
 
 `content/docs/` is written by hand. Help text answers "what are the flags"; a

@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# Weekly version updates for what Dependabot can update without breaking it.
+# doc/release.md lists what it leaves out and how each of those is updated,
+# and doc/adr/0012-dependabot.md says why.
+
+version: 2
+
+updates:
+  # The requirements in go.mod. The Hugo module in site/ is deliberately not
+  # listed: Dependabot tidies a module after updating it, and tidying a module
+  # without Go packages removes every requirement, the theme included.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    # A release has a week to be found out before it is proposed. Security
+    # updates do not wait.
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+    # CI runs the whole suite on every pull request, so minor and patch
+    # releases can travel together.
+    groups:
+      go-modules:
+        update-types: [minor, patch]
+
+  # The actions the workflows use, one pull request each: the release and
+  # Pages workflows do not run on pull requests, so a new major version of one
+  # of their actions is reviewed on its own release notes.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope

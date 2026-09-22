@@ -35,7 +35,7 @@ counterpart in this design.
 | [safety.md](safety.md) | What a destructive command has to pass before it runs |
 | [requirements.md](requirements.md) | What the program has to do, and where each requirement is met |
 | [testing.md](testing.md) | What is tested, how, and what cannot be |
-| [release.md](release.md) | Versioning, the release workflow and the documentation site |
+| [release.md](release.md) | Versioning, the release workflow, the documentation site and dependency updates |
 | [migration.md](migration.md) | Moving a site from the shell toolkit to clusterctl |
 | [adr/](adr/) | The decisions, each with its context and consequences |
 
