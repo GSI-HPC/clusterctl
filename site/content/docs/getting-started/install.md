@@ -17,6 +17,14 @@ $ mise use -g github:GSI-HPC/clusterctl
 $ clusterctl version
 ```
 
+mise leaves a release alone for its first 24 hours (its `minimum_release_age`
+setting), so on the day of a release it reports "no versions found ... matching
+date filter" or picks the previous one. Name the version to take it sooner:
+
+```console
+$ mise use -g github:GSI-HPC/clusterctl@1.4.0
+```
+
 Pin a version for a team by putting it in the project's `mise.toml`:
 
 ```toml
@@ -39,25 +47,27 @@ used tools, so the backend has to be named: `github:GSI-HPC/clusterctl`.
 
 ## From a release
 
+Download the archive under its own name, together with `checksums.txt`:
+
 ```console
-$ curl -fsSL -o clusterctl.tar.gz \
-    https://github.com/GSI-HPC/clusterctl/releases/latest/download/clusterctl_linux_amd64.tar.gz
-$ tar xzf clusterctl.tar.gz
-$ install -m 0755 clusterctl ~/.local/bin/
-$ clusterctl version
+$ base=https://github.com/GSI-HPC/clusterctl/releases/latest/download
+$ curl -fsSL --remote-name-all "$base/clusterctl_linux_amd64.tar.gz" "$base/checksums.txt"
 ```
 
-Releases carry `checksums.txt`. Verify before installing:
+Verify it before installing, against the checksums and against its build
+provenance attestation, which says which workflow, commit and tag produced it:
 
 ```console
 $ sha256sum -c checksums.txt --ignore-missing
+$ gh attestation verify clusterctl_linux_amd64.tar.gz --repo GSI-HPC/clusterctl
 ```
 
-Every archive is also attested, which says which workflow, commit and tag
-produced it:
+Then install it:
 
 ```console
-$ gh attestation verify clusterctl_linux_amd64.tar.gz --repo GSI-HPC/clusterctl
+$ tar xzf clusterctl_linux_amd64.tar.gz
+$ install -m 0755 clusterctl ~/.local/bin/
+$ clusterctl version
 ```
 
 The checksum answers "are these the published bytes"; the attestation answers
