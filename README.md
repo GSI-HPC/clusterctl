@@ -3,9 +3,11 @@
 
 # clusterctl
 
-One binary to administer HPC clusters: reach the hosts of a site, select nodes
-with ClusterShell node set syntax, run commands on them in parallel, drive
-their service processors, reinstall them and administer Slurm.
+**One binary. Every node. No surprises.** clusterctl selects nodes with
+ClusterShell syntax, fans out commands, drives service processors, reinstalls
+nodes and administers Slurm, and asks before it changes anything.
+
+### [Read the manual →](https://gsi-hpc.github.io/clusterctl/)
 
 ```console
 $ clusterctl node select '@idle&@rack:R02'
@@ -27,21 +29,6 @@ $ clusterctl provision reinstall -n '@rack:R02' --dry-run
 Would reinstall 10 hosts: exe[0001-0010]
   everything on these machines is lost
 ```
-
-**Manual:** <https://gsi-hpc.github.io/clusterctl/> ·
-**Design notes:** [`doc/`](doc/)
-
-## What it does
-
-| | |
-| --- | --- |
-| **Reach everything** | One host key file the team keeps in version control, one generated ssh configuration, and sshuttle profiles for the networks behind a gateway. |
-| **Select and fan out** | ClusterShell node sets, groups from node attributes, tables or the workload manager, and bounded parallel execution that reports every node. |
-| **Operate hardware** | Redfish with a pinned certificate, FreeIPMI and ipmitool run on a host that can reach the service network, rack power units, and the InfiniBand fabric. |
-| **Reinstall nodes** | DHCP inspection, per-node PXE and GRUB boot paths, age or sops encrypted secrets streamed to the node, and the configuration management client. |
-| **Administer Slurm** | Nodes and their drain reasons, the queue and the accounting database, accounts, users and fair share. |
-| **Serve several clusters** | Domains, naming, roles, networks and the inventory live in YAML, not in the code. |
-| **Work with an agent** | An MCP server that lets an AI agent read the cluster and plan changes, which you confirm before anything is sent. |
 
 ## Install
 
