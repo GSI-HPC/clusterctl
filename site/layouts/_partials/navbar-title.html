@@ -1,0 +1,63 @@
+{{- /* SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> */ -}}
+{{- /* SPDX-License-Identifier: LGPL-3.0-or-later */ -}}
+{{- /*
+  Hextra's navbar title (v0.11.2), wrapped so that the version switcher can
+  stand beside it; the theme has no hook in the navbar. Everything outside
+  the "versions" block is the theme's own.
+
+  The switcher is shown when the build is given the list of versions, which
+  site/build.sh does. It uses the markup and the script of Hextra's own
+  dropdown menus, which the navbar hides on a phone; this one is not hidden.
+*/ -}}
+{{- $logoPath := .Site.Params.navbar.logo.path | default "images/logo.svg" -}}
+{{- $logoLink := .Site.Params.navbar.logo.link | default .Site.Home.RelPermalink -}}
+{{- $logoWidth := .Site.Params.navbar.logo.width | default "20" -}}
+{{- $logoHeight := .Site.Params.navbar.logo.height | default "20" -}}
+{{- $logoDarkPath := .Site.Params.navbar.logo.dark | default $logoPath -}}
+
+<div class="hx:flex hx:items-center hx:gap-1 hx:ltr:mr-auto hx:rtl:ml-auto">
+  <a class="hx:flex hx:items-center hx:hover:opacity-75" href="{{ $logoLink }}">
+    {{- $displayTitle := (.Site.Params.navbar.displayTitle | default true) }}
+    {{- if (.Site.Params.navbar.displayLogo | default true) }}
+      <img class="hx:mr-2 hx:block hx:dark:hidden" src="{{ $logoPath | relURL }}" alt="{{ cond $displayTitle `Logo` .Site.Title }}" height="{{ $logoHeight }}" width="{{ $logoWidth }}" />
+      <img class="hx:mr-2 hx:hidden hx:dark:block" src="{{ $logoDarkPath | relURL }}" alt="{{ cond $displayTitle `Dark Logo` .Site.Title }}" height="{{ $logoHeight }}" width="{{ $logoWidth }}" />
+    {{- end }}
+    {{- if $displayTitle }}
+      <span class="hx:mr-2 hx:font-extrabold hx:inline hx:select-none" title="{{ .Site.Title }}">{{- .Site.Title -}}</span>
+    {{- end }}
+  </a>
+
+  {{- with site.Params.versions }}
+    {{- $versions := . -}}
+    {{- $path := partial "version-path.html" $ -}}
+    <div class="hx:relative hx:inline-block">
+      <button
+        type="button"
+        data-state="closed"
+        title="Other versions of the manual"
+        aria-label="Version {{ .version }}; other versions of the manual"
+        class="hextra-nav-menu-toggle hx:cursor-pointer hx:text-sm hx:whitespace-nowrap hx:p-2 hx:flex hx:items-center hx:gap-1 hx:text-gray-600 hx:hover:text-gray-800 hx:dark:text-gray-400 hx:dark:hover:text-gray-200"
+      >
+        <span>{{ .version }}</span>
+        {{- partial "utils/icon.html" (dict "name" "chevron-down" "attributes" "height=12") -}}
+      </button>
+      <ul
+        class="hextra-nav-menu-items hx:hidden hx:z-20 hx:max-h-64 hx:overflow-auto hx:rounded-md hx:ring-1 hx:ring-black/5 hx:bg-white hx:py-1 hx:text-sm hx:shadow-lg hx:dark:ring-white/20 hx:dark:bg-neutral-800"
+        style="min-width: 100px;"
+      >
+        {{- range .list }}
+          {{- $current := eq .version $versions.version }}
+          <li class="hextra-nav-menu-item hx:flex hx:flex-col">
+            <a
+              href="{{ $versions.root }}{{ .path }}{{ $path }}"
+              {{- if $current }} aria-current="true"{{ end }}
+              class="hx:whitespace-nowrap hx:py-1.5 hx:ltr:pl-3 hx:ltr:pr-9 hx:rtl:pr-3 hx:rtl:pl-9 hx:flex hx:items-center hx:gap-1 {{ if $current }}hx:font-medium{{ else }}hx:text-gray-600 hx:hover:text-gray-800 hx:dark:text-gray-400 hx:dark:hover:text-gray-200{{ end }}"
+            >
+              {{- .version }}{{ with .note }} ({{ . }}){{ end -}}
+            </a>
+          </li>
+        {{- end }}
+      </ul>
+    </div>
+  {{- end }}
+</div>

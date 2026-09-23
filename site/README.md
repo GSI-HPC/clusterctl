@@ -19,8 +19,8 @@ $ go run ./internal/tools/gendocs   # from the repository root
 $ cd site && hugo server
 ```
 
-Hugo **extended** 0.152 or newer. The manual is then at
-<http://localhost:1313>.
+Hugo **extended**, the release [`hugo-version`](hugo-version) names. The
+manual is then at <http://localhost:1313>.
 
 Dependabot does not update the theme, because tidying a Hugo module as it does
 removes the requirement. Update it here with
@@ -47,12 +47,42 @@ what they describe. Both are gitignored and built in CI.
 - `{{< callout type="warning" >}}` for anything that loses data;
   `type="info"` for a note worth not missing.
 
+## Versions
+
+The published site holds a manual per version: the latest release at the
+root, the newest patch release of each minor line under `/vX.Y/`, and main
+under `/dev/`. [`build.sh`](build.sh) builds them all into `public/`, each
+release's from its own tag, with its own command reference, theme and Hugo:
+
+```console
+$ site/build.sh                     # from the repository root
+$ python3 -m http.server -d site/public 8000
+```
+
+It lists the releases with `gh`; `RELEASES="v0.1.0 v0.2.0"` names them
+instead. Their tags have to be fetched.
+
+Each build is given the list of versions as an extra configuration file,
+`params.versions`, and three templates draw from it:
+
+- `layouts/_partials/navbar-title.html`, the theme's navbar title with the
+  version switcher beside it. It replaces Hextra's, so check it when the theme
+  is upgraded.
+- `layouts/_partials/custom/banner.html`, the banner over every manual but the
+  latest release's.
+- `layouts/_partials/version-path.html`, the path of a page below its
+  version's base, from which both link to the same page elsewhere.
+
+`hugo server` is given no versions, and shows neither.
+[`../doc/adr/0018-a-manual-for-every-release.md`](../doc/adr/0018-a-manual-for-every-release.md)
+says why it is built this way.
+
 ## Publishing
 
-`.github/workflows/pages.yml` builds and deploys on every push to the default
-branch that touches the site, the design notes or the command tree, and on
-every release. It needs GitHub Pages switched on for the repository, with
-GitHub Actions as the source; `doc/release.md` says how.
+`.github/workflows/pages.yml` runs `build.sh` and deploys the result on every
+push to the default branch that touches the site, the design notes or the
+command tree, and after every release. It needs GitHub Pages switched on for
+the repository, with GitHub Actions as the source; `doc/release.md` says how.
 
 Hextra fetches its search index library from a CDN while the site builds. An
 air-gapped build needs the theme vendored and `params.search.enable` set to

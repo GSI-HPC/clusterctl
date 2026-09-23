@@ -28,3 +28,4 @@ A decision is superseded by a later record, never edited.
 | [0015](0015-release-notes-in-the-tag.md) | Release notes are written in the signed tag | accepted |
 | [0016](0016-copyright-holder.md) | GSI holds the copyright, and every file says so | accepted |
 | [0017](0017-config-init-into-an-empty-directory.md) | `config init` writes only into an empty directory, where it is read | accepted |
+| [0018](0018-a-manual-for-every-release.md) | A manual for every release, the latest at the root | accepted |
