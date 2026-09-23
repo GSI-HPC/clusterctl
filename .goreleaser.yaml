@@ -98,8 +98,11 @@ release:
     ```console
     $ go install github.com/GSI-HPC/clusterctl/cmd/clusterctl@{{ .Tag }}
     ```
+  # The manual of this release's minor line, which stays where it is when the
+  # next release takes the root. It appears once the Pages workflow that
+  # follows the release has run.
   footer: |
     ---
 
-    The [manual](https://gsi-hpc.github.io/clusterctl/) covers every command.
+    The [manual](https://gsi-hpc.github.io/clusterctl/v{{ .Major }}.{{ .Minor }}/) covers every command.
     Verify a download against `checksums.txt`.

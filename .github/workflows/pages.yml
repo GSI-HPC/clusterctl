@@ -13,8 +13,14 @@ on:
       - 'internal/apis/**'
       - 'internal/tools/gendocs/**'
       - '.github/workflows/pages.yml'
-  release:
-    types: [published]
+  # A release moves the manual at the root to it. GoReleaser publishes the
+  # release with the GITHUB_TOKEN, and events that token causes start no
+  # workflow, so the trigger is the release workflow finishing instead. That
+  # runs on the default branch, which the github-pages environment lets
+  # deploy; unless told otherwise, it refuses a run on a tag.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -35,8 +41,11 @@ env:
 jobs:
   build:
     name: Build
+    # A release that failed published nothing.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
+      # The whole history: every release's manual is built from its tag.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -46,24 +55,17 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
 
-      - uses: peaceiris/actions-hugo@v3
-        with:
-          hugo-version: '0.152.0'
-          extended: true
-
       - uses: actions/configure-pages@v6
         id: pages
 
-      # The command reference and the JSON Schemas describe the binary they
-      # are generated from, so they are built here and never committed.
-      - name: Generate the reference and the schemas
-        run: go run ./internal/tools/gendocs
-
-      - name: Build the site
-        working-directory: site
+      # The latest release at the root, every minor line under /vX.Y/ and
+      # main under /dev/, each built from its own tree. The command reference
+      # and the JSON Schemas describe the binary they are generated from, so
+      # they are generated here, for each version, and never committed.
+      - name: Build the manual of every version
         env:
-          HUGO_ENVIRONMENT: production
-        run: hugo --minify --baseURL "${{ steps.pages.outputs.base_url }}/"
+          GH_TOKEN: ${{ github.token }}
+        run: site/build.sh "${{ steps.pages.outputs.base_url }}/"
 
       - uses: actions/upload-pages-artifact@v5
         with:

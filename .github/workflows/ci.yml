@@ -176,22 +176,20 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
+      # The whole history: every release's manual is built from its tag.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
 
-      # The command reference and the schemas are generated, so a command
-      # that cannot be documented is a broken command.
-      - name: Generate the reference and the schemas
-        run: go run ./internal/tools/gendocs
-
-      - uses: peaceiris/actions-hugo@v3
-        with:
-          hugo-version: '0.152.0'
-          extended: true
-
-      - name: Build the site
-        working-directory: site
-        run: hugo --minify --baseURL https://gsi-hpc.github.io/clusterctl/
+      # The site as the Pages workflow publishes it, every release's manual
+      # included, so a change that would break publishing fails here. The
+      # command reference and the schemas are generated on the way, so a
+      # command that cannot be documented is a broken command.
+      - name: Build the manual of every version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: site/build.sh https://gsi-hpc.github.io/clusterctl/

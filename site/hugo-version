@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The Hugo release, extended edition, that builds this manual. site/build.sh
+# reads it from every tag it builds, so each version of the manual is built
+# with the Hugo it was written for, and moving this one forward cannot break
+# the manual of an earlier release.
+0.152.0

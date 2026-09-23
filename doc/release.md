@@ -48,6 +48,9 @@ The workflow then builds, tests, and publishes:
 - release notes: the body of the tag message, then the commits since the
   previous tag, grouped by type
 
+When it succeeds, the Pages workflow republishes the manual with this release
+at the root; see [the documentation site](#the-documentation-site).
+
 The archive name carries no version, so
 `releases/latest/download/clusterctl_linux_amd64.tar.gz` is a stable URL. The
 version is in the tag, the release and the binary itself.
@@ -110,7 +113,7 @@ The rest is updated by hand:
 | What | Where | How |
 | --- | --- | --- |
 | The Hextra theme | `site/go.mod` | `hugo mod get -u github.com/imfing/hextra`, then `hugo mod tidy`, in `site/`. Never `go mod tidy`: it removes the requirement. |
-| Hugo | `hugo-version` in `ci.yml` and `pages.yml` | Change both, and the minimum in `site/README.md`. |
+| Hugo | `site/hugo-version` | Change it there; CI and the Pages workflow build main's manual with it. Each release's manual keeps the Hugo its own tag names. |
 | The Go release line | `GO_VERSION` in the workflows, `go` in `mise.toml` | As described under [the Go toolchain](#the-go-toolchain). |
 
 golangci-lint and govulncheck need nothing, and neither does GoReleaser within
@@ -165,8 +168,34 @@ Two kinds of page live there:
 `make docs` regenerates them locally. `hugo server` in `site/` then serves the
 manual at <http://localhost:1313>.
 
-The site is published to GitHub Pages on every push to the default branch and
-on every release, by `.github/workflows/pages.yml`.
+The site holds the manual of every release, not only main's:
+
+| Path | Manual |
+| --- | --- |
+| `/` | the latest release |
+| `/vX.Y/` | the newest patch release of each minor line, the latest's included |
+| `/dev/` | main |
+
+A switcher beside the title moves between them and stays on the same page.
+Every manual but the latest release's says in a banner which one it is, and
+search engines are kept to the root.
+
+`site/build.sh` builds them all, each release's manual from its own tag: its
+pages, its command reference and schemas, its Hextra and its Hugo. CI runs it
+on every pull request. `.github/workflows/pages.yml` runs it and publishes the
+result on every push to the default branch that touches the site, the design
+notes or the command tree, and after every release. [ADR
+0018](adr/0018-a-manual-for-every-release.md) says why it is built this way.
+
+To look at the whole site before it is published:
+
+```console
+$ site/build.sh
+$ python3 -m http.server -d site/public 8000
+```
+
+The script lists the releases with `gh`, or takes them from `RELEASES`
+(`RELEASES="v0.1.0 v0.2.0" site/build.sh`), and needs their tags fetched.
 
 Publishing needs Pages switched on once per repository, with GitHub Actions as
 its source: *Settings → Pages → Build and deployment → Source*. The workflow

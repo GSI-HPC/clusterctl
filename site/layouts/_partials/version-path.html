@@ -1,0 +1,8 @@
+{{- /* SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> */ -}}
+{{- /* SPDX-License-Identifier: LGPL-3.0-or-later */ -}}
+{{- /*
+  The path of a page below the base of the manual it belongs to. It is the
+  same in every version, so appending it to another version's base links to
+  the same page there.
+*/ -}}
+{{- return strings.TrimPrefix (urls.Parse site.BaseURL).Path .RelPermalink -}}

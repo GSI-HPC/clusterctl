@@ -1,0 +1,18 @@
+{{- /* SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> */ -}}
+{{- /* SPDX-License-Identifier: LGPL-3.0-or-later */ -}}
+{{- /*
+  The banner over every manual but the latest release's, linking to the same
+  page there. Hextra shows a banner when params.banner is set, which
+  site/build.sh does for those builds only.
+*/ -}}
+{{- with site.Params.versions -}}
+  <div class="hx:px-8">
+    {{- if eq .version "main" -}}
+      This is the manual for the unreleased main branch.
+    {{- else -}}
+      This is the manual for clusterctl {{ .version }}.
+    {{- end }}
+    The latest release is {{ .latest }}:
+    <a class="hx:underline" href="{{ .root }}{{ partial "version-path.html" $ }}">read its manual</a>.
+  </div>
+{{- end -}}
