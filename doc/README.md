@@ -1,3 +1,4 @@
+<!-- SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> -->
 <!-- SPDX-License-Identifier: LGPL-3.0-or-later -->
 
 # clusterctl design documentation
@@ -42,7 +43,9 @@ counterpart in this design.
 
 ## Conventions
 
-- Every source file carries `SPDX-License-Identifier: LGPL-3.0-or-later`.
+- Every source file carries `SPDX-License-Identifier: LGPL-3.0-or-later`,
+  with an `SPDX-FileCopyrightText` line naming the copyright holder above it
+  ([0016](adr/0016-copyright-holder.md)).
 - Packages under `internal/` are implementation; `nodeset/` at the module root
   is the one package offered to other programs.
 - A package comment says what the package owns and why it exists, not what its

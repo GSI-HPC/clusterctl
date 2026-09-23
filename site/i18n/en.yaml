@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# Hextra's footer shows this key when footer.displayCopyright is set, and
+# without it shows the theme's own copyright line, crediting its authors.
+
+copyright: "© 2026 [GSI Helmholtz Centre for Heavy Ion Research GmbH](http://www.gsi.de)"
