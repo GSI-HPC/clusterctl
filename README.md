@@ -40,6 +40,7 @@ Would reinstall 10 hosts: exe[0001-0010]
 | **Reinstall nodes** | DHCP inspection, per-node PXE and GRUB boot paths, age or sops encrypted secrets streamed to the node, and the configuration management client. |
 | **Administer Slurm** | Nodes and their drain reasons, the queue and the accounting database, accounts, users and fair share. |
 | **Serve several clusters** | Domains, naming, roles, networks and the inventory live in YAML, not in the code. |
+| **Work with an agent** | An MCP server that lets an AI agent read the cluster and plan changes, which you confirm before anything is sent. |
 
 ## Install
 

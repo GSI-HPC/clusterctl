@@ -33,6 +33,7 @@ counterpart in this design.
 | [nodeset.md](nodeset.md) | The node set language and the semantics chosen for it |
 | [transport.md](transport.md) | How a command reaches a host and why it is quoted the way it is |
 | [safety.md](safety.md) | What a destructive command has to pass before it runs |
+| [mcp.md](mcp.md) | The MCP server: its tools, plan and apply, and who answers the gate |
 | [requirements.md](requirements.md) | What the program has to do, and where each requirement is met |
 | [testing.md](testing.md) | What is tested, how, and what cannot be |
 | [release.md](release.md) | Versioning, the release workflow, the documentation site and dependency updates |

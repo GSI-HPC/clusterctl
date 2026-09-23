@@ -48,6 +48,7 @@ every command rather than in the ones that remembered to implement them.
 | `internal/fanout` | Running one request on many targets, bounded and in order. |
 | `internal/safety` | Deciding whether a destructive action may proceed. |
 | `internal/fileutil` | Writing files atomically and under a lock. |
+| `internal/mcpserver` | Offering the commands to an AI agent over MCP, with changes only through plan and apply. |
 
 ### Subsystems
 

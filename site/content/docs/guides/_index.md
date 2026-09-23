@@ -13,5 +13,6 @@ How to do each of the jobs clusterctl exists for.
   {{< card link="slurm" title="Slurm" subtitle="Nodes, the queue, accounts and fair share." >}}
   {{< card link="access" title="Access and trust" subtitle="Host keys, tunnels and the generated ssh configuration." >}}
   {{< card link="output" title="Output and scripting" subtitle="Formats, exit codes and how to build on them." >}}
+  {{< card link="agents" title="Working with an agent" subtitle="The MCP server, plans and confirmation." >}}
   {{< card link="troubleshooting" title="Troubleshooting" subtitle="When something does not work." >}}
 {{< /cards >}}
