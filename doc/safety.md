@@ -42,6 +42,19 @@ Everything that changes or destroys something goes through
 
 `--dry-run` stops after the preview and exits zero, having sent nothing.
 
+Steps 2 to 4 are also available separately. `Gate.Preview` runs the checks and
+describes the question without asking it, and `Preview.Accept` judges an
+answer by the same rule as the prompt. The MCP server uses these to put the
+question to the administrator through the client instead of a terminal; see
+[mcp.md](mcp.md).
+
+## What a command does
+
+Every command records its effect, `read`, `change` or `interactive`, from one
+table in `internal/cli/effects.go`. A test keeps the table and the command tree
+in step. Anything that drives the tree for someone else reads the effect rather
+than keeping its own list, and a command without one counts as a change.
+
 ## Checks specific to what is being done
 
 **Power actions ask Slurm first.** A node running a job is refused, because
