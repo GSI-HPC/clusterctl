@@ -45,6 +45,7 @@ var effects = map[string]safety.Effect{
 	"cinc show":                 safety.EffectRead,
 	"config contexts":           safety.EffectRead,
 	"config explain":            safety.EffectRead,
+	"config init":               safety.EffectChange,
 	"config schema":             safety.EffectRead,
 	"config use-context":        safety.EffectRead,
 	"config validate":           safety.EffectRead,

@@ -74,15 +74,17 @@ Go 1.26 or newer. The toolchain downloads itself if yours is older.
 ## Get started
 
 ```console
-$ mkdir -p ~/.config/clusterctl
-$ cp examples/site/*.yaml ~/.config/clusterctl/    # then edit them
+$ clusterctl config init --site lab --cluster alpha --domain hpc.example.org
+$ $EDITOR ~/.config/clusterctl/*.yaml    # fill in what the comments ask for
 $ clusterctl config validate
 $ clusterctl doctor
 $ clusterctl node list
 ```
 
-`examples/site/` is a complete configuration to copy. The
-[manual](https://gsi-hpc.github.io/clusterctl/) walks through it, and
+`config init` writes the least configuration that resolves, and only into an
+empty directory. `examples/site/` is a complete
+configuration to take further settings from. The
+[manual](https://gsi-hpc.github.io/clusterctl/) walks through both, and
 [`doc/migration.md`](doc/migration.md) maps every command and setting of the
 shell toolkit clusterctl replaces to its counterpart.
 

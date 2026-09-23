@@ -34,10 +34,20 @@ func listSeparator() string {
 // CLUSTERCTL_CONFIG is not set, most specific last.
 func ConfigDirs() []string {
 	var dirs []string
-	if home, err := os.UserConfigDir(); err == nil {
-		dirs = append(dirs, filepath.Join(home, "clusterctl"))
+	if dir, err := UserConfigDir(); err == nil {
+		dirs = append(dirs, dir)
 	}
 	return append([]string{"/etc/clusterctl"}, dirs...)
+}
+
+// UserConfigDir returns the administrator's own configuration directory,
+// usually ~/.config/clusterctl, which is searched after /etc/clusterctl.
+func UserConfigDir() (string, error) {
+	home, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "clusterctl"), nil
 }
 
 // StateDir returns the directory holding the generated ssh configuration,
@@ -83,16 +93,29 @@ func ExpandPath(path, base string) string {
 
 // SearchPath returns the files to read, in the order they are layered.
 func SearchPath(env func(string) string) ([]string, error) {
+	return ExpandEntries(SearchEntries(env))
+}
+
+// SearchEntries returns the files and directories configuration is read from
+// when --config is not given: the entries of CLUSTERCTL_CONFIG when it is
+// set, the configuration directories otherwise.
+func SearchEntries(env func(string) string) []string {
+	if entries := EnvEntries(env); entries != nil {
+		return entries
+	}
+	return ConfigDirs()
+}
+
+// EnvEntries returns the files and directories CLUSTERCTL_CONFIG names, or
+// nil when it is not set.
+func EnvEntries(env func(string) string) []string {
 	if env == nil {
 		env = os.Getenv
 	}
-	var entries []string
 	if list := env(EnvConfig); list != "" {
-		entries = strings.Split(list, listSeparator())
-	} else {
-		entries = ConfigDirs()
+		return strings.Split(list, listSeparator())
 	}
-	return ExpandEntries(entries)
+	return nil
 }
 
 // ExpandEntries turns files and directories into the list of files to read,

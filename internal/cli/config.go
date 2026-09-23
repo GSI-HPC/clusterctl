@@ -4,7 +4,11 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -13,16 +17,19 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 )
 
 func newConfigCommand(r *root) *cobra.Command {
-	return group("config", "Inspect and check the configuration", `
+	return group("config", "Start, inspect and check the configuration", `
 The configuration is read from several documents and merged in layers:
 built-in defaults, the site, the cluster, the workstation, the context, the
 environment and finally the flags. Each layer wins over the ones before it.
 
-These commands show what the merge produced and where each value came from.`,
+These commands show what the merge produced and where each value came from.
+"clusterctl config init" writes a first configuration to start from.`,
+		newConfigInitCommand(r),
 		newConfigViewCommand(r),
 		newConfigValidateCommand(r),
 		newConfigContextsCommand(r),
@@ -30,6 +37,207 @@ These commands show what the merge produced and where each value came from.`,
 		newConfigExplainCommand(r),
 		newConfigSchemaCommand(r),
 	)
+}
+
+func newConfigInitCommand(r *root) *cobra.Command {
+	opts := config.ScaffoldDefaults()
+
+	cmd := leaf("init [DIR]", "Write a first configuration to fill in", `
+Write the least configuration that resolves, one document to a file: a
+Config with one context, a Site with a login node, a Cluster and an empty
+NodeInventory. The comments in each file say what to fill in; then check the
+result with "clusterctl config validate" and "clusterctl doctor".
+
+Without DIR the files are written where configuration is read from: the
+directory --config or CLUSTERCTL_CONFIG names, or else your own configuration
+directory, usually ~/.config/clusterctl. When either names several places,
+name the one to write to. Directories that are missing are created.
+
+The directory has to be empty. One that holds anything, hidden files
+included, is refused rather than added to: this command writes nothing next
+to files it did not write, and overwrites nothing.
+
+  clusterctl config init
+  clusterctl config init --site lab --cluster alpha --domain hpc.example.org --user alice_adm
+  clusterctl config init ./site-config --dry-run`,
+		cobra.MaximumNArgs(1),
+		func(cmd *cobra.Command, args []string) error {
+			format, err := output.ParseFormat(r.format)
+			if err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
+			}
+			dir, err := initDir(r, args)
+			if err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
+			}
+			files, err := config.Scaffold(opts)
+			if err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
+			}
+			if err := refuseNonEmpty(dir); err != nil {
+				return err
+			}
+
+			t := output.NewTable(output.Cols("FILE", "KIND", "NAME")...)
+			for _, f := range files {
+				t.Add(filepath.Join(dir, f.Name), f.Kind, f.DocName)
+			}
+			if r.dryRun {
+				t.Caption = fmt.Sprintf("%d files would be written; nothing was", len(files))
+				return format.Write(cmd.OutOrStdout(), output.Result{Table: t})
+			}
+			if err := writeScaffold(dir, files); err != nil {
+				return err
+			}
+			t.Caption = initNextSteps(r, dir, len(files))
+			return format.Write(cmd.OutOrStdout(), output.Result{Table: t})
+		})
+
+	flags := cmd.Flags()
+	flags.StringVar(&opts.Site, "site", opts.Site, "name of the Site document")
+	flags.StringVar(&opts.Cluster, "cluster", opts.Cluster, "name of the Cluster document and of the context that acts on it")
+	flags.StringVar(&opts.Domain, "domain", opts.Domain, "DNS domain of the cluster nodes")
+	flags.StringVar(&opts.Login, "login", "", "host name of the login node (default: login in the domain)")
+	flags.StringVar(&opts.User, "user", "", "remote account to log in as (default: left to ssh)")
+	cmd.ValidArgsFunction = func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveFilterDirs
+	}
+	return cmd
+}
+
+// initDir is where config init writes: the directory it was given, else the
+// one place --config or CLUSTERCTL_CONFIG names, else the administrator's own
+// configuration directory. Writing where configuration is read from means
+// the next command reads what was written.
+func initDir(r *root, args []string) (string, error) {
+	if len(args) == 1 {
+		if strings.TrimSpace(args[0]) == "" {
+			return "", fmt.Errorf("the directory to write to is empty")
+		}
+		return filepath.Abs(config.ExpandPath(args[0], ""))
+	}
+	source, places := "--config", nonBlank(r.configFiles)
+	if len(places) == 0 {
+		source, places = config.EnvConfig, nonBlank(config.EnvEntries(nil))
+	}
+	switch len(places) {
+	case 0:
+	case 1:
+		return filepath.Abs(config.ExpandPath(places[0], ""))
+	default:
+		// A complete configuration written into one layer of several
+		// would change what the others resolve to.
+		return "", fmt.Errorf("%s names %d places to read configuration from (%s); name the one to write to: clusterctl config init DIR",
+			source, len(places), strings.Join(places, ", "))
+	}
+	dir, err := config.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("no configuration directory is known for this user (%w); name one: clusterctl config init DIR", err)
+	}
+	return dir, nil
+}
+
+// nonBlank returns the entries that are not blank, trimmed.
+func nonBlank(entries []string) []string {
+	var out []string
+	for _, entry := range entries {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// refuseNonEmpty stops config init from writing into a directory that holds
+// anything at all. Whatever is there was put there by someone else, and
+// documents written next to it could change what it resolves to.
+func refuseNonEmpty(dir string) error {
+	info, err := os.Stat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	case !info.IsDir():
+		return exitcode.Errorf(exitcode.Usage, "%s is not a directory", dir)
+	}
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	const shown = 3
+	names := make([]string, 0, shown+1)
+	for _, item := range items[:min(len(items), shown)] {
+		names = append(names, item.Name())
+	}
+	if len(items) > shown {
+		names = append(names, fmt.Sprintf("and %d more", len(items)-shown))
+	}
+	return exitcode.Errorf(exitcode.Usage,
+		"%s is not empty (%s); config init writes only into an empty directory: name a new one, clusterctl config init DIR",
+		dir, strings.Join(names, ", "))
+}
+
+// writeScaffold writes the files of a new configuration, all of them or none:
+// when one cannot be written, the ones written before it are taken away.
+func writeScaffold(dir string, files []config.ScaffoldFile) (err error) {
+	// Every administrator of the site reads the site documents, so the
+	// directory is not made private the way the state directory is.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	var written []string
+	defer func() {
+		if err != nil {
+			for _, path := range written {
+				_ = os.Remove(path)
+			}
+		}
+	}()
+	for _, f := range files {
+		path := filepath.Join(dir, f.Name)
+		if err = fileutil.WriteNew(path, f.Data, 0o644); err != nil {
+			return err
+		}
+		written = append(written, path)
+	}
+	return nil
+}
+
+// initNextSteps says what to do with the files config init wrote, including
+// how to have them read when they are not where clusterctl looks.
+func initNextSteps(r *root, dir string, count int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d files written. The comments in them say what to fill in; then check the result:\n", count)
+	if !searched(r, dir) {
+		fmt.Fprintf(&b, "  export %s=%s    # clusterctl does not read this directory otherwise\n",
+			config.EnvConfig, shellQuote(dir))
+	}
+	b.WriteString("  clusterctl config validate\n  clusterctl doctor")
+	return b.String()
+}
+
+// searched reports whether configuration in dir is read without being named
+// again: dir is given to --config, listed in CLUSTERCTL_CONFIG, or one of the
+// directories searched when neither is set.
+func searched(r *root, dir string) bool {
+	entries := r.configFiles
+	if len(entries) == 0 {
+		entries = config.SearchEntries(nil)
+	}
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(config.ExpandPath(entry, "")); err == nil && abs == dir {
+			return true
+		}
+	}
+	return false
 }
 
 func newConfigViewCommand(r *root) *cobra.Command {

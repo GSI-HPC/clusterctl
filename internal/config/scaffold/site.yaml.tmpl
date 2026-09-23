@@ -1,0 +1,46 @@
+{{/* SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> */ -}}
+{{/* SPDX-License-Identifier: LGPL-3.0-or-later */ -}}
+# Everything the clusters of one site share. Keep it in version control with
+# the host key file next to it: a relative path in it is resolved against the
+# directory it is in.
+#
+# This is the least that resolves. "clusterctl config schema Site" lists every
+# other field, and the manual explains them: https://gsi-hpc.github.io/clusterctl/
+# yaml-language-server: $schema={{schema "Site"}}
+apiVersion: clusterctl/v1alpha1
+kind: Site
+metadata:
+  name: {{yaml .Site}}
+spec:
+  domains:
+    # The naming rules refer to a domain by its role, as {domains.hpc}.
+    hpc: {{yaml .Domain}}
+
+  naming:
+    # The first rule that matches a short node name decides its host name and
+    # the name of its service processor. A rule without a match applies to
+    # every name, so it comes last.
+    rules:
+      - fqdn: "{name}.{domains.hpc}"
+        # The service processors keep the node's name unless this says
+        # otherwise, for example:
+        # bmc: "{name}.mgmt.{domains.hpc}"
+
+  hosts:
+    # The hosts commands reach by role. The Slurm commands run on login.
+    login:
+      host: {{yaml .Login}}
+      description: Cluster login node, where the Slurm clients run
+
+  ssh:
+    # The host key file every connection is checked against. Collect the key
+    # of the login node, and those of the nodes once they are in the
+    # inventory, and commit the file with this one:
+    #
+    #   clusterctl hostkey refresh {{.Login}}
+    knownHostsFile: ssh-known-hosts
+
+  safety:
+    # Node sets that no destructive command touches unless --force is given
+    # as well, such as the Slurm controller and the file servers.
+    protectedHosts: []

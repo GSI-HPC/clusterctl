@@ -11,6 +11,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -79,6 +80,274 @@ func TestConfigViewPrintsTheMergedConfiguration(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the sources listing is missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestConfigInitWritesAConfigurationThatResolves runs what a new
+// administrator runs: init, then the commands the next steps name, against
+// nothing but what init wrote.
+func TestConfigInitWritesAConfigurationThatResolves(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "site-config")
+	h, err := run(t, harnessOptions{bare: true, config: []string{dir}},
+		"config", "init", dir,
+		"--site", "lab", "--cluster", "alpha", "--domain", "hpc.lab.example", "--user", "alice_adm")
+	if err != nil {
+		t.Fatalf("config init failed: %v", err)
+	}
+	out := h.out.String()
+	for _, name := range []string{"config.yaml", "site.yaml", "cluster.yaml", "inventory.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s was not written: %v", name, err)
+		}
+		if !strings.Contains(out, filepath.Join(dir, name)) {
+			t.Errorf("the output does not list %s:\n%s", name, out)
+		}
+	}
+	if !strings.Contains(out, "clusterctl config validate") {
+		t.Errorf("the output does not say what to run next:\n%s", out)
+	}
+	// --config names the directory, so there is nothing to point at it.
+	if strings.Contains(out, "export CLUSTERCTL_CONFIG") {
+		t.Errorf("the output asks for a directory that is read already to be named:\n%s", out)
+	}
+
+	h, err = run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "validate")
+	if err != nil {
+		t.Fatalf("config validate of the written files failed: %v", err)
+	}
+	if !strings.Contains(h.out.String(), "4 documents are valid; context alpha resolves") {
+		t.Errorf("config validate did not accept the written files:\n%s", h.out)
+	}
+
+	h, err = run(t, harnessOptions{bare: true, config: []string{dir}}, "node", "fqdn", "-n", "node[1-2]")
+	if err != nil {
+		t.Fatalf("node fqdn against the written files failed: %v", err)
+	}
+	if got, want := strings.TrimSpace(h.out.String()), "node[1-2].hpc.lab.example"; got != want {
+		t.Errorf("node fqdn = %q, want %q", got, want)
+	}
+
+	h, err = run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "explain", "defaultUser")
+	if err != nil {
+		t.Fatalf("config explain against the written files failed: %v", err)
+	}
+	if !strings.Contains(h.out.String(), "alice_adm") {
+		t.Errorf("the context user was not written:\n%s", h.out)
+	}
+}
+
+// isolateHome points the user's configuration directory into a temporary
+// one, so that a config init without DIR cannot reach the real one, and
+// returns it.
+func isolateHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("CLUSTERCTL_CONFIG", "")
+	t.Setenv("CLUSTERCTL_CONTEXT", "")
+	dir, err := config.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestConfigInitDefaultsToTheUserConfigDirectory(t *testing.T) {
+	dir := isolateHome(t)
+
+	h, err := run(t, harnessOptions{bare: true}, "config", "init")
+	if err != nil {
+		t.Fatalf("config init failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "site.yaml")); err != nil {
+		t.Errorf("site.yaml was not written to %s: %v", dir, err)
+	}
+	// The directory is on the search path, so the next steps need no
+	// variable.
+	if strings.Contains(h.out.String(), "export CLUSTERCTL_CONFIG") {
+		t.Errorf("the output asks for the searched directory to be named:\n%s", h.out)
+	}
+
+	// And the search path finds it with nothing else set, unless this
+	// machine has a site configuration of its own that is read as well.
+	if _, err := os.Stat("/etc/clusterctl"); err == nil {
+		return
+	}
+	h, err = run(t, harnessOptions{bare: true}, "config", "validate")
+	if err != nil {
+		t.Fatalf("config validate over the search path failed: %v", err)
+	}
+	if !strings.Contains(h.out.String(), "context cluster1 resolves") {
+		t.Errorf("config validate did not find the written files:\n%s", h.out)
+	}
+}
+
+func TestConfigInitSaysHowToReadAnotherDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "elsewhere")
+	h, err := run(t, harnessOptions{}, "config", "init", dir)
+	if err != nil {
+		t.Fatalf("config init failed: %v", err)
+	}
+	if want := "export CLUSTERCTL_CONFIG=" + dir; !strings.Contains(h.out.String(), want) {
+		t.Errorf("the output does not say %q:\n%s", want, h.out)
+	}
+}
+
+func TestConfigInitWritesWhereTheEnvironmentPoints(t *testing.T) {
+	// Directories that are missing, parents included, are created.
+	isolateHome(t)
+	dir := filepath.Join(t.TempDir(), "srv", "site-config")
+	t.Setenv("CLUSTERCTL_CONFIG", dir)
+
+	h, err := run(t, harnessOptions{bare: true}, "config", "init")
+	if err != nil {
+		t.Fatalf("config init failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "site.yaml")); err != nil {
+		t.Errorf("site.yaml was not written to %s: %v", dir, err)
+	}
+	if strings.Contains(h.out.String(), "export CLUSTERCTL_CONFIG") {
+		t.Errorf("the output asks for the directory CLUSTERCTL_CONFIG names to be named:\n%s", h.out)
+	}
+	if _, err := run(t, harnessOptions{bare: true}, "config", "validate"); err != nil {
+		t.Errorf("config validate of what was written failed: %v", err)
+	}
+}
+
+func TestConfigInitWritesWhereConfigPoints(t *testing.T) {
+	isolateHome(t)
+	t.Setenv("CLUSTERCTL_CONFIG", filepath.Join(t.TempDir(), "not-this-one"))
+	dir := filepath.Join(t.TempDir(), "site-config")
+
+	if _, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "init"); err != nil {
+		t.Fatalf("config init failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "site.yaml")); err != nil {
+		t.Errorf("site.yaml was not written to the --config directory: %v", err)
+	}
+}
+
+// TestConfigInitRefusesSeveralPlaces keeps init from writing a complete
+// configuration into one layer of several, where it would change what the
+// others resolve to.
+func TestConfigInitRefusesSeveralPlaces(t *testing.T) {
+	own := isolateHome(t)
+	base := t.TempDir()
+	first, second := filepath.Join(base, "site"), filepath.Join(base, "mine")
+	t.Setenv("CLUSTERCTL_CONFIG", first+string(os.PathListSeparator)+second)
+
+	_, err := run(t, harnessOptions{bare: true}, "config", "init")
+	if err == nil {
+		t.Fatal("config init chose one of several places")
+	}
+	if got, want := exitcode.From(err), exitcode.Usage; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	if !strings.Contains(err.Error(), "clusterctl config init DIR") {
+		t.Errorf("the error does not say how to name the directory: %v", err)
+	}
+	for _, dir := range []string{first, second, own} {
+		if _, err := os.Stat(dir); err == nil {
+			t.Errorf("a refused config init created %s", dir)
+		}
+	}
+}
+
+// TestConfigInitRefusesADirectoryThatIsNotEmpty keeps init from writing next
+// to anything it did not write, and from writing over it.
+func TestConfigInitRefusesADirectoryThatIsNotEmpty(t *testing.T) {
+	const content = "# already here\n"
+	for _, name := range []string{"mine.yaml", "README.md", ".sops.yaml", ".git"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, name)
+			if name == ".git" {
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			for _, extra := range [][]string{nil, {"--dry-run"}} {
+				_, err := run(t, harnessOptions{}, append([]string{"config", "init", dir}, extra...)...)
+				if err == nil {
+					t.Fatalf("config init %v wrote into a directory holding %s", extra, name)
+				}
+				if got, want := exitcode.From(err), exitcode.Usage; got != want {
+					t.Errorf("exit code = %d, want %d", got, want)
+				}
+				if !strings.Contains(err.Error(), name) {
+					t.Errorf("the error does not name what is there: %v", err)
+				}
+			}
+			items, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 {
+				t.Errorf("the refused directory holds %d entries, want only %s", len(items), name)
+			}
+			if name != ".git" {
+				if data, _ := os.ReadFile(path); string(data) != content {
+					t.Errorf("%s changed: %q", name, data)
+				}
+			}
+		})
+	}
+
+	// An empty directory is taken, and a second run finds the first one's
+	// files.
+	dir := t.TempDir()
+	if _, err := run(t, harnessOptions{}, "config", "init", dir); err != nil {
+		t.Fatalf("config init into an empty directory failed: %v", err)
+	}
+	if _, err := run(t, harnessOptions{}, "config", "init", dir); err == nil {
+		t.Error("a second config init into the same directory was not refused")
+	}
+}
+
+func TestConfigInitDryRunWritesNothing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "site-config")
+	h, err := run(t, harnessOptions{}, "config", "init", dir, "--dry-run")
+	if err != nil {
+		t.Fatalf("config init --dry-run failed: %v", err)
+	}
+	if !strings.Contains(h.out.String(), filepath.Join(dir, "site.yaml")) {
+		t.Errorf("the dry run does not list what it would write:\n%s", h.out)
+	}
+	if _, err := os.Stat(dir); err == nil {
+		t.Errorf("the dry run created %s", dir)
+	}
+}
+
+func TestConfigInitRejectsWhatCannotBeWritten(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "site-config")
+	for _, args := range [][]string{
+		{"--domain", "hpc example.org"},
+		{"--cluster", "my cluster"},
+		{"--login", "-oProxyCommand=true"},
+	} {
+		_, err := run(t, harnessOptions{}, append([]string{"config", "init", dir}, args...)...)
+		if err == nil {
+			t.Errorf("config init %v succeeded", args)
+			continue
+		}
+		if got, want := exitcode.From(err), exitcode.Usage; got != want {
+			t.Errorf("config init %v: exit code = %d, want %d", args, got, want)
+		}
+	}
+	if _, err := os.Stat(dir); err == nil {
+		t.Errorf("a rejected config init created %s", dir)
+	}
+
+	file := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, harnessOptions{}, "config", "init", file); err == nil {
+		t.Error("config init into a file succeeded")
 	}
 }
 

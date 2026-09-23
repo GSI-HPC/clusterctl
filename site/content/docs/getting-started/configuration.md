@@ -6,15 +6,49 @@ weight: 2
 Configuration is YAML documents, each carrying an `apiVersion` and a `kind`.
 Several may share a file.
 
+## Start from a scaffold
+
 ```console
-$ mkdir -p ~/.config/clusterctl
-$ cp examples/site/*.yaml ~/.config/clusterctl/
-$ $EDITOR ~/.config/clusterctl/site.yaml
+$ clusterctl config init --site lab --cluster alpha --domain hpc.example.org --user alice_adm
+FILE                                           KIND           NAME
+/home/alice/.config/clusterctl/cluster.yaml    Cluster        alpha
+/home/alice/.config/clusterctl/config.yaml     Config
+/home/alice/.config/clusterctl/inventory.yaml  NodeInventory  lab
+/home/alice/.config/clusterctl/site.yaml       Site           lab
+
+4 files written. The comments in them say what to fill in; then check the result:
+  clusterctl config validate
+  clusterctl doctor
+```
+
+This is the least configuration that resolves: one context, a login node, a
+naming rule, a host key file and an empty node inventory. Every flag is
+optional; without them the files carry the names of the example site. Fill in
+your nodes and whatever else the comments point at, and check the result:
+
+```console
+$ $EDITOR ~/.config/clusterctl/inventory.yaml
 $ clusterctl config validate
 ```
 
-`examples/site/` ships with the release and is a complete, working
-configuration. Copy it and replace the values.
+Without a directory, the files go where clusterctl reads configuration from:
+the directory `CLUSTERCTL_CONFIG` or `--config` names, or else your own
+configuration directory. Give a directory to write somewhere else, such as a
+new one in the repository the site documents are to live in. Directories that
+are missing are created. `--dry-run` lists the files without writing them:
+
+```console
+$ clusterctl config init ./site-config --dry-run
+```
+
+`config init` writes only into an empty directory and never overwrites a
+file, so running it twice changes nothing. A directory that holds anything, a
+`README` or a `.git` directory included, is refused: run `config init` before
+`git init`, or write into a subdirectory.
+
+For everything the scaffold leaves out, `examples/site/` ships with the
+release and is a complete, working configuration. Take from it what your site
+needs.
 
 ## The six kinds
 
@@ -29,7 +63,8 @@ configuration. Copy it and replace the values.
 
 ## A minimal site
 
-Enough to log in and run commands:
+Enough to log in and run commands. It is what `config init --user alice_adm`
+writes, without the comments and with the documents in one file:
 
 ```yaml
 apiVersion: clusterctl/v1alpha1
@@ -42,19 +77,18 @@ spec:
 
   naming:
     rules:
-      - match:
-          prefixes: [exe, sub, wlm]
-        fqdn: "{name}.{domains.hpc}"
-        bmc: "{name}.{domains.mgmtHpc}"
       - fqdn: "{name}.{domains.hpc}"
 
   hosts:
     login:
       host: login.hpc.example.org
-      description: Where the Slurm clients run
+      description: Cluster login node, where the Slurm clients run
 
   ssh:
     knownHostsFile: ssh-known-hosts
+
+  safety:
+    protectedHosts: []
 ---
 apiVersion: clusterctl/v1alpha1
 kind: Cluster
@@ -69,6 +103,13 @@ spec:
     sources:
       inventory:
         attribute: class
+---
+apiVersion: clusterctl/v1alpha1
+kind: NodeInventory
+metadata:
+  name: example
+spec:
+  nodes: []
 ---
 apiVersion: clusterctl/v1alpha1
 kind: Config

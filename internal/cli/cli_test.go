@@ -51,7 +51,10 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 	cmd := NewRootCommand(context.Background(), streams)
 	cmd.SetOut(h.out)
 	cmd.SetErr(h.errOut)
-	config := []string{"--config", exampleDir}
+	var config []string
+	if !opts.bare {
+		config = []string{"--config", exampleDir}
+	}
 	for _, extra := range opts.config {
 		config = append(config, "--config", extra)
 	}
@@ -71,6 +74,9 @@ type harnessOptions struct {
 	// config are read after the example configuration, so their documents
 	// replace the example's of the same kind and name.
 	config []string
+	// bare leaves the example configuration out, so that only config is
+	// read, or the search path when config is empty too.
+	bare bool
 }
 
 // rootOf digs the root state out of a built command tree.
