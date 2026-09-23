@@ -44,7 +44,8 @@ The workflow then builds, tests, and publishes:
 - the same for `linux/arm64`, `darwin/amd64` and `darwin/arm64`
 - `checksums.txt`, covering all four
 - a build provenance attestation for every artifact
-- release notes generated from the commits since the previous tag
+- release notes: the body of the tag message, then the commits since the
+  previous tag, grouped by type
 
 The archive name carries no version, so
 `releases/latest/download/clusterctl_linux_amd64.tar.gz` is a stable URL. The
@@ -53,6 +54,27 @@ version is in the tag, the release and the binary itself.
 The binary is built with `-trimpath` and with the version, commit and build
 date injected, so two builds of the same tag with the same toolchain produce
 the same binary.
+
+## Release notes
+
+Anything the tag message says after its first line opens the release notes,
+so the words that announce a release are signed with it. A tag made with `-m`
+has no body and the notes are the commit list alone. To say more, write the
+message in a file:
+
+```
+git tag -s --cleanup=whitespace v1.4.0 -F notes.md
+```
+
+The first line of `notes.md` is the subject, `clusterctl v1.4.0`; after a
+blank line comes the body, in Markdown. `--cleanup=whitespace` matters: git's
+default cleanup drops every line that starts with `#`, Markdown headings
+included.
+
+The first release has no previous tag, and the history before it begins with
+the shell toolkit clusterctl replaced, so it lists no commits: its notes are
+the tag message alone. [ADR 0015](adr/0015-release-notes-in-the-tag.md)
+says why the notes live there.
 
 ## The Go toolchain
 
@@ -115,6 +137,9 @@ Semantic versioning, with the command line as the public interface:
 - **major** — a command, a flag or an exit code changes meaning or goes away
 - **minor** — a command or a flag is added, or a configuration field is added
 - **patch** — a fix that changes no interface
+
+Releases start at 0.1.0. Until 1.0.0, a minor release may also make the
+changes that would otherwise need a major one, and says so in its notes.
 
 The configuration schema carries its own version, `clusterctl/v1alpha1`. As an
 alpha version it promises nothing; a document written for a later version is

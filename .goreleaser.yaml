@@ -24,7 +24,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/GSI-HPC/clusterctl/internal/version.version={{ .Version }}
+      # The tag as written, v included: what "go install" of the same tag
+      # reports, since .Version drops the v.
+      - -X github.com/GSI-HPC/clusterctl/internal/version.version=v{{ .Version }}
       - -X github.com/GSI-HPC/clusterctl/internal/version.commit={{ .FullCommit }}
       - -X github.com/GSI-HPC/clusterctl/internal/version.date={{ .CommitDate }}
     goos: [linux, darwin]
@@ -54,6 +56,10 @@ snapshot:
   version_template: '{{ incpatch .Version }}-next'
 
 changelog:
+  # The first release has no earlier tag to compare with, and the history
+  # before it begins with the shell toolkit it replaced; its notes are the
+  # body of the tag message instead, which the header below carries.
+  disable: '{{ not .PreviousTag }}'
   use: github
   sort: asc
   groups:
@@ -79,10 +85,14 @@ release:
     owner: GSI-HPC
     name: clusterctl
   prerelease: auto
+  # Whatever the tag message says after its first line opens the notes, so
+  # the words announcing a release are signed along with it.
   header: |
     ## clusterctl {{ .Tag }}
 
-    Download the binary for your platform below, or:
+    {{ with .TagBody }}{{ . }}
+
+    {{ end }}Download the binary for your platform below, or:
 
     ```console
     $ go install github.com/GSI-HPC/clusterctl/cmd/clusterctl@{{ .Tag }}

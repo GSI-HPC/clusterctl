@@ -24,3 +24,4 @@ A decision is superseded by a later record, never edited.
 | [0012](0012-dependabot.md) | Dependabot proposes the dependency updates | accepted |
 | [0013](0013-sops-secret-documents.md) | Secrets live in sops encrypted Secret documents | accepted |
 | [0014](0014-mcp-plan-and-apply.md) | An MCP server of curated tools, where a person answers the gate | accepted |
+| [0015](0015-release-notes-in-the-tag.md) | Release notes are written in the signed tag | accepted |
