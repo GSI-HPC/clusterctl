@@ -53,6 +53,30 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(name, path)
 }
 
+// WriteNew writes data to a file that does not exist yet, and never to one
+// that does. The file is created exclusively, so one that appeared since it
+// was last looked for is left alone and reported with an error errors.Is
+// matches to fs.ErrExist. A write that fails takes the new file away again.
+func WriteNew(path string, data []byte, perm os.FileMode) (err error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err = f.Write(data); err != nil {
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	return f.Close()
+}
+
 // Update reads a file, hands its content to change and writes back whatever
 // comes out, holding an exclusive lock for the whole cycle. A file that does
 // not exist yet is presented as empty.

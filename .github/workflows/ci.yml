@@ -63,6 +63,17 @@ jobs:
           ./bin/clusterctl exec --dry-run -n 'exe[1-3]' --confirm -- uptime
           ./bin/clusterctl provision reinstall --dry-run -n exe0001
 
+      # What config init writes has to be accepted by the rest of the binary,
+      # and a second run into the same directory has to be refused.
+      - name: Smoke test a scaffolded configuration
+        run: |
+          set -euxo pipefail
+          dir="$RUNNER_TEMP/scaffold"
+          ./bin/clusterctl config init "$dir" --site lab --cluster alpha --domain hpc.example.org
+          CLUSTERCTL_CONFIG="$dir" ./bin/clusterctl config validate
+          CLUSTERCTL_CONFIG="$dir" ./bin/clusterctl node fqdn -n 'node[1-3]'
+          if ./bin/clusterctl config init "$dir"; then exit 1; fi
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

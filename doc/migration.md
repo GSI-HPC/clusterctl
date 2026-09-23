@@ -111,7 +111,9 @@ across every command:
 
 ## Suggested order
 
-1. Write `Site`, `Cluster` and `NodeInventory` from `examples/site/`.
+1. Start from `clusterctl config init`, then fill in `Site`, `Cluster` and
+   `NodeInventory` from the old files; `examples/site/` shows every field in
+   use.
 2. `clusterctl config validate`, then `clusterctl config view --show-sources`
    and read it against the old `.conf` files.
 3. `clusterctl doctor --remote`.

@@ -39,6 +39,36 @@ list of files and directories, most general first. Without it, clusterctl reads
 name order, leaving out hidden files such as `.sops.yaml`. `--config` takes the
 same entries.
 
+## Starting a configuration
+
+`clusterctl config init [DIR]` writes the least configuration that resolves: a
+`Config` with one context, a `Site` with a login node, a `Cluster` and an
+empty `NodeInventory`, one document to a file. Without `DIR` it writes where
+configuration is read from: the directory `--config` or `CLUSTERCTL_CONFIG`
+names, or else the user's configuration directory. When either names several
+places it asks for `DIR`. Directories that are missing are created. Flags fill in the names, the
+domain, the login node and the remote account; the comments in each file say
+what is left to fill in.
+
+- **Checked before it is written.** The files are loaded, validated and
+  resolved in memory the way files read from disk are, so a value that would
+  not resolve is refused before anything is written. A name with a space in
+  it or a domain with a trailing dot is refused as well, although the schema
+  would take it. A name that YAML would read as something else, a cluster
+  called `0600` or a site called `yes`, is quoted.
+- **Only into an empty directory.** A directory that holds anything, a hidden
+  file or a `.git` directory included, is refused, with `--dry-run` as well.
+  To start a site repository, write into an empty subdirectory of it, or run
+  `config init` first and `git init` afterwards.
+  [ADR 0017](adr/0017-config-init-into-an-empty-directory.md) says why.
+- **Nothing is overwritten.** Each file is created exclusively, and when one
+  cannot be written the ones written before it are removed again.
+- **The template is not the example.** `examples/site/` shows every kind and
+  most fields in use; the scaffold holds only what a first `config validate`,
+  `doctor` and `node fqdn` need. Workstation and Secret documents are left
+  out, because neither is needed to resolve and both hold what only the
+  administrator knows.
+
 ## The layers
 
 Layers are applied in this order, each winning over the ones before it:

@@ -6,6 +6,7 @@ package fileutil_test
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,26 @@ func TestWriteAtomic(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".") {
 			t.Errorf("a temporary file was left behind: %s", e.Name())
 		}
+	}
+}
+
+func TestWriteNewNeverReplacesAFile(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "file")
+	if err := fileutil.WriteNew(path, []byte("one"), 0o644); err != nil {
+		t.Fatalf("WriteNew failed: %v", err)
+	}
+	err := fileutil.WriteNew(path, []byte("two"), 0o644)
+	if !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("writing over a file: err = %v, want fs.ErrExist", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "one"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
 	}
 }
 

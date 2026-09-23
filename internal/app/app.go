@@ -146,7 +146,8 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	}
 	if len(files) == 0 {
 		return nil, exitcode.Errorf(exitcode.Usage,
-			"no configuration was found; put a Config and a Site document in %s or point %s at them",
+			"no configuration was found; run \"clusterctl config init\" to write a first one, "+
+				"put a Config and a Site document in %s, or point %s at them",
 			strings.Join(config.ConfigDirs(), " or "), config.EnvConfig)
 	}
 

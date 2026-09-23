@@ -27,3 +27,4 @@ A decision is superseded by a later record, never edited.
 | [0014](0014-mcp-plan-and-apply.md) | An MCP server of curated tools, where a person answers the gate | accepted |
 | [0015](0015-release-notes-in-the-tag.md) | Release notes are written in the signed tag | accepted |
 | [0016](0016-copyright-holder.md) | GSI holds the copyright, and every file says so | accepted |
+| [0017](0017-config-init-into-an-empty-directory.md) | `config init` writes only into an empty directory, where it is read | accepted |

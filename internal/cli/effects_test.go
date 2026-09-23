@@ -53,6 +53,7 @@ func TestNothingThatWritesIsMarkedRead(t *testing.T) {
 	for _, path := range []string{
 		"bmc power", "hca config", "slurm account shares", "hostkey refresh",
 		"bmc forget", "exec", "copy", "tunnel start", "login", "mcp serve",
+		"config init",
 	} {
 		if effects[path] == safety.EffectRead {
 			t.Errorf("%q is marked read-only", path)

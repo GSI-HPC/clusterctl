@@ -1,0 +1,23 @@
+{{/* SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> */ -}}
+{{/* SPDX-License-Identifier: LGPL-3.0-or-later */ -}}
+# What differs between the clusters of a site. Each cluster has a document of
+# its own, and a context in the Config document that acts on it.
+# yaml-language-server: $schema={{schema "Cluster"}}
+apiVersion: clusterctl/v1alpha1
+kind: Cluster
+metadata:
+  name: {{yaml .Cluster}}
+spec:
+  site: {{yaml .Site}}
+
+  slurm:
+    # The host role the Slurm clients run on.
+    role: login
+
+  groups:
+    # One group per value of the class attribute of the node inventory, so
+    # that @compute names every node whose class is compute.
+    defaultSource: inventory
+    sources:
+      inventory:
+        attribute: class

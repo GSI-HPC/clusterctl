@@ -43,6 +43,12 @@ type Bundle struct {
 // Validation happens per document, before anything is merged, so a mistake is
 // reported at the line it was written on.
 func Load(files []string) (*Bundle, error) {
+	return load(files, os.ReadFile)
+}
+
+// load is Load with the files read by read, so that a configuration that is
+// not on disk yet can be checked the same way.
+func load(files []string, read func(string) ([]byte, error)) (*Bundle, error) {
 	b := &Bundle{
 		Files:        files,
 		Sites:        map[string]*Document{},
@@ -54,7 +60,7 @@ func Load(files []string) (*Bundle, error) {
 
 	configDocs := make([]*Document, 0, 2)
 	for _, file := range files {
-		data, err := os.ReadFile(file)
+		data, err := read(file)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", file, err)
 		}

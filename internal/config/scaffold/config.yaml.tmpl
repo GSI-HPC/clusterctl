@@ -1,0 +1,19 @@
+{{/* SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> */ -}}
+{{/* SPDX-License-Identifier: LGPL-3.0-or-later */ -}}
+# Which clusters this installation knows and which one commands act on. This
+# document is yours rather than the site's: when the site documents move into
+# version control, it stays in your own configuration directory.
+# yaml-language-server: $schema={{schema "Config"}}
+apiVersion: clusterctl/v1alpha1
+kind: Config
+currentContext: {{yaml .Cluster}}
+contexts:
+  - name: {{yaml .Cluster}}
+    cluster: {{yaml .Cluster}}
+{{- if .User}}
+    user: {{yaml .User}}
+{{- else}}
+    # The account to log in as on a host that does not name one. Without it,
+    # ssh decides: your own ssh_config, or your local user name.
+    # user: alice_adm
+{{- end}}
