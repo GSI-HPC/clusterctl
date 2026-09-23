@@ -84,6 +84,7 @@ var effects = map[string]safety.Effect{
 	"pdu shell":                 safety.EffectInteractive,
 	"provision reinstall":       safety.EffectChange,
 	"provision status":          safety.EffectRead,
+	"secrets check":             safety.EffectRead,
 	"secrets list":              safety.EffectRead,
 	"secrets push":              safety.EffectChange,
 	"slurm account add":         safety.EffectChange,
