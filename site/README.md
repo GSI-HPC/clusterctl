@@ -47,6 +47,23 @@ what they describe. Both are gitignored and built in CI.
 - `{{< callout type="warning" >}}` for anything that loses data;
   `type="info"` for a note worth not missing.
 
+## The front page
+
+`content/_index.md` is HTML rather than Markdown, styled by
+[`assets/css/custom.css`](assets/css/custom.css), which Hextra appends to its
+own styles; its classes start with `cx-`. Hextra compiles only the `hx:`
+utility classes it uses itself, so one it does not use does nothing here.
+
+Two shortcodes draw on it:
+
+- `terminal`, a terminal window. A line starting with `$ ` is a command, `? `
+  a question it asks and `! ` a warning; any other line is output. What it
+  shows is real output, as on every other page.
+- `nodemap`, the picture of a cluster, whose caption counts the nodes it
+  selects.
+
+`custom.css` also sets the accent colour of the whole manual.
+
 ## Versions
 
 The published site holds a manual per version: the latest release at the
