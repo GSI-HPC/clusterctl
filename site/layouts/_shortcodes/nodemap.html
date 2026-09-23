@@ -1,0 +1,49 @@
+{{- /* SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> */ -}}
+{{- /* SPDX-License-Identifier: LGPL-3.0-or-later */ -}}
+{{- /*
+  The picture on the front page: a cluster drawn as racks of nodes, a square
+  per node coloured by its Slurm state, with the idle nodes of one rack
+  selected. The caption is the node set that selects them and its count,
+  which the template counts, so the two cannot disagree.
+
+  The states are a fixed pattern, a quadratic in the node's index, so the
+  picture is the same on every build; a linear one draws visible stripes.
+  A phone shows the first four racks.
+*/ -}}
+{{- $racks := 8 -}}
+{{- $rows := 16 -}}
+{{- $cols := 6 -}}
+{{- $selected := 3 -}}
+{{- $count := 0 -}}
+<figure class="cx-map not-prose" aria-label="{{ $racks }} racks of {{ mul $rows $cols }} nodes, the idle nodes of rack R0{{ $selected }} selected">
+  <div class="cx-racks" aria-hidden="true">
+  {{- range $rack := seq $racks }}
+    <div class="cx-rack"><span>R0{{ $rack }}</span><div>
+    {{- range $row := seq 0 (sub $rows 1) -}}
+      {{- range $col := seq 0 (sub $cols 1) -}}
+        {{- $i := add (mul $row $racks $cols) (mul (sub $rack 1) $cols) $col -}}
+        {{- $r := mod (add (mul $i $i 131) (mul $i 29) 11) 97 -}}
+        {{- $state := "alloc" -}}
+        {{- if lt $r 3 -}}
+          {{- $state = "drain" -}}
+        {{- else if and (eq $r 88) (eq (mod $i 3) 0) -}}
+          {{- $state = "down" -}}
+        {{- else if lt $r 38 -}}
+          {{- $state = "idle" -}}
+        {{- end -}}
+        {{- if and (eq $rack $selected) (eq $state "idle") -}}
+          {{- $state = "sel" -}}
+          {{- $count = add $count 1 -}}
+        {{- end -}}
+        <i class="{{ $state }}"{{ if eq $state "sel" }} style="--d: {{ add $row $col }}"{{ end }}></i>
+      {{- end -}}
+    {{- end -}}
+    </div></div>
+  {{- end }}
+  </div>
+  <figcaption>
+    <code><span class="cx-prompt">$</span> clusterctl node select '@idle&amp;@rack:R0{{ $selected }}' --count</code>
+    <b>{{ $count }}</b>
+    <span class="cx-legend"><i class="alloc"></i>allocated <i class="idle"></i>idle <i class="drain"></i>drained <i class="down"></i>down</span>
+  </figcaption>
+</figure>

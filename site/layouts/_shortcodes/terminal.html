@@ -1,0 +1,34 @@
+{{- /* SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> */ -}}
+{{- /* SPDX-License-Identifier: LGPL-3.0-or-later */ -}}
+{{- /*
+  A terminal window, for showing a command and what it prints. A line
+  starting with "$ " is a command, "# " a comment, "? " a question the command
+  asks and "! " a warning or an error; any other line is output, and a blank
+  line is a gap. A long line wraps, a command indented under its own start.
+
+    {{< terminal title="alpha" >}}
+    $ clusterctl node select '@idle'
+    exe[0004-0009]
+    {{< /terminal >}}
+*/ -}}
+{{- $title := .Get "title" -}}
+<div class="cx-term not-prose">
+  <div class="cx-term-bar" aria-hidden="true"><i></i><i></i><i></i>{{ with $title }}<span>{{ . }}</span>{{ end }}</div>
+  <pre class="cx-term-body"><code>
+  {{- range split (strings.TrimRight " \n" (strings.TrimLeft "\n" .Inner)) "\n" -}}
+    {{- if hasPrefix . "$ " -}}
+      <span class="cx-l cx-cmd"><span class="cx-prompt">$ </span>{{ substr . 2 }}</span>
+    {{- else if hasPrefix . "# " -}}
+      <span class="cx-l cx-comment">{{ . }}</span>
+    {{- else if hasPrefix . "? " -}}
+      <span class="cx-l cx-ask">{{ substr . 2 }}</span>
+    {{- else if hasPrefix . "! " -}}
+      <span class="cx-l cx-warn">{{ substr . 2 }}</span>
+    {{- else if eq (strings.TrimSpace .) "" -}}
+      <span class="cx-l cx-gap"></span>
+    {{- else -}}
+      <span class="cx-l">{{ . }}</span>
+    {{- end -}}
+  {{- end -}}
+  </code></pre>
+</div>
