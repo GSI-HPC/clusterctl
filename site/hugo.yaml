@@ -1,8 +1,13 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
 # SPDX-License-Identifier: LGPL-3.0-or-later
 
 baseURL: https://gsi-hpc.github.io/clusterctl/
 title: clusterctl
 languageCode: en-gb
+
+# The copyright element of the feeds. The page footer takes its line from
+# i18n/en.yaml, which is where Hextra reads it.
+copyright: © 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH
 
 # Hextra is a Hugo module, so the theme is fetched through the same module
 # proxy as the Go dependencies. No Node, no package manager.

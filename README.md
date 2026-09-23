@@ -1,3 +1,4 @@
+<!-- SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> -->
 <!-- SPDX-License-Identifier: LGPL-3.0-or-later -->
 
 # clusterctl
@@ -141,6 +142,9 @@ Design notes and the decision records are in [`doc/`](doc/); a change that
 takes a decision gets a record.
 
 ## Licence
+
+Copyright (C) 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH
+<http://www.gsi.de>
 
 LGPL-3.0-or-later. See [`COPYING`](COPYING) and
 [`COPYING.LESSER`](COPYING.LESSER).

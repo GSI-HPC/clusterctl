@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
 // Package slurm reads and changes the state of a Slurm cluster through its

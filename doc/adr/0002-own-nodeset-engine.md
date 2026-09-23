@@ -1,3 +1,4 @@
+<!-- SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de> -->
 <!-- SPDX-License-Identifier: LGPL-3.0-or-later -->
 
 # 0002 — Port the node set engine rather than depend on one
