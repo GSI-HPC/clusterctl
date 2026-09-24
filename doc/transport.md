@@ -253,6 +253,13 @@ administrator can still write it. A symbolic link to the file stays a link, as
 long as the administrator writing or root made it; a link anyone else made is
 refused rather than followed.
 
+The rewrite is faithful to what ssh reads. Comments between entries travel
+with the entry below them, and a refresh carries them over to the new key.
+Hashed names and wildcard patterns are matched as ssh matches them, and only a
+line that names a host itself is removed for it. `@revoked` and
+`@cert-authority` lines are parsed as markers and never dropped; `verify`
+reports a revoked key and `refresh` will not write one back.
+
 `hostkey verify` reports a changed key and exits non-zero. Whether that is a
 reinstalled machine or something worth investigating is not for a program to
 decide.
