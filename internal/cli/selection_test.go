@@ -50,6 +50,8 @@ func TestAnEmptyNodesFlagDoesNotFallBackToTheEnvironment(t *testing.T) {
 // Without -n the session set still applies.
 func TestTheEnvironmentAppliesWithoutNodesFlag(t *testing.T) {
 	t.Setenv(config.EnvNodes, "@rack:R02")
+	// A dry run of bmc power resolves the BMC account, as the real run does.
+	t.Setenv("BMC_PASSWORD", "s3cret")
 
 	h, err := run(t, harnessOptions{recorder: slurmAllIdle(t)}, "bmc", "power", "off", "--dry-run")
 	if err != nil {
@@ -114,6 +116,8 @@ func TestANodeSetArgumentAndTheNodesFlagContradict(t *testing.T) {
 // An argument replaces the session set, which is only a default.
 func TestANodeSetArgumentWinsOverTheEnvironment(t *testing.T) {
 	t.Setenv(config.EnvNodes, "@rack:R02")
+	// A dry run of bmc power resolves the BMC account, as the real run does.
+	t.Setenv("BMC_PASSWORD", "s3cret")
 
 	h, err := run(t, harnessOptions{recorder: slurmAllIdle(t)}, "bmc", "power", "off", "exe0002", "--dry-run")
 	if err != nil {

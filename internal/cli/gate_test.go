@@ -226,6 +226,8 @@ func TestChangeToANodeTheInventoryDoesNotKnowNeedsForce(t *testing.T) {
 // One machine named three ways was three targets: three resets at once to
 // one service processor, and the command run three times on the node.
 func TestOneMachineNamedTwiceIsOneTarget(t *testing.T) {
+	// A dry run of bmc power resolves the BMC account, as the real run does.
+	t.Setenv("BMC_PASSWORD", "s3cret")
 	names := "exe0001,exe0001.hpc.example.org,exe0001.,EXE1,10.0.2.1,exe0001.mgmt.hpc.example.org"
 
 	h, err := run(t, harnessOptions{}, "node", "select", names)

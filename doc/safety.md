@@ -142,10 +142,31 @@ what the real run would. A set whose host list is too long for one argument
 is not named to `sinfo`; every node is asked for and the answer narrowed to
 the set.
 
-**A power-on is spread over batches.** `safety.powerOnBatch` nodes at a time
-with `safety.powerOnStagger` between them, because a rack powering on at once
-trips its breaker. A batch of less than one node is refused rather than read
-as "no batches".
+**A power-on or a power cycle is spread over batches.** `safety.powerOnBatch`
+nodes at a time with `safety.powerOnStagger` between them, because a rack
+powering on at once trips its breaker, and a cycle powers it on again. A batch
+with a failure stops the run: the failure may be the breaker. Every node of the
+set is reported either way, the later batches as `not tried`, and the whole run
+prints one result. A batch of less than one node is refused, in the
+configuration and on the command line, rather than read as "no batches".
+
+**An action falls back to another transport only when it never arrived.** A
+read of the power state that fails over Redfish is tried over IPMI, when the
+node's `bmc.order` names both. An action is tried again only when the request
+provably never reached the service processor, because its name did not resolve
+or nothing accepted the connection. A certificate that no longer matches its
+pin is never a reason to try another transport.
+
+**An interrupt leaves the unsent alone.** Once a BMC command is interrupted,
+nothing more is sent. What was not sent reads `not sent`, and an action that
+was under way reads `outcome unknown`, because it may have been carried out;
+re-running for the failed nodes must not cycle those a second time.
+
+**Forgetting a certificate pin is a change.** `bmc forget` shows the
+fingerprints it is about to drop and goes through the confirmation like any
+other change, protected hosts included. The pin is the only trust anchor for
+a service processor's certificate: without it, the next connection trusts
+whatever it is shown and sends it the BMC account.
 
 **A boot source override applies once by default.** A persistent override is
 what leaves a machine reinstalling every time it reboots, so `--persistent` has

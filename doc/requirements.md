@@ -47,7 +47,7 @@ hardware, and **deferred** when it is deliberately not done.
 | | Requirement | Where | State |
 | --- | --- | --- | --- |
 | R22 | Read and change power state | `cli/bmc.go` | met |
-| R23 | Prefer Redfish, fall back to IPMI | `app.BMCOrder` | met |
+| R23 | Prefer Redfish, fall back to IPMI | `app.BMCTransports`, `cli/bmcpower.go` | met |
 | R24 | Run the IPMI tools on a host that can reach the service network | `ipmi` | met |
 | R25 | Keep the password out of the remote argument vector | `ipmi` | met |
 | R26 | Pin the service processor certificate and refuse a change | `redfish/pins.go` | met |

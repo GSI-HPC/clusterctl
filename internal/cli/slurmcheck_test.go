@@ -292,6 +292,8 @@ func TestForceDoesNotLoseJobs(t *testing.T) {
 // Section 2.14: a dry run asks Slurm as the real run would, so that it does
 // not preview an action the real run refuses.
 func TestSlurmCheckRunsInADryRun(t *testing.T) {
+	// A dry run of bmc power resolves the BMC account, as the real run does.
+	t.Setenv("BMC_PASSWORD", "s3cret")
 	rec := sinfoAnswers("exe0007 allocated\n", 0)
 	h, err := run(t, harnessOptions{recorder: rec}, "bmc", "power", "off", "-n", "exe7", "--dry-run")
 	if err == nil {

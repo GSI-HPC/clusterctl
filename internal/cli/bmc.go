@@ -80,16 +80,13 @@ Read the power state of each node's service processor.
 			if err != nil {
 				return err
 			}
-			nodes, bmcs, err := bmcSet(a, args)
+			nodes, _, err := bmcSet(a, args)
 			if err != nil {
 				return err
 			}
-			if useIPMI || a.PreferredBMCTransport(firstNode(nodes)) == "ipmi" {
-				return ipmiPower(a, nodes, bmcs, ipmi.ActionStatus)
-			}
-			return redfishStatus(a, nodes)
+			return bmcPowerState(a, nodes, useIPMI)
 		})
-	cmd.Flags().BoolVar(&useIPMI, "ipmi", false, "ask over IPMI instead of Redfish")
+	cmd.Flags().BoolVar(&useIPMI, "ipmi", false, "ask over IPMI only, whatever bmc.order says")
 	return cmd
 }
 
@@ -111,8 +108,15 @@ Change the power state of the nodes through their service processors.
   cycle   power off and on again
   reset   reset without asking the operating system
 
-Powering many nodes on at once trips rack breakers, so a power-on is sent in
-batches with a pause between them; both come from the configuration.
+Powering many nodes on at once trips rack breakers, so a power-on and a power
+cycle are sent in batches with a pause between them; both come from the
+configuration. A batch with a failure stops the run, and the nodes of the
+later batches are reported as not tried.
+
+Each node is reached over the transports of bmc.order, or its vendor's, in
+turn. An action falls back to the next transport only when the first provably
+never reached the service processor, because an action is never sent twice.
+Nodes with different accounts are sent to the IPMI backend separately.
 
 Slurm is asked first, because powering off a running job loses it. A node
 that Slurm reports running a job, or cannot say about, is refused unless
@@ -123,22 +127,32 @@ that Slurm reports running a job, or cannot say about, is refused unless
 			if err != nil {
 				return err
 			}
+			// The action is checked before anything is asked of Slurm or
+			// the credential store, so that a typo costs nothing.
 			action := strings.ToLower(args[0])
-			nodes, bmcs, err := bmcSet(a, args[1:])
+			if err := ipmi.CheckAction(action); err != nil {
+				return err
+			}
+			batch, stagger, err := powerBatching(cmd, a, batch, stagger)
+			if err != nil {
+				return err
+			}
+			nodes, _, err := bmcSet(a, args[1:])
 			if err != nil {
 				return err
 			}
 			if action == ipmi.ActionStatus {
-				if useIPMI {
-					return ipmiPower(a, nodes, bmcs, action)
-				}
-				return redfishStatus(a, nodes)
+				return bmcPowerState(a, nodes, useIPMI)
+			}
+			plan, err := planBMC(a, nodes, useIPMI)
+			if err != nil {
+				return err
 			}
 
 			gated := safety.Action{
 				Verb:    "power " + action,
 				Targets: nodes,
-				Detail:  "through " + transportName(a, useIPMI, firstNode(nodes)),
+				Detail:  plan.describe(a),
 			}
 			// A protected host is named before Slurm is asked, so that a
 			// refusal never leaves it out.
@@ -148,112 +162,70 @@ that Slurm reports running a job, or cannot say about, is refused unless
 			if err := checkSlurmIdle(a, nodes, action, loseJobs); err != nil {
 				return err
 			}
-			if err := a.Gate.Confirm(gated); err != nil {
+			if err := confirmResolved(a, gated, func() error { return plan.resolve(a) }); err != nil {
 				return dryRunOrError(err)
 			}
-
-			if action == ipmi.ActionOn {
-				return staggeredPowerOn(a, nodes, bmcs, useIPMI, batch, stagger)
-			}
-			if useIPMI || a.PreferredBMCTransport(firstNode(nodes)) == "ipmi" {
-				return ipmiPower(a, nodes, bmcs, action)
-			}
-			return redfishPower(a, nodes, action)
+			return printBMCResults(a, runPower(a, plan, action, batch, stagger))
 		})
 
-	cmd.Flags().BoolVar(&useIPMI, "ipmi", false, "act over IPMI instead of Redfish")
-	cmd.Flags().IntVar(&batch, "batch", 0, "how many nodes to power on at once (default: from the configuration)")
-	cmd.Flags().DurationVar(&stagger, "stagger", 0, "pause between power-on batches (default: from the configuration)")
+	cmd.Flags().BoolVar(&useIPMI, "ipmi", false, "act over IPMI only, whatever bmc.order says")
+	cmd.Flags().IntVar(&batch, "batch", 0, "how many nodes to power on or cycle at once, at least 1 (default: from the configuration)")
+	cmd.Flags().DurationVar(&stagger, "stagger", 0, "pause between batches (default: from the configuration)")
 	addLoseJobsFlag(cmd, &loseJobs)
 	cmd.ValidArgsFunction = fixed(ipmi.Actions()...)
 	return cmd
 }
 
-func transportName(a *app.App, useIPMI bool, node string) string {
-	if useIPMI || a.PreferredBMCTransport(node) == "ipmi" {
-		return "IPMI"
-	}
-	return "Redfish"
-}
-
-func firstNode(ns *nodeset.NodeSet) string {
-	names := ns.Expand()
-	if len(names) == 0 {
-		return ""
-	}
-	return names[0]
-}
-
-// staggeredPowerOn spreads a power-on over batches so that a rack does not
-// draw its whole inrush current at once.
-func staggeredPowerOn(a *app.App, nodes, bmcs *nodeset.NodeSet, useIPMI bool, batch int, stagger time.Duration) error {
-	if batch <= 0 {
-		batch = a.Spec.Safety.PowerOnBatch
-	}
-	if stagger <= 0 {
-		stagger = a.Spec.Safety.PowerOnStagger.Get()
-	}
-	if batch <= 0 || nodes.Len() <= batch {
-		if useIPMI || a.PreferredBMCTransport(firstNode(nodes)) == "ipmi" {
-			return ipmiPower(a, nodes, bmcs, ipmi.ActionOn)
-		}
-		return redfishPower(a, nodes, ipmi.ActionOn)
-	}
-
-	chunks := nodes.Split((nodes.Len() + batch - 1) / batch)
-	for i, chunk := range chunks {
-		if i > 0 && stagger > 0 {
-			a.Printf("waiting %s before the next batch\n", stagger)
-			select {
-			case <-a.Context().Done():
-				return a.Context().Err()
-			case <-time.After(stagger):
-			}
-		}
-		a.Printf("powering on %s (%d of %d)\n", chunk, i+1, len(chunks))
-		chunkBMCs, err := a.BMCHosts(chunk)
-		if err != nil {
+// confirmResolved runs the gate and resolves what the command needs to send,
+// the accounts above all, before anything is sent. A real run resolves after
+// the gate, so that a protected host or a missing confirmation is reported
+// before a password is asked for; a dry run resolves before its preview,
+// because it has to fail where the real run would.
+func confirmResolved(a *app.App, action safety.Action, resolve func() error) error {
+	if a.DryRun() {
+		if err := resolve(); err != nil {
 			return err
 		}
-		var runErr error
-		if useIPMI || a.PreferredBMCTransport(firstNode(chunk)) == "ipmi" {
-			runErr = ipmiPower(a, chunk, chunkBMCs, ipmi.ActionOn)
-		} else {
-			runErr = redfishPower(a, chunk, ipmi.ActionOn)
-		}
-		if runErr != nil {
-			return runErr
-		}
+		return a.Gate.Confirm(action)
 	}
-	return nil
+	if err := a.Gate.Confirm(action); err != nil {
+		return err
+	}
+	return resolve()
 }
 
-// ipmiPower runs a power action through the IPMI backend.
-func ipmiPower(a *app.App, nodes, bmcs *nodeset.NodeSet, action string) error {
-	backend, err := a.IPMIBackend(a.Context(), firstNode(nodes))
-	if err != nil {
-		return err
+// powerBatching returns the batch size and the pause of a power-on or cycle:
+// the flags where they were given, zero included, else the configuration.
+func powerBatching(cmd *cobra.Command, a *app.App, batch int, stagger time.Duration) (int, time.Duration, error) {
+	if !cmd.Flags().Changed("batch") {
+		batch = a.Spec.Safety.PowerOnBatch
 	}
-	statuses, err := backend.Power(a.Context(), action, bmcs)
-	if err != nil {
-		return exitcode.Wrap(exitcode.Transport, err)
+	if !cmd.Flags().Changed("stagger") {
+		stagger = a.Spec.Safety.PowerOnStagger.Get()
 	}
+	// A batch below one would power the whole set on at once, which is
+	// what the batching is there to prevent.
+	if batch < 1 {
+		return 0, 0, exitcode.Errorf(exitcode.Usage,
+			"--batch is %d; it must be at least 1, or a whole rack powers on at once", batch)
+	}
+	if stagger < 0 {
+		return 0, 0, exitcode.Errorf(exitcode.Usage, "--stagger cannot be negative")
+	}
+	return batch, stagger, nil
+}
 
-	t := output.NewTable(output.Cols("BMC", "STATE", "ERROR")...)
-	failed := 0
-	for _, s := range statuses {
-		t.Add(s.BMC, s.State, s.Err)
-		if s.Err != "" {
-			failed++
-		}
-	}
-	if err := a.Print(output.Result{Table: t, Object: statuses}); err != nil {
+// bmcPowerState reads the power state of every node, over the transports of
+// its order, falling back to the next when one fails.
+func bmcPowerState(a *app.App, nodes *nodeset.NodeSet, useIPMI bool) error {
+	plan, err := planBMC(a, nodes, useIPMI)
+	if err != nil {
 		return err
 	}
-	if failed > 0 {
-		return exitcode.Errorf(exitcode.TargetFailed, "%d of %d service processors failed", failed, len(statuses))
+	if err := plan.resolve(a); err != nil {
+		return err
 	}
-	return nil
+	return printBMCResults(a, plan.run(a, nodes.Expand(), ipmi.ActionStatus))
 }
 
 // resetTypeFor maps a power action to the Redfish reset type.
@@ -269,106 +241,9 @@ func resetTypeFor(action string) (string, error) {
 		return redfish.ResetForceRestart, nil
 	case ipmi.ActionCycle:
 		return redfish.ResetPowerCycle, nil
-	case "reboot":
-		return redfish.ResetGracefulRestart, nil
 	default:
-		return "", fmt.Errorf("unknown power action %q; expected one of %s",
-			action, strings.Join(ipmi.Actions(), ", "))
+		return "", exitcode.Errorf(exitcode.Usage, "the power action %q has no Redfish reset type", action)
 	}
-}
-
-// redfishPower runs a power action over Redfish, one processor at a time up
-// to the configured concurrency.
-func redfishPower(a *app.App, nodes *nodeset.NodeSet, action string) error {
-	resetType, err := resetTypeFor(action)
-	if err != nil {
-		return exitcode.Wrap(exitcode.Usage, err)
-	}
-	results := forEachBMC(a, nodes, func(ctx context.Context, node string, c *redfish.Client) (string, error) {
-		if err := c.Reset(ctx, resetType); err != nil {
-			return "", err
-		}
-		return resetType + " sent", nil
-	})
-	return printBMCResults(a, results)
-}
-
-// redfishStatus reads the power state of every processor.
-func redfishStatus(a *app.App, nodes *nodeset.NodeSet) error {
-	results := forEachBMC(a, nodes, func(ctx context.Context, node string, c *redfish.Client) (string, error) {
-		return c.PowerState(ctx)
-	})
-	return printBMCResults(a, results)
-}
-
-// bmcResult is what one processor answered.
-type bmcResult struct {
-	Node  string `json:"node" yaml:"node"`
-	BMC   string `json:"bmc" yaml:"bmc"`
-	State string `json:"state,omitempty" yaml:"state,omitempty"`
-	Error string `json:"error,omitempty" yaml:"error,omitempty"`
-}
-
-// forEachBMC talks to the processors of a node set in parallel, bounded by
-// the configured concurrency.
-func forEachBMC(a *app.App, nodes *nodeset.NodeSet, do func(context.Context, string, *redfish.Client) (string, error)) []bmcResult {
-	names := nodes.Expand()
-	results := make([]bmcResult, len(names))
-
-	limit := a.Spec.BMC.Redfish.MaxConcurrent
-	if limit < 1 {
-		limit = 8
-	}
-	sem := make(chan struct{}, limit)
-	done := make(chan int, len(names))
-
-	for i, node := range names {
-		sem <- struct{}{}
-		go func(i int, node string) {
-			defer func() { <-sem; done <- i }()
-			out := bmcResult{Node: node}
-			client, err := a.RedfishClient(a.Context(), node)
-			if err != nil {
-				out.Error = err.Error()
-				results[i] = out
-				return
-			}
-			out.BMC = client.Host
-			state, err := do(a.Context(), node, client)
-			if err != nil {
-				out.Error = err.Error()
-			}
-			out.State = state
-			results[i] = out
-		}(i, node)
-	}
-	for range names {
-		<-done
-	}
-	return results
-}
-
-func printBMCResults(a *app.App, results []bmcResult) error {
-	t := output.NewTable(
-		output.Column{Name: "NODE"},
-		output.Column{Name: "BMC", Wide: true},
-		output.Column{Name: "STATE"},
-		output.Column{Name: "ERROR"},
-	)
-	failed := 0
-	for _, r := range results {
-		t.Add(r.Node, r.BMC, r.State, r.Error)
-		if r.Error != "" {
-			failed++
-		}
-	}
-	if err := a.Print(output.Result{Table: t, Object: results}); err != nil {
-		return err
-	}
-	if failed > 0 {
-		return exitcode.Errorf(exitcode.TargetFailed, "%d of %d service processors failed", failed, len(results))
-	}
-	return nil
 }
 
 // addLoseJobsFlag declares the override of the Slurm job check. It is a flag
@@ -605,7 +480,7 @@ machine reinstalling in a loop, so --persistent has to be asked for.
 				return err
 			}
 			target := args[0]
-			nodes, err := selection(a, args[1:])
+			nodes, _, err := bmcSet(a, args[1:])
 			if err != nil {
 				return err
 			}
@@ -613,20 +488,21 @@ machine reinstalling in a loop, so --persistent has to be asked for.
 			if persistent {
 				mode = "persistently"
 			}
-			if err := a.Gate.Confirm(safety.Action{
+			var clients []*redfish.Client
+			if err := confirmResolved(a, safety.Action{
 				Verb:    "set the boot source of",
 				Targets: nodes,
 				Detail:  fmt.Sprintf("to %s, %s", target, mode),
+			}, func() (err error) {
+				clients, err = redfishClients(a, nodes.Expand())
+				return err
 			}); err != nil {
 				return dryRunOrError(err)
 			}
-			results := forEachBMC(a, nodes, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
-				if err := c.SetBootOverride(ctx, target, persistent); err != nil {
-					return "", err
-				}
-				return target + " " + mode, nil
+			calls := redfishEach(a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+				return target + " " + mode, c.SetBootOverride(ctx, target, persistent)
 			})
-			return printBMCResults(a, results)
+			return printBMCResults(a, callResults(calls, true, func(s string) string { return s }))
 		})
 	set.Flags().BoolVar(&persistent, "persistent", false, "keep the override until it is removed")
 
@@ -638,20 +514,22 @@ Remove the boot source override, so the nodes boot their usual way again.`,
 			if err != nil {
 				return err
 			}
-			nodes, err := selection(a, args)
+			nodes, _, err := bmcSet(a, args)
 			if err != nil {
 				return err
 			}
-			if err := a.Gate.Confirm(safety.Action{Verb: "clear the boot source override of", Targets: nodes}); err != nil {
+			var clients []*redfish.Client
+			if err := confirmResolved(a, safety.Action{Verb: "clear the boot source override of", Targets: nodes},
+				func() (err error) {
+					clients, err = redfishClients(a, nodes.Expand())
+					return err
+				}); err != nil {
 				return dryRunOrError(err)
 			}
-			results := forEachBMC(a, nodes, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
-				if err := c.ClearBootOverride(ctx); err != nil {
-					return "", err
-				}
-				return "cleared", nil
+			calls := redfishEach(a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+				return "cleared", c.ClearBootOverride(ctx)
 			})
-			return printBMCResults(a, results)
+			return printBMCResults(a, callResults(calls, true, func(s string) string { return s }))
 		})
 
 	show := leaf("show [NODESET]", "Show the current boot source override", `
@@ -663,10 +541,17 @@ accepts.`,
 			if err != nil {
 				return err
 			}
-			nodes, err := selection(a, args)
+			nodes, _, err := bmcSet(a, args)
 			if err != nil {
 				return err
 			}
+			clients, err := redfishClients(a, nodes.Expand())
+			if err != nil {
+				return err
+			}
+			calls := redfishEach(a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
+				return c.System(ctx)
+			})
 			t := output.NewTable(
 				output.Column{Name: "NODE"},
 				output.Column{Name: "SOURCE"},
@@ -681,33 +566,21 @@ accepts.`,
 				Accepts []string `json:"accepts,omitempty"`
 				Error   string   `json:"error,omitempty"`
 			}
-			var object []row
-			failed := 0
-			for _, node := range nodes.Expand() {
-				client, err := a.RedfishClient(a.Context(), node)
-				if err != nil {
-					t.Add(node, "", "", "", err.Error())
-					object = append(object, row{Node: node, Error: err.Error()})
-					failed++
+			object := make([]row, 0, len(calls))
+			for _, c := range calls {
+				if c.err != nil {
+					t.Add(c.node, "", "", "", c.err.Error())
+					object = append(object, row{Node: c.node, Error: c.err.Error()})
 					continue
 				}
-				sys, err := client.System(a.Context())
-				if err != nil {
-					t.Add(node, "", "", "", err.Error())
-					object = append(object, row{Node: node, Error: err.Error()})
-					failed++
-					continue
-				}
-				t.Add(node, sys.BootSource, sys.BootEnabled, strings.Join(sys.BootTargets, ","), "")
-				object = append(object, row{Node: node, Source: sys.BootSource, Mode: sys.BootEnabled, Accepts: sys.BootTargets})
+				sys := c.value
+				t.Add(c.node, sys.BootSource, sys.BootEnabled, strings.Join(sys.BootTargets, ","), "")
+				object = append(object, row{Node: c.node, Source: sys.BootSource, Mode: sys.BootEnabled, Accepts: sys.BootTargets})
 			}
 			if err := a.Print(output.Result{Table: t, Object: object}); err != nil {
 				return err
 			}
-			if failed > 0 {
-				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d nodes failed", failed, nodes.Len())
-			}
-			return nil
+			return bmcExit(callResults(calls, false, func(*redfish.System) string { return "" }))
 		})
 
 	return group("boot", "Read and set what a node boots next time", `
@@ -727,7 +600,7 @@ comes back.
 			if err != nil {
 				return err
 			}
-			nodes, err := selection(a, args[1:])
+			nodes, _, err := bmcSet(a, args[1:])
 			if err != nil {
 				return err
 			}
@@ -751,7 +624,7 @@ reset asks Slurm first, as bmc power does, and --lose-jobs overrides that.`,
 			if err := json.Unmarshal([]byte(args[1]), &body); err != nil {
 				return exitcode.Errorf(exitcode.Usage, "the body is not JSON: %v", err)
 			}
-			nodes, err := selection(a, args[2:])
+			nodes, _, err := bmcSet(a, args[2:])
 			if err != nil {
 				return err
 			}
@@ -784,10 +657,17 @@ the power state and the reset types the firmware accepts.`,
 			if err != nil {
 				return err
 			}
-			nodes, err := selection(a, args)
+			nodes, _, err := bmcSet(a, args)
 			if err != nil {
 				return err
 			}
+			clients, err := redfishClients(a, nodes.Expand())
+			if err != nil {
+				return err
+			}
+			calls := redfishEach(a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
+				return c.System(ctx)
+			})
 			t := output.NewTable(
 				output.Column{Name: "NODE"},
 				output.Column{Name: "POWER"},
@@ -797,33 +677,24 @@ the power state and the reset types the firmware accepts.`,
 				output.Column{Name: "RESET TYPES", Wide: true},
 				output.Column{Name: "ERROR"},
 			)
+			// Every node is in the object, a failed one with its error, so
+			// that a reader of the JSON sees what the table shows.
 			object := map[string]any{}
-			failed := 0
-			for _, node := range nodes.Expand() {
-				client, err := a.RedfishClient(a.Context(), node)
-				if err != nil {
-					t.Add(node, "", "", "", "", "", err.Error())
-					failed++
+			for _, c := range calls {
+				if c.err != nil {
+					t.Add(c.node, "", "", "", "", "", c.err.Error())
+					object[c.node] = map[string]string{"error": c.err.Error()}
 					continue
 				}
-				sys, err := client.System(a.Context())
-				if err != nil {
-					t.Add(node, "", "", "", "", "", err.Error())
-					object[node] = map[string]string{"error": err.Error()}
-					failed++
-					continue
-				}
-				t.Add(node, sys.PowerState, sys.Health, sys.Manufacturer+" "+sys.Model,
+				sys := c.value
+				t.Add(c.node, sys.PowerState, sys.Health, sys.Manufacturer+" "+sys.Model,
 					sys.BIOSVersion, strings.Join(sys.ResetTypes, ","), "")
-				object[node] = sys
+				object[c.node] = sys
 			}
 			if err := a.Print(output.Result{Table: t, Object: object}); err != nil {
 				return err
 			}
-			if failed > 0 {
-				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d nodes failed", failed, nodes.Len())
-			}
-			return nil
+			return bmcExit(callResults(calls, false, func(*redfish.System) string { return "" }))
 		})
 
 	return group("redfish", "Talk to the Redfish interface directly", `
@@ -842,31 +713,27 @@ func resetsHost(path string) bool {
 }
 
 func redfishRequest(a *app.App, nodes *nodeset.NodeSet, method, path string, body any) error {
+	clients, err := redfishClients(a, nodes.Expand())
+	if err != nil {
+		return err
+	}
+	changes := method != "GET"
+	calls := redfishEach(a, nodes.Expand(), clients, changes, func(ctx context.Context, _ string, c *redfish.Client) (map[string]any, error) {
+		return c.Do(ctx, method, path, body)
+	})
 	object := map[string]any{}
-	failed := 0
-	for _, node := range nodes.Expand() {
-		client, err := a.RedfishClient(a.Context(), node)
-		if err != nil {
-			object[node] = map[string]string{"error": err.Error()}
-			failed++
+	for _, c := range calls {
+		if c.err != nil {
+			object[c.node] = map[string]string{"error": c.err.Error()}
 			continue
 		}
-		answer, err := client.Do(a.Context(), method, path, body)
-		if err != nil {
-			object[node] = map[string]string{"error": err.Error()}
-			failed++
-			continue
-		}
-		object[node] = answer
+		object[c.node] = c.value
 	}
 	// A Redfish body is a tree, so the table formats show it as JSON too.
 	if err := jsonOut(a, object); err != nil {
 		return err
 	}
-	if failed > 0 {
-		return exitcode.Errorf(exitcode.TargetFailed, "%d of %d nodes failed", failed, nodes.Len())
-	}
-	return nil
+	return bmcExit(callResults(calls, changes, func(map[string]any) string { return "" }))
 }
 
 // jsonOut prints a tree, using the selected format when it is a machine one
