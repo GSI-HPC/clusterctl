@@ -142,8 +142,12 @@ $ clusterctl bmc status
 $ clusterctl exec -- uptime
 ```
 
-`-n` always wins over it. Nothing else falls back to a set you set earlier: a
-command with no selection stops rather than guessing.
+`-n` or a node set argument always wins over it. Nothing else falls back to a
+set you set earlier: a command with no selection stops rather than guessing.
+
+Give a node set once. `-n` twice is refused with exit code 2 rather than all
+but the last being ignored; write the union into one expression instead, such
+as `-n exe0001,exe0002`.
 
 ## Passing a set to another tool
 
@@ -153,6 +157,10 @@ exe[0007,0042,0511]
 
 $ clusterctl exec -n "$(clusterctl slurm node nodeset idle)" -- uptime
 ```
+
+When no node is in that state, the inner command prints nothing and `-n` is
+given an empty set. That is refused with exit code 2, even with
+`CLUSTERCTL_NODES` set: an explicit `-n` is never replaced by the session set.
 
 Slurm and FreeIPMI understand one bracketed range per name and neither several
 numeric dimensions nor groups, so clusterctl expands a set for them when it has

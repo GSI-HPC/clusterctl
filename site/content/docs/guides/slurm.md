@@ -53,6 +53,9 @@ exe[0001-0006,0008-1024]
 $ clusterctl exec -n "$(clusterctl slurm node nodeset drain)" -- dmesg -T | tail
 ```
 
+When no node is drained, the inner command prints nothing and the `-n` it fills
+in is refused with exit code 2; `CLUSTERCTL_NODES` is not used in its place.
+
 ## The queue
 
 ```console
