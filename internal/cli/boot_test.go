@@ -489,3 +489,27 @@ func TestBootStatusReportsUnknownNodes(t *testing.T) {
 		t.Errorf("nosuchnode = %+v, want an error", got["nosuchnode"])
 	}
 }
+
+// 2.16: a pull changes what every node boots.
+func TestBootSyncGoesThroughTheGate(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "boot", "sync")
+	if err == nil || !strings.Contains(err.Error(), "-y") {
+		t.Errorf("boot sync without a terminal should ask for -y, got %v", err)
+	}
+	if len(h.recorder.Calls()) != 0 {
+		t.Errorf("boot sync sent %q unasked", h.recorder.Commands())
+	}
+
+	h, err = run(t, harnessOptions{tty: true, stdin: "n\n"}, "boot", "sync")
+	if err == nil || len(h.recorder.Calls()) != 0 {
+		t.Errorf("a declined boot sync should send nothing, got %v and %q", err, h.recorder.Commands())
+	}
+
+	h, err = run(t, harnessOptions{}, "boot", "sync", "-y")
+	if err != nil {
+		t.Fatalf("boot sync -y failed: %v", err)
+	}
+	if commands := h.recorder.Commands(); len(commands) != 1 || !strings.Contains(commands[0], "git -C /srv/pxesrv/boot pull --ff-only") {
+		t.Errorf("commands = %q, want the pull", commands)
+	}
+}

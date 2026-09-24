@@ -725,7 +725,8 @@ a boot path may point at.`,
 func newBootSyncCommand(r *root) *cobra.Command {
 	return leaf("sync", "Update the boot configurations from version control", `
 Pull the boot configuration repository on the PXE service, so the
-configurations it offers match what is in version control.`,
+configurations it offers match what is in version control. The pull is
+previewed and confirmed like any other change.`,
 		cobra.NoArgs,
 		func(cmd *cobra.Command, _ []string) error {
 			a, err := r.App()
@@ -741,9 +742,18 @@ configurations it offers match what is in version control.`,
 				return exitcode.Errorf(exitcode.Usage,
 					"no boot configuration repository is configured; set services.pxesrv.repoPath")
 			}
-			if a.DryRun() {
-				a.Printf("would run git pull in %s on %s\n", path, role)
-				return nil
+			target, err := a.Role(role)
+			if err != nil {
+				return err
+			}
+			// What the pull brings is what every node gets at its next
+			// network boot, so it is asked for like any other change.
+			if err := a.Gate.Confirm(safety.Action{
+				Verb:    "update the boot configurations from version control on",
+				Targets: singleNode(target.Host),
+				Detail:  fmt.Sprintf("git -C %s pull --ff-only, on the %s host", path, role),
+			}); err != nil {
+				return dryRunOrError(err)
 			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
 				Argv:    []string{"git", "-C", path, "pull", "--ff-only"},
