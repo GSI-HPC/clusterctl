@@ -339,3 +339,15 @@ func TestArgsRefusesOptionsClusterctlSets(t *testing.T) {
 		}
 	}
 }
+
+// An exclude that expands to nothing would route what it was meant to keep
+// off the tunnel.
+func TestArgsRefusesAnEmptyExclude(t *testing.T) {
+	t.Parallel()
+	m := manager(t)
+	m.Vars["workstation.host"] = ""
+
+	if _, err := m.Args("ipmi"); err == nil || !strings.Contains(err.Error(), "{workstation.host}") {
+		t.Errorf("Args = %v, want the empty exclude reported", err)
+	}
+}

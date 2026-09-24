@@ -120,7 +120,9 @@ func (m *Manager) Args(name string) ([]string, error) {
 			return nil, fmt.Errorf("tunnel %q: exclude %q: %w", name, exclude, err)
 		}
 		if value == "" {
-			continue
+			// Dropping it would route what it was meant to keep off the
+			// tunnel, such as this machine's own address.
+			return nil, fmt.Errorf("tunnel %q: exclude %q expands to nothing; define the value it refers to, such as the host of a Workstation document for this machine, or remove the exclude", name, exclude)
 		}
 		args = append(args, "--exclude", value)
 	}

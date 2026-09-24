@@ -120,7 +120,7 @@ for the local password.
 
 sshuttle connects with the generated ssh configuration, like every other
 connection: the host key is checked against the site's file, and the role's
-jump hosts and account apply.`,
+jump hosts and account apply. An exclude that expands to nothing is refused.`,
 		cobra.ExactArgs(1),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()

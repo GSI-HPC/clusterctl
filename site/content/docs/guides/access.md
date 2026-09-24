@@ -184,6 +184,11 @@ one whose number now belongs to another of your processes, is not reported as
 a running tunnel, and `tunnel stop` signals nothing and removes the file.
 `tunnel stop` takes only the name of a configured profile.
 
+An exclude that expands to nothing is refused rather than dropped:
+`{workstation.host}` is empty on a machine no `Workstation` document
+describes, and dropping the exclude would route this machine's own address
+into the tunnel.
+
 A subnet that is neither a configured network name nor an address is refused,
 because sshuttle would otherwise route something else entirely.
 
