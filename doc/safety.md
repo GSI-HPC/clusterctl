@@ -45,7 +45,10 @@ Everything that changes or destroys something goes through
    that cannot be asked is refused, not carried out. `-y` confirms in advance
    and is the supported way to automate.
 
-`--dry-run` stops after the preview and exits zero, having sent nothing.
+`--dry-run` stops after the preview and exits zero, having changed nothing.
+The read-only lookups the preview is built from, group sources and the DHCP
+server's configuration, still run, so the rehearsal selects and addresses the
+same hosts the real run would.
 
 Steps 2 to 4 are also available separately. `Gate.Preview` runs the checks and
 describes the question without asking it, and `Preview.Accept` judges an

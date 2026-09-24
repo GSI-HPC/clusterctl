@@ -47,13 +47,17 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 	if opts.in != nil {
 		in = opts.in
 	}
+	cacheDir := opts.cacheDir
+	if cacheDir == "" {
+		cacheDir = filepath.Join(dir, "cache")
+	}
 	streams := app.Streams{
 		In:       in,
 		Out:      h.out,
 		Err:      h.errOut,
 		IsTTY:    opts.tty,
 		StateDir: filepath.Join(dir, "state"),
-		CacheDir: filepath.Join(dir, "cache"),
+		CacheDir: cacheDir,
 	}
 	if opts.stateDir != "" {
 		streams.StateDir = opts.stateDir
@@ -127,6 +131,9 @@ type harnessOptions struct {
 	stateDir string
 	// streams changes the streams before the command tree is built.
 	streams func(*app.Streams)
+	// cacheDir replaces the fresh cache directory of each run, so that
+	// several runs can share one the way the commands of one user do.
+	cacheDir string
 }
 
 // rootOf digs the root state out of a built command tree.
