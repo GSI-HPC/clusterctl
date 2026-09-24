@@ -62,6 +62,15 @@ than keeping its own list, and a command without one counts as a change.
 
 ## Checks specific to what is being done
 
+**exec asks only when told to, but always checks.** Running a command is how
+most of the day is spent, so exec asks nothing by default; `--confirm` adds the
+question. The protected host check runs on every exec, so a plain run, a
+confirmed run and a dry run make the same decision. With `--stdin` the payload
+takes up standard input, so the question cannot be read from it and
+`--stdin --confirm` needs `-y`. The command has to follow `--`, because a
+word of it read as one of clusterctl's options, a `-n` or `-r`, would change
+where or as whom it runs.
+
 **Power actions ask Slurm first.** A node running a job is refused, because
 powering it off loses the job. `--force` overrides, and the check is skipped
 when the workload manager cannot be reached — it is a safeguard, not a

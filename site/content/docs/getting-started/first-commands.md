@@ -97,9 +97,9 @@ exe0003: up 3 weeks, 1 day
 exe0004: up 2 days
 
 $ clusterctl exec -n '@compute' --dedup -- uname -r
-exe[0001-1020] (1020)
+exe[0001-1020] (1020): ok
   5.14.0-570.el9.x86_64
-exe[1021-1024] (4)
+exe[1021-1024] (4): ok
   5.14.0-503.el9.x86_64
 ```
 

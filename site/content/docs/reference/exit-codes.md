@@ -28,6 +28,11 @@ case $? in
 esac
 ```
 
+When a command that works on many hosts sees several of these, it exits with
+the first that applies of `130` (a host was not tried because of an
+interrupt), `3` (a host could not be reached) and `1` (a host answered with a
+failure). A run in which one node refused and another was down exits `3`.
+
 ## A declined confirmation is 130
 
 Declining a prompt is an interruption, not a failure:

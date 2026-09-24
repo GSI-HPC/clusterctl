@@ -51,7 +51,7 @@ Almost every `CLUSTER_*` variable becomes a configuration field:
 | `cluster-login` | `clusterctl login [ROLE]` |
 | `cl`, `cli`, `cla` | `clusterctl login`, `login -X mgmt`, `login -A` |
 | `cluster-ssh`, `cluster-scp` | `clusterctl login`, `clusterctl copy` |
-| `cluster-clush`, `rush`, `crush` | `clusterctl exec -n …` |
+| `cluster-clush`, `rush`, `crush` | `clusterctl exec NODESET -- …`, with the `--` required |
 | `cluster-nodeset` | `clusterctl node select`, `clusterctl hostkey …` |
 | `cluster-node-fqdn` | `clusterctl node fqdn [--bmc]` |
 | `cluster-knownhosts` | `clusterctl hostkey refresh` |

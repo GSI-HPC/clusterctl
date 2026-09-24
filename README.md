@@ -14,9 +14,9 @@ $ clusterctl node select '@idle&@rack:R02'
 exe[0004-0009]
 
 $ clusterctl exec -n '@idle' --dedup -- uname -r
-exe[0001-0009] (9)
+exe[0001-0009] (9): ok
   5.14.0-570.el9.x86_64
-exe0010 (1)
+exe0010 (1): ok
   4.18.0-553.el8.x86_64
 
 $ clusterctl slurm node drain 'ticket 4711: failing DIMM' -n exe0007
