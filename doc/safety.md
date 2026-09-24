@@ -71,10 +71,31 @@ takes up standard input, so the question cannot be read from it and
 word of it read as one of clusterctl's options, a `-n` or `-r`, would change
 where or as whom it runs.
 
-**Power actions ask Slurm first.** A node running a job is refused, because
-powering it off loses the job. `--force` overrides, and the check is skipped
-when the workload manager cannot be reached — it is a safeguard, not a
-dependency.
+**Power actions ask Slurm first.** `bmc power off`, `soft`, `cycle` and
+`reset`, and a `bmc redfish post` to a path that names a reset, ask `sinfo`
+on the `slurm.role` host about every node in the set, because powering off a
+running job loses it. The check fails closed. A node counts as idle only when
+Slurm reports it in a state known to run no job, such as `idle`, `drained` or
+`down`. These are refused:
+
+- a node in a state that runs jobs, `allocated`, `mixed`, `completing`,
+  `draining` or `failing`, whatever flags follow the state;
+- a node in a state the check does not know;
+- a node Slurm did not report, for example because its Slurm name differs
+  from its inventory name;
+- every node, when Slurm cannot be asked.
+
+`--lose-jobs` overrides the check, and names the nodes it lets through. It is
+separate from `--force` on purpose: getting past a protected host does not
+also lose the jobs of the rest of the set. The protected-host check runs
+first, so a refusal never leaves a protected host unnamed.
+
+The check is on by default (`safety.slurmAware: true`) wherever `slurm.role`
+names a host. When it is turned off, or no role is set, the command says so
+before it asks for confirmation. A dry run asks Slurm too, so that it refuses
+what the real run would. A set whose host list is too long for one argument
+is not named to `sinfo`; every node is asked for and the answer narrowed to
+the set.
 
 **A power-on is spread over batches.** `safety.powerOnBatch` nodes at a time
 with `safety.powerOnStagger` between them, because a rack powering on at once
