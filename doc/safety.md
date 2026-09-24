@@ -82,7 +82,20 @@ trips its breaker.
 
 **A boot source override applies once by default.** A persistent override is
 what leaves a machine reinstalling every time it reboots, so `--persistent` has
-to be asked for. The same applies to a PXE boot path.
+to be asked for. The same applies to a PXE boot path: the persistent link, asked
+for with `--persistent` or by a boot path rule marked `static`, is the one named
+with `services.pxesrv.staticSuffix`, and without a suffix it is refused rather
+than written as the one-shot link. `boot unset` removes both links, `boot
+status` shows both, and a one-shot path is refused for a node that has a
+persistent one. A GRUB link over TFTP has no one-shot form, so its preview says
+that it stays until `boot grub unset`.
+
+**A boot link is checked before it is written.** The address a link is named
+after has to be an IP address that no other node has, and every boot path has
+to exist on the PXE host, all before the question, which lists each boot path
+with the nodes and addresses it is written for. A dry run sends nothing to the
+PXE host and says what it left unchecked. Every node is tried and reported, so
+a link that cannot be written neither stops the rest nor goes unnoticed.
 
 **Draining a node needs a reason.** The reason is the first argument, not an
 option, because a drained node with no reason is one nobody dares resume.

@@ -138,7 +138,34 @@ example  /etc/clusterctl/secrets.sops.yaml  2     3 age         2     decrypts
 
 ```console
 $ clusterctl boot list
-$ clusterctl boot sync            # git pull on the PXE host
+$ clusterctl boot sync            # git pull on the PXE host, after a question
+```
+
+`boot set` resolves every address and checks every boot path on the PXE host
+before it asks, and the question lists each path with its nodes:
+
+```console
+$ clusterctl boot set -n exe0007
+About to set the network boot configuration of 1 host: exe0007
+  /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2, for the next request: exe0007 (10.0.2.7)
+Continue? [y/N] y
+NODE     ADDRESS   BOOT PATH                                   MODE  RESULT
+exe0007  10.0.2.7  /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2  once  set
+```
+
+Every node is tried and listed, and a node whose link could not be written
+fails the command, so a rerun, or `boot unset`, knows what is left.
+
+A persistent boot path, with `--persistent` or from a rule marked
+`static: true`, survives the first request. It is the link named with
+`services.pxesrv.staticSuffix`, and it is refused when no suffix is set.
+`boot status` then shows both links, and `boot unset` removes both:
+
+```console
+$ clusterctl boot status -n exe0007
+NODE     ADDRESS   BOOT PATH  PERSISTENT
+exe0007  10.0.2.7  none       none
+
 $ clusterctl boot unset -n exe0007
 ```
 
@@ -153,7 +180,11 @@ NODE     ADDRESS   GRUB FILE
 exe0007  10.0.2.7  grub.cfg-0A000207
 
 $ clusterctl boot grub set exe0007 /srv/tftp/grub/1.0/grub.cfg.install-exec
+$ clusterctl boot grub unset exe0007
 ```
+
+A GRUB link has no one-shot form: the node loads its target at every boot
+until `boot grub unset` removes the link.
 
 ## When a node does not come up
 
