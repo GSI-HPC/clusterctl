@@ -54,7 +54,7 @@ func TestBMCPowerUsesTheInventoryAddress(t *testing.T) {
 		return s + "    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n"
 	})
 
-	h, err := run(t, harnessOptions{config: []string{inventory}},
+	h, err := run(t, harnessOptions{config: []string{inventory}, recorder: slurmAllIdle(t)},
 		"bmc", "power", "cycle", "--ipmi", "-y", "-n", "exe[0003-0004]")
 	if err != nil {
 		t.Fatalf("bmc power failed: %v\n%s", err, h.errOut)
@@ -122,7 +122,7 @@ func TestBMCRefusesANodeWithoutAServiceProcessorName(t *testing.T) {
 	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
 		return s + "    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n"
 	})
-	h, err = run(t, harnessOptions{config: []string{site, inventory}},
+	h, err = run(t, harnessOptions{config: []string{site, inventory}, recorder: slurmAllIdle(t)},
 		"bmc", "power", "cycle", "--ipmi", "-y", "-n", "exe0003")
 	if err != nil {
 		t.Fatalf("bmc power with a bmcAddress failed: %v\n%s", err, h.errOut)
@@ -182,7 +182,8 @@ func TestBMCKeepsTheVendorProfileForEverySpelling(t *testing.T) {
 	})
 
 	for _, spelling := range []string{"exe0001", "exe0001.hpc.example.org", "EXE0001", "exe0001."} {
-		h, err := run(t, harnessOptions{config: []string{site}}, "bmc", "power", "off", "--dry-run", "-n", spelling)
+		h, err := run(t, harnessOptions{config: []string{site}, recorder: slurmAllIdle(t)},
+			"bmc", "power", "off", "--dry-run", "-n", spelling)
 		if err != nil {
 			t.Fatalf("-n %s: dry run failed: %v", spelling, err)
 		}
@@ -190,7 +191,8 @@ func TestBMCKeepsTheVendorProfileForEverySpelling(t *testing.T) {
 			t.Errorf("-n %s: the preview does not use the vendor's order:\n%s", spelling, preview)
 		}
 
-		h, err = run(t, harnessOptions{config: []string{site}}, "bmc", "power", "off", "--ipmi", "-y", "-n", spelling)
+		h, err = run(t, harnessOptions{config: []string{site}, recorder: slurmAllIdle(t)},
+			"bmc", "power", "off", "--ipmi", "-y", "-n", spelling)
 		if err != nil {
 			t.Fatalf("-n %s: bmc power failed: %v", spelling, err)
 		}

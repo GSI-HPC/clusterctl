@@ -12,6 +12,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
+	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // sinfoAnswers is a recorder on which sinfo answers with the given output and
@@ -26,6 +27,32 @@ func sinfoAnswers(stdout string, code int) *transport.Recorder {
 			return result, nil
 		}
 		return &transport.Result{Target: tg}, nil
+	}}
+}
+
+// slurmAllIdle is a recorder on which sinfo reports every node it is asked
+// about idle, for the tests of what a power action does once it is allowed.
+func slurmAllIdle(t *testing.T) *transport.Recorder {
+	t.Helper()
+	return &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if !isSinfo(req) {
+			return &transport.Result{Target: tg}, nil
+		}
+		var out strings.Builder
+		for i, arg := range req.Argv {
+			if arg != "-n" || i+1 == len(req.Argv) {
+				continue
+			}
+			ns, err := nodeset.Parse(req.Argv[i+1])
+			if err != nil {
+				t.Errorf("sinfo was asked about %q: %v", req.Argv[i+1], err)
+				break
+			}
+			for _, name := range ns.Expand() {
+				fmt.Fprintf(&out, "%s idle\n", name)
+			}
+		}
+		return &transport.Result{Target: tg, Stdout: out.String()}, nil
 	}}
 }
 
@@ -164,6 +191,57 @@ func TestSlurmCheckRefusesEveryBusyState(t *testing.T) {
 	}
 }
 
+// Section 3.5: a node sinfo did not list, or listed without a state, is not
+// known to be idle.
+func TestSlurmCheckRefusesNodesSlurmDidNotReport(t *testing.T) {
+	for name, tc := range map[string]struct{ answer, named string }{
+		"no answer":     {"", "exe[0001-0002]"},
+		"one missing":   {"exe0001 idle\n", "exe0002"},
+		"no state":      {"exe0001 idle\nexe0002\n", "exe0002"},
+		"another name":  {"exe1 idle\nexe2 idle\n", "exe[0001-0002]"},
+		"another state": {"exe0001 idle\nexe0002 allocated\n", "exe0002"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := sinfoAnswers(tc.answer, 0)
+			_, err := powerOffIPMI(t, rec, "-n", "exe[1-2]")
+			if err == nil {
+				t.Fatal("the power action went ahead for a node Slurm did not report as idle")
+			}
+			if !strings.Contains(err.Error(), tc.named) {
+				t.Errorf("error = %v, want it to name %s", err, tc.named)
+			}
+			if _, other := sinfoCalls(rec); other != 0 {
+				t.Error("the power action was sent")
+			}
+		})
+	}
+}
+
+// The check fails closed when Slurm cannot be asked; --lose-jobs is the way
+// past it, and says what it skipped.
+func TestSlurmCheckRefusesWhenSlurmCannotBeAsked(t *testing.T) {
+	rec := sinfoAnswers("", 1)
+	_, err := powerOffIPMI(t, rec, "-n", "exe7")
+	if err == nil {
+		t.Fatal("the power action went ahead although Slurm could not be asked")
+	}
+	if !strings.Contains(err.Error(), "--lose-jobs") {
+		t.Errorf("error = %v, want it to name the override", err)
+	}
+	if _, other := sinfoCalls(rec); other != 0 {
+		t.Error("the power action was sent")
+	}
+
+	rec = sinfoAnswers("", 1)
+	h, err := powerOffIPMI(t, rec, "-n", "exe7", "--lose-jobs")
+	if err != nil {
+		t.Fatalf("--lose-jobs did not get past the check: %v", err)
+	}
+	if !strings.Contains(h.errOut.String(), "--lose-jobs") {
+		t.Errorf("nothing says the check was overridden:\n%s", h.errOut)
+	}
+}
+
 // Section 2.10: --force lifts host protection, not the job check, and the
 // protected host is named before the job check runs.
 func TestForceDoesNotLoseJobs(t *testing.T) {
@@ -237,8 +315,25 @@ func TestSlurmCheckRunsInADryRun(t *testing.T) {
 	if sinfo, other := sinfoCalls(rec); sinfo != 1 || other != 0 {
 		t.Errorf("the dry run sent %d sinfo and %d other commands, want 1 and 0", sinfo, other)
 	}
-	// The dry run asks Slurm itself, as the real run does.
-	if got, want := rec.Commands()[0], "sinfo -h -N -o '%N %T' -n exe0007"; !strings.Contains(got, want) {
+	// Nodes of hidden partitions run jobs too, so sinfo is asked for them.
+	if got, want := rec.Commands()[0], "sinfo --all -h -N -o '%N %T' -n exe0007"; !strings.Contains(got, want) {
 		t.Errorf("command = %q, want it to contain %q", got, want)
+	}
+}
+
+// Section 3.5: a Redfish reset sent by hand powers a node off as surely as
+// bmc power does.
+func TestRedfishPostResetChecksSlurm(t *testing.T) {
+	rec := sinfoAnswers("exe0007 allocated\n", 0)
+	_, err := run(t, harnessOptions{recorder: rec}, "bmc", "redfish", "post",
+		"/redfish/v1/Systems/1/Actions/ComputerSystem.Reset", `{"ResetType":"ForceOff"}`, "-n", "exe7", "-y")
+	if err == nil {
+		t.Fatal("a reset was posted to a node running a job")
+	}
+	if !strings.Contains(err.Error(), "--lose-jobs") {
+		t.Errorf("error = %v, want it to name the override", err)
+	}
+	if sinfo, _ := sinfoCalls(rec); sinfo != 1 {
+		t.Errorf("sinfo was sent %d times, want once", sinfo)
 	}
 }

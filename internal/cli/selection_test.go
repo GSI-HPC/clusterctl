@@ -51,7 +51,7 @@ func TestAnEmptyNodesFlagDoesNotFallBackToTheEnvironment(t *testing.T) {
 func TestTheEnvironmentAppliesWithoutNodesFlag(t *testing.T) {
 	t.Setenv(config.EnvNodes, "@rack:R02")
 
-	h, err := run(t, harnessOptions{}, "bmc", "power", "off", "--dry-run")
+	h, err := run(t, harnessOptions{recorder: slurmAllIdle(t)}, "bmc", "power", "off", "--dry-run")
 	if err != nil {
 		t.Fatalf("a dry run on the session set failed: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestANodeSetArgumentAndTheNodesFlagContradict(t *testing.T) {
 func TestANodeSetArgumentWinsOverTheEnvironment(t *testing.T) {
 	t.Setenv(config.EnvNodes, "@rack:R02")
 
-	h, err := run(t, harnessOptions{}, "bmc", "power", "off", "exe0002", "--dry-run")
+	h, err := run(t, harnessOptions{recorder: slurmAllIdle(t)}, "bmc", "power", "off", "exe0002", "--dry-run")
 	if err != nil {
 		t.Fatalf("a dry run on an argument failed: %v", err)
 	}

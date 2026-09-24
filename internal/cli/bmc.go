@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -113,8 +114,8 @@ Powering many nodes on at once trips rack breakers, so a power-on is sent in
 batches with a pause between them; both come from the configuration.
 
 Slurm is asked first, because powering off a running job loses it. A node
-that Slurm reports running a job is refused unless --lose-jobs is given;
---force gets past a protected host, not this check.`,
+that Slurm reports running a job, or cannot say about, is refused unless
+--lose-jobs is given; --force gets past a protected host, not this check.`,
 		cobra.MinimumNArgs(1),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -374,14 +375,16 @@ func printBMCResults(a *app.App, results []bmcResult) error {
 // also lose the jobs of every node in the set.
 func addLoseJobsFlag(cmd *cobra.Command, loseJobs *bool) {
 	cmd.Flags().BoolVar(loseJobs, "lose-jobs", false,
-		"go ahead although Slurm reports jobs on the nodes")
+		"go ahead although Slurm reports jobs on the nodes, or cannot say")
 }
 
-// checkSlurmIdle refuses a power action on nodes that may be running a job,
-// unless loseJobs is set. A node counts as idle only when Slurm reports it
-// in a state known to run no job; a busy state and a state the check does
-// not know both refuse the action. It asks Slurm even in a dry run, so that
-// the dry run refuses what the real run would.
+// checkSlurmIdle refuses a power action on nodes that may be running a job.
+//
+// It fails closed: a node counts as idle only when Slurm reports it in a
+// state known to run no job. A busy state, a state the check does not know,
+// a node Slurm did not report and a Slurm that cannot be asked all refuse
+// the action, unless loseJobs is set. It asks Slurm even in a dry run, so
+// that the dry run refuses what the real run would.
 func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs bool) error {
 	if action == ipmi.ActionStatus || action == ipmi.ActionOn {
 		return nil
@@ -397,11 +400,16 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs 
 
 	jobs, err := slurmJobs(a, nodes)
 	if err != nil {
-		// The check is a safeguard, not a dependency: a cluster whose
-		// workload manager cannot be reached still has to be able to power
-		// a node off.
-		a.Printf("could not ask Slurm about these nodes (%v); continuing without the job check\n", err)
-		return nil //nolint:nilerr // the check is a safeguard, not a dependency
+		if loseJobs {
+			a.Printf("could not ask Slurm whether %s run jobs (%v); going ahead because --lose-jobs was given\n", nodes, err)
+			return nil
+		}
+		var coded *exitcode.Error
+		if !errors.As(err, &coded) {
+			err = exitcode.Wrap(exitcode.Transport, err)
+		}
+		return fmt.Errorf("could not ask Slurm whether %s run jobs, so nothing was done; "+
+			"pass --lose-jobs to go ahead without the check: %w", nodes, err)
 	}
 	if jobs.idle() {
 		return nil
@@ -432,10 +440,12 @@ type slurmJobState struct {
 	// states as Slurm wrote them.
 	strange *nodeset.NodeSet
 	states  []string
+	// missing are the nodes Slurm did not report at all.
+	missing *nodeset.NodeSet
 }
 
 func (s slurmJobState) idle() bool {
-	return s.busy.IsEmpty() && s.strange.IsEmpty()
+	return s.busy.IsEmpty() && s.strange.IsEmpty() && s.missing.IsEmpty()
 }
 
 // String names every node that is not known to be idle, and why.
@@ -454,6 +464,14 @@ func (s slurmJobState) String() string {
 		parts = append(parts, fmt.Sprintf("Slurm reports %s in a state not known to be free of jobs (%s)",
 			s.strange, strings.Join(quoted, ", ")))
 	}
+	if !s.missing.IsEmpty() {
+		pronoun := "they run"
+		if s.missing.Len() == 1 {
+			pronoun = "it runs"
+		}
+		parts = append(parts, fmt.Sprintf("Slurm did not report %s, so whether %s jobs is not known "+
+			"(check that the Slurm and inventory names agree)", s.missing, pronoun))
+	}
 	return strings.Join(parts, "; ")
 }
 
@@ -463,8 +481,10 @@ func slurmJobs(a *app.App, nodes *nodeset.NodeSet) (slurmJobState, error) {
 	if err != nil {
 		return slurmJobState{}, err
 	}
+	// --all includes the nodes of hidden partitions, which run jobs too.
+	argv := []string{"sinfo", "--all", "-h", "-N", "-o", "%N %T", "-n", nodes.Hostlist()}
 	result, err := a.ReadRunner.Run(a.Context(), target, transport.Request{
-		Argv:    []string{"sinfo", "-h", "-N", "-o", "%N %T", "-n", nodes.Hostlist()},
+		Argv:    argv,
 		Timeout: 30 * time.Second,
 		TTY:     transport.TTYNone,
 	})
@@ -496,10 +516,12 @@ func slurmJobs(a *app.App, nodes *nodeset.NodeSet) (slurmJobState, error) {
 		}
 	}
 
-	out := slurmJobState{busy: nodeset.New(), strange: nodeset.New()}
+	out := slurmJobState{busy: nodeset.New(), strange: nodeset.New(), missing: nodeset.New()}
 	seen := map[string]bool{}
 	for _, name := range nodes.Expand() {
 		switch verdict[name] {
+		case slurmUnreported:
+			_ = out.missing.Add(name)
 		case slurmStrange:
 			_ = out.strange.Add(name)
 			if state := stateOf[name]; !seen[state] {
@@ -703,11 +725,13 @@ comes back.
 			return redfishRequest(a, nodes, "GET", args[0], nil)
 		})
 
+	var loseJobs bool
 	post := leaf("post PATH BODY [NODESET]", "Send an action to a Redfish resource", `
 Send a POST with a JSON body to the Redfish interface.
 
 This can power off a machine, so it goes through the confirmation gate like
-any other destructive command, and it is never retried.`,
+any other destructive command, and it is never retried. A path that names a
+reset asks Slurm first, as bmc power does, and --lose-jobs overrides that.`,
 		cobra.MinimumNArgs(2),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -722,15 +746,25 @@ any other destructive command, and it is never retried.`,
 			if err != nil {
 				return err
 			}
-			if err := a.Gate.Confirm(safety.Action{
+			gated := safety.Action{
 				Verb:    "POST " + args[0] + " to",
 				Targets: nodes,
 				Detail:  args[1],
-			}); err != nil {
+			}
+			if resetsHost(args[0]) {
+				if err := a.Gate.Check(gated); err != nil {
+					return err
+				}
+				if err := checkSlurmIdle(a, nodes, ipmi.ActionReset, loseJobs); err != nil {
+					return err
+				}
+			}
+			if err := a.Gate.Confirm(gated); err != nil {
 				return dryRunOrError(err)
 			}
 			return redfishRequest(a, nodes, "POST", args[0], body)
 		})
+	addLoseJobsFlag(post, &loseJobs)
 
 	info := leaf("info [NODESET]", "Summarise what the service processors report", `
 Read the computer system resource of each node and show the identification,
@@ -789,6 +823,13 @@ Send requests to the Redfish interface of the service processors.
 The certificate of each processor is pinned the first time it is seen and a
 change is refused, because a self signed certificate cannot be verified any
 other way.`, get, post, info)
+}
+
+// resetsHost says whether a Redfish POST path may power a machine off. It
+// errs on the side of asking Slurm: any path that mentions a reset counts,
+// such as ComputerSystem.Reset, Chassis.Reset or a vendor's own.
+func resetsHost(path string) bool {
+	return strings.Contains(strings.ToLower(path), "reset")
 }
 
 func redfishRequest(a *app.App, nodes *nodeset.NodeSet, method, path string, body any) error {
