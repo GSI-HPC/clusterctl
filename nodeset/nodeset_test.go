@@ -34,13 +34,21 @@ func TestParseExpand(t *testing.T) {
 		{"exe[1-5]&exe[4-8]", []string{"exe4", "exe5"}},
 		{"exe[1-3]^exe[2-4]", []string{"exe1", "exe4"}},
 		{"exe[1-3]!exe2,sub1", []string{"exe1", "exe3", "sub1"}},
+		{"", nil},
+		// Padding is not part of a host's identity, so these name one host,
+		// shown the way it was first written.
+		{"exe1,exe01", []string{"exe1"}},
+		{"exe01,exe1", []string{"exe01"}},
+		{"exe[1,01]", []string{"exe1"}},
+		// Every host keeps its own width, so none is shown under a name it
+		// was not given.
+		{"exe[01-02],exe3", []string{"exe01", "exe02", "exe3"}},
+		{"exe[0001-0002,11]", []string{"exe0001", "exe0002", "exe11"}},
+		{"exe[01-100/99]", []string{"exe01", "exe100"}},
+		{"exe[001-010]", []string{"exe001", "exe002", "exe003", "exe004", "exe005", "exe006", "exe007", "exe008", "exe009", "exe010"}},
+		{"exe[08-10]!exe09", []string{"exe08", "exe10"}},
 		{"exe1 & exe[1-2]", []string{"exe1"}},
 		{"exe[1-3],,exe5,", []string{"exe1", "exe2", "exe3", "exe5"}},
-		{"", nil},
-		// Padding is a display property, so these name one host, shown with
-		// the first non-zero width the expression asked for.
-		{"exe1,exe01", []string{"exe01"}},
-		{"exe01,exe1", []string{"exe01"}},
 	}
 
 	for _, tc := range tests {
@@ -75,8 +83,11 @@ func TestFold(t *testing.T) {
 		{"padding is preserved", "exe0001 exe0002", "exe[0001-0002]"},
 		{"gaps are listed", "exe1 exe2 exe5", "exe[1-2,5]"},
 		{"pads do not merge across widths", "exe09 exe10", "exe[09-10]"},
-		{"the first non-zero width wins", "exe1 exe01", "exe01"},
-		{"a width applies to the whole dimension", "exe[01-02] exe3", "exe[01-03]"},
+		{"the first spelling of a host wins", "exe1 exe01", "exe1"},
+		{"every host keeps its width", "exe[01-02] exe3", "exe[01-02,3]"},
+		{"a stray unpadded host is not renamed", "exe[0001-0010] exe11", "exe[0001-0010,11]"},
+		{"a wider value joins a padded run", "exe08 exe09 exe10 exe11", "exe[08-11]"},
+		{"widths split a run", "exe7 exe08 exe9", "exe[7,08,9]"},
 		{"patterns are listed alphabetically", "sub1 exe1", "exe1,sub1"},
 		{"a single valued dimension loses its brackets", "exe[1-1]", "exe1"},
 		{"two dimensions fold into one vector", "exe1-ib0 exe1-ib1 exe2-ib0 exe2-ib1", "exe[1-2]-ib[0-1]"},
@@ -109,6 +120,8 @@ func TestFoldRoundTrip(t *testing.T) {
 		"exe[1-2]-ib[0-1]", "exe1,exe01,exe001",
 		"rack[1-3]node[01-04]", "10.0.1.[1-8]",
 		"exe[1-5]!exe3", "exe[1-100]",
+		"exe[01-02],exe3", "exe[0001-0010],exe11", "exe7,exe08,exe9",
+		"exe[08-12]!exe[08-09]", "x[1-2]y[01-02],x3y3", "exe[00-01],exe0",
 	}
 	for _, expr := range exprs {
 		t.Run(expr, func(t *testing.T) {
@@ -282,6 +295,9 @@ func TestParseErrors(t *testing.T) {
 		"exe[1-9/+2]", "exe[5-999999999999999999/9223372036854775807]",
 		// Adjacent numeric parts cannot be told apart once expanded.
 		"exe0[0,10]", "exe[1-2][3-4]", "[1-2]0",
+		// A last bound padded differently from the first would be shown
+		// under a name it was not given.
+		"exe[1-010]", "exe[001-10]", "exe[01-005]",
 		// A set operator needs an operand on each side. A dangling one is
 		// what an empty command substitution leaves behind, and dropping it
 		// would select every host of the left operand.
@@ -449,4 +465,53 @@ func equal(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestCanonicalReturnsAHeldName covers a set that holds hosts of one pattern
+// written with different widths. Canonical used to render every member at one
+// width per pattern, so it answered with names the set was never given.
+func TestCanonicalReturnsAHeldName(t *testing.T) {
+	t.Parallel()
+
+	ns := nodeset.MustParse("exe[0001-0010],exe11,lab1")
+	tests := []struct{ ask, want string }{
+		{"exe1", "exe0001"},
+		{"exe0001", "exe0001"},
+		{"exe11", "exe11"},
+		{"exe0011", "exe11"},
+		{"lab01", "lab1"},
+	}
+	for _, tc := range tests {
+		got, ok := ns.Canonical(tc.ask)
+		if !ok || got != tc.want {
+			t.Errorf("Canonical(%q) = %q, %v, want %q", tc.ask, got, ok, tc.want)
+		}
+	}
+	for _, name := range []string{"exe12", "exe[1-2]", ""} {
+		if got, ok := ns.Canonical(name); ok {
+			t.Errorf("Canonical(%q) = %q, want no match", name, got)
+		}
+	}
+
+	// Combining sets keeps the spelling already held.
+	u := nodeset.MustParse("lab1").Union(nodeset.MustParse("lab01,lab2"))
+	if got, want := u.String(), "lab[1-2]"; got != want {
+		t.Errorf("union = %q, want %q", got, want)
+	}
+	for _, chunk := range ns.Split(2) {
+		for _, name := range chunk.Expand() {
+			if !contains(ns.Expand(), name) {
+				t.Errorf("Split renamed a host to %q", name)
+			}
+		}
+	}
+}
+
+func contains(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
