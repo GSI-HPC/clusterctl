@@ -46,5 +46,7 @@ ask on, it refuses rather than proceeding — pass `-y` when you mean it.
 
 {{< callout type="warning" >}}
 `--dry-run` is the first thing to reach for on a command you have not run
-before. It prints what would be sent and exits without contacting anything.
+before. It prints what would be changed and changes nothing. Lookups still run
+for real, such as asking Slurm for a group or whether a node is running a job,
+so a dry run refuses what the real run would refuse.
 {{< /callout >}}

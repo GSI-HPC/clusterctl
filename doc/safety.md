@@ -45,10 +45,16 @@ Everything that changes or destroys something goes through
    that cannot be asked is refused, not carried out. `-y` confirms in advance
    and is the supported way to automate.
 
-`--dry-run` stops after the preview and exits zero, having changed nothing.
-The read-only lookups the preview is built from, group sources and the DHCP
-server's configuration, still run, so the rehearsal selects and addresses the
-same hosts the real run would.
+`--dry-run` stops after the preview and sends no change. Read-only lookups
+still run for real: the node set is resolved, group sources such as
+`@slurm:main` are asked over ssh, the DHCP server's configuration is read, and
+the checks a real run makes, such as the Slurm job check or a drain's reason,
+are made the same way. The rehearsal therefore selects and addresses the same
+hosts the real run would, refuses what the real run would refuse with the same
+exit code, and exits zero only when the real run would go ahead. Only the
+changes are recorded and printed instead of sent. A lookup that a dry run
+skips is named in the preview, so a preview never reads a check it did not
+make as passed.
 
 Steps 2 to 4 are also available separately. `Gate.Preview` runs the checks and
 describes the question without asking it, and `Preview.Accept` judges an
