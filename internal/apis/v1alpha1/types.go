@@ -159,8 +159,10 @@ type BMCSpec struct {
 	// names another.
 	Credential string `json:"credential,omitempty" yaml:"credential,omitempty"`
 	// Order is the transport preference. Redfish first matches current
-	// firmware, where IPMI over LAN is off by default.
-	Order   []string    `json:"order,omitempty" yaml:"order,omitempty" jsonschema:"description=Transport preference, e.g. [redfish, ipmi]"`
+	// firmware, where IPMI over LAN is off by default. A read falls back
+	// to the next transport when the first fails; an action only when the
+	// first provably did not reach the processor.
+	Order   []string    `json:"order,omitempty" yaml:"order,omitempty" jsonschema:"description=Transports to try in order: redfish and ipmi,enum=redfish,enum=ipmi"`
 	IPMI    IPMISpec    `json:"ipmi,omitempty" yaml:"ipmi,omitempty"`
 	Redfish RedfishSpec `json:"redfish,omitempty" yaml:"redfish,omitempty"`
 	PDU     PDUSpec     `json:"pdu,omitempty" yaml:"pdu,omitempty"`
@@ -172,16 +174,18 @@ type BMCSpec struct {
 // IPMISpec configures the IPMI backends, which run on the management gateway
 // rather than on the workstation.
 type IPMISpec struct {
-	// Via names the host role the backend runs on. Empty runs it locally.
+	// Via names the host role the backend runs on. It is required: the
+	// tools are never run on the workstation.
 	Via string `json:"via,omitempty" yaml:"via,omitempty" jsonschema:"description=Host role the IPMI tools run on"`
 	// Backend selects ipmipower or ipmitool.
 	Backend string `json:"backend,omitempty" yaml:"backend,omitempty" jsonschema:"enum=ipmipower,enum=ipmitool"`
 	// Driver is the FreeIPMI driver name, LAN_2_0 for anything current.
 	Driver string `json:"driver,omitempty" yaml:"driver,omitempty"`
 	// PasswordTransport decides how the password reaches the backend. The
-	// default, file, writes it to a mode 0600 file on the gateway, so that
-	// it never appears in the remote argv where ps would show it.
-	PasswordTransport string `json:"passwordTransport,omitempty" yaml:"passwordTransport,omitempty" jsonschema:"enum=file,enum=stdin,enum=env"`
+	// only one implemented, file, streams it over stdin into a mode 0600
+	// file on the gateway, so that it never appears in the remote argv
+	// where ps would show it.
+	PasswordTransport string `json:"passwordTransport,omitempty" yaml:"passwordTransport,omitempty" jsonschema:"enum=file"`
 	// IpmipowerPath and IpmitoolPath override the backend locations.
 	IpmipowerPath string   `json:"ipmipowerPath,omitempty" yaml:"ipmipowerPath,omitempty"`
 	IpmitoolPath  string   `json:"ipmitoolPath,omitempty" yaml:"ipmitoolPath,omitempty"`
@@ -220,7 +224,7 @@ type PDUSpec struct {
 // VendorProfile overrides BMC handling for one hardware vendor.
 type VendorProfile struct {
 	Credential string   `json:"credential,omitempty" yaml:"credential,omitempty"`
-	Order      []string `json:"order,omitempty" yaml:"order,omitempty"`
+	Order      []string `json:"order,omitempty" yaml:"order,omitempty" jsonschema:"enum=redfish,enum=ipmi"`
 	// ResetTypes lists the Redfish reset types the firmware accepts. When it
 	// is empty the client asks the BMC instead of guessing.
 	ResetTypes    []string `json:"resetTypes,omitempty" yaml:"resetTypes,omitempty"`
