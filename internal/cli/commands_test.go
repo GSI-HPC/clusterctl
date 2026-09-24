@@ -164,6 +164,11 @@ func TestConfigInitDefaultsToTheUserConfigDirectory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "site.yaml")); err != nil {
 		t.Errorf("site.yaml was not written to %s: %v", dir, err)
 	}
+	// The README and the manual send the administrator to the paths
+	// printed here, because the directory differs between systems.
+	if !strings.Contains(h.out.String(), filepath.Join(dir, "site.yaml")) {
+		t.Errorf("the output does not name the file it wrote in %s:\n%s", dir, h.out)
+	}
 	// The directory is on the search path, so the next steps need no
 	// variable.
 	if strings.Contains(h.out.String(), "export CLUSTERCTL_CONFIG") {

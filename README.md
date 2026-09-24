@@ -62,15 +62,17 @@ Go 1.26 or newer. The toolchain downloads itself if yours is older.
 
 ```console
 $ clusterctl config init --site lab --cluster alpha --domain hpc.example.org
-$ $EDITOR ~/.config/clusterctl/*.yaml    # fill in what the comments ask for
+$ $EDITOR ~/.config/clusterctl/*.yaml    # the files it listed; fill in what they ask
 $ clusterctl config validate
 $ clusterctl doctor
 $ clusterctl node list
 ```
 
 `config init` writes the least configuration that resolves, and only into an
-empty directory. `examples/site/` is a complete
-configuration to take further settings from. The
+empty directory, and prints the path of every file it writes. On macOS that
+directory is `~/Library/Application Support/clusterctl`, not
+`~/.config/clusterctl`. `examples/site/` is a complete configuration to take
+further settings from. The
 [manual](https://gsi-hpc.github.io/clusterctl/) walks through both, and
 [`doc/migration.md`](doc/migration.md) maps every command and setting of the
 shell toolkit clusterctl replaces to its counterpart.
