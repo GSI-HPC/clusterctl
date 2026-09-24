@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -973,13 +974,18 @@ management network, and report which of them answer.`,
 }
 
 func newBMCForgetCommand(r *root) *cobra.Command {
-	return leaf("forget NODE...", "Forget the recorded certificate of a service processor", `
+	return leaf("forget [NODESET | BMC...]", "Forget the recorded certificate of a service processor", `
 Remove the recorded certificate fingerprint of a service processor, so that
 the next connection records whatever it now presents.
 
+Name the nodes, or the service processor as the certificate error names it.
+The fingerprints about to be dropped are shown and confirmed like any other
+change, and a protected host is refused without --force.
+
 Run this after a certificate was replaced on purpose. If it changed without
-anyone replacing it, find out why first.`,
-		cobra.MinimumNArgs(1),
+anyone replacing it, find out why first: the next connection trusts whatever
+it is shown and sends the BMC account to it.`,
+		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
 			if err != nil {
@@ -990,19 +996,136 @@ anyone replacing it, find out why first.`,
 				path = a.StatePath("bmc-pins")
 			}
 			store := &redfish.PinStore{Path: path}
-			for _, node := range args {
-				// The pin is kept under the host the client talked to.
-				host, err := a.BMCHost(node)
-				if err != nil {
+			pins, err := store.Load()
+			if err != nil {
+				return err
+			}
+			drops, targets, err := pinsToForget(a, pins, args)
+			if err != nil {
+				return err
+			}
+
+			lines := make([]string, len(drops))
+			for i, d := range drops {
+				lines[i] = d.host + " " + d.fingerprint
+			}
+			if err := a.Gate.Confirm(safety.Action{
+				Verb:    "forget the certificates of",
+				Targets: targets,
+				Detail:  "drops from " + path + ":\n    " + strings.Join(lines, "\n    "),
+			}); err != nil {
+				return dryRunOrError(err)
+			}
+			for _, d := range drops {
+				if err := store.Remove(a.Context(), d.host); err != nil {
 					return err
 				}
-				if err := store.Remove(a.Context(), host); err != nil {
-					return err
-				}
-				a.Printf("forgot the certificate of %s\n", host)
+				a.Printf("forgot the certificate of %s, %s\n", d.host, d.fingerprint)
 			}
 			return nil
 		})
+}
+
+// pinToForget is a recorded certificate about to be dropped.
+type pinToForget struct {
+	host, fingerprint string
+}
+
+// pinsToForget finds the pins the arguments name, and the nodes they belong
+// to, for the gate. An argument is a service processor when a pin is recorded
+// under it, which is the name the certificate error gives; anything else is
+// a node set, mapped to its service processors the way the other commands
+// map it. A node without a recorded pin is named; none at all is an error.
+func pinsToForget(a *app.App, pins map[string]string, args []string) ([]pinToForget, *nodeset.NodeSet, error) {
+	var (
+		drops   []pinToForget
+		targets = nodeset.New()
+		rest    []string
+	)
+	add := func(host, fingerprint, node string) error {
+		for _, d := range drops {
+			if d.host == host {
+				return nil
+			}
+		}
+		drops = append(drops, pinToForget{host: host, fingerprint: fingerprint})
+		return targets.Add(node)
+	}
+	for _, arg := range args {
+		host, ok := recordedPin(pins, arg)
+		if !ok {
+			rest = append(rest, arg)
+			continue
+		}
+		// The gate checks nodes, so the processor is mapped back to its
+		// node; a protected node is protected under either name.
+		if err := add(host, pins[host], nodeOfBMC(a, host)); err != nil {
+			return nil, nil, exitcode.Wrap(exitcode.Usage, err)
+		}
+	}
+
+	unpinned := nodeset.New()
+	if len(rest) > 0 || len(args) == 0 {
+		nodes, err := selection(a, rest)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, node := range nodes.Expand() {
+			bmc, err := a.BMCHost(node)
+			if err != nil {
+				return nil, nil, err
+			}
+			host, ok := recordedPin(pins, bmc)
+			if !ok {
+				_ = unpinned.Add(node)
+				continue
+			}
+			if err := add(host, pins[host], node); err != nil {
+				return nil, nil, exitcode.Wrap(exitcode.Usage, err)
+			}
+		}
+	}
+	if len(drops) == 0 {
+		return nil, nil, exitcode.Errorf(exitcode.TargetFailed,
+			"no certificate is recorded for %s; nothing was forgotten", unpinned)
+	}
+	if !unpinned.IsEmpty() {
+		a.Printf("no certificate is recorded for %s\n", unpinned)
+	}
+	return drops, targets, nil
+}
+
+// recordedPin finds the host a pin is recorded under. Host names are not
+// case sensitive, and a trailing dot only makes one absolute.
+func recordedPin(pins map[string]string, name string) (string, bool) {
+	if _, ok := pins[name]; ok {
+		return name, true
+	}
+	want := strings.TrimSuffix(name, ".")
+	for host := range pins {
+		if strings.EqualFold(host, want) {
+			return host, true
+		}
+	}
+	return "", false
+}
+
+// nodeOfBMC returns the node whose service processor a host is. For a host
+// no node of the inventory has, it returns the host's short name, which is
+// what a protected host is usually listed as, or the address itself.
+func nodeOfBMC(a *app.App, host string) string {
+	if a.Inventory != nil {
+		for _, name := range a.Inventory.Names() {
+			bmc, err := a.BMCHost(name)
+			if err == nil && strings.EqualFold(bmc, host) {
+				return name
+			}
+		}
+	}
+	if net.ParseIP(host) != nil {
+		return host
+	}
+	return strings.SplitN(host, ".", 2)[0]
 }
 
 func newPDUCommand(r *root) *cobra.Command {
