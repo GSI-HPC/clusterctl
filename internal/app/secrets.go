@@ -86,11 +86,11 @@ func (a *App) SecretValues(name string) (map[string][]byte, error) {
 			return nil, err
 		}
 	}
-	plaintext, err := secrets.DecryptSops(raw, ids)
+	sections, err := secrets.DecryptSops(raw, ids, config.SecretSections())
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, fmt.Errorf("the Secret %q (%s): %w", name, doc.File, err))
 	}
-	values, err := config.SecretValues(doc.File, plaintext)
+	values, err := config.SecretValues(doc.File, sections)
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
