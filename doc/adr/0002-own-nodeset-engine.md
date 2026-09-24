@@ -33,7 +33,8 @@ Implement the engine here, in `nodeset/` at the module root.
 
 Three things an implementation has to pick, written down in
 [../nodeset.md](../nodeset.md). The first agrees with ClusterShell; the other
-two do not:
+two do not, and that document lists every place where clusterctl and
+ClusterShell 1.10.1 differ:
 
 - Every run of digits is a dimension, and a dimension with one value renders
   without brackets. This makes folding idempotent, which is checked by a fuzz
@@ -51,6 +52,7 @@ two do not:
 
 - Roughly 800 lines to maintain, plus the semantics to keep aligned with
   ClusterShell as it changes.
-- Divergence from ClusterShell is possible and would be found by a site rather
-  than by a test. Running the two against each other over a corpus of real
-  expressions would close that gap and has not been done.
+- Divergence from ClusterShell is possible beyond the corpus the two are run
+  against (`nodeset/testdata/clustershell.txt`), and there it would be found
+  by a site rather than by a test. The corpus grows with every divergence
+  found.

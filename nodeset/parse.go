@@ -196,6 +196,11 @@ func parseTerm(term string, res Resolver, depth int, b *budget) (*NodeSet, error
 // dimensions before it leave of the budget, so an oversized pattern is
 // refused before its memory is spent.
 func parsePattern(term string, b *budget) (*NodeSet, error) {
+	// A host name never begins with a dash, and a name that does is read as
+	// an option by ssh and most other tools a name is handed to.
+	if strings.HasPrefix(term, "-") {
+		return nil, fmt.Errorf("%q is not a host name: it begins with -", term)
+	}
 	var (
 		pattern strings.Builder
 		dims    []*rangeSet

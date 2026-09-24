@@ -4,7 +4,9 @@ weight: 1
 ---
 
 Every command that acts on nodes takes a node set. The syntax is ClusterShell's,
-so it is what you already type at `nodeset`, `clush` and `sinfo`.
+so it is what you already type at `nodeset`, `clush` and `sinfo`. A few corner
+cases are decided differently; the padding note below is the one you are most
+likely to meet.
 
 ## The syntax
 
@@ -80,7 +82,7 @@ with the BMC password, to another host.
 
 ```console
 $ clusterctl node hw -n '-oProxyCommand=...'
-clusterctl: node "-oProxyCommand=..." is not a host name: the label "-oProxyCommand=" begins with a hyphen
+clusterctl: "-oProxyCommand=..." is not a host name: it begins with -
 ```
 
 ## Groups

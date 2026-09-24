@@ -11,7 +11,7 @@ import (
 
 // FuzzParseFold checks the two properties every expression must satisfy:
 // parsing never panics, and folding is idempotent, so the printed form of a
-// set parses back into the same set.
+// set parses back into the same set, every host spelled as before.
 //
 // A fuzzing worker gives up on an input that runs for ten seconds, and a huge
 // set proves nothing about folding that a small one does not. The limits are
@@ -25,6 +25,8 @@ func FuzzParseFold(f *testing.F) {
 		"exe[1-5]!exe3", "exe[1-3]&exe[2-9]", "exe[1-3]^exe[3-5]",
 		"exe[01-10/3]", "10.0.1.[1-4]", "exe[1-2].hpc.example.org",
 		"", ",", "[", "]", "exe[]", "exe[9-1]", "@group", "exe[1-2]x",
+		"exe[1-3]&", "exe[1-3]!,exe2", "exe[1-3]&&exe2", "-exe1",
+		"exe[0001-0010],exe11", "exe1,exe01", "exe7 exe08 exe9", "exe[08-12]!exe09",
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -46,13 +48,14 @@ func FuzzParseFold(f *testing.F) {
 		if got := second.String(); got != folded {
 			t.Fatalf("folding is not idempotent for %q: %q then %q", expr, folded, got)
 		}
-		if first.Len() != second.Len() {
-			t.Fatalf("folding %q changed the host count: %d then %d", expr, first.Len(), second.Len())
+		// Contains ignores padding, so only an exact comparison notices a
+		// fold that renamed exe3 to exe03.
+		if a, b := first.Expand(), second.Expand(); !equal(a, b) {
+			t.Fatalf("folding %q to %q changed the hosts: %v then %v", expr, folded, a, b)
 		}
-		for _, name := range first.Expand() {
-			if !second.Contains(name) {
-				t.Fatalf("folding %q to %q lost host %q", expr, folded, name)
-			}
+		// Hostlist has to name the same hosts too.
+		if hl := first.Hostlist(); !equal(nodeset.MustParse(hl).Expand(), first.Expand()) {
+			t.Fatalf("Hostlist of %q is %q, which names other hosts", expr, hl)
 		}
 	})
 }

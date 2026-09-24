@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# A differential corpus: each line is an expression, what ClusterShell expands
+# it to (the host names, or "error", or "-" for none), and, where clusterctl
+# decides otherwise on purpose, the divergence doc/nodeset.md lists for it.
+# Columns are separated by one tab. clustershell.py rewrites the second column.
+# Recorded with ClusterShell 1.10.1.
+exe1	exe1
+exe0001	exe0001
+login	login
+exe[1-3]	exe1 exe2 exe3
+exe[0001-0003]	exe0001 exe0002 exe0003
+exe[1-10/3]	exe1 exe4 exe7 exe10
+exe[1,5,9]	exe1 exe5 exe9
+exe[09-11]	exe09 exe10 exe11
+exe[01-100/33]	error	padding mismatch
+exe[1-2]-ib[0-1]	exe1-ib0 exe1-ib1 exe2-ib0 exe2-ib1
+rack[1-2]node[01-02]	rack1node01 rack1node02 rack2node01 rack2node02
+exe[1-2].hpc.example.org	exe1.hpc.example.org exe2.hpc.example.org
+10.0.1.[1-4]	10.0.1.1 10.0.1.2 10.0.1.3 10.0.1.4
+exe[1-3],sub[1-2]	exe1 exe2 exe3 sub1 sub2
+exe[1-5]!exe[2-3]	exe1 exe4 exe5
+exe[1-5]&exe[4-8]	exe4 exe5
+exe[1-3]^exe[2-4]	exe1 exe4
+exe[1-3]!exe2,sub1	exe1 exe3 sub1
+exe[1-10]!exe[1-5]&exe[1-7]	exe6 exe7
+exe[08-10]!exe09	exe08 exe10
+exe[1-3],exe[2-5]	exe1 exe2 exe3 exe4 exe5
+exe[0001-0010]!exe[0002-0009]	exe0001 exe0010
+x[1-2]y[01-02]!x1y02	x1y01 x2y01 x2y02
+exe[1-5]!exe[1-5]	-
+exe[	error
+exe1]	error
+exe[]	error
+exe[5-1]	error
+exe[1-2/0]	error
+exe[a-b]	error
+exe[3/2]	error
+exe[1,,2]	error
+exe[1-3]&	error
+exe[1-3]!	error
+exe[1-3]^	error
+exe[1-3]!,exe2	error
+exe[1-3]&&exe2	error
+exe[1-3]&!exe2	error
+exe[1-3],&exe2	error
+&exe1	error
+!exe1	error
+exe1,exe01	exe1 exe01	padding identity
+exe01,exe1	exe1 exe01	padding identity
+exe[1,01]	exe1 exe01	padding identity
+exe[01-02],exe3	exe3 exe01 exe02
+exe[1-3]!exe02	exe1 exe2 exe3	padding identity
+exe0[0,10]	exe00 exe010	adjacent numeric parts
+exe[1-2][3-4]	error
+exe[1-010]	error
+exe[01-100]	error	padding mismatch
+exe[001-10]	error
+exe[1-3] sub1	exe1 sub1 exe2 sub1 exe3 sub1	whitespace
+exe1 & exe[1-2]	exe1
+exe[1-3],	error	empty operand
+exe[1-3],,exe5	error	empty operand
+,exe1	error	empty operand
+-oProxyCommand=x	-oProxyCommand=x	leading dash
+exe1,-exe2	-exe2 exe1	leading dash

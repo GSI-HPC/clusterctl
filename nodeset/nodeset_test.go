@@ -305,6 +305,9 @@ func TestParseErrors(t *testing.T) {
 		"exe[1-3]&", "exe[1-3]!", "exe[1-3]^", "exe[1-3]! ",
 		"exe[1-3]!,exe2", "exe[1-3]&&exe2", "exe[1-3]&!exe2", "exe[1-3],&exe2",
 		"&exe1", "!exe1", " ^exe1",
+		// A host name never begins with a dash; ssh would read it as an
+		// option.
+		"-oProxyCommand=x", "exe1 -exe2", "exe1,-exe[1-2]",
 	}
 	for _, expr := range exprs {
 		t.Run(expr, func(t *testing.T) {
@@ -546,7 +549,7 @@ func TestCanonicalReturnsAHeldName(t *testing.T) {
 			t.Errorf("Canonical(%q) = %q, %v, want %q", tc.ask, got, ok, tc.want)
 		}
 	}
-	for _, name := range []string{"exe12", "exe[1-2]", ""} {
+	for _, name := range []string{"exe12", "exe[1-2]", "-exe1", ""} {
 		if got, ok := ns.Canonical(name); ok {
 			t.Errorf("Canonical(%q) = %q, want no match", name, got)
 		}

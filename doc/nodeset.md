@@ -5,7 +5,8 @@
 
 A node set expression names a set of hosts. The syntax is ClusterShell's,
 because that is what the team already types and what the cluster's other tools
-accept.
+accept. The semantics follow ClusterShell except in the corners listed under
+[Where this differs from ClusterShell](#where-this-differs-from-clustershell).
 
 The engine is in `nodeset/`, the one package this module offers to other
 programs: when this was written, Go had no node set implementation, and porting
@@ -97,11 +98,37 @@ the two bounds would be shown under a name it was not written as.
 can be split back into the same two dimensions, so folding it would silently
 lose a host. Separate numeric parts with a literal character.
 
+### A name cannot begin with a dash
+
+`-oProxyCommand=x` is an error. No host name begins with `-`, and ssh and most
+other tools a name is handed to would read one as an option.
+
 ### Steps are read but not written
 
 `exe[1-10/2]` parses. Folding does not produce a step unless it is asked for,
 which is what ClusterShell's `--autostep` does; without it, `exe[1,3,5,7]`
 prints as it is.
+
+## Where this differs from ClusterShell
+
+ClusterShell 1.10.1 was run over the corpus in
+`nodeset/testdata/clustershell.txt`, and a test checks that clusterctl agrees
+with it on every other line of that corpus and differs on these:
+
+| Expression | ClusterShell | clusterctl |
+| --- | --- | --- |
+| `exe1,exe01` | two hosts, `exe[1,01]` | one host, `exe1` (padding identity) |
+| `exe[1-3]!exe02` | `exe[1-3]` | `exe[1,3]` (padding identity) |
+| `exe[01-100]` | error: padding length mismatch | `exe01` to `exe99` and `exe100` |
+| `exe0[0,10]` | `exe00`, `exe010` | error: adjacent numeric parts |
+| `exe[1-3] sub1` | whitespace is part of the name | union, `exe[1-3],sub1` |
+| `exe[1-3],` and `exe1,,exe2` | error | the empty operand is nothing |
+| `-oProxyCommand=x` | accepted as a name | error |
+
+Both reject `exe[1-010]`, `exe[001-10]`, a dangling `!`, `&` or `^`, and a set
+operator with no left operand. On the other lines of the corpus both name the
+same hosts. Folded output may still be ordered differently: ClusterShell prints
+`exe[3,01-02]` where clusterctl prints `exe[01-02,3]`.
 
 ## Groups
 
@@ -144,7 +171,8 @@ than looping.
 ### Names are host names
 
 The node set language accepts more than a host name may contain, because a
-set is also used for things that are not hosts. A node name, though, becomes
+set is also used for things that are not hosts; of the host name rules, the
+parser itself enforces only that a name does not begin with `-`. A node name, though, becomes
 an ssh destination and the host of a Redfish URL, where a leading `-` is an
 option and `:`, `@`, `/`, `?` and `#` set the port, the account, the path, the
 query and the fragment. So `App.Select`, which every command and the MCP
