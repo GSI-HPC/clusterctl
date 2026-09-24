@@ -17,6 +17,7 @@ package transport
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -64,17 +65,17 @@ const (
 type Target struct {
 	// Name is the node or role as the administrator named it, used in
 	// output and errors.
-	Name string
+	Name string `json:"name" yaml:"name"`
 	// Host is the name ssh connects to.
-	Host string
+	Host string `json:"host" yaml:"host"`
 	// User is the remote account; empty uses what the configuration says.
-	User string
+	User string `json:"user" yaml:"user"`
 	// Role names the infrastructure role, when the target is one.
-	Role string
+	Role string `json:"role,omitempty" yaml:"role,omitempty"`
 	// ForwardAgent and ForwardX11 are requested per command, on top of what
 	// the role already asks for.
-	ForwardAgent bool
-	ForwardX11   bool
+	ForwardAgent bool `json:"forwardAgent,omitempty" yaml:"forwardAgent,omitempty"`
+	ForwardX11   bool `json:"forwardX11,omitempty" yaml:"forwardX11,omitempty"`
 }
 
 // String renders the target the way errors refer to it.
@@ -121,6 +122,20 @@ type Result struct {
 	Duration time.Duration `json:"-" yaml:"-"`
 	// Err is set when the command could not be run or did not exit zero.
 	Err error `json:"-" yaml:"-"`
+}
+
+// MarshalJSON adds the error text to the result, which the machine formats
+// would otherwise leave out: Err is an error value, not a string.
+func (r Result) MarshalJSON() ([]byte, error) {
+	type plain Result
+	out := struct {
+		plain
+		Error string `json:"error,omitempty"`
+	}{plain: plain(r)}
+	if r.Err != nil {
+		out.Error = r.Err.Error()
+	}
+	return json.Marshal(out)
 }
 
 // Failed reports whether the command did not succeed.

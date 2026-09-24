@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -39,5 +40,29 @@ func TestMalformedJSONPathDoesNotPanic(t *testing.T) {
 	}
 	if got, want := exitcode.From(err), exitcode.Usage; got != want {
 		t.Errorf("exit code = %d, want %d", got, want)
+	}
+}
+
+// TestExecJQSelectsFailingTargets covers review finding 12.3 with the idiom
+// the manual documents.
+func TestExecJQSelectsFailingTargets(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		if tg.Name == "exe0002" {
+			return &transport.Result{Target: tg, ExitCode: 1}, nil
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	h, err := run(t, harnessOptions{recorder: rec}, "exec", "-n", "exe[1-2]",
+		"-o", "jq=.[] | select(.exitCode != 0) | .target.name", "--", "true")
+	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
+		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
+	}
+	if got, want := h.out.String(), "exe0002\n"; got != want {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+
+	h, _ = run(t, harnessOptions{recorder: rec}, "exec", "-n", "exe[1-2]", "-o", "yaml", "--", "true")
+	if out := h.out.String(); !strings.Contains(out, "exitCode: 0\n") || strings.Contains(out, "0.0") {
+		t.Errorf("-o yaml does not print integers as integers:\n%s", out)
 	}
 }
