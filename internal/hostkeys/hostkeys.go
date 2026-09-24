@@ -11,16 +11,20 @@
 package hostkeys
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha1" // ssh hashes known_hosts names with HMAC-SHA1
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -404,17 +408,18 @@ var errCollected = errors.New("host key collected")
 type Scanner struct {
 	// Algorithms are the key types to ask for, best first.
 	Algorithms []string
-	// Timeout bounds one connection attempt.
+	// Timeout bounds one host, from the dial to the key.
 	Timeout time.Duration
 	// Port is the SSH port; empty means 22.
 	Port string
-	// Dial connects; it is replaced in tests.
+	// Dial connects. It defaults to a TCP connection; a host behind a jump
+	// host is reached through DialCommand instead, and tests replace it.
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-// Scan collects the host keys a host offers, best algorithm first. It returns
-// the first key it obtains, which is the strongest algorithm the host
-// supports out of those asked for.
+// Scan collects the host key a host offers. The algorithms are offered in one
+// handshake, best first, so the server picks the strongest it has and an
+// unreachable host costs one timeout rather than one for each algorithm.
 func (s *Scanner) Scan(ctx context.Context, host string) ([]Entry, error) {
 	algorithms := s.Algorithms
 	if len(algorithms) == 0 {
@@ -428,33 +433,36 @@ func (s *Scanner) Scan(ctx context.Context, host string) ([]Entry, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	dial := s.Dial
 	if dial == nil {
-		dial = func(ctx context.Context, network, address string) (net.Conn, error) {
-			return (&net.Dialer{Timeout: timeout}).DialContext(ctx, network, address)
-		}
+		dial = (&net.Dialer{}).DialContext
 	}
-
 	address := net.JoinHostPort(host, port)
-	var lastErr error
-	for _, algorithm := range algorithms {
-		entry, err := scanOne(ctx, dial, address, host, algorithm, timeout)
-		if err == nil {
-			return []Entry{entry}, nil
-		}
-		lastErr = err
+	entry, err := scanOne(ctx, dial, address, host, algorithms, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("no host key could be collected from %s: %w", host, err)
 	}
-	return nil, fmt.Errorf("no host key could be collected from %s: %w", host, lastErr)
+	return []Entry{entry}, nil
 }
 
 func scanOne(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error),
-	address, host, algorithm string, timeout time.Duration) (Entry, error) {
+	address, host string, algorithms []string, timeout time.Duration) (Entry, error) {
 
 	conn, err := dial(ctx, "tcp", address)
 	if err != nil {
 		return Entry{}, err
 	}
-	defer func() { _ = conn.Close() }()
+	// Closing the connection is what ends a handshake stuck on a host that
+	// accepted the connection and then went silent, or on a jump host that
+	// never forwarded it; a deadline alone does not reach a command's pipes.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer func() {
+		stop()
+		_ = conn.Close()
+	}()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	var collected ssh.PublicKey
@@ -462,7 +470,7 @@ func scanOne(ctx context.Context, dial func(context.Context, string, string) (ne
 		// The handshake is abandoned before authentication, so the account
 		// only has to be syntactically valid.
 		User:              "clusterctl-hostkey-scan",
-		HostKeyAlgorithms: []string{algorithm},
+		HostKeyAlgorithms: algorithms,
 		Timeout:           timeout,
 		// The key is captured and the handshake abandoned at once: the
 		// key is the only thing wanted, and authenticating would need
@@ -475,6 +483,9 @@ func scanOne(ctx context.Context, dial func(context.Context, string, string) (ne
 
 	_, _, _, err = ssh.NewClientConn(conn, address, config)
 	if collected == nil {
+		if ctx.Err() != nil {
+			return Entry{}, fmt.Errorf("no answer within %s: %w", timeout, ctx.Err())
+		}
 		if err == nil {
 			err = errors.New("the host presented no key")
 		}
@@ -485,4 +496,124 @@ func scanOne(ctx context.Context, dial func(context.Context, string, string) (ne
 		Type:  collected.Type(),
 		Key:   strings.TrimPrefix(strings.TrimSpace(string(ssh.MarshalAuthorizedKey(collected))), collected.Type()+" "),
 	}, nil
+}
+
+// DialCommand starts a command whose standard input and output are the
+// connection, the way ssh's ProxyCommand works. With "ssh -W host:port jump"
+// it reaches a host through its jump host, over the site's own ssh
+// configuration and host key checks for the jump.
+func DialCommand(ctx context.Context, argv []string) (net.Conn, error) {
+	if len(argv) == 0 {
+		return nil, errors.New("no command was given to connect through")
+	}
+	// Plain pipes rather than StdoutPipe: Wait closes those as soon as the
+	// command exits, which can discard what it wrote last.
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		_ = outR.Close()
+		_ = outW.Close()
+		return nil, err
+	}
+	c := &commandConn{argv: argv, out: outR, in: inW, done: make(chan struct{})}
+	c.cmd = exec.CommandContext(ctx, argv[0], argv[1:]...)
+	c.cmd.Stdin = inR
+	c.cmd.Stdout = outW
+	c.cmd.Stderr = &c.stderr
+	err = c.cmd.Start()
+	_ = inR.Close()
+	_ = outW.Close()
+	if err != nil {
+		_ = outR.Close()
+		_ = inW.Close()
+		return nil, fmt.Errorf("starting %s: %w", argv[0], err)
+	}
+	go func() {
+		_ = c.cmd.Wait()
+		close(c.done)
+	}()
+	return c, nil
+}
+
+// commandConn is a connection over the standard input and output of a
+// command.
+type commandConn struct {
+	argv   []string
+	cmd    *exec.Cmd
+	out    *os.File
+	in     *os.File
+	stderr lockedBuffer
+	done   chan struct{}
+	once   sync.Once
+}
+
+func (c *commandConn) Read(p []byte) (int, error) {
+	n, err := c.out.Read(p)
+	if errors.Is(err, io.EOF) {
+		// The command ended; what it said on its way out is the reason,
+		// such as a jump host that could not be reached.
+		select {
+		case <-c.done:
+		case <-time.After(time.Second):
+		}
+		if msg := lastLine(c.stderr.String()); msg != "" {
+			return n, fmt.Errorf("%s: %s: %w", c.argv[0], msg, err)
+		}
+	}
+	return n, err
+}
+
+func (c *commandConn) Write(p []byte) (int, error) { return c.in.Write(p) }
+
+func (c *commandConn) Close() error {
+	c.once.Do(func() {
+		_ = c.in.Close()
+		if c.cmd.Process != nil {
+			_ = c.cmd.Process.Kill()
+		}
+		<-c.done
+		_ = c.out.Close()
+	})
+	return nil
+}
+
+func (c *commandConn) LocalAddr() net.Addr  { return commandAddr(c.argv[0]) }
+func (c *commandConn) RemoteAddr() net.Addr { return commandAddr(strings.Join(c.argv, " ")) }
+
+// Deadlines are not supported on a command's pipes; Scan closes the
+// connection instead when its time is up.
+func (c *commandConn) SetDeadline(time.Time) error      { return nil }
+func (c *commandConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *commandConn) SetWriteDeadline(time.Time) error { return nil }
+
+type commandAddr string
+
+func (commandAddr) Network() string  { return "command" }
+func (a commandAddr) String() string { return string(a) }
+
+// lockedBuffer collects a command's standard error, which is written while
+// the connection reads.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }

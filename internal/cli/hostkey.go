@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
@@ -40,11 +42,20 @@ refreshing at the same time cannot lose an entry.`,
 var scanDial func(ctx context.Context, network, address string) (net.Conn, error)
 
 // scanTargets collects the current key of every host of a node set.
+//
+// The hosts are scanned in parallel, bounded like any fan-out, so that nodes
+// still in the installer cost one timeout between them rather than one each.
 func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duration) (map[string][]hostkeys.Entry, map[string]error) {
-	scanner := &hostkeys.Scanner{Timeout: timeout, Dial: scanDial}
 	found := map[string][]hostkeys.Entry{}
 	failed := map[string]error{}
+	var mu sync.Mutex
 
+	limit := a.Spec.Fanout.Max
+	if limit < 1 {
+		limit = fanout.DefaultMax
+	}
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
 	for _, node := range ns.Expand() {
 		var (
 			host string
@@ -56,17 +67,79 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 			host, err = a.Namer.FQDN(node)
 		}
 		if err != nil {
+			mu.Lock()
 			failed[node] = err
+			mu.Unlock()
 			continue
 		}
-		entries, err := scanner.Scan(a.Context(), host)
-		if err != nil {
-			failed[host] = err
-			continue
+		scanner := &hostkeys.Scanner{Timeout: timeout, Dial: scanDial}
+		if hops := jumpHops(a, host); len(hops) > 0 {
+			scanner.Dial = dialThrough(a, hops)
 		}
-		found[host] = entries
+
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			entries, err := scanner.Scan(a.Context(), host)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failed[host] = err
+				return
+			}
+			found[host] = entries
+		}()
 	}
+	wg.Wait()
 	return found, failed
+}
+
+// jumpHops returns the jump hosts a host is reached through: those of the
+// role serving it, the first role in name order deciding as it does in the
+// generated ssh configuration. A role names another role or a host, and a
+// chain is separated by commas.
+func jumpHops(a *app.App, host string) []string {
+	for _, name := range a.RoleNames() {
+		role := a.Spec.Hosts[name]
+		if !strings.EqualFold(role.Host, host) {
+			continue
+		}
+		if role.ProxyJump == "" {
+			return nil
+		}
+		var hops []string
+		for _, hop := range strings.Split(role.ProxyJump, ",") {
+			hop = strings.TrimSpace(hop)
+			if jump, ok := a.Spec.Hosts[hop]; ok && jump.Host != "" {
+				hop = jump.Host
+			}
+			hops = append(hops, hop)
+		}
+		return hops
+	}
+	return nil
+}
+
+// dialThrough reaches a host the way ssh would, through its jump hosts with
+// "ssh -W". The jumps are made with the generated configuration, so their
+// own host keys are checked against the site's file before anything passes
+// through them. BatchMode keeps a scan of many hosts from prompting.
+func dialThrough(a *app.App, hops []string) func(ctx context.Context, network, address string) (net.Conn, error) {
+	return func(ctx context.Context, _, address string) (net.Conn, error) {
+		config, err := a.SSH.ConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		argv := []string{a.SSH.Binary(), "-F", config, "-o", "BatchMode=yes"}
+		last := len(hops) - 1
+		if last > 0 {
+			argv = append(argv, "-J", strings.Join(hops[:last], ","))
+		}
+		argv = append(argv, "-W", address, "--", hops[last])
+		return hostkeys.DialCommand(ctx, argv)
+	}
 }
 
 func hostkeyFile(a *app.App) (string, error) {

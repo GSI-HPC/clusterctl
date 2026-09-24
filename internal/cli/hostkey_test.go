@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -70,6 +72,85 @@ func dialFake(t *testing.T, host *fakeHost, before func()) {
 		return (&net.Dialer{}).DialContext(ctx, network, host.address)
 	}
 	t.Cleanup(func() { scanDial = nil })
+}
+
+// fakeSSH writes a script standing in for ssh, which records its arguments
+// and fails the way ssh does when a jump host refuses a forward.
+func fakeSSH(t *testing.T) (binary, argsFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	argsFile = filepath.Join(dir, "args")
+	binary = filepath.Join(dir, "ssh")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\n" +
+		"echo 'channel 0: open failed: administratively prohibited' >&2\nexit 255\n"
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return binary, argsFile
+}
+
+// TestHostkeyScanGoesThroughTheJumpHost: the dhcp role sits behind mgmt, and
+// the scanner used to dial it directly from the workstation.
+func TestHostkeyScanGoesThroughTheJumpHost(t *testing.T) {
+	binary, argsFile := fakeSSH(t)
+	h, err := run(t, harnessOptions{},
+		"--set", "ssh.binary="+binary, "hostkey", "scan", "-n", "dhcp01", "--timeout", "5s")
+	if err == nil {
+		t.Fatal("the fake jump host refuses the forward, so the scan should fail")
+	}
+	if got, want := exitcode.From(err), exitcode.Transport; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	data, readErr := os.ReadFile(argsFile)
+	if readErr != nil {
+		t.Fatalf("ssh was not run to reach the jump host: %v; output:\n%s", readErr, h.out)
+	}
+	args := strings.Fields(string(data))
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"-F", "BatchMode=yes", "-W dhcp01.example.org:22 -- mgmt-gw.example.org"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("ssh arguments %q do not contain %q", joined, want)
+		}
+	}
+	if !strings.Contains(h.out.String(), "administratively prohibited") {
+		t.Errorf("the jump host's reason is not reported:\n%s", h.out)
+	}
+}
+
+// TestHostkeyScanRunsHostsInParallel: the hosts used to be scanned one at a
+// time, so every silent node added a timeout. Each dial here waits until all
+// four have started, which only happens when they run at once.
+func TestHostkeyScanRunsHostsInParallel(t *testing.T) {
+	host := startFakeHost(t)
+	var (
+		mu      sync.Mutex
+		started int
+		all     = make(chan struct{})
+	)
+	dialFake(t, host, func() {
+		mu.Lock()
+		started++
+		if started == 4 {
+			close(all)
+		}
+		mu.Unlock()
+		select {
+		case <-all:
+		case <-time.After(3 * time.Second):
+		}
+	})
+
+	start := time.Now()
+	h, err := run(t, harnessOptions{}, "hostkey", "scan", "-n", "exe[1-4]", "--timeout", "10s")
+	if err != nil {
+		t.Fatalf("hostkey scan failed: %v\n%s", err, h.out)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("four hosts took %s; they were not scanned in parallel", elapsed)
+	}
+	if got := strings.Count(h.out.String(), "ssh-ed25519"); got != 4 {
+		t.Errorf("%d keys collected, want 4:\n%s", got, h.out)
+	}
 }
 
 // TestHostkeyVerifyReportsARevokedKey: the marker used to be read as a host

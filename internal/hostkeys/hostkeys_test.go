@@ -5,14 +5,25 @@ package hostkeys_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha1" // ssh hashes known_hosts names with HMAC-SHA1
 	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 )
@@ -206,6 +217,244 @@ func TestEntryString(t *testing.T) {
 	if !e.Matches("b") || e.Matches("c") {
 		t.Error("Matches does not agree with the host list")
 	}
+}
+
+// serveSSH runs an SSH server that presents one host key and counts the
+// connections it accepts. It stops when the test ends.
+func serveSSH(t *testing.T, signer ssh.Signer) (string, *atomic.Int32) {
+	t.Helper()
+
+	config := &ssh.ServerConfig{NoClientAuth: true}
+	config.AddHostKey(signer)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	accepted := &atomic.Int32{}
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			go func() {
+				defer func() { _ = conn.Close() }()
+				_, _, _, _ = ssh.NewServerConn(conn, config)
+			}()
+		}
+	}()
+	return ln.Addr().String(), accepted
+}
+
+func rsaSigner(t *testing.T) ssh.Signer {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer
+}
+
+func ed25519Signer(t *testing.T) ssh.Signer {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer
+}
+
+func scanAddress(t *testing.T, s *hostkeys.Scanner, address string) ([]hostkeys.Entry, error) {
+	t.Helper()
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Port = port
+	return s.Scan(context.Background(), host)
+}
+
+// TestScanCollectsFromAnSSHRSAOnlyServer is the host legacyAlgorithms exists
+// for: an sshd older than OpenSSH 7.2 signs only with SHA-1 ssh-rsa, and the
+// scanner used to have no algorithm in common with it.
+func TestScanCollectsFromAnSSHRSAOnlyServer(t *testing.T) {
+	t.Parallel()
+
+	signer := rsaSigner(t)
+	legacy, err := ssh.NewSignerWithAlgorithms(signer.(ssh.AlgorithmSigner), []string{ssh.KeyAlgoRSA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, _ := serveSSH(t, legacy)
+
+	entries, err := scanAddress(t, &hostkeys.Scanner{Timeout: 5 * time.Second}, address)
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+	want := strings.Fields(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))[1]
+	if len(entries) != 1 || entries[0].Type != ssh.KeyAlgoRSA || entries[0].Key != want {
+		t.Errorf("entries = %+v, want the server's RSA key", entries)
+	}
+}
+
+func TestScanPrefersTheStrongestKey(t *testing.T) {
+	t.Parallel()
+
+	ed := ed25519Signer(t)
+	config := &ssh.ServerConfig{NoClientAuth: true}
+	config.AddHostKey(rsaSigner(t))
+	config.AddHostKey(ed)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() { _, _, _, _ = ssh.NewServerConn(conn, config) }()
+		}
+	}()
+
+	entries, err := scanAddress(t, &hostkeys.Scanner{Timeout: 5 * time.Second}, ln.Addr().String())
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Type != ssh.KeyAlgoED25519 {
+		t.Errorf("entries = %+v, want the Ed25519 key", entries)
+	}
+}
+
+// TestScanDialsOnce: a host that cannot be reached used to be dialled once
+// for every algorithm, so a powered-off node cost three timeouts.
+func TestScanDialsOnce(t *testing.T) {
+	t.Parallel()
+
+	var dials atomic.Int32
+	s := &hostkeys.Scanner{
+		Timeout: time.Second,
+		Dial: func(context.Context, string, string) (net.Conn, error) {
+			dials.Add(1)
+			return nil, errors.New("no route to host")
+		},
+	}
+	if _, err := s.Scan(context.Background(), "exe0001"); err == nil {
+		t.Fatal("an unreachable host should be reported")
+	}
+	if got := dials.Load(); got != 1 {
+		t.Errorf("the host was dialled %d times, want once", got)
+	}
+}
+
+// TestScanGivesUpOnASilentHost is a host that accepts the connection and then
+// says nothing, as one still in the installer may: it costs one timeout.
+func TestScanGivesUpOnASilentHost(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	var accepted atomic.Int32
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			defer func() { _ = conn.Close() }()
+		}
+	}()
+
+	const timeout = 300 * time.Millisecond
+	start := time.Now()
+	if _, err := scanAddress(t, &hostkeys.Scanner{Timeout: timeout}, ln.Addr().String()); err == nil {
+		t.Fatal("a silent host should be reported")
+	}
+	if elapsed := time.Since(start); elapsed > 2*timeout {
+		t.Errorf("the scan took %s, want about one timeout of %s", elapsed, timeout)
+	}
+	if got := accepted.Load(); got != 1 {
+		t.Errorf("the host was connected to %d times, want once", got)
+	}
+}
+
+// TestScanThroughACommand reaches the server over a command's standard input
+// and output, which is how a host behind a jump host is scanned with
+// "ssh -W". The test binary itself plays the command.
+func TestScanThroughACommand(t *testing.T) {
+	t.Parallel()
+
+	signer := ed25519Signer(t)
+	address, accepted := serveSSH(t, signer)
+
+	s := &hostkeys.Scanner{
+		Timeout: 5 * time.Second,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return hostkeys.DialCommand(ctx, []string{os.Args[0], "-test.run=^TestHelperProxy$", "--", address})
+		},
+	}
+	entries, err := s.Scan(context.Background(), "behind-a-jump")
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Type != ssh.KeyAlgoED25519 || entries[0].Hosts[0] != "behind-a-jump" {
+		t.Errorf("entries = %+v, want the server's key under the scanned name", entries)
+	}
+	if accepted.Load() != 1 {
+		t.Errorf("the server saw %d connections, want 1", accepted.Load())
+	}
+}
+
+func TestScanThroughACommandReportsWhatItSaid(t *testing.T) {
+	t.Parallel()
+
+	s := &hostkeys.Scanner{
+		Timeout: 5 * time.Second,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return hostkeys.DialCommand(ctx, []string{"sh", "-c", "echo 'channel 0: open failed: connect failed' >&2; exit 255"})
+		},
+	}
+	_, err := s.Scan(context.Background(), "behind-a-jump")
+	if err == nil || !strings.Contains(err.Error(), "open failed") {
+		t.Errorf("error = %v, want what the command said", err)
+	}
+}
+
+// TestHelperProxy is not a test: TestScanThroughACommand runs the test binary
+// as the command that carries the connection.
+func TestHelperProxy(t *testing.T) {
+	args := os.Args
+	for len(args) > 0 && args[0] != "--" {
+		args = args[1:]
+	}
+	if len(args) != 2 {
+		t.Skip("only run as a helper process")
+	}
+	conn, err := net.Dial("tcp", args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(255)
+	}
+	go func() { _, _ = io.Copy(conn, os.Stdin) }()
+	_, _ = io.Copy(os.Stdout, conn)
+	os.Exit(0)
 }
 
 // TestRewriteKeepsComments: comments between entries used to be dropped by
