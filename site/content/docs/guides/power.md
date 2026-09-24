@@ -50,13 +50,28 @@ This is more than 8 hosts. Type the number of hosts to continue: 10
 
 {{< callout type="warning" >}}
 A node running a Slurm job is refused, because powering it off loses the job.
-Drain it first, or pass `--force` if losing it is the intention.
+A node that is still `draining` runs jobs too. Drain it and wait for its jobs
+to end, or pass `--lose-jobs` if losing them is the intention. `--force` gets
+past a protected host, not this check.
 {{< /callout >}}
 
 ```console
 $ clusterctl bmc power off -n exe0007
-clusterctl: exe0007 is running Slurm jobs; drain them first, or pass --force to lose the jobs
+clusterctl: exe0007 is running Slurm jobs; drain them and wait for their jobs to end, or pass --lose-jobs to lose the jobs
 ```
+
+The check refuses whatever it cannot vouch for: a state it does not know, a
+node `sinfo` does not list, and every node when Slurm cannot be asked. A node
+whose Slurm name differs from its inventory name is refused this way:
+
+```console
+$ clusterctl bmc power off -n exe0007
+clusterctl: Slurm did not report exe0007, so whether it runs jobs is not known (check that the Slurm and inventory names agree); pass --lose-jobs to go ahead and lose any jobs on them
+```
+
+`safety.slurmAware` turns the check on or off and is on by default. With it
+off, every power action says so before it asks. `--dry-run` asks Slurm as
+well, so a dry run is refused where the real run would be.
 
 ### Powering on a rack
 
