@@ -139,6 +139,9 @@ type App struct {
 	credentials     *credentials.Resolver
 	credentialsOnce sync.Once
 	secrets         secretStore
+
+	machinesOnce sync.Once
+	machines     *machines
 }
 
 // ensureDirs creates the state and cache directories, or checks the ones
@@ -490,7 +493,9 @@ func (a *App) Select(expr string) (*nodeset.NodeSet, error) {
 	if ns.IsEmpty() {
 		return nil, exitcode.Errorf(exitcode.Usage, "%q names no node", expr)
 	}
-	ns = a.canonicalize(ns)
+	if ns, err = a.canonicalize(ns); err != nil {
+		return nil, err
+	}
 	if err := checkHostNames(ns); err != nil {
 		return nil, err
 	}
@@ -514,26 +519,25 @@ func checkHostNames(ns *nodeset.NodeSet) error {
 }
 
 // canonicalize replaces each name with the one the inventory uses for that
-// host.
+// machine, so that one machine is one target however it was written.
 //
 // Padding is a display property, so exe1 and exe0001 name the same machine.
-// An administrator who types the short form should reach the host the site
-// wrote down, and see it under the name the site gave it. A node the
-// inventory does not know is left exactly as it was typed.
-func (a *App) canonicalize(ns *nodeset.NodeSet) *nodeset.NodeSet {
-	if a.Inventory == nil || a.Inventory.Len() == 0 {
-		return ns
-	}
+// Case and a final dot do not change a host name, and the host name, the
+// service processor name and the addresses of a node all reach it. An
+// administrator who types any of them should reach the host the site wrote
+// down, see it under the name the site gave it, and be stopped by the gate
+// if it is protected. Names that turn out to be one machine become one
+// target, so that it is not reset twice at once.
+func (a *App) canonicalize(ns *nodeset.NodeSet) (*nodeset.NodeSet, error) {
 	out := nodeset.New()
 	for _, name := range ns.Expand() {
-		if canonical, ok := a.Inventory.Resolve(name); ok {
-			name = canonical
-		}
-		if err := out.Add(name); err != nil {
-			return ns
+		machine := a.machine(name)
+		if err := out.Add(machine); err != nil {
+			return nil, exitcode.Errorf(exitcode.Usage, "node %q, which is %q, cannot be selected: %w",
+				name, machine, err)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // SelectOptional is Select without the requirement that anything is

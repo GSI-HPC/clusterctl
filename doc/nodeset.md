@@ -204,6 +204,19 @@ The check runs on every name the expression resolves to, so names from a group
 source or the inventory are held to it too. It lives in `internal/hostname`,
 and ssh and the Redfish client apply it again to the host they are given.
 
+### Names are machines
+
+`App.Select` then replaces each name with the name the inventory uses for the
+machine it refers to (`App.canonicalize`). Case and one final dot are dropped;
+a name written with other padding is resolved; and the host name and the
+service processor name the naming rules give an inventory node, and its
+`address` and `bmcAddress`, are that node. A dotted name the inventory does not
+list is reduced to its short name when it is the host name or service processor
+name the rules give that short name. Anything else is kept, lowercased.
+Because the result is a set, one machine named several ways is one member. An
+alias two inventory nodes share names neither, and an inventory name is never
+taken over by another node's alias.
+
 ## Rendering for other tools
 
 `clusterctl node select` prints the folded form. Anything handed to Slurm or
