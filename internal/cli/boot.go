@@ -6,7 +6,10 @@ package cli
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
+	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func newBootCommand(r *root) *cobra.Command {
@@ -41,21 +45,74 @@ asked for.`,
 
 // nodeAddress resolves the address a node boots with: what the inventory
 // says, else what DHCP hands it.
+//
+// The address names a file on the PXE and TFTP hosts, where the link to it
+// is written as root, so anything that does not parse as an IP address is
+// refused rather than joined into a path.
 func nodeAddress(a *app.App, node string) (string, error) {
+	address, source := "", "the inventory"
 	if entry, ok := a.Inventory.Lookup(node); ok && entry.Address != "" {
-		return entry.Address, nil
-	}
-	cfg, err := dhcpConfig(a)
-	if err != nil {
-		return "", err
-	}
-	for _, host := range cfg.Lookup(node) {
-		if host.Address != "" {
-			return host.Address, nil
+		address = entry.Address
+	} else {
+		cfg, err := dhcpConfig(a)
+		if err != nil {
+			return "", err
+		}
+		for _, host := range cfg.Lookup(node) {
+			if host.Address != "" {
+				address, source = host.Address, "DHCP"
+				break
+			}
 		}
 	}
-	return "", exitcode.Errorf(exitcode.Usage,
-		"no address is known for %s; set it in the inventory or in DHCP", node)
+	if address == "" {
+		return "", exitcode.Errorf(exitcode.Usage,
+			"no address is known for %s; set it in the inventory or in DHCP", node)
+	}
+	ip := net.ParseIP(address)
+	if ip == nil {
+		return "", exitcode.Errorf(exitcode.Usage,
+			"%s has the address %q in %s, which is not an IP address; the boot link is named after it",
+			node, printable(address), source)
+	}
+	return ip.String(), nil
+}
+
+// nodeAddresses resolves the boot address of each node, in order, and
+// refuses two nodes that share one: the link named after the address would
+// arm both, and one of them was not asked for.
+func nodeAddresses(a *app.App, nodes []string) ([]string, error) {
+	owners := map[string][]string{}
+	for _, n := range a.Inventory.All() {
+		if ip := net.ParseIP(n.Address); ip != nil {
+			owners[ip.String()] = append(owners[ip.String()], n.Name)
+		}
+	}
+	addresses := make([]string, len(nodes))
+	seen := map[string]string{}
+	for i, node := range nodes {
+		address, err := nodeAddress(a, node)
+		if err != nil {
+			return nil, err
+		}
+		if other, ok := seen[address]; ok {
+			return nil, sharedAddress(address, other, node)
+		}
+		for _, other := range owners[address] {
+			if other != node {
+				return nil, sharedAddress(address, other, node)
+			}
+		}
+		seen[address] = node
+		addresses[i] = address
+	}
+	return addresses, nil
+}
+
+func sharedAddress(address, first, second string) error {
+	return exitcode.Errorf(exitcode.Usage,
+		"%s and %s both have the address %s, so a boot link for one would arm the other; fix the inventory or DHCP",
+		first, second, address)
 }
 
 // pxeRole returns the host role the PXE service runs on.
@@ -68,9 +125,341 @@ func pxeRole(a *app.App) (string, error) {
 	return role, nil
 }
 
+// pxeRoot returns the directory the PXE service looks up boot links in.
+func pxeRoot(a *app.App) string {
+	if root := a.Spec.Services.PXESrv.Root; root != "" {
+		return root
+	}
+	return "/srv/pxesrv"
+}
+
+// bootLink is the boot path link of one node on the PXE service, and what
+// became of it.
+type bootLink struct {
+	Node    string `json:"node"`
+	Address string `json:"address"`
+	Path    string `json:"bootPath,omitempty"`
+	// Mode is once or persistent; a persistent link carries the static
+	// suffix and survives the first request.
+	Mode string `json:"mode,omitempty"`
+	// Result is set or removed, failed, or unknown when the script stopped
+	// before it said.
+	Result string `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+const (
+	bootOnce       = "once"
+	bootPersistent = "persistent"
+)
+
+// resolveBootLinks resolves the address and boot path of every node before
+// anything is written, so a node with no boot path stops the command
+// instead of leaving half the set configured. An explicit path wins over
+// the cluster rules; a rule marked static asks for a persistent link.
+func resolveBootLinks(a *app.App, ns *nodeset.NodeSet, explicit string, persistent bool) ([]bootLink, error) {
+	nodes := ns.Expand()
+	addresses, err := nodeAddresses(a, nodes)
+	if err != nil {
+		return nil, err
+	}
+	links := make([]bootLink, len(nodes))
+	var persistentNodes []string
+	for i, node := range nodes {
+		path, static := explicit, persistent
+		if path == "" {
+			resolved, ruleStatic, err := inventory.BootPath(a.Inventory, a.Spec.BootPaths, node)
+			if err != nil {
+				return nil, exitcode.Wrap(exitcode.Usage, err)
+			}
+			path, static = resolved, persistent || ruleStatic
+		}
+		mode := bootOnce
+		if static {
+			mode = bootPersistent
+			persistentNodes = append(persistentNodes, node)
+		}
+		links[i] = bootLink{Node: node, Address: addresses[i], Path: path, Mode: mode}
+	}
+	// Without a suffix the persistent link is the one-shot link, and the
+	// node would find no boot path on its second request.
+	if len(persistentNodes) > 0 && a.Spec.Services.PXESrv.StaticSuffix == "" {
+		return nil, exitcode.Errorf(exitcode.Usage,
+			"%s would get a persistent boot path, but services.pxesrv.staticSuffix is not set, "+
+				"so it would be written as the one-shot link", fold(persistentNodes))
+	}
+	return links, nil
+}
+
+// linkName is the file the PXE service looks up for one node.
+func linkName(a *app.App, root string, l bootLink) string {
+	name := root + "/" + l.Address
+	if l.Mode == bootPersistent {
+		name += a.Spec.Services.PXESrv.StaticSuffix
+	}
+	return name
+}
+
+// describeBootLinks lists each distinct boot path with the nodes it is
+// written for, for the preview: the set may span several installations,
+// and each one is confirmed, not only the first.
+func describeBootLinks(links []bootLink) string {
+	type group struct {
+		path, mode string
+		nodes      []string
+	}
+	var groups []*group
+	index := map[[2]string]*group{}
+	for _, l := range links {
+		key := [2]string{l.Path, l.Mode}
+		g, ok := index[key]
+		if !ok {
+			g = &group{path: l.Path, mode: l.Mode}
+			index[key] = g
+			groups = append(groups, g)
+		}
+		g.nodes = append(g.nodes, fmt.Sprintf("%s (%s)", l.Node, l.Address))
+	}
+	lines := make([]string, 0, len(groups))
+	for _, g := range groups {
+		mode := "for the next request"
+		if g.mode == bootPersistent {
+			mode = "persistently"
+		}
+		lines = append(lines, fmt.Sprintf("%s, %s: %s", g.path, mode, strings.Join(g.nodes, ", ")))
+	}
+	return strings.Join(lines, "\n  ")
+}
+
+// dryRunChecks names what a dry run leaves unchecked: it sends nothing to
+// the PXE host, not even the reads.
+const dryRunChecks = "not checked in a dry run: that the boot paths exist on the PXE host and that no persistent link is in the way"
+
+// checkBootLinks reads the PXE host before anything is written: every boot
+// path has to exist, or the machine is reset into a failed network boot,
+// and a one-shot link is refused over a persistent one, which the PXE
+// service would keep offering after the first request.
+func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
+	var paths []string
+	seen := map[string]bool{}
+	for _, l := range links {
+		if !seen[l.Path] {
+			seen[l.Path] = true
+			paths = append(paths, l.Path)
+		}
+	}
+	var script strings.Builder
+	script.WriteString("for p in")
+	for _, p := range paths {
+		script.WriteString(" " + shellquote.Quote(p))
+	}
+	script.WriteString("; do [ -f \"$p\" ] || printf '%s\\n' \"$p\"; done\n")
+	result, err := a.RunOnRole(a.Context(), role, transport.Request{
+		Script:  script.String(),
+		Timeout: a.Timeout().Get(),
+		TTY:     transport.TTYNone,
+	})
+	if err != nil {
+		return err
+	}
+	var missing []string
+	for _, line := range result.Lines() {
+		// Only a path that was asked about counts, whatever else the
+		// host prints.
+		if seen[line] {
+			missing = append(missing, line)
+		}
+	}
+	if len(missing) > 0 {
+		return exitcode.Errorf(exitcode.Usage, "no boot configuration exists on %s at %s; see \"clusterctl boot list\"",
+			role, strings.Join(missing, ", "))
+	}
+
+	suffix := a.Spec.Services.PXESrv.StaticSuffix
+	if suffix == "" {
+		return nil
+	}
+	existing, err := readBootLinks(a, role, root)
+	if err != nil {
+		return err
+	}
+	var held []string
+	for _, l := range links {
+		if l.Mode == bootOnce && existing[l.Address+suffix] != "" {
+			held = append(held, l.Node)
+		}
+	}
+	if len(held) > 0 {
+		return exitcode.Errorf(exitcode.Usage,
+			"%s has a persistent boot path, which a one-shot one does not replace; "+
+				"remove it with \"clusterctl boot unset\" first, or pass --persistent", fold(held))
+	}
+	return nil
+}
+
+// readBootLinks lists the links under the PXE root, name to target, in one
+// call rather than one connection per node.
+func readBootLinks(a *app.App, role, root string) (map[string]string, error) {
+	result, err := a.RunOnRole(a.Context(), role, transport.Request{
+		Argv:    []string{"find", root, "-maxdepth", "1", "-type", "l", "-printf", "%f\t%l\n"},
+		Timeout: a.Timeout().Get(),
+		TTY:     transport.TTYNone,
+	})
+	if err != nil {
+		return nil, err
+	}
+	links := map[string]string{}
+	for _, line := range result.Lines() {
+		name, target, ok := strings.Cut(line, "\t")
+		if ok {
+			links[name] = target
+		}
+	}
+	return links, nil
+}
+
+// The link scripts try every node and report each one on a line of its
+// own, rather than stopping at the first failure under set -e: a failing
+// line then neither leaves the rest of the set as it was nor goes
+// unreported.
+const (
+	bootLinkScript = `set -u
+bootlink() {
+	if [ -d "$3" ] && [ ! -L "$3" ]; then
+		printf 'fail\t%s\t%s\n' "$1" "$3 is a directory"
+	elif out=$(ln -sfn -- "$2" "$3" 2>&1); then
+		printf 'ok\t%s\n' "$1"
+	else
+		printf 'fail\t%s\t%s\n' "$1" "$(printf %s "$out" | tr '\t\n' '  ')"
+	fi
+}
+`
+	bootUnlinkScript = `set -u
+bootunlink() {
+	i=$1
+	shift
+	if out=$(rm -f -- "$@" 2>&1); then
+		printf 'ok\t%s\n' "$i"
+	else
+		printf 'fail\t%s\t%s\n' "$i" "$(printf %s "$out" | tr '\t\n' '  ')"
+	fi
+}
+`
+)
+
+// writeBootLinks points the PXE service at each node's boot path and
+// records the outcome in each link.
+func writeBootLinks(a *app.App, role, root string, links []bootLink) error {
+	var script strings.Builder
+	script.WriteString(bootLinkScript)
+	for i, l := range links {
+		fmt.Fprintf(&script, "bootlink %d %s %s\n", i, shellquote.Quote(l.Path), shellquote.Quote(linkName(a, root, l)))
+	}
+	return runLinkScript(a, role, script.String(), links, "set")
+}
+
+// removeBootLinks removes the one-shot and the persistent link of each node
+// and records the outcome in each link.
+func removeBootLinks(a *app.App, role, root string, links []bootLink) error {
+	suffix := a.Spec.Services.PXESrv.StaticSuffix
+	var script strings.Builder
+	script.WriteString(bootUnlinkScript)
+	for i, l := range links {
+		names := shellquote.Quote(root + "/" + l.Address)
+		if suffix != "" {
+			names += " " + shellquote.Quote(root+"/"+l.Address+suffix)
+		}
+		fmt.Fprintf(&script, "bootunlink %d %s\n", i, names)
+	}
+	return runLinkScript(a, role, script.String(), links, "removed")
+}
+
+func runLinkScript(a *app.App, role, script string, links []bootLink, done string) error {
+	for i := range links {
+		links[i].Result, links[i].Error = "unknown", "the PXE host did not report this link"
+	}
+	result, runErr := a.RunOnRole(a.Context(), role, transport.Request{
+		Script:  script,
+		Timeout: a.Timeout().Get(),
+		TTY:     transport.TTYNone,
+	})
+	if result != nil {
+		for _, line := range result.Lines() {
+			fields := strings.SplitN(line, "\t", 3)
+			if len(fields) < 2 {
+				continue
+			}
+			i, err := strconv.Atoi(fields[1])
+			if err != nil || i < 0 || i >= len(links) || links[i].Result != "unknown" {
+				continue
+			}
+			switch {
+			case fields[0] == "ok" && len(fields) == 2:
+				links[i].Result, links[i].Error = done, ""
+			case fields[0] == "fail" && len(fields) == 3:
+				links[i].Result, links[i].Error = "failed", printable(fields[2])
+			}
+		}
+	}
+
+	var failed, unknown []string
+	for _, l := range links {
+		switch l.Result {
+		case "failed":
+			failed = append(failed, l.Node)
+		case "unknown":
+			unknown = append(unknown, l.Node)
+		}
+	}
+	if len(failed) == 0 && len(unknown) == 0 {
+		return nil
+	}
+	var parts []string
+	if len(failed) > 0 {
+		parts = append(parts, fmt.Sprintf("the boot link of %s could not be changed", fold(failed)))
+	}
+	if len(unknown) > 0 {
+		parts = append(parts, fmt.Sprintf("the boot link of %s was not reported and may or may not have changed", fold(unknown)))
+	}
+	msg := strings.Join(parts, "; ")
+	if runErr != nil {
+		return fmt.Errorf("%s: %w", msg, runErr)
+	}
+	return exitcode.Errorf(exitcode.TargetFailed, "%s", msg)
+}
+
+// fold renders node names as a folded set, the way every other message
+// names hosts.
+func fold(nodes []string) string {
+	ns := nodeset.New()
+	for _, n := range nodes {
+		_ = ns.Add(n)
+	}
+	return ns.String()
+}
+
+// printable escapes the control characters in text read from a host, so it
+// cannot move the cursor or forge a line of the output.
+func printable(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == utf8.RuneError, unicode.IsControl(r):
+			fmt.Fprintf(&b, "\\x%02x", r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func newBootStatusCommand(r *root) *cobra.Command {
 	return leaf("status [NODESET]", "Show which boot configuration each node is set to", `
-List the boot path configured on the PXE service for each node.`,
+List the boot path configured on the PXE service for each node: the one-shot
+link and, when services.pxesrv.staticSuffix is set, the persistent one.
+
+A node whose address cannot be resolved is listed with the reason and fails
+the command.`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -81,10 +470,7 @@ List the boot path configured on the PXE service for each node.`,
 			if err != nil {
 				return err
 			}
-			root := a.Spec.Services.PXESrv.Root
-			if root == "" {
-				root = "/srv/pxesrv"
-			}
+			root := pxeRoot(a)
 
 			ns, err := a.SelectOptional(strings.Join(args, ","))
 			if err != nil {
@@ -92,47 +478,76 @@ List the boot path configured on the PXE service for each node.`,
 			}
 			// One listing answers for every node, rather than one connection
 			// per node as the shell version did.
-			result, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Argv:    []string{"find", root, "-maxdepth", "1", "-type", "l", "-printf", "%f\t%l\n"},
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
-			})
+			links, err := readBootLinks(a, role, root)
 			if err != nil {
 				return err
 			}
-			links := map[string]string{}
-			for _, line := range result.Lines() {
-				name, target, ok := strings.Cut(line, "\t")
-				if ok {
-					links[name] = target
-				}
-			}
 
-			t := output.NewTable(output.Cols("NODE", "ADDRESS", "BOOT PATH")...)
-			object := map[string]string{}
 			if ns == nil {
+				t := output.NewTable(output.Cols("NODE", "ADDRESS", "BOOT PATH")...)
+				object := map[string]string{}
 				for name, target := range links {
-					t.Add("", name, target)
+					t.Add("", printable(name), printable(target))
 					object[name] = target
 				}
 				t.Caption = fmt.Sprintf("%d boot paths configured on %s", len(links), role)
 				return a.Print(output.Result{Table: t, Object: object})
 			}
+
+			suffix := a.Spec.Services.PXESrv.StaticSuffix
+			cols := []string{"NODE", "ADDRESS", "BOOT PATH"}
+			if suffix != "" {
+				cols = append(cols, "PERSISTENT")
+			}
+			t := output.NewTable(output.Cols(cols...)...)
+			type state struct {
+				Address    string `json:"address,omitempty"`
+				BootPath   string `json:"bootPath,omitempty"`
+				Persistent string `json:"persistentBootPath,omitempty"`
+				Error      string `json:"error,omitempty"`
+			}
+			object := map[string]state{}
+			var failed []string
+			var firstErr error
 			for _, node := range ns.Expand() {
 				address, err := nodeAddress(a, node)
 				if err != nil {
-					t.Add(node, "unknown", "")
+					object[node] = state{Error: err.Error()}
+					row := []string{node, "unknown", ""}
+					if suffix != "" {
+						row = append(row, "")
+					}
+					t.Add(row...)
+					failed = append(failed, node)
+					if firstErr == nil {
+						firstErr = err
+					}
 					continue
 				}
-				target := links[address]
-				if target == "" {
-					target = "none"
+				s := state{Address: address, BootPath: orNone(links[address])}
+				row := []string{node, address, printable(s.BootPath)}
+				if suffix != "" {
+					s.Persistent = orNone(links[address+suffix])
+					row = append(row, printable(s.Persistent))
 				}
-				object[node] = target
-				t.Add(node, address, target)
+				object[node] = s
+				t.Add(row...)
 			}
-			return a.Print(output.Result{Table: t, Object: object})
+			if err := a.Print(output.Result{Table: t, Object: object}); err != nil {
+				return err
+			}
+			if firstErr != nil {
+				return fmt.Errorf("the boot configuration of %s is not known: %w", fold(failed), firstErr)
+			}
+			return nil
 		})
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
 }
 
 func newBootSetCommand(r *root) *cobra.Command {
@@ -143,7 +558,15 @@ Point the PXE service at a boot configuration for each node.
 
 Without a path, the boot path rules of the cluster decide, which is what makes
 a reinstall a one-liner. A node matched by two rules is an error rather than a
-silent first match.
+silent first match. A rule marked static writes a persistent link, as
+--persistent does; both need services.pxesrv.staticSuffix.
+
+Before it asks, the command resolves every address, checks that each boot
+path exists on the PXE host, and refuses a one-shot path for a node that has
+a persistent one. The question lists each boot path with its nodes.
+
+Every node is tried, and each one's result is listed; a node that failed or
+was not reported fails the command.
 
   clusterctl boot set -n exe[1-4]
   clusterctl boot set -n exe0001 /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2`,
@@ -157,10 +580,7 @@ silent first match.
 			if err != nil {
 				return err
 			}
-			root := a.Spec.Services.PXESrv.Root
-			if root == "" {
-				root = "/srv/pxesrv"
-			}
+			root := pxeRoot(a)
 
 			var explicit string
 			rest := args
@@ -173,72 +593,55 @@ silent first match.
 				return err
 			}
 
-			// Everything is resolved before anything is written, so a node
-			// with no boot path stops the command instead of leaving half
-			// the set configured.
-			type plan struct{ node, address, path string }
-			var plans []plan
-			for _, node := range ns.Expand() {
-				address, err := nodeAddress(a, node)
-				if err != nil {
-					return err
-				}
-				path := explicit
-				if path == "" {
-					resolved, _, err := inventory.BootPath(a.Inventory, a.Spec.BootPaths, node)
-					if err != nil {
-						return exitcode.Wrap(exitcode.Usage, err)
-					}
-					path = resolved
-				}
-				plans = append(plans, plan{node: node, address: address, path: path})
+			links, err := resolveBootLinks(a, ns, explicit, persistent)
+			if err != nil {
+				return err
+			}
+			detail := describeBootLinks(links)
+			if a.DryRun() {
+				detail += "\n  " + dryRunChecks
+			} else if err := checkBootLinks(a, role, root, links); err != nil {
+				return err
 			}
 
-			mode := "for the next request"
-			if persistent {
-				mode = "persistently"
-			}
 			if err := a.Gate.Confirm(safety.Action{
 				Verb:    "set the network boot configuration of",
 				Targets: ns,
-				Detail:  fmt.Sprintf("%s, %s", plans[0].path, mode),
+				Detail:  detail,
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
-				return err
+				return dryRunOrError(err)
 			}
 
-			var script strings.Builder
-			script.WriteString("set -eu\n")
-			for _, p := range plans {
-				link := root + "/" + p.address
-				if persistent {
-					link += a.Spec.Services.PXESrv.StaticSuffix
-				}
-				fmt.Fprintf(&script, "ln -sfn %s %s\n", shellquote.Quote(p.path), shellquote.Quote(link))
+			err = writeBootLinks(a, role, root, links)
+			t := output.NewTable(output.Cols("NODE", "ADDRESS", "BOOT PATH", "MODE", "RESULT")...)
+			for _, l := range links {
+				t.Add(l.Node, l.Address, l.Path, l.Mode, resultText(l))
 			}
-			if _, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Script:  script.String(),
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
-			}); err != nil {
-				return err
+			if printErr := a.Print(output.Result{Table: t, Object: links}); printErr != nil && err == nil {
+				err = printErr
 			}
-
-			t := output.NewTable(output.Cols("NODE", "ADDRESS", "BOOT PATH")...)
-			for _, p := range plans {
-				t.Add(p.node, p.address, p.path)
-			}
-			return a.Print(output.Result{Table: t})
+			return err
 		})
-	cmd.Flags().BoolVar(&persistent, "persistent", false, "keep the boot path after the first request")
+	cmd.Flags().BoolVar(&persistent, "persistent", false,
+		"keep the boot path after the first request (needs services.pxesrv.staticSuffix)")
 	return cmd
+}
+
+func resultText(l bootLink) string {
+	if l.Error != "" {
+		return l.Result + ": " + l.Error
+	}
+	return l.Result
 }
 
 func newBootUnsetCommand(r *root) *cobra.Command {
 	return leaf("unset [NODESET]", "Remove the boot configuration of a node set", `
-Remove the boot path of each node, so the PXE service stops offering one.`,
+Remove the boot path of each node, so the PXE service stops offering one: the
+one-shot link and, when services.pxesrv.staticSuffix is set, the persistent
+one.
+
+Every node is tried, and each one's result is listed; a node that failed or
+was not reported fails the command.`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -249,41 +652,38 @@ Remove the boot path of each node, so the PXE service stops offering one.`,
 			if err != nil {
 				return err
 			}
-			root := a.Spec.Services.PXESrv.Root
-			if root == "" {
-				root = "/srv/pxesrv"
-			}
+			root := pxeRoot(a)
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
 			}
+			// The addresses are resolved before the question, so that
+			// what is confirmed is what runs.
+			nodes := ns.Expand()
+			addresses, err := nodeAddresses(a, nodes)
+			if err != nil {
+				return err
+			}
+			links := make([]bootLink, len(nodes))
+			for i, node := range nodes {
+				links[i] = bootLink{Node: node, Address: addresses[i]}
+			}
+
 			if err := a.Gate.Confirm(safety.Action{
 				Verb: "remove the network boot configuration of", Targets: ns,
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
-				return err
+				return dryRunOrError(err)
 			}
 
-			var script strings.Builder
-			script.WriteString("set -eu\n")
-			for _, node := range ns.Expand() {
-				address, err := nodeAddress(a, node)
-				if err != nil {
-					return err
-				}
-				fmt.Fprintf(&script, "rm -f %s\n", shellquote.Quote(root+"/"+address))
+			err = removeBootLinks(a, role, root, links)
+			t := output.NewTable(output.Cols("NODE", "ADDRESS", "RESULT")...)
+			for _, l := range links {
+				t.Add(l.Node, l.Address, resultText(l))
 			}
-			if _, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Script:  script.String(),
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
-			}); err != nil {
-				return err
+			if printErr := a.Print(output.Result{Table: t, Object: links}); printErr != nil && err == nil {
+				err = printErr
 			}
-			a.Printf("removed the boot configuration of %s\n", ns)
-			return nil
+			return err
 		})
 }
 
