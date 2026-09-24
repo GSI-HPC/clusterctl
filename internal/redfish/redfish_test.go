@@ -7,11 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -534,5 +536,71 @@ func TestPinningRefusesAChangedCertificate(t *testing.T) {
 	}
 	if pin, _, _ := store.Get(c.Host); pin != earlier {
 		t.Errorf("the recorded pin was replaced by %q", pin)
+	}
+}
+
+func TestPinStoreDoesNotReplaceAPin(t *testing.T) {
+	t.Parallel()
+
+	store := &redfish.PinStore{Path: filepath.Join(t.TempDir(), "pins")}
+	ctx := context.Background()
+
+	if err := store.Set(ctx, "bmc1", "sha256:aaaa"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(ctx, "bmc1", "sha256:aaaa"); err != nil {
+		t.Errorf("recording the same pin again failed: %v", err)
+	}
+	err := store.Set(ctx, "bmc1", "sha256:bbbb")
+	var mismatch *redfish.PinMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("error = %v, want a PinMismatchError", err)
+	}
+	if mismatch.Recorded != "sha256:aaaa" || mismatch.Seen != "sha256:bbbb" {
+		t.Errorf("mismatch = %+v", mismatch)
+	}
+	if pin, _, _ := store.Get("bmc1"); pin != "sha256:aaaa" {
+		t.Errorf("pin = %q, want the first one kept", pin)
+	}
+}
+
+func TestPinStoreFirstContactsRace(t *testing.T) {
+	t.Parallel()
+
+	// Overlapping first contacts that present different certificates, as a
+	// man in the middle could arrange: only one may be accepted.
+	store := &redfish.PinStore{Path: filepath.Join(t.TempDir(), "pins")}
+	const contacts = 8
+	errs := make([]error, contacts)
+	var wg sync.WaitGroup
+	for i := range contacts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = store.Set(context.Background(), "bmc1", fmt.Sprintf("sha256:%04d", i))
+		}()
+	}
+	wg.Wait()
+
+	pin, ok, err := store.Get("bmc1")
+	if err != nil || !ok {
+		t.Fatalf("no pin was recorded: %v", err)
+	}
+	accepted := 0
+	for i, err := range errs {
+		var mismatch *redfish.PinMismatchError
+		switch {
+		case err == nil:
+			accepted++
+			if want := fmt.Sprintf("sha256:%04d", i); pin != want {
+				t.Errorf("contact %d was accepted, but %q is recorded", i, pin)
+			}
+		case errors.As(err, &mismatch):
+		default:
+			t.Errorf("contact %d: %v", i, err)
+		}
+	}
+	if accepted != 1 {
+		t.Errorf("%d different certificates were accepted at first contact, want 1", accepted)
 	}
 }

@@ -72,7 +72,12 @@ func (s *PinStore) Get(host string) (string, bool, error) {
 	return pin, ok, nil
 }
 
-// Set records a pin, replacing any earlier one.
+// Set records the pin of a host that has none. It never replaces a pin: when
+// a different one is recorded, including by a concurrent first contact that
+// got there first, it returns a PinMismatchError. The check and the write
+// happen under one lock, so of overlapping first contacts that present
+// different certificates only one is accepted. Remove is how a pin is
+// replaced on purpose.
 func (s *PinStore) Set(ctx context.Context, host, pin string) error {
 	if s.Path == "" {
 		return nil
@@ -87,6 +92,12 @@ func (s *PinStore) Set(ctx context.Context, host, pin string) error {
 			if h, p, ok := strings.Cut(line, " "); ok {
 				pins[h] = strings.TrimSpace(p)
 			}
+		}
+		if recorded, ok := pins[host]; ok {
+			if recorded != pin {
+				return nil, &PinMismatchError{Host: host, Recorded: recorded, Seen: pin}
+			}
+			return current, nil
 		}
 		pins[host] = pin
 
