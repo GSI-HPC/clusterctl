@@ -29,11 +29,20 @@ type harness struct {
 	out, errOut *bytes.Buffer
 	recorder    *transport.Recorder
 	root        *root
+	streams     app.Streams
 }
 
 // run builds the command tree over the example configuration and runs one
 // command line against it.
 func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
+	t.Helper()
+	h, cmd := build(t, opts, args...)
+	return h, cmd.Execute()
+}
+
+// build builds the command tree over the example configuration, ready to run
+// one command line against it.
+func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.Command) {
 	t.Helper()
 
 	h := &harness{out: &bytes.Buffer{}, errOut: &bytes.Buffer{}}
@@ -87,8 +96,9 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 	// The root holds the flags; reach it to install the fake transport.
 	h.root = builtRoots[cmd]
 	h.root.runner = h.recorder
+	h.streams = streams
 
-	return h, cmd.Execute()
+	return h, cmd
 }
 
 // exampleFiles lists the files of the example configuration, leaving out

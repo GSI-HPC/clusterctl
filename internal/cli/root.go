@@ -156,10 +156,16 @@ are about to do and ask before doing it.`),
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: false},
+		Args:              noSubcommand,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
+	// A flag that cannot be parsed is a usage error, whichever command it
+	// was given to: the subcommands ask their parents for this function.
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return exitcode.Wrap(exitcode.Usage, err)
+	})
 
 	flags := cmd.PersistentFlags()
 	flags.StringSliceVar(&r.configFiles, "config", nil,
@@ -203,7 +209,46 @@ are about to do and ask before doing it.`),
 		newVersionCommand(r),
 	)
 	annotateEffects(cmd)
+	usageArgs(cmd)
 	return cmd, r
+}
+
+// noSubcommand is the argument check of a command that only holds
+// subcommands. A word that names none of them is refused, rather than
+// handed to the command, which would print its help and succeed: a script
+// that misspelt "drain" would go on to its next step.
+func noSubcommand(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if cmd.SuggestionsMinimumDistance <= 0 {
+		cmd.SuggestionsMinimumDistance = 2
+	}
+	suggestion := ""
+	if found := cmd.SuggestionsFor(args[0]); len(found) > 0 {
+		suggestion = "; did you mean " + strings.Join(found, " or ") + "?"
+	}
+	return exitcode.Errorf(exitcode.Usage, "unknown command %q for %q%s",
+		args[0], cmd.CommandPath(), suggestion)
+}
+
+// usageArgs makes every argument check in the tree report a usage error.
+// cobra's own checks, such as cobra.ExactArgs, return plain errors, which
+// would otherwise exit 1, the code for a target that failed.
+func usageArgs(cmd *cobra.Command) {
+	if check := cmd.Args; check != nil {
+		cmd.Args = func(c *cobra.Command, args []string) error {
+			err := check(c, args)
+			var coded *exitcode.Error
+			if err == nil || errors.As(err, &coded) {
+				return err
+			}
+			return exitcode.Wrap(exitcode.Usage, err)
+		}
+	}
+	for _, sub := range cmd.Commands() {
+		usageArgs(sub)
+	}
 }
 
 // Execute runs the command tree and returns the process exit code.
@@ -214,6 +259,11 @@ func Execute(ctx context.Context) int {
 	cmd.SetOut(streams.Out)
 	cmd.SetErr(streams.Err)
 
+	return execute(ctx, cmd, streams)
+}
+
+// execute runs a built command tree and returns the process exit code.
+func execute(ctx context.Context, cmd *cobra.Command, streams app.Streams) int {
 	if err := cmd.ExecuteContext(ctx); err != nil {
 		return report(streams, err)
 	}
