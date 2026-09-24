@@ -337,3 +337,46 @@ func TestRedfishPostResetChecksSlurm(t *testing.T) {
 		t.Errorf("sinfo was sent %d times, want once", sinfo)
 	}
 }
+
+// Section 3.6: a set whose host list is longer than one argument may be is
+// still checked, instead of the oversized sinfo call switching the check off.
+func TestSlurmCheckCoversLongHostLists(t *testing.T) {
+	// Every other node of each rack: no two numbers are adjacent, so even the
+	// folded host list is longer than the 128 KiB one argument may be.
+	odd := make([]string, 0, 1000)
+	for n := 1; n <= 1999; n += 2 {
+		odd = append(odd, fmt.Sprintf("%04d", n))
+	}
+	expr := "r[01-30]n[" + strings.Join(odd, ",") + "]"
+	var all strings.Builder
+	for r := 1; r <= 30; r++ {
+		for n := 1; n <= 2000; n++ {
+			state := "idle"
+			if r == 21 && n == 17 {
+				state = "allocated"
+			}
+			fmt.Fprintf(&all, "r%02dn%04d %s\n", r, n, state)
+		}
+	}
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if isSinfo(req) {
+			return &transport.Result{Target: tg, Stdout: all.String()}, nil
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	_, err := run(t, harnessOptions{recorder: rec}, "bmc", "power", "off", "-n", expr, "--dry-run")
+	if err == nil {
+		t.Fatal("the power action went ahead for a long set with one busy node")
+	}
+	if !strings.Contains(err.Error(), "r21n0017") {
+		t.Errorf("error = %v, want it to name r21n0017", err)
+	}
+	if sinfo, _ := sinfoCalls(rec); sinfo != 1 {
+		t.Errorf("sinfo was sent %d times, want once", sinfo)
+	}
+	// The list is too long for one argument, so sinfo is asked about every
+	// node and the answer narrowed to the set.
+	if got := rec.Commands()[0]; strings.Contains(got, " -n ") {
+		t.Errorf("command carries the host list: %.200s", got)
+	}
+}
