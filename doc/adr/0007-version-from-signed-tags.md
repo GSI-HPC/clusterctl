@@ -23,8 +23,9 @@ and in the GitHub release built from it, and nowhere else.
   being noticed.
 - There is no release commit to forget, no merge conflict on a version line,
   and no way for the tree to disagree with the tag.
-- The release workflow refuses an unsigned or lightweight tag before it builds
-  anything, so an unsigned release is not possible by accident.
+- Before it builds anything, the release workflow refuses a tag that a listed
+  signer did not sign under the name it was pushed as, so an unsigned release
+  is not possible by accident.
 
 ## How a build knows its version
 
@@ -46,6 +47,6 @@ devel (a1b2c3d4e5f6-dirty) built 2026-09-22T14:42:30Z go1.26.0 linux/amd64
 
 - `go install` of an untagged commit produces a pseudo-version rather than a
   release number. That is accurate, and it is what the release asset is for.
-- The signing key becomes part of the release process. Without
-  `.github/allowed_signers` the workflow can only check that a signature is
-  present, not whose it is; with it, the signer is verified.
+- The signing key becomes part of the release process. The workflow verifies
+  the signer against the `RELEASE_ALLOWED_SIGNERS` repository variable, which
+  the tagged commit cannot change, and cuts no release without it.

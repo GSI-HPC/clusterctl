@@ -33,10 +33,51 @@ git tag -s v1.4.0 -m 'clusterctl v1.4.0'
 git push origin v1.4.0
 ```
 
-The tag must be **signed**: the release workflow refuses an unsigned or
-lightweight tag before it builds anything. With `.github/allowed_signers`
-present, the signature is verified against it; without it, the workflow checks
-that a signature is there at all and says so in the job log.
+The tag must be **signed with an SSH key listed in the
+`RELEASE_ALLOWED_SIGNERS` repository variable**. Before it builds anything, the
+release workflow refuses a tag that:
+
+- is lightweight, or annotated but unsigned;
+- carries a signature `git verify-tag` does not accept against that list,
+  which includes every OpenPGP signature;
+- was signed under another name than the one it was pushed as, such as a
+  signed `v1.0.0` pushed again as `v9.9.9`;
+- names another commit than the push;
+- or when the variable is empty or not set.
+
+`.github/scripts/verify-release-tag.sh` makes these checks, and CI tests it
+against tags it makes on the spot. The release job then checks that the tag
+still points at the tag object that was verified, and tells GoReleaser which
+tag it is releasing.
+
+### Setting up verification
+
+The list is a repository variable, not a file in the tree, because the
+workflow runs on the tagged commit: a file there would let the commit being
+released name its own signers. Only an administrator can change a variable.
+Under *Settings → Secrets and variables → Actions → Variables*, set
+`RELEASE_ALLOWED_SIGNERS` to one line per signer, in the format of git's
+`gpg.ssh.allowedSignersFile`:
+
+```
+name@example.org namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...
+```
+
+Lines starting with `#` are comments. Sign with the matching key:
+
+```
+git config gpg.format ssh
+git config user.signingKey ~/.ssh/id_ed25519.pub
+```
+
+A writer who may change workflows could still edit the check out of
+`release.yml` in the commit they tag. Two settings close that, and belong with
+the variable:
+
+- a tag ruleset on `v*` that lets only the maintainers who sign releases
+  create, update or delete such a tag;
+- protection rules on the `release` environment, which the publishing job
+  runs in: a required reviewer, and deployment limited to `v*` tags.
 
 The workflow then builds, tests, and publishes:
 

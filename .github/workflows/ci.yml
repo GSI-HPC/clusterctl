@@ -172,6 +172,17 @@ jobs:
               go build -trimpath -o /dev/null ./cmd/clusterctl
           done
 
+  release-tag:
+    name: Release tag verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The release workflow runs only when a tag is pushed, so the check that
+      # refuses a tag is tested here against tags made on the spot.
+      - name: Test the tag verification
+        run: .github/scripts/verify-release-tag_test.sh
+
   docs:
     name: Documentation
     runs-on: ubuntu-latest

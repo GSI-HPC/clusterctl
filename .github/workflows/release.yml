@@ -19,41 +19,22 @@ jobs:
   verify-tag:
     name: Verify the tag is signed
     runs-on: ubuntu-latest
+    outputs:
+      object: ${{ steps.verify.outputs.object }}
+      commit: ${{ steps.verify.outputs.commit }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      # The version of a release exists only in its tag, so the tag has to be
-      # a statement by a person holding a key rather than a label anyone with
-      # write access can move.
-      - name: Refuse an unsigned or lightweight tag
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-
-          if [ "$(git cat-file -t "$tag")" != "tag" ]; then
-            echo "::error::$tag is a lightweight tag; releases are cut from signed annotated tags"
-            echo "  git tag -s $tag -m 'clusterctl $tag'"
-            exit 1
-          fi
-
-          if ! git cat-file tag "$tag" | grep -qE 'BEGIN (PGP|SSH) SIGNATURE'; then
-            echo "::error::$tag carries no signature; releases are cut from signed tags"
-            exit 1
-          fi
-
-          if [ -f .github/allowed_signers ]; then
-            git config gpg.ssh.allowedSignersFile .github/allowed_signers
-            if git verify-tag "$tag"; then
-              echo "::notice::$tag is signed by a listed signer"
-            else
-              echo "::error::$tag is signed, but not by anyone in .github/allowed_signers"
-              exit 1
-            fi
-          else
-            echo "::notice::$tag is signed; add .github/allowed_signers to verify who signed it"
-          fi
+      # The signer list is a repository variable, which only an administrator
+      # can change, and never a file in the checkout: the tagged commit would
+      # otherwise name its own signers. Without it no release is cut.
+      - name: Refuse a tag not signed by a listed signer
+        id: verify
+        env:
+          ALLOWED_SIGNERS: ${{ vars.RELEASE_ALLOWED_SIGNERS }}
+        run: .github/scripts/verify-release-tag.sh
 
   test:
     name: Test
@@ -61,6 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify-tag.outputs.commit }}
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -70,17 +53,38 @@ jobs:
 
   release:
     name: Build and publish
-    needs: test
+    needs: [verify-tag, test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       # Minting a Sigstore signing certificate and storing the attestation.
       id-token: write
       attestations: write
+    # Protection rules on this environment, such as a required reviewer or a
+    # rule that only v* tags deploy, hold the release until they are met.
+    environment: release
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      # The tag may have moved since it was verified; what is built is the tag
+      # object that was verified and the commit it names, or nothing.
+      - name: Refuse a tag that moved since it was verified
+        env:
+          TAG: ${{ github.ref_name }}
+          OBJECT: ${{ needs.verify-tag.outputs.object }}
+          COMMIT: ${{ needs.verify-tag.outputs.commit }}
+        run: |
+          set -euo pipefail
+          if [ -z "$OBJECT" ] || [ "$(git rev-parse --verify "refs/tags/$TAG")" != "$OBJECT" ]; then
+            echo "::error::$TAG no longer points at the verified tag object $OBJECT"
+            exit 1
+          fi
+          if [ "$(git rev-parse --verify HEAD)" != "$COMMIT" ]; then
+            echo "::error::the checkout is not the verified commit $COMMIT"
+            exit 1
+          fi
 
       - uses: actions/setup-go@v7
         with:
@@ -93,6 +97,9 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The verified tag, not whichever tag on this commit GoReleaser
+          # would otherwise pick.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
 
       # Attest every published archive. checksums.txt already names each
       # artifact and its digest, so one call covers the whole release.
