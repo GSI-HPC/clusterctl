@@ -168,8 +168,16 @@ folds a one-dimensional set and expands anything else.
 A bracket is capped at 2²⁰ elements, counting all of its parts together, and
 an expression at 2²⁰ hosts. The expression cap holds at every step of the
 evaluation, so `a[1-600000],b[1-600000]!b[1-600000]` is refused even though it
-ends up smaller. A typo such as `exe[1-100000000]` is reported rather than
-exhausting memory.
+ends up smaller. It also holds for all the terms of an expression together,
+groups and the groups they refer to included, so the work an expression costs
+is bounded as well as its result: `a[1-600000]!a[1-600000],b1` is refused too.
+
+Each dimension of a name is weighed before it is expanded, against what the
+dimensions before it and the terms before it have left, so an oversized
+expression is refused before its memory is spent. A typo such as
+`exe[1-100000000]` is reported rather than exhausting memory. The most an
+expression can cost is the largest set it may name, about 260 MiB of
+allocation and a second of time for 2²⁰ hosts.
 
 Bounds and steps are plain decimal numbers of at most eighteen digits, so no
 arithmetic on them can overflow.

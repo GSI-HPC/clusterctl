@@ -31,7 +31,7 @@ type Resolver interface {
 }
 
 // resolveGroup evaluates one @reference.
-func resolveGroup(ref string, res Resolver, depth int) (*NodeSet, error) {
+func resolveGroup(ref string, res Resolver, depth int, b *budget) (*NodeSet, error) {
 	if res == nil {
 		return nil, fmt.Errorf("group @%s cannot be resolved: no group source is configured", ref)
 	}
@@ -61,7 +61,7 @@ func resolveGroup(ref string, res Resolver, depth int) (*NodeSet, error) {
 	if strings.TrimSpace(expr) == "" {
 		return New(), nil
 	}
-	return parseExpression(expr, res, depth+1)
+	return parseExpression(expr, res, depth+1, b)
 }
 
 // MapResolver resolves groups from an in-memory table. It backs the static
