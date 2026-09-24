@@ -66,7 +66,11 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 		opts.streams(&streams)
 	}
 
-	cmd := NewRootCommand(context.Background(), streams)
+	ctx := opts.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := NewRootCommand(ctx, streams)
 	cmd.SetOut(h.out)
 	cmd.SetErr(h.errOut)
 	var args0 []string
@@ -134,6 +138,9 @@ type harnessOptions struct {
 	// cacheDir replaces the fresh cache directory of each run, so that
 	// several runs can share one the way the commands of one user do.
 	cacheDir string
+	// ctx is the context the command runs under; cancelling it is what an
+	// interrupt does.
+	ctx context.Context
 }
 
 // rootOf digs the root state out of a built command tree.
