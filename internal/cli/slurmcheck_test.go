@@ -16,7 +16,7 @@ import (
 )
 
 // sinfoAnswers is a recorder on which sinfo answers with the given output and
-// exit code, and every other command succeeds without output.
+// exit code, and every IPMI run succeeds for every processor it names.
 func sinfoAnswers(stdout string, code int) *transport.Recorder {
 	return &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if isSinfo(req) {
@@ -26,7 +26,7 @@ func sinfoAnswers(stdout string, code int) *transport.Recorder {
 			}
 			return result, nil
 		}
-		return &transport.Result{Target: tg}, nil
+		return ipmiOK().Reply(tg, req)
 	}}
 }
 
@@ -36,7 +36,7 @@ func slurmAllIdle(t *testing.T) *transport.Recorder {
 	t.Helper()
 	return &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if !isSinfo(req) {
-			return &transport.Result{Target: tg}, nil
+			return ipmiOK().Reply(tg, req)
 		}
 		var out strings.Builder
 		for i, arg := range req.Argv {
