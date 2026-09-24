@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/groups"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/output"
@@ -402,6 +403,7 @@ One script per node answers everything, so a node is contacted once.`,
 
 			t := output.NewTable(
 				output.Column{Name: "NODE"},
+				output.Column{Name: "STATUS"},
 				output.Column{Name: "VENDOR"},
 				output.Column{Name: "PRODUCT"},
 				output.Column{Name: "BOARD", Wide: true},
@@ -409,19 +411,29 @@ One script per node answers everything, so a node is contacted once.`,
 				output.Column{Name: "BIOS DATE", Wide: true},
 				output.Column{Name: "INFINIBAND"},
 			)
+			// Every node gets an entry, a failed one with how it failed,
+			// so that a script counting the answers sees the failures.
 			object := make([]map[string]string, 0, len(results))
 			for _, res := range results {
+				status := fanout.Status(res)
 				if res.Failed() {
-					t.Add(res.Target.Name, "unreachable", "", "", "", "", "")
+					detail := failureDetail(res)
+					if detail == "" {
+						detail = status
+					}
+					t.Add(res.Target.Name, status, "", "", "", "", "")
+					object = append(object, map[string]string{
+						"node": res.Target.Name, "status": status, "error": detail,
+					})
 					continue
 				}
 				f := strings.Split(res.Output(), "|")
 				for len(f) < 8 {
 					f = append(f, "")
 				}
-				t.Add(res.Target.Name, f[0], f[1], f[2]+" "+f[3], f[4]+" "+f[5], f[6], strings.TrimSpace(f[7]))
+				t.Add(res.Target.Name, status, f[0], f[1], f[2]+" "+f[3], f[4]+" "+f[5], f[6], strings.TrimSpace(f[7]))
 				object = append(object, map[string]string{
-					"node": res.Target.Name, "vendor": f[0], "product": f[1],
+					"node": res.Target.Name, "status": status, "vendor": f[0], "product": f[1],
 					"boardVendor": f[2], "boardName": f[3],
 					"biosVendor": f[4], "biosVersion": f[5], "biosDate": f[6],
 					"infiniband": strings.TrimSpace(f[7]),
@@ -429,6 +441,20 @@ One script per node answers everything, so a node is contacted once.`,
 			}
 			if err := a.Print(output.Result{Table: t, Object: object}); err != nil {
 				return err
+			}
+			if !a.Format.IsMachine() {
+				// The table has no room for an error; say it underneath,
+				// the way exec does.
+				for _, res := range results {
+					if !res.Failed() {
+						continue
+					}
+					line := fanout.Status(res)
+					if detail := failureDetail(res); detail != "" {
+						line += ": " + detail
+					}
+					a.Printf("%s: %s\n", res.Target.Name, escapeControl(line))
+				}
 			}
 			return failureError(results)
 		})

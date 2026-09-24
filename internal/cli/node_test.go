@@ -5,9 +5,13 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
 // inventoryPositions finds the file:line references to the example
@@ -144,5 +148,61 @@ func TestNodeDescribeUsesTheInventoryName(t *testing.T) {
 		if strings.Contains(call.Command, "exe1") && !strings.Contains(call.Command, "exe0001") {
 			t.Errorf("a group source was asked about exe1: %q", call.Command)
 		}
+	}
+}
+
+// Report 12.8: node hw called every failed node unreachable and left it out of
+// -o json altogether, so a script saw fewer nodes and no failure.
+func TestNodeHardwareReportsEveryFailedNode(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		switch tg.Name {
+		case "exe0002":
+			return &transport.Result{Target: tg, ExitCode: 2, Stderr: "lspci: \x1b[31mdenied\n",
+				Err: errors.New("exit status 2")}, nil
+		case "exe0003":
+			return &transport.Result{Target: tg, ExitCode: -1,
+				Err: exitcode.Errorf(exitcode.Transport, "ssh: connect to host exe0003: No route to host")}, nil
+		}
+		return &transport.Result{Target: tg, Stdout: "Vendor|Model|BV|BN|BIOSV|1.2|2026-01-01|MT4123\n"}, nil
+	}}
+	h, err := run(t, harnessOptions{recorder: rec}, "node", "hw", "-n", "exe[1-3]", "-o", "json")
+	if err == nil {
+		t.Fatal("node hw with failed nodes should fail")
+	}
+	var entries []map[string]string
+	if err := json.Unmarshal(h.out.Bytes(), &entries); err != nil {
+		t.Fatalf("decoding %s: %v", h.out, err)
+	}
+	byNode := map[string]map[string]string{}
+	for _, e := range entries {
+		byNode[e["node"]] = e
+	}
+	if len(byNode) != 3 {
+		t.Fatalf("-o json has %d nodes, want all 3:\n%s", len(byNode), h.out)
+	}
+	if e := byNode["exe0001"]; e["status"] != "ok" || e["vendor"] != "Vendor" {
+		t.Errorf("exe0001 = %v, want ok and its vendor", e)
+	}
+	if e := byNode["exe0002"]; e["status"] != "exit 2" || !strings.Contains(e["error"], "lspci") {
+		t.Errorf("exe0002 = %v, want exit 2 and the error it printed", e)
+	}
+	if e := byNode["exe0003"]; e["status"] != "unreachable" || !strings.Contains(e["error"], "No route to host") {
+		t.Errorf("exe0003 = %v, want unreachable and why", e)
+	}
+
+	// The table says the same, and does not pass a node's control
+	// characters to the terminal.
+	h, _ = run(t, harnessOptions{recorder: rec}, "node", "hw", "-n", "exe[1-3]")
+	out := h.out.String() + h.errOut.String()
+	if strings.Contains(out, "\x1b") {
+		t.Errorf("a control character reached the terminal:\n%q", out)
+	}
+	for _, want := range []string{"exit 2", `lspci: \x1b[31mdenied`, "No route to host"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output does not say %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(h.out.String(), "exe0002  unreachable") {
+		t.Errorf("exe0002 is called unreachable:\n%s", h.out)
 	}
 }
