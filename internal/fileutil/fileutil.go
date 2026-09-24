@@ -281,10 +281,37 @@ func shareLock(name string, perm os.FileMode, gid int) {
 	}
 }
 
-// EnsureDir creates a directory that only its owner can read, for state that
-// holds host keys, control sockets and certificate pins.
+// EnsureDir creates a directory that only its owner can write, for state
+// that holds host keys, control sockets and certificate pins, and checks the
+// one that is there already. It has to be a directory, not a link to one,
+// owned by this user and writable by nobody else: whoever else can write it
+// can replace the ssh configuration clusterctl hands to ssh.
 func EnsureDir(path string) error {
-	return os.MkdirAll(path, 0o700)
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("%q is not an absolute path", path)
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	switch {
+	case info.Mode()&fs.ModeSymlink != 0:
+		return fmt.Errorf("%s is a symbolic link, not a directory: %w", path, ErrUntrusted)
+	case !info.IsDir():
+		return fmt.Errorf("%s is not a directory", path)
+	}
+	if uid, _, ok := owner(info); ok && uid != os.Geteuid() {
+		return fmt.Errorf("%s is owned by uid %d, not by this user (uid %d): %w",
+			path, uid, os.Geteuid(), ErrUntrusted)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("%s can be written by others (mode %v); run chmod go-w %s: %w",
+			path, info.Mode().Perm(), path, ErrUntrusted)
+	}
+	return nil
 }
 
 // trustedOwner refuses a file neither this user nor root owns.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -117,7 +118,7 @@ func localChecks(a *app.App) []check {
 		{"state directory", a.StateDir},
 		{"cache directory", a.CacheDir},
 	} {
-		if err := os.MkdirAll(dir.path, 0o700); err != nil {
+		if err := fileutil.EnsureDir(dir.path); err != nil {
 			checks = append(checks, check{dir.name, statusFail, err.Error()})
 			continue
 		}
