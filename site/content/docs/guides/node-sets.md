@@ -173,9 +173,10 @@ When no node is in that state, the inner command prints nothing and `-n` is
 given an empty set. That is refused with exit code 2, even with
 `CLUSTERCTL_NODES` set: an explicit `-n` is never replaced by the session set.
 
-Slurm and FreeIPMI understand one bracketed range per name and neither several
-numeric dimensions nor groups, so clusterctl expands a set for them when it has
-to. You never have to think about it.
+clusterctl hands Slurm and FreeIPMI a set with at most one bracketed range per
+name, `rack1node[001-100],rack2node[001-100]` rather than
+`rack[1-2]node[001-100]`, and with groups already resolved. You never have to
+think about it.
 
 ## Checking a set before you use it
 

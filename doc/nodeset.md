@@ -158,10 +158,19 @@ and ssh and the Redfish client apply it again to the host they are given.
 
 ## Rendering for other tools
 
-`clusterctl node select` prints the folded form. Slurm and FreeIPMI parse one
-bracketed range per name and understand neither several numeric dimensions nor
-`@groups`, so anything handed to them goes through `NodeSet.Hostlist()`, which
-folds a one-dimensional set and expands anything else.
+`clusterctl node select` prints the folded form. Anything handed to Slurm or
+FreeIPMI goes through `NodeSet.Hostlist()` instead, which folds each pattern
+along the one dimension that gives the fewest names, the last one on a tie, and
+never writes a step. `rack[1-2]node[001-100]` becomes
+`rack1node[001-100],rack2node[001-100]`, and a BMC name such as
+`exe[0001-4600].mgmt.dc2.example.org` stays one name rather than 4,600.
+
+Every name then carries at most one bracketed range. That is the form every
+version of the two host list parsers reads. `scontrol` 23.11 and `ipmipower`
+1.6.13 also read several ranges in one name, but older ones are not known to,
+and the one-range form is short enough: it grows with the number of values of
+the other dimensions, not with the number of hosts. Neither reads `@groups`,
+which are resolved before a set is rendered.
 
 ## Limits
 

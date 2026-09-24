@@ -325,15 +325,25 @@ func TestHostlist(t *testing.T) {
 	}{
 		{"exe[1-4]", "exe[1-4]"},
 		{"exe[1-2],sub1", "exe[1-2],sub1"},
-		// Slurm and FreeIPMI parse one range per name, so several numeric
-		// dimensions have to be expanded for them.
-		{"exe[1-2]-ib[0-1]", "exe1-ib0,exe1-ib1,exe2-ib0,exe2-ib1"},
+		// Every name has one bracketed range at most, folded along the
+		// dimension that gives the fewest names, the last one on a tie.
+		{"exe[1-2]-ib[0-1]", "exe1-ib[0-1],exe2-ib[0-1]"},
+		{"r[01-02]n[001-100]", "r01n[001-100],r02n[001-100]"},
+		{"exe[0001-0100].mgmt.dc2.example.org", "exe[0001-0100].mgmt.dc2.example.org"},
+		// Slurm and FreeIPMI read no steps, whatever the set was parsed with.
+		{"exe[1,3,5,7]", "exe[1,3,5,7]"},
+		{"exe[0001-0010],exe11", "exe[0001-0010,11]"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.expr, func(t *testing.T) {
 			t.Parallel()
-			if got := nodeset.MustParse(tc.expr).Hostlist(); got != tc.want {
+			ns := nodeset.MustParse(tc.expr, nodeset.WithAutostep(2))
+			if got := ns.Hostlist(); got != tc.want {
 				t.Errorf("Hostlist() = %q, want %q", got, tc.want)
+			}
+			back := nodeset.MustParse(ns.Hostlist())
+			if !equal(back.Expand(), ns.Expand()) {
+				t.Errorf("Hostlist() %q names %v, want %v", ns.Hostlist(), back.Expand(), ns.Expand())
 			}
 		})
 	}
