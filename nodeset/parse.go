@@ -10,15 +10,24 @@ import (
 )
 
 // The expansion limits, so that a typo such as exe[1-100000000] is reported
-// instead of exhausting memory. They are variables only so that tests can
-// lower them.
+// before it exhausts memory. They are variables only so that tests can lower
+// them.
 var (
 	// maxRangeElements caps how far a single bracket range may expand.
 	maxRangeElements = 1 << 20
 	// maxSetElements caps how many hosts a whole expression may name, at
-	// every step of its evaluation.
+	// every step of its evaluation, and also how many hosts all of its
+	// terms may name together, groups included. The second cap bounds the
+	// work an expression costs, which the first alone does not:
+	// a[1-600000]!a[1-600000] repeated is small at every step.
 	maxSetElements = 1 << 20
 )
+
+// budget is what is left of the hosts an expression may name across all its
+// terms. It is shared by the groups the expression refers to.
+type budget struct{ left int }
+
+func newBudget() *budget { return &budget{left: maxSetElements} }
 
 // node is one host: a pattern with a %s for each numeric dimension, the value
 // of each dimension, and the width each value was written with. The widths
@@ -68,7 +77,7 @@ const (
 // need an operand on both sides. "a&" is what a command substitution that
 // printed nothing leaves behind, and evaluating it as "a" would select every
 // host of a instead of none, so it is an error, as it is in ClusterShell.
-func parseExpression(expr string, res Resolver, depth int) (*NodeSet, error) {
+func parseExpression(expr string, res Resolver, depth int, b *budget) (*NodeSet, error) {
 	if depth > maxGroupDepth {
 		return nil, fmt.Errorf("group references nested more than %d levels deep", maxGroupDepth)
 	}
@@ -86,11 +95,16 @@ func parseExpression(expr string, res Resolver, depth int) (*NodeSet, error) {
 		if term == "" {
 			return nil
 		}
-		ts, err := parseTerm(term, res, depth)
+		ts, err := parseTerm(term, res, depth, b)
 		if err != nil {
 			return err
 		}
-		apply(result, op, ts)
+		if result.IsEmpty() && op == opUnion {
+			// The first term needs no copy; the set is taken as it is.
+			result = ts
+		} else {
+			apply(result, op, ts)
+		}
 		op, operand, pendingOp = opUnion, true, false
 		if result.Len() > maxSetElements {
 			return fmt.Errorf("%q expands to more than %d hosts", expr, maxSetElements)
@@ -170,15 +184,18 @@ func apply(dst *NodeSet, op operator, src *NodeSet) {
 }
 
 // parseTerm parses a single term: either a group reference or a node pattern.
-func parseTerm(term string, res Resolver, depth int) (*NodeSet, error) {
+func parseTerm(term string, res Resolver, depth int, b *budget) (*NodeSet, error) {
 	if strings.HasPrefix(term, "@") {
-		return resolveGroup(term[1:], res, depth)
+		return resolveGroup(term[1:], res, depth, b)
 	}
-	return parsePattern(term)
+	return parsePattern(term, b)
 }
 
-// parsePattern turns one node pattern into the hosts it names.
-func parsePattern(term string) (*NodeSet, error) {
+// parsePattern turns one node pattern into the hosts it names, charging them
+// to b. Every dimension is weighed before it is expanded, against what the
+// dimensions before it leave of the budget, so an oversized pattern is
+// refused before its memory is spent.
+func parsePattern(term string, b *budget) (*NodeSet, error) {
 	var (
 		pattern strings.Builder
 		dims    []*rangeSet
@@ -186,7 +203,15 @@ func parsePattern(term string) (*NodeSet, error) {
 		// again once expanded: exe0[0,10] would print exe00, which reads as
 		// a single number. Such a name is rejected rather than folded wrong.
 		prevNumeric bool
+		// total is the number of hosts the dimensions read so far name.
+		total = 1
 	)
+	tooMany := func() error {
+		if b.left < maxSetElements {
+			return fmt.Errorf("at %q: the expression's terms name more than %d hosts together", term, maxSetElements)
+		}
+		return fmt.Errorf("%q expands to more than %d hosts", term, maxSetElements)
+	}
 	for i := 0; i < len(term); {
 		c := term[i]
 		numeric := c == '[' || (c >= '0' && c <= '9')
@@ -205,6 +230,10 @@ func parsePattern(term string) (*NodeSet, error) {
 			if err != nil {
 				return nil, fmt.Errorf("in %q: %w", term, err)
 			}
+			if count > b.left/total {
+				return nil, tooMany()
+			}
+			total *= count
 			dims = append(dims, expandSpans(spans, count))
 			pattern.WriteString("%s")
 			i += end + 1
@@ -236,23 +265,27 @@ func parsePattern(term string) (*NodeSet, error) {
 	if pattern.Len() == 0 && len(dims) == 0 {
 		return nil, fmt.Errorf("empty node name")
 	}
-
-	total := 1
-	for _, d := range dims {
-		total *= len(d.values)
-		if total > maxSetElements {
-			return nil, fmt.Errorf("%q expands to more than %d hosts", term, maxSetElements)
-		}
+	if total > b.left {
+		return nil, tooMany()
 	}
+	b.left -= total
 
-	ns := New()
+	ns := &NodeSet{nodes: make(map[string]node, total)}
 	pat := pattern.String()
-	vals := make([]int, len(dims))
-	pads := make([]int, len(dims))
+	width := len(dims)
+	vals := make([]int, width)
+	pads := make([]int, width)
+	// The hosts share two backing arrays rather than holding two small
+	// slices each, which halves what a large set costs.
+	allVals := make([]int, 0, total*width)
+	allPads := make([]int, 0, total*width)
 	var walk func(int)
 	walk = func(d int) {
 		if d == len(dims) {
-			n := node{pattern: pat, vals: append([]int(nil), vals...), pads: append([]int(nil), pads...)}
+			allVals = append(allVals, vals...)
+			allPads = append(allPads, pads...)
+			end := len(allVals)
+			n := node{pattern: pat, vals: allVals[end-width : end : end], pads: allPads[end-width : end : end]}
 			ns.nodes[n.key()] = n
 			return
 		}

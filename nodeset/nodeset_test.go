@@ -4,6 +4,7 @@
 package nodeset_test
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -422,7 +423,7 @@ func TestExpressionLimits(t *testing.T) {
 
 	for _, expr := range []string{
 		"exe[1-100]", "exe[1-50,51-100]", "exe[1-10]-ib[1-10]",
-		"exe[1-100],exe[1-100]", "exe[1-100]!exe[1-50],sub[1-50]",
+		"exe[1-50],exe[1-50]", "exe[1-50]!exe[1-25],sub[1-25]",
 	} {
 		if _, err := nodeset.Parse(expr); err != nil {
 			t.Errorf("Parse(%q) failed within the limits: %v", expr, err)
@@ -437,6 +438,13 @@ func TestExpressionLimits(t *testing.T) {
 		// So is an expression made of several terms, at every step.
 		{"exe[1-60],sub[1-60]", "hosts"},
 		{"exe[1-60] sub[1-60]!sub[1-60]", "hosts"},
+		// Every term counts, however small the result stays, so the work
+		// an expression costs is bounded as well as its size.
+		{"exe[1-100]!exe[1-100],exe1", "together"},
+		{"a[1-60]!a[1-60],b1", "together"},
+		// A pattern is weighed one dimension at a time, before the next is
+		// expanded.
+		{"a[1-2]b[1-2]c[1-2]d[1-2]e[1-2]f[1-2]g[1-2]h[1-2]", "hosts"},
 	}
 	for _, tc := range rejected {
 		_, err := nodeset.Parse(tc.expr)
@@ -449,9 +457,15 @@ func TestExpressionLimits(t *testing.T) {
 		}
 	}
 
-	res := nodeset.NewMapResolver("local", map[string]string{"big": "exe[1-60],sub[1-60]"})
+	res := nodeset.NewMapResolver("local", map[string]string{
+		"big": "exe[1-60],sub[1-60]", "half": "exe[1-60]",
+	})
 	if _, err := nodeset.ParseWith("@big", res); err == nil {
 		t.Error("a group beyond the limits should be rejected")
+	}
+	// The terms of a group count towards the expression that refers to it.
+	if _, err := nodeset.ParseWith("@half!@half,@half", res); err == nil {
+		t.Error("groups beyond the limits together should be rejected")
 	}
 }
 
@@ -465,6 +479,41 @@ func equal(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestOversizedExpressionsAreRefusedEarly runs the two expressions that used
+// to be refused, or accepted, only after gigabytes had been allocated: a term
+// of two hundred full brackets, and a difference that cancels out repeated.
+// Neither may cost more than the largest set an expression may name. It
+// measures allocation across the whole process, so it must not run in
+// parallel.
+func TestOversizedExpressionsAreRefusedEarly(t *testing.T) {
+	full := "[0-1048575]"
+	allocated := func(expr string) (uint64, error) {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		_, err := nodeset.Parse(expr)
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc, err
+	}
+
+	largest, err := allocated("a" + full)
+	if err != nil {
+		t.Fatalf("the largest set was refused: %v", err)
+	}
+	for _, expr := range []string{
+		"a" + strings.Repeat(full+"a", 200),
+		strings.Repeat("a"+full+"!a"+full+",", 3),
+	} {
+		spent, err := allocated(expr)
+		if err == nil {
+			t.Errorf("Parse(%.40q...) should be refused", expr)
+		}
+		if spent > largest+largest/2 {
+			t.Errorf("Parse(%.40q...) allocated %d MiB before refusing, the largest set costs %d MiB",
+				expr, spent>>20, largest>>20)
+		}
+	}
 }
 
 // TestCanonicalReturnsAHeldName covers a set that holds hosts of one pattern

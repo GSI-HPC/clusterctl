@@ -48,7 +48,7 @@ func Parse(expr string, opts ...Option) (*NodeSet, error) {
 // ParseWith evaluates a node set expression, resolving group references
 // through res. A nil resolver rejects every group reference.
 func ParseWith(expr string, res Resolver, opts ...Option) (*NodeSet, error) {
-	ns, err := parseExpression(expr, res, 0)
+	ns, err := parseExpression(expr, res, 0, newBudget())
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (ns *NodeSet) Clone() *NodeSet {
 
 // Add parses names and adds the hosts they name to the set.
 func (ns *NodeSet) Add(expr string) error {
-	other, err := parseExpression(expr, nil, 0)
+	other, err := parseExpression(expr, nil, 0, newBudget())
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (ns *NodeSet) Canonical(name string) (string, bool) {
 
 // lookup finds the member a single host name refers to.
 func (ns *NodeSet) lookup(name string) (node, bool) {
-	other, err := parsePattern(name)
+	other, err := parsePattern(name, newBudget())
 	if err != nil || len(other.nodes) != 1 {
 		return node{}, false
 	}
