@@ -163,3 +163,35 @@ func TestForceDoesNotLoseJobs(t *testing.T) {
 		}
 	}
 }
+
+// Section 2.14: a dry run asks Slurm as the real run would, so that it does
+// not preview an action the real run refuses.
+func TestSlurmCheckRunsInADryRun(t *testing.T) {
+	rec := sinfoAnswers("exe0007 allocated\n", 0)
+	h, err := run(t, harnessOptions{recorder: rec}, "bmc", "power", "off", "-n", "exe7", "--dry-run")
+	if err == nil {
+		t.Fatalf("the dry run approved powering off a busy node:\n%s", h.errOut)
+	}
+	if got, want := exitcode.From(err), exitcode.Usage; got != want {
+		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
+	}
+	if strings.Contains(h.errOut.String(), "Would power off") {
+		t.Errorf("the dry run previewed the power-off:\n%s", h.errOut)
+	}
+
+	rec = sinfoAnswers("exe0007 idle\n", 0)
+	h, err = run(t, harnessOptions{recorder: rec}, "bmc", "power", "off", "-n", "exe7", "--dry-run")
+	if err != nil {
+		t.Fatalf("the dry run of an idle node failed: %v", err)
+	}
+	if !strings.Contains(h.errOut.String(), "Would power off") {
+		t.Errorf("the dry run says nothing:\n%s", h.errOut)
+	}
+	if sinfo, other := sinfoCalls(rec); sinfo != 1 || other != 0 {
+		t.Errorf("the dry run sent %d sinfo and %d other commands, want 1 and 0", sinfo, other)
+	}
+	// The dry run asks Slurm itself, as the real run does.
+	if got, want := rec.Commands()[0], "sinfo -h -N -o '%N %T' -n exe0007"; !strings.Contains(got, want) {
+		t.Errorf("command = %q, want it to contain %q", got, want)
+	}
+}

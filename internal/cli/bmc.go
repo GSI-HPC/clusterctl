@@ -377,7 +377,8 @@ func addLoseJobsFlag(cmd *cobra.Command, loseJobs *bool) {
 }
 
 // checkSlurmIdle refuses a power action on a node that is running a job,
-// unless loseJobs is set.
+// unless loseJobs is set. It asks Slurm even in a dry run, so that the dry
+// run refuses what the real run would.
 func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs bool) error {
 	if action == ipmi.ActionStatus || action == ipmi.ActionOn {
 		return nil
@@ -397,7 +398,7 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs 
 		a.Printf("the Slurm host role is not usable (%v); continuing without the job check\n", err)
 		return nil
 	}
-	result, err := a.Runner.Run(a.Context(), target, transport.Request{
+	result, err := a.ReadRunner.Run(a.Context(), target, transport.Request{
 		Argv:    []string{"sinfo", "-h", "-N", "-o", "%N %T", "-n", nodes.Hostlist()},
 		Timeout: 30 * time.Second,
 		TTY:     transport.TTYNone,
