@@ -201,6 +201,16 @@ otherwise keep running on the node with nothing watching it.
 Connection timeouts and attempts are ssh's own, set in the generated
 configuration.
 
+## Interrupts
+
+Ctrl-C stops ssh, not the remote command. ssh is sent SIGTERM, so that it
+closes the session and puts the terminal back, and is killed if it is still
+there five seconds later; clusterctl stops waiting for its output at the same
+moment, since a `ProxyCommand` it started can hold it open. Without a
+terminal on the host nothing tells the remote command, which runs until the
+timeout above ends it or it fails to write. A command that an interrupt
+stopped is reported as interrupted, whatever ssh exited with, and exits 130.
+
 ## Fan-out
 
 `internal/fanout` runs one request on many targets with a bounded number in

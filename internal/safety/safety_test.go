@@ -5,8 +5,12 @@ package safety_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -372,6 +376,50 @@ func TestEffectOfTreatsUnknownAsChange(t *testing.T) {
 	for _, tc := range tests {
 		if got := safety.EffectOf(tc.annotations); got != tc.want {
 			t.Errorf("EffectOf(%v) = %q, want %q", tc.annotations, got, tc.want)
+		}
+	}
+}
+
+// TestInterruptEndsThePrompt checks that Ctrl-C at the prompt ends it. The
+// read ignored the context, so the first interrupt was lost and the process
+// could not be stopped at "Continue? [y/N]".
+func TestInterruptEndsThePrompt(t *testing.T) {
+	t.Parallel()
+
+	g, _ := gate(t, "")
+	stdin, typing := io.Pipe()
+	t.Cleanup(func() { _ = typing.Close() })
+	g.In = stdin
+	ctx, cancel := context.WithCancel(context.Background())
+	g.Context = ctx
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	done := make(chan error, 1)
+	go func() { done <- g.Confirm(action("drain", "exe1")) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || exitcode.From(err) != exitcode.Interrupted {
+			t.Errorf("error = %v (exit code %d), want the interrupt", err, exitcode.From(err))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the prompt kept waiting after the interrupt")
+	}
+}
+
+// TestNothingIsConfirmedOnceInterrupted checks that an answer given in
+// advance does not carry an action past an interrupt, which used to send
+// the command on to its next prompt and report the aborted work as failures.
+func TestNothingIsConfirmedOnceInterrupted(t *testing.T) {
+	t.Parallel()
+
+	for _, assumeYes := range []bool{false, true} {
+		g, _ := gate(t, "y\n")
+		g.AssumeYes = assumeYes
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		g.Context = ctx
+		if err := g.Confirm(action("drain", "exe1")); !errors.Is(err, context.Canceled) || exitcode.From(err) != exitcode.Interrupted {
+			t.Errorf("-y %v: error = %v, want the interrupt", assumeYes, err)
 		}
 	}
 }
