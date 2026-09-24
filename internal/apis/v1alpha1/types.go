@@ -102,10 +102,12 @@ type NamingMatch struct {
 // HostRole is one infrastructure host commands reach by role name.
 type HostRole struct {
 	// Host is the name to connect to. It should be the real host name, so
-	// that the administrator's own ssh_config Host blocks still match.
-	Host string `json:"host" yaml:"host" jsonschema:"required,description=Host name to connect to"`
-	// User is the account to log in as.
-	User string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"description=Remote account; defaults to the context user"`
+	// that the administrator's own ssh_config Host blocks still match. It is
+	// a host name or an address and nothing else: a user, a port or a
+	// leading "-" would be read by ssh, and are refused when connecting.
+	Host string `json:"host" yaml:"host" jsonschema:"required,description=Host name or address to connect to,pattern=^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\\.?|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*)$"`
+	// User is the account to log in as, in the portable user name alphabet.
+	User string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"description=Remote account; defaults to the context user,pattern=^[A-Za-z0-9._][A-Za-z0-9._-]*$"`
 	// ForwardAgent forwards the ssh agent to this role.
 	ForwardAgent bool `json:"forwardAgent,omitempty" yaml:"forwardAgent,omitempty"`
 	// ForwardX11 enables X11 forwarding for this role.
