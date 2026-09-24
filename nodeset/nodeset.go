@@ -262,14 +262,20 @@ func lessNode(a, b node) bool {
 	return len(a.vals) < len(b.vals)
 }
 
-// Hostlist renders the set in the syntax Slurm and FreeIPMI accept. Those
-// parsers understand a single bracketed range per name but not several
-// dimensions, so a multi dimensional set is expanded instead of folded.
+// Hostlist renders the set in the syntax Slurm and FreeIPMI accept: one
+// bracketed range per name at most, and no steps.
+//
+// Each pattern is folded along the one dimension that gives the fewest names,
+// so rack[1-2]node[001-100] becomes rack1node[001-100],rack2node[001-100]
+// rather than two hundred names, and the argument stays short. Both parsers
+// read several bracketed dimensions in one name as well, but this form is the
+// one every version of them reads.
 func (ns *NodeSet) Hostlist() string {
-	for _, n := range ns.nodes {
-		if len(n.vals) > 1 {
-			return strings.Join(ns.Expand(), ",")
+	var parts []string
+	for _, p := range ns.byPattern() {
+		for _, v := range foldOneAxis(p.pattern, p.nodes) {
+			parts = append(parts, v.render(0))
 		}
 	}
-	return ns.fold()
+	return strings.Join(parts, ",")
 }

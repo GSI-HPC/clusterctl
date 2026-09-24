@@ -113,21 +113,22 @@ func TestIpmitoolLoopsOnTheGateway(t *testing.T) {
 	}
 }
 
-func TestMultiDimensionalSetsAreExpandedForTheHostList(t *testing.T) {
+func TestMultiDimensionalSetsHaveOneRangePerNameInTheHostList(t *testing.T) {
 	t.Parallel()
 
-	// FreeIPMI parses one bracketed range per name and cannot read several
-	// numeric dimensions, so such a set has to be expanded for it.
+	// FreeIPMI is handed at most one bracketed range per name, the form
+	// every version of its host list parser reads, without expanding the
+	// whole set.
 	b, runner := backend(t, v1alpha1.IPMISpec{}, "")
 	_, err := b.Power(context.Background(), ipmi.ActionStatus, nodeset.MustParse("bmc[1-2]-ib[0-1]"))
 	if err != nil {
 		t.Fatalf("Power failed: %v", err)
 	}
 	if strings.Contains(runner.script, "bmc[1-2]-ib[0-1]") {
-		t.Errorf("a multi dimensional set was sent to FreeIPMI:\n%s", runner.script)
+		t.Errorf("a name with two ranges was sent to FreeIPMI:\n%s", runner.script)
 	}
-	if !strings.Contains(runner.script, "bmc1-ib0,bmc1-ib1") && !strings.Contains(runner.script, "'bmc1-ib0,bmc1-ib1") {
-		t.Errorf("the set was not expanded:\n%s", runner.script)
+	if !strings.Contains(runner.script, "'bmc1-ib[0-1],bmc2-ib[0-1]'") {
+		t.Errorf("the set was not folded along one dimension:\n%s", runner.script)
 	}
 }
 

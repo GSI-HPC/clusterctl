@@ -83,6 +83,27 @@ func foldPattern(pattern string, nodes []node, autostep int) []vector {
 	return vectors
 }
 
+// foldOneAxis merges the hosts of one pattern along a single dimension, the
+// one that leaves the fewest vectors, so every vector has at most one
+// dimension with more than one value. A tie goes to the later dimension, which
+// is the one that usually counts nodes. Steps are never used.
+func foldOneAxis(pattern string, nodes []node) []vector {
+	var best []vector
+	if len(nodes) > 0 {
+		for axis := range nodes[0].vals {
+			merged, _ := foldAxis(unitVectors(pattern, nodes), axis, 0)
+			if best == nil || len(merged) <= len(best) {
+				best = merged
+			}
+		}
+	}
+	if best == nil {
+		best = unitVectors(pattern, nodes)
+	}
+	sortVectors(best)
+	return best
+}
+
 // foldAxis unions the values of one dimension across every pair of vectors
 // that agree on all other dimensions.
 //
