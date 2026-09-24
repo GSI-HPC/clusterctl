@@ -17,6 +17,10 @@ A name that matches a configured role connects with that role's account and
 options. Anything else is treated as a host or a node and resolved through the
 naming rules.
 
+`login` takes one name. A command goes after `--`; a second word before it is
+refused rather than dropped, so `clusterctl login mgmt uptime` is an error and
+`clusterctl login mgmt -- uptime` runs `uptime`.
+
 ## On many hosts
 
 ```console
