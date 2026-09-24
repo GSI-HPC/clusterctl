@@ -26,6 +26,8 @@ type fakeBMC struct {
 	lastPost map[string]any
 	patches  []map[string]any
 	power    string
+	// mux serves the resources; tests add their own to it.
+	mux *http.ServeMux
 	// requests counts what reached the server, and withAuth how much of
 	// it carried credentials.
 	requests atomic.Int32
@@ -88,6 +90,7 @@ func newFakeBMC(t *testing.T, resetTypes []string) *fakeBMC {
 		})
 	})
 
+	f.mux = mux
 	f.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests.Add(1)
 		if r.Header.Get("Authorization") != "" {
@@ -362,6 +365,98 @@ func TestRejectedAccountIsATransportFailure(t *testing.T) {
 	}
 	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
 		t.Errorf("a refusal: exit code = %d, want %d (%v)", got, want, err)
+	}
+}
+
+// credentialSink is a plain HTTP server that records every request it gets,
+// standing in for wherever a redirect points.
+type credentialSink struct {
+	server *httptest.Server
+	hits   atomic.Int32
+	auth   atomic.Bool
+}
+
+func newCredentialSink(t *testing.T) *credentialSink {
+	t.Helper()
+	s := &credentialSink{}
+	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.hits.Add(1)
+		if r.Header.Get("Authorization") != "" {
+			s.auth.Store(true)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"PowerState": "On"})
+	}))
+	t.Cleanup(s.server.Close)
+	return s
+}
+
+func TestRedirectsAreNotFollowed(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		status int
+		post   bool
+		// toSink points the redirect at plain HTTP on another port of the
+		// same host, which Go's default policy sends the credentials to.
+		toSink bool
+	}{
+		{name: "a read is not sent to plain HTTP with the credentials", status: http.StatusTemporaryRedirect, toSink: true},
+		{name: "a reset is not sent again after a 307", status: http.StatusTemporaryRedirect, post: true},
+		{name: "a reset is not sent again after a 308", status: http.StatusPermanentRedirect, post: true},
+		{name: "a reset is not sent to plain HTTP", status: http.StatusPermanentRedirect, post: true, toSink: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := newCredentialSink(t)
+			_, sinkPort, _ := net.SplitHostPort(sink.server.Listener.Addr().String())
+			f := newFakeBMC(t, nil)
+			f.mux.HandleFunc("/redfish/v1/moved", func(w http.ResponseWriter, r *http.Request) {
+				target := "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset"
+				if r.Method == http.MethodGet {
+					target = "/redfish/v1/Systems/1"
+				}
+				if tc.toSink {
+					target = "http://example.com:" + sinkPort + target
+				}
+				http.Redirect(w, r, target, tc.status)
+			})
+
+			// The client names example.com throughout; its port decides
+			// whether a connection reaches the sink or the fake BMC.
+			c := f.client(t)
+			rt := c.Transport.(*http.Transport)
+			bmc, sinkAddr := f.server.Listener.Addr().String(), sink.server.Listener.Addr().String()
+			rt.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				to := bmc
+				if strings.HasSuffix(addr, ":"+sinkPort) {
+					to = sinkAddr
+				}
+				var d net.Dialer
+				return d.DialContext(ctx, network, to)
+			}
+			var err error
+			if tc.post {
+				_, err = c.Post(context.Background(), "/redfish/v1/moved", map[string]any{"ResetType": "ForceRestart"})
+			} else {
+				_, err = c.Get(context.Background(), "/redfish/v1/moved")
+			}
+			if err == nil {
+				t.Error("a redirect should be reported, not followed")
+			} else if !strings.Contains(err.Error(), "redirect") {
+				t.Errorf("error = %v, want it to say the answer was a redirect", err)
+			}
+			if got := f.resets.Load(); got != 0 {
+				t.Errorf("the reset was sent again %d times after a redirect", got)
+			}
+			if got := sink.hits.Load(); got != 0 {
+				t.Errorf("the redirect target got %d requests", got)
+			}
+			if sink.auth.Load() {
+				t.Error("the credentials were sent in cleartext")
+			}
+		})
 	}
 }
 

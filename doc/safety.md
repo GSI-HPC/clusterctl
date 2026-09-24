@@ -200,7 +200,9 @@ check reads the cluster under `--dry-run` too.
 **A Redfish action is never retried.** A reset that timed out may well have
 been carried out; sending it again would power cycle a running machine. The
 retry policies of general-purpose HTTP clients do exactly this, which is why
-the client here has none.
+the client here has none. For the same reason a redirect is refused rather
+than followed: Go would send a POST again to the new location, and keep the
+credentials for plain HTTP on the same host.
 
 **A reset type is checked before it is sent.** The machine is asked what it
 accepts, so unsupported firmware is reported by name instead of rejecting an
