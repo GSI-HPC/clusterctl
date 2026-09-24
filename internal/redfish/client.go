@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 )
 
@@ -216,18 +217,32 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, body any) ([]by
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s: %w", c.Host, unwrapURLError(err))
+		return nil, 0, c.unreachable(ctx, fmt.Errorf("%s: %w", c.Host, unwrapURLError(err)))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("%s: reading the answer: %w", c.Host, err)
+		return nil, resp.StatusCode, c.unreachable(ctx, fmt.Errorf("%s: reading the answer: %w", c.Host, err))
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return raw, resp.StatusCode, exitcode.Wrap(exitcode.Transport,
+			fmt.Errorf("%s: %s: %s", c.Host, resp.Status, redfishMessage(raw)))
 	}
 	if resp.StatusCode >= 400 {
 		return raw, resp.StatusCode, fmt.Errorf("%s: %s: %s", c.Host, resp.Status, redfishMessage(raw))
 	}
 	return raw, resp.StatusCode, nil
+}
+
+// unreachable marks an error that left no answer from the processor, which
+// could not be reached, trusted or heard to the end, as a transport failure.
+// An interrupt is left as it is, so that it still exits 130.
+func (c *Client) unreachable(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return err
+	}
+	return exitcode.Wrap(exitcode.Transport, err)
 }
 
 // unwrapURLError strips the wrapper the HTTP client adds, which repeats the
