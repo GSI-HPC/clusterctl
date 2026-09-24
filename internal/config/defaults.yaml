@@ -33,9 +33,14 @@ bmc:
     user: admin
 
 ssh:
-  # The generated -F file includes the system configuration, so that crypto
-  # policies, GSSAPI settings and site defaults keep applying.
+  # ssh reads neither file on its own once it is given -F, so the generated
+  # file includes both, in the order ssh itself reads them: the
+  # administrator's own configuration, then the system one with its crypto
+  # policies, GSSAPI settings and site defaults. Neither can change which host
+  # keys are trusted or turn multiplexing on for a node; the generated file
+  # settles both first.
   include:
+    - ~/.ssh/config
     - /etc/ssh/ssh_config
   connectTimeout: 10s
   connectionAttempts: 2

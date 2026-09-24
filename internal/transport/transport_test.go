@@ -30,7 +30,7 @@ func testClient(t *testing.T) *transport.Client {
 			ServerAliveInterval: v1alpha1.Duration(60 * time.Second),
 			ServerAliveCountMax: 3,
 			SendEnv:             []string{"APPTAINER_CONTAINER"},
-			Options:             map[string]string{"CheckHostIP": "no", "HashKnownHosts": "no"},
+			Options:             map[string]string{"Compression": "yes"},
 		},
 		Roles: map[string]v1alpha1.HostRole{
 			"mgmt":  {Host: "mgmt-gw.example.org", ForwardAgent: true, ControlMaster: true},
@@ -119,8 +119,9 @@ func TestGeneratedConfigUsesRealHostNames(t *testing.T) {
 	if strings.Contains(cfg, "\nHost mgmt\n") {
 		t.Errorf("an alias block was generated:\n%s", cfg)
 	}
-	if !strings.Contains(cfg, "ProxyJump mgmt-gw.example.org") {
-		t.Errorf("the jump host was not resolved to a real host:\n%s", cfg)
+	// The jump role names no account, so the context's goes with it.
+	if !strings.Contains(cfg, "ProxyJump alice_adm@mgmt-gw.example.org") {
+		t.Errorf("the jump host was not resolved to a real host and account:\n%s", cfg)
 	}
 }
 

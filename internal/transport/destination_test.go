@@ -4,6 +4,7 @@
 package transport_test
 
 import (
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -39,7 +40,8 @@ func TestArgsRefuseADestinationThatIsNotAHost(t *testing.T) {
 	t.Parallel()
 	// No default user, so that the destination is the bare host name, which
 	// is what config init writes when --user is not given.
-	c := transport.New(transport.Options{StateDir: t.TempDir()})
+	dir := t.TempDir()
+	c := transport.New(transport.Options{StateDir: dir, KnownHostsFile: filepath.Join(dir, "known_hosts")})
 
 	for _, target := range []transport.Target{
 		{Name: "n", Host: "-oProxyCommand=touch${IFS}/tmp/pwned1;#"},
@@ -66,9 +68,11 @@ func TestArgsRefuseADestinationThatIsNotAHost(t *testing.T) {
 
 func TestArgsAcceptAddressesAndAccounts(t *testing.T) {
 	t.Parallel()
+	dir := t.TempDir()
 	c := transport.New(transport.Options{
-		StateDir: t.TempDir(),
-		Roles:    map[string]v1alpha1.HostRole{"dhcp": {Host: "dhcp01.example.org", User: "root"}},
+		StateDir:       dir,
+		KnownHostsFile: filepath.Join(dir, "known_hosts"),
+		Roles:          map[string]v1alpha1.HostRole{"dhcp": {Host: "dhcp01.example.org", User: "root"}},
 	})
 
 	for _, target := range []transport.Target{

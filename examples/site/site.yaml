@@ -122,6 +122,7 @@ spec:
   ssh:
     knownHostsFile: ssh-known-hosts
     include:
+      - ~/.ssh/config
       - /etc/ssh/ssh_config
     connectTimeout: 10s
     sendEnv:

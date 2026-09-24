@@ -52,6 +52,9 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 		StateDir: filepath.Join(dir, "state"),
 		CacheDir: filepath.Join(dir, "cache"),
 	}
+	if opts.stateDir != "" {
+		streams.StateDir = opts.stateDir
+	}
 
 	cmd := NewRootCommand(context.Background(), streams)
 	cmd.SetOut(h.out)
@@ -84,6 +87,8 @@ type harnessOptions struct {
 	// bare leaves the example configuration out, so that only config is
 	// read, or the search path when config is empty too.
 	bare bool
+	// stateDir is shared between runs that stand for processes of one user.
+	stateDir string
 }
 
 // rootOf digs the root state out of a built command tree.
