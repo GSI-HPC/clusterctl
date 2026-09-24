@@ -1460,20 +1460,113 @@ func codeWeight(code int) int {
 	}
 }
 
+// provisionState is where the reinstallation of one node stands.
+type provisionState struct {
+	Node               string `json:"node"`
+	Address            string `json:"address,omitempty"`
+	BootPath           string `json:"bootPath,omitempty"`
+	PersistentBootPath string `json:"persistentBootPath,omitempty"`
+	BMC                string `json:"bmc,omitempty"`
+	Power              string `json:"power,omitempty"`
+	// SSH says whether the node answers over ssh; SSHError says why not.
+	// A node that is reinstalling does not, so neither fails the command.
+	SSH      bool   `json:"ssh"`
+	SSHError string `json:"sshError,omitempty"`
+	Uptime   string `json:"uptime,omitempty"`
+	// Error says why the boot path or the power state is not known.
+	Error string `json:"error,omitempty"`
+
+	err error
+}
+
+func (s *provisionState) fail(err error) {
+	if s.err == nil {
+		s.err = err
+	} else {
+		s.err = errors.Join(s.err, err)
+	}
+	if s.Error != "" {
+		s.Error += "; "
+	}
+	s.Error += printable(err.Error())
+}
+
 func newProvisionStatusCommand(r *root) *cobra.Command {
 	return leaf("status [NODESET]", "Show where a reinstallation stands", `
-Show, for each node, the boot path it is configured with, what its service
-processor reports and whether it answers over ssh yet.`,
+Show, for each node, the boot path its link on the PXE service points at,
+the power state its service processor reports and whether it answers over
+ssh yet.
+
+Every node is listed. A node that does not answer over ssh is shown as such
+and does not fail the command, since a machine that is reinstalling does not
+answer. A boot path or a power state that cannot be read is shown as
+unknown, with the reason in the ERROR column and in the error field of the
+node in the JSON output, and fails the command: with exit code 3 when a host
+could not be reached, 2 for a configuration problem such as a missing
+credential, and 1 when a host refused.`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
 			if err != nil {
 				return err
 			}
+			role, err := pxeRole(a)
+			if err != nil {
+				return err
+			}
+			root := pxeRoot(a)
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
 			}
+			nodes := ns.Expand()
+			states := make([]*provisionState, len(nodes))
+			for i, node := range nodes {
+				states[i] = &provisionState{Node: node}
+			}
+
+			// One listing answers for every node.
+			suffix := a.Spec.Services.PXESrv.StaticSuffix
+			links, linkErr := readBootLinks(a, role, root)
+			for _, s := range states {
+				address, err := nodeAddress(a, s.Node)
+				if err != nil {
+					s.fail(err)
+					continue
+				}
+				s.Address = address
+				if linkErr != nil {
+					s.fail(fmt.Errorf("reading the boot links on %s: %w", role, linkErr))
+					continue
+				}
+				s.BootPath = printable(orNone(links[address]))
+				if suffix != "" {
+					s.PersistentBootPath = printable(orNone(links[address+suffix]))
+				}
+			}
+
+			clients := make([]*redfish.Client, len(nodes))
+			for i, s := range states {
+				c, err := provisionClient(a, a.Context(), s.Node)
+				if err != nil {
+					s.fail(err)
+					continue
+				}
+				clients[i], s.BMC = c, c.Host
+			}
+			power := make([]string, len(nodes))
+			powerErrs := forEachBMCError(a, clients, func(ctx context.Context, i int, c *redfish.Client) error {
+				state, err := c.PowerState(ctx)
+				power[i] = state
+				return err
+			})
+			for i, s := range states {
+				if powerErrs[i] != nil {
+					s.fail(powerErrs[i])
+				}
+				s.Power = printable(power[i])
+			}
+
 			results, err := runOnNodes(a, ns, func(string) transport.Request {
 				return transport.Request{
 					Argv:    []string{"uptime", "-p"},
@@ -1484,28 +1577,74 @@ processor reports and whether it answers over ssh yet.`,
 			if err != nil {
 				return err
 			}
-			power := forEachBMC(a, ns, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
-				return c.PowerState(ctx)
-			})
-			states := map[string]string{}
-			for _, p := range power {
-				if p.Error != "" {
-					states[p.Node] = "unknown"
-					continue
+			byName := map[string]*transport.Result{}
+			for _, res := range results {
+				byName[res.Target.Name] = res
+			}
+			for _, s := range states {
+				res, ok := byName[s.Node]
+				switch {
+				case !ok:
+					s.SSHError = "not tried"
+				case res.Failed():
+					s.SSHError = printable(sshReason(res))
+				default:
+					s.SSH, s.Uptime = true, printable(res.Output())
 				}
-				states[p.Node] = p.State
 			}
 
-			t := output.NewTable(output.Cols("NODE", "POWER", "SSH", "UPTIME")...)
-			for _, res := range results {
-				reachable := "no"
-				uptime := ""
-				if !res.Failed() {
-					reachable = "yes"
-					uptime = res.Output()
-				}
-				t.Add(res.Target.Name, states[res.Target.Name], reachable, uptime)
+			cols := []string{"NODE", "BOOT PATH"}
+			if suffix != "" {
+				cols = append(cols, "PERSISTENT")
 			}
-			return a.Print(output.Result{Table: t})
+			cols = append(cols, "POWER", "SSH", "UPTIME", "ERROR")
+			t := output.NewTable(output.Cols(cols...)...)
+			var failedNames []string
+			var failedErrs []error
+			for _, s := range states {
+				row := []string{s.Node, orUnknown(s.BootPath)}
+				if suffix != "" {
+					row = append(row, orUnknown(s.PersistentBootPath))
+				}
+				reachable := "no"
+				if s.SSH {
+					reachable = "yes"
+				}
+				row = append(row, orUnknown(s.Power), reachable, s.Uptime, s.Error)
+				t.Add(row...)
+				if s.err != nil {
+					failedNames = append(failedNames, s.Node)
+					failedErrs = append(failedErrs, s.err)
+				}
+			}
+			if err := a.Print(output.Result{Table: t, Object: states}); err != nil {
+				return err
+			}
+			if err := namedFailures(failedNames, failedErrs); err != nil {
+				return fmt.Errorf("where the reinstallation of %s stands is not fully known: %w", fold(failedNames), err)
+			}
+			return nil
 		})
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return s
+}
+
+// sshReason is the reason a node gave for failing, or the transport's.
+func sshReason(res *transport.Result) string {
+	for _, text := range []string{res.Stderr, res.Stdout} {
+		for _, line := range strings.Split(text, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				return line
+			}
+		}
+	}
+	if res.Err != nil {
+		return res.Err.Error()
+	}
+	return fmt.Sprintf("exit status %d", res.ExitCode)
 }
