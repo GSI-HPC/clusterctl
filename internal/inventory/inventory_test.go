@@ -307,3 +307,25 @@ func TestSelectNeverReturnsANilNode(t *testing.T) {
 		t.Errorf("Select(exe11) = %v, want exe11", known)
 	}
 }
+
+// Report 4.18: looking up a name must not rebuild the set of every node, or
+// selecting a large group costs quadratic time.
+func TestLookupDoesNotScaleWithTheInventory(t *testing.T) {
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe[0001-4000]"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ns := nodeset.MustParse("exe1")
+	for name, f := range map[string]func(){
+		"Resolve": func() { _, _ = inv.Resolve("exe1") },
+		"Lookup":  func() { _, _ = inv.Lookup("exe1") },
+		"Select":  func() { _, _ = inv.Select(ns) },
+	} {
+		// Rebuilding the set allocates for each of the 4,000 nodes.
+		if allocs := testing.AllocsPerRun(10, f); allocs > 100 {
+			t.Errorf("%s allocates %.0f times for one name in 4,000", name, allocs)
+		}
+	}
+}

@@ -40,6 +40,10 @@ func (n Node) Attribute(key string) (string, bool) {
 type Inventory struct {
 	nodes map[string]*Node
 	order []string
+	// all holds every node name. It is built once, because finding the
+	// node a name written with other padding refers to needs it for every
+	// name of every selection.
+	all *nodeset.NodeSet
 }
 
 // Document is one NodeInventory together with a way to say where each of its
@@ -107,6 +111,12 @@ func FromDocuments(docs ...Document) (*Inventory, error) {
 		}
 	}
 	sort.Strings(inv.order)
+	inv.all = nodeset.New()
+	for _, name := range inv.order {
+		if err := inv.all.Add(name); err != nil {
+			return nil, err
+		}
+	}
 	return inv, nil
 }
 
@@ -226,7 +236,7 @@ func (inv *Inventory) Lookup(name string) (*Node, bool) {
 		return n, true
 	}
 	// The name may have been written with different padding.
-	canonical, ok := inv.NodeSet().Canonical(name)
+	canonical, ok := inv.all.Canonical(name)
 	if !ok {
 		return nil, false
 	}
@@ -250,11 +260,7 @@ func (inv *Inventory) All() []*Node {
 
 // NodeSet returns every known node as a set.
 func (inv *Inventory) NodeSet() *nodeset.NodeSet {
-	ns := nodeset.New()
-	for _, name := range inv.order {
-		_ = ns.Add(name)
-	}
-	return ns
+	return inv.all.Clone()
 }
 
 // Select returns the nodes of a set that the inventory knows, and the names
@@ -264,9 +270,8 @@ func (inv *Inventory) NodeSet() *nodeset.NodeSet {
 // finds the nodes an inventory wrote as exe0001 and exe0002: padding is a
 // display property, not part of a host's identity.
 func (inv *Inventory) Select(ns *nodeset.NodeSet) (known []*Node, unknown []string) {
-	all := inv.NodeSet()
 	for _, name := range ns.Expand() {
-		canonical, ok := all.Canonical(name)
+		canonical, ok := inv.all.Canonical(name)
 		if !ok {
 			unknown = append(unknown, name)
 			continue
@@ -286,7 +291,7 @@ func (inv *Inventory) Select(ns *nodeset.NodeSet) (known []*Node, unknown []stri
 // Resolve returns the name the inventory uses for a host, which may differ
 // from the name given only in padding.
 func (inv *Inventory) Resolve(name string) (string, bool) {
-	return inv.NodeSet().Canonical(name)
+	return inv.all.Canonical(name)
 }
 
 // AttributeValues lists the distinct values of an attribute, in sorted order.
