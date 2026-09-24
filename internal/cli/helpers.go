@@ -56,7 +56,8 @@ func say(cmd *cobra.Command, format string, args ...any) error {
 }
 
 // selection resolves the node set a command acts on, from its argument or
-// from -n.
+// from -n, or else from CLUSTERCTL_NODES. An argument together with -n is a
+// usage error, as is an empty selection.
 func selection(a *app.App, args []string) (*nodeset.NodeSet, error) {
 	expr := ""
 	if len(args) > 0 {

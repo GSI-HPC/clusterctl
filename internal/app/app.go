@@ -74,6 +74,9 @@ type Options struct {
 	Context string
 	// Nodes is the default node set, from -n or the environment.
 	Nodes string
+	// NodesFromFlag says Nodes came from -n, so a node set given as an
+	// argument as well is a contradiction rather than an override.
+	NodesFromFlag bool
 	// Format is the -o value.
 	Format string
 	// Set are the --set assignments.
@@ -342,10 +345,15 @@ func (a *App) NodeTargets(ns *nodeset.NodeSet) ([]transport.Target, error) {
 // Select parses a node set expression, resolving group references.
 //
 // An empty expression falls back to what -n or the environment named, so a
-// session can select a set once and then work with it.
+// session can select a set once and then work with it. An expression replaces
+// a set from the environment, which is only a default, but not one from -n:
+// the two together are refused rather than one of them dropped.
 func (a *App) Select(expr string) (*nodeset.NodeSet, error) {
 	if strings.TrimSpace(expr) == "" {
 		expr = a.opts.Nodes
+	} else if a.opts.NodesFromFlag {
+		return nil, exitcode.Errorf(exitcode.Usage,
+			"nodes were given both as an argument (%s) and with -n (%s); give them once", expr, a.opts.Nodes)
 	}
 	if strings.TrimSpace(expr) == "" {
 		return nil, exitcode.Errorf(exitcode.Usage,
