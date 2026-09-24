@@ -47,7 +47,8 @@ $ clusterctl config init ./site-config --dry-run
 `config init` writes only into an empty directory and never overwrites a
 file, so running it twice changes nothing. A directory that holds anything, a
 `README` or a `.git` directory included, is refused: run `config init` before
-`git init`, or write into a subdirectory.
+`git init`, or write into a subdirectory. So is a directory another user owns
+or others can write, even an empty one.
 
 For everything the scaffold leaves out, `examples/site/` ships with the
 release and is a complete, working configuration. Take from it what your site
@@ -153,6 +154,12 @@ $ clusterctl --config ./examples/site config validate
 Both take files and directories, most general first. Every place they name
 has to exist: a misspelled one is an error, not a file quietly left out. Of the
 two directories read without them, one that is missing is skipped.
+
+Configuration names programs clusterctl runs, so like `~/.ssh/config` it has to
+be yours or root's, and nobody else may be able to write the files or the
+directory they are in. Otherwise clusterctl refuses to read them and says
+which one to `chmod go-w`. Share a site directory through version control or
+keep it owned by root, not writable by a group.
 
 {{< callout type="info" >}}
 Keep the `Site`, `Cluster`, `NodeInventory` and sops encrypted `Secret`

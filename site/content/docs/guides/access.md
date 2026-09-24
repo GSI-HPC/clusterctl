@@ -44,8 +44,10 @@ the server presents its key, so no credentials are involved. The file is always
 rewritten completely, under a lock, and sorted, so two administrators
 refreshing at once cannot lose an entry and the diff is readable.
 
-To share the file, keep it in a directory its group can write, with the setgid
-bit set: `chmod 2775`. clusterctl keeps the file's mode and group when it
+To share the file, keep it in a directory of its own that its group can write,
+with the setgid bit set: `chmod 2775`, and name it as
+`knownHostsFile: hostkeys/ssh-known-hosts`. Not the configuration directory
+itself: clusterctl refuses configuration others can write. clusterctl keeps the file's mode and group when it
 rewrites it, and its lock readable by the group, so every administrator in the
 group can refresh it. A symbolic link to the file stays a link, unless someone
 other than you or root made it, in which case the write is refused.

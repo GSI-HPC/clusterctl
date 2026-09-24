@@ -117,3 +117,156 @@ func TestAMisspelledConfigIsReported(t *testing.T) {
 		check(t, h, err)
 	})
 }
+
+// copyExampleWithModes copies the example configuration into a new
+// directory with the given mode, its files with fileMode.
+func copyExampleWithModes(t *testing.T, mode, fileMode os.FileMode) string {
+	t.Helper()
+	dir := copyExample(t)
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if err := os.Chmod(filepath.Join(dir, item.Name()), fileMode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(dir, mode); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestConfigurationOthersCanWriteIsRefused is report section 9.7: the
+// configuration names programs clusterctl runs, and it was read from files
+// and directories anyone could write.
+func TestConfigurationOthersCanWriteIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		mode, fileMode os.FileMode
+	}{
+		{"directory anyone can write", 0o777, 0o644},
+		{"directory the group can write", 0o775, 0o644},
+		{"file anyone can write", 0o755, 0o646},
+		{"file the group can write", 0o755, 0o664},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := copyExampleWithModes(t, tc.mode, tc.fileMode)
+			for _, entry := range []string{dir, filepath.Join(dir, "site.yaml")} {
+				// A file nobody else can write is refused too
+				// when it is in a directory others can write,
+				// who could swap it for another.
+				_, err := run(t, harnessOptions{bare: true, config: []string{entry}}, "config", "validate")
+				if err == nil {
+					t.Fatalf("configuration in %s was read", entry)
+				}
+				if got, want := exitcode.From(err), exitcode.Usage; got != want {
+					t.Errorf("exit code = %d, want %d", got, want)
+				}
+				if !strings.Contains(err.Error(), "chmod go-w") {
+					t.Errorf("the error does not say how to fix it: %v", err)
+				}
+			}
+		})
+	}
+
+	// The same files with nobody else able to write them are read.
+	dir := copyExampleWithModes(t, 0o755, 0o644)
+	if _, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "validate"); err != nil {
+		t.Errorf("a private copy of the example was refused: %v", err)
+	}
+}
+
+// TestAnotherUsersConfigurationIsRefused is the case the report showed:
+// root read a document another user had added, and doctor ran the program it
+// named as ssh.binary.
+func TestAnotherUsersConfigurationIsRefused(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("only root can give a file to another user")
+	}
+	dir := copyExampleWithModes(t, 0o755, 0o644)
+	marker := filepath.Join(t.TempDir(), "ran")
+	program := filepath.Join(t.TempDir(), "x")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	extra := filepath.Join(dir, "zz-extra.yaml")
+	doc := "apiVersion: clusterctl/v1alpha1\nkind: Config\ncurrentContext: cluster1\ncontexts:\n" +
+		"  - name: cluster1\n    cluster: cluster1\n    overrides:\n      ssh.binary: " + program + "\n"
+	if err := os.WriteFile(extra, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(extra, 65534, 65534); err != nil {
+		t.Fatal(err)
+	}
+
+	h, _ := run(t, harnessOptions{bare: true, config: []string{dir}}, "doctor")
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("doctor ran a program another user's document named")
+	}
+	if !strings.Contains(h.out.String(), "uid 65534") {
+		t.Errorf("doctor does not say whose file was refused:\n%s", h.out)
+	}
+}
+
+// TestConfigInitRefusesADirectoryOthersCanWrite is the other half of 9.7:
+// config init wrote into an empty directory another user had created with
+// mode 0777, and told root to export CLUSTERCTL_CONFIG pointing at it.
+func TestConfigInitRefusesADirectoryOthersCanWrite(t *testing.T) {
+	open := filepath.Join(t.TempDir(), "open")
+	if err := os.Mkdir(open, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{open, filepath.Join(open, "cfg"), filepath.Join(open, "a", "cfg")} {
+		h, err := run(t, harnessOptions{}, "config", "init", dir)
+		if err == nil {
+			t.Fatalf("config init wrote into %s:\n%s", dir, h.out)
+		}
+		if got, want := exitcode.From(err), exitcode.Usage; got != want {
+			t.Errorf("exit code = %d, want %d", got, want)
+		}
+		if strings.Contains(h.out.String(), "export") {
+			t.Errorf("config init said to read %s:\n%s", dir, h.out)
+		}
+	}
+	if items, _ := os.ReadDir(open); len(items) != 0 {
+		t.Errorf("a refused config init left %d entries behind", len(items))
+	}
+
+	// A directory in /tmp, which anyone can write but nobody can take
+	// another user's file from, is fine.
+	sticky := filepath.Join(t.TempDir(), "sticky")
+	if err := os.Mkdir(sticky, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(sticky, 0o777|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, harnessOptions{}, "config", "init", filepath.Join(sticky, "cfg")); err != nil {
+		t.Errorf("config init below a sticky directory failed: %v", err)
+	}
+}
+
+func TestConfigInitRefusesAnotherUsersDirectory(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("only root can give a directory to another user")
+	}
+	dir := filepath.Join(t.TempDir(), "cfg")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(dir, 65534, 65534); err != nil {
+		t.Fatal(err)
+	}
+	_, err := run(t, harnessOptions{}, "config", "init", dir)
+	if err == nil {
+		t.Fatal("config init wrote into another user's directory")
+	}
+	if got, want := exitcode.From(err), exitcode.Usage; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+}

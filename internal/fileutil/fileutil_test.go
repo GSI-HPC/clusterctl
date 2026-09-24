@@ -373,3 +373,85 @@ func TestEnsureDirRefusesAnotherUsersDirectory(t *testing.T) {
 		t.Errorf("another user's directory: err = %v, want ErrUntrusted", err)
 	}
 }
+
+func TestCheckTrusted(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	write := func(name string, mode os.FileMode) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	for _, tc := range []struct {
+		name string
+		mode os.FileMode
+		ok   bool
+	}{
+		{"private.yaml", 0o600, true},
+		{"readable.yaml", 0o644, true},
+		{"group-writable.yaml", 0o664, false},
+		{"world-writable.yaml", 0o646, false},
+	} {
+		err := fileutil.CheckTrusted(write(tc.name, tc.mode))
+		if tc.ok && err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+		if !tc.ok && !errors.Is(err, fileutil.ErrUntrusted) {
+			t.Errorf("%s: err = %v, want ErrUntrusted", tc.name, err)
+		}
+	}
+
+	// A file in a sticky directory anyone can write, the way /tmp is, has
+	// a trusted parent; one in a plain directory anyone can write has not.
+	for _, tc := range []struct {
+		mode os.FileMode
+		ok   bool
+	}{
+		{0o755, true},
+		{0o777 | fs.ModeSticky, true},
+		{0o777, false},
+	} {
+		sub, err := os.MkdirTemp(dir, "parent")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(sub, tc.mode); err != nil {
+			t.Fatal(err)
+		}
+		err = fileutil.CheckTrustedParent(filepath.Join(sub, "config.yaml"))
+		if tc.ok && err != nil {
+			t.Errorf("parent with mode %v: %v", tc.mode, err)
+		}
+		if !tc.ok && !errors.Is(err, fileutil.ErrUntrusted) {
+			t.Errorf("parent with mode %v: err = %v, want ErrUntrusted", tc.mode, err)
+		}
+	}
+}
+
+func TestCheckTrustedRefusesAnotherUsersFile(t *testing.T) {
+	t.Parallel()
+	uid, gid := otherIDs(t)
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(path, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileutil.CheckTrusted(path); !errors.Is(err, fileutil.ErrUntrusted) {
+		t.Errorf("another user's file: err = %v, want ErrUntrusted", err)
+	}
+	if err := os.Chown(path, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileutil.CheckTrusted(path); err != nil {
+		t.Errorf("root's file: %v", err)
+	}
+}

@@ -48,7 +48,11 @@ protected hosts would stop applying. Directories that are missing, parents inclu
 **Into what.** A directory that does not exist yet or is empty. Any entry, a
 hidden file or a subdirectory included, makes the command refuse before it
 creates or writes anything. `--dry-run` refuses the same way, so it predicts
-the real run.
+the real run. The directory also has to be one nobody but this user or root
+owns or can write, and a directory to be created has to be created where
+nobody else can replace it: the loader refuses configuration anywhere else,
+and an empty directory another user made is one they can add documents to
+later.
 
 ## Why
 

@@ -53,6 +53,16 @@ use only one of them. An entry of `--config` or `CLUSTERCTL_CONFIG` that does
 not exist is a usage error: it is most likely misspelled, and without it the
 command would resolve to another context.
 
+Configuration names programs clusterctl runs on the workstation, such as
+`ssh.binary` and a password command, so it is held to what OpenSSH holds
+`~/.ssh/config` to. A configuration file, the directory it is read from, and
+the directory holding a file named on its own have to be owned by the user
+running clusterctl or by root and must not be writable by their group or by
+anyone else; otherwise the command refuses to run. A directory with the sticky
+bit set, such as `/tmp`, may hold a file named on its own. A site directory
+several administrators share is therefore owned by root, or kept in version
+control and checked out by each administrator; a group-writable one is refused.
+
 ## Starting a configuration
 
 `clusterctl config init [DIR]` writes the least configuration that resolves: a
@@ -84,6 +94,10 @@ what is left to fill in.
   To start a site repository, write into an empty subdirectory of it, or run
   `config init` first and `git init` afterwards.
   [ADR 0017](adr/0017-config-init-into-an-empty-directory.md) says why.
+- **Only into a directory of its own.** A directory another user owns, or one
+  its group or anyone can write, is refused even when it is empty, and so is a
+  new directory inside one, unless that one has the sticky bit set, as `/tmp`
+  has. Configuration written there could not be read anyway.
 - **Nothing is overwritten.** Each file is created exclusively, and when one
   cannot be written the ones written before it are removed again.
 - **The template is not the example.** `examples/site/` shows every kind and

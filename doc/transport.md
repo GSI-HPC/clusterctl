@@ -243,7 +243,10 @@ rewritten completely, under a lock, and sorted, so two administrators
 refreshing at once cannot lose an entry and a diff stays readable.
 
 A file the team shares lives in a directory its group can write, best with
-the setgid bit so that new files take the directory's group. The lock file
+the setgid bit so that new files take the directory's group. That is a
+directory of its own, such as a `hostkeys/` subdirectory named with
+`knownHostsFile: hostkeys/ssh-known-hosts`, not the directory the
+configuration is read from, which nobody but its owner may write. The lock file
 beside it is then readable and writable by that group, and a rewrite keeps the
 file's mode and group, and its owner when root writes it, so that the next
 administrator can still write it. A symbolic link to the file stays a link, as
