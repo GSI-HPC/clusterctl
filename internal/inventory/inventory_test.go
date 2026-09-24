@@ -4,6 +4,8 @@
 package inventory_test
 
 import (
+	"errors"
+	"net"
 	"strings"
 	"testing"
 
@@ -463,5 +465,19 @@ func TestRackFieldAndAttributeMustNotConflict(t *testing.T) {
 		{Nodes: "exe1", Rack: "R02", Attributes: map[string]string{"rack": "R02"}},
 	}}); err != nil {
 		t.Errorf("an entry saying the same rack twice is consistent: %v", err)
+	}
+}
+
+// A malformed identifier's error keeps the parser's error underneath it, so
+// that a caller can still tell what went wrong.
+func TestMalformedIdentifierKeepsTheParseError(t *testing.T) {
+	t.Parallel()
+
+	_, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe1", MACs: []string{"00:11:22:33:44"}},
+	}})
+	var addrErr *net.AddrError
+	if !errors.As(err, &addrErr) {
+		t.Errorf("error = %v, want the *net.AddrError of the MAC parser wrapped in it", err)
 	}
 }
