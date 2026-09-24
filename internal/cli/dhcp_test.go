@@ -45,6 +45,56 @@ func linkScripts(rec *transport.Recorder) string {
 
 const dhcpdPath = "/etc/dhcp/dhcpd.conf"
 
+// A comment above a neighbour's declaration that names the node gave the node
+// the neighbour's address, and boot set armed the neighbour (report 5.1).
+func TestBootSetIgnoresACommentThatNamesTheNode(t *testing.T) {
+	rec := serveDHCP(map[string]string{dhcpdPath: `
+# chassis C07: exe0003 exe0004
+host exe0003 {
+  hardware ethernet aa:bb:cc:00:00:03;
+  fixed-address 10.0.2.3;
+}
+host exe0004 {
+  hardware ethernet aa:bb:cc:00:00:04;
+  fixed-address 10.0.2.4;
+}
+`})
+	h, err := run(t, harnessOptions{recorder: rec}, "boot", "set", "-y", "-n", "exe0004")
+	if err != nil {
+		t.Fatalf("boot set failed: %v", err)
+	}
+	script := linkScripts(rec)
+	if !strings.Contains(script, " /srv/pxesrv/10.0.2.4\n") || strings.Contains(script, "10.0.2.3") {
+		t.Errorf("boot set linked the wrong address:\n%s", script)
+	}
+	if out := h.out.String(); strings.Contains(out, "10.0.2.3") {
+		t.Errorf("boot set reported the neighbour's address:\n%s", out)
+	}
+}
+
+// A node named only in a comment has no address of its own, so nothing is
+// linked for it (report 5.1 and 5.3).
+func TestProvisionReinstallRefusesANodeNamedOnlyInAComment(t *testing.T) {
+	t.Setenv("BMC_PASSWORD", "secret")
+	rec := serveDHCP(map[string]string{dhcpdPath: `
+# rack R02: exe0001 to exe0010
+host exe0002 {
+  fixed-address 10.0.2.2;
+}
+`})
+	_, err := run(t, harnessOptions{recorder: rec},
+		"provision", "reinstall", "-y", "--no-reset", "-n", "exe0010")
+	if err == nil {
+		t.Fatal("reinstall of a node with no declaration of its own should fail")
+	}
+	if got := exitcode.From(err); got != exitcode.Usage {
+		t.Errorf("exit code = %d, want %d (%v)", got, exitcode.Usage, err)
+	}
+	if script := linkScripts(rec); script != "" {
+		t.Errorf("reinstall sent a script although no address is known:\n%s", script)
+	}
+}
+
 // A declaration closed on the line of its last statement swallowed the next
 // declaration, whose address then went to the first node (report 5.2).
 func TestBootSetReadsADeclarationClosedOnItsLastLine(t *testing.T) {
@@ -78,6 +128,78 @@ host exe0004 {
 	}
 	if strings.Count(out, "aa:bb:cc:00:00:04") != 1 {
 		t.Errorf("exe0004's MAC is reported more than once:\n%s", out)
+	}
+}
+
+// A second interface or the BMC sorted before the node's own declaration and
+// became its boot address (report 5.3).
+func TestBootSetTakesTheAddressOfTheNodesOwnDeclaration(t *testing.T) {
+	rec := serveDHCP(map[string]string{dhcpdPath: `
+host exe0005.hpc.example.org {
+  fixed-address 10.0.2.5;
+}
+host exe0005-bmc.mgmt.hpc.example.org {
+  fixed-address 10.9.2.5;
+}
+`})
+	h, err := run(t, harnessOptions{recorder: rec}, "boot", "set", "-y", "-n", "exe0005")
+	if err != nil {
+		t.Fatalf("boot set failed: %v", err)
+	}
+	if script := linkScripts(rec); !strings.Contains(script, " /srv/pxesrv/10.0.2.5\n") {
+		t.Errorf("boot set linked the wrong address:\n%s", script)
+	}
+	if out := h.out.String(); strings.Contains(out, "10.9.2.5") {
+		t.Errorf("boot set reported the BMC's address:\n%s", out)
+	}
+}
+
+// Two declarations named after the node that both carry an address leave the
+// boot address undecided, so nothing is linked (report 5.3).
+func TestBootSetRefusesTwoDeclarationsOfTheNode(t *testing.T) {
+	rec := serveDHCP(map[string]string{dhcpdPath: `
+host exe0006 {
+  fixed-address 10.0.2.6;
+}
+host exe0006.hpc.example.org {
+  fixed-address 10.0.2.16;
+}
+`})
+	_, err := run(t, harnessOptions{recorder: rec}, "boot", "set", "-y", "-n", "exe0006")
+	if err == nil {
+		t.Fatal("boot set should refuse a node with two addresses")
+	}
+	if got := exitcode.From(err); got != exitcode.Usage {
+		t.Errorf("exit code = %d, want %d (%v)", got, exitcode.Usage, err)
+	}
+	for _, want := range []string{"exe0006", "exe0006.hpc.example.org"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to name %s", err, want)
+		}
+	}
+	if script := linkScripts(rec); script != "" {
+		t.Errorf("boot set sent a script although the address is ambiguous:\n%s", script)
+	}
+}
+
+// dhcp hosts shows a declaration found only through a comment, but says so,
+// and does not count it as the node's own.
+func TestDHCPHostsMarksACommentMatch(t *testing.T) {
+	rec := serveDHCP(map[string]string{dhcpdPath: `
+# a node named only in the comment: exe0007
+host weird-name-0001 {
+  fixed-address 10.0.5.1;
+}
+`})
+	h, err := run(t, harnessOptions{recorder: rec}, "dhcp", "hosts", "-n", "exe0007")
+	if got := exitcode.From(err); got != exitcode.TargetFailed {
+		t.Errorf("exit code = %d, want %d (%v)", got, exitcode.TargetFailed, err)
+	}
+	out := h.out.String()
+	for _, want := range []string{"weird-name-0001", "comment"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dhcp hosts is missing %q:\n%s", want, out)
+		}
 	}
 }
 

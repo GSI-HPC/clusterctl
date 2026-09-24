@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
+	"github.com/GSI-HPC/clusterctl/internal/dhcp"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/output"
@@ -58,11 +60,13 @@ func nodeAddress(a *app.App, node string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		for _, host := range cfg.Lookup(node) {
-			if host.Address != "" {
-				address, source = host.Address, "DHCP"
-				break
-			}
+		address, err = cfg.BootAddress(node)
+		switch {
+		case errors.Is(err, dhcp.ErrNoAddress):
+		case err != nil:
+			return "", exitcode.Wrap(exitcode.Usage, err)
+		default:
+			source = "DHCP"
 		}
 	}
 	if address == "" {

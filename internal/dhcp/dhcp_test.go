@@ -101,10 +101,16 @@ func TestLookupFindsEveryInterfaceOfANode(t *testing.T) {
 	if got, want := len(hosts), 2; got != want {
 		t.Fatalf("got %d declarations for exe0001, want %d", got, want)
 	}
+	if hosts[0].By != dhcp.ByName || hosts[1].By != dhcp.ByInterface {
+		t.Errorf("matches = %s, %s; want name, interface", hosts[0].By, hosts[1].By)
+	}
 
-	// A site that names the node only in a comment is still matched.
-	if got := cfg.Lookup("sub0001"); len(got) != 1 {
-		t.Errorf("got %d declarations for a node named in a comment, want 1", len(got))
+	// A comment is not a name: the declaration is only mentioned.
+	if got := cfg.Lookup("sub0001"); len(got) != 0 {
+		t.Errorf("got %d declarations for a node named in a comment, want 0", len(got))
+	}
+	if got := cfg.Mentions("sub0001"); len(got) != 1 || got[0].By != dhcp.ByComment {
+		t.Errorf("mentions of a node named in a comment = %v, want the one declaration", got)
 	}
 	if got := cfg.Lookup("exe0002"); len(got) != 0 {
 		t.Errorf("got %d declarations for an unknown node, want 0", len(got))
@@ -302,5 +308,50 @@ func TestParseFileFollowsInclude(t *testing.T) {
 	// The reader's own error survives, so its exit code does too.
 	if _, err := dhcp.ParseFile("/etc/dhcp/gone.conf", read); !errors.Is(err, missing) {
 		t.Errorf("ParseFile = %v, want it to wrap the reader's error", err)
+	}
+}
+
+// The boot address comes only from the declaration named after the node
+// (report 5.1 and 5.3).
+func TestBootAddress(t *testing.T) {
+	t.Parallel()
+
+	conf := `
+# chassis C07: exe0003 exe0004
+host exe0003 { fixed-address 10.0.2.3; }
+host exe0004 { hardware ethernet aa:bb:cc:00:00:04; }
+host exe0005-bmc.mgmt.hpc.example.org { fixed-address 10.9.2.5; }
+host exe0005.hpc.example.org { fixed-address 10.0.2.5; }
+host exe0006 { fixed-address 10.0.2.6; }
+host exe0006.hpc.example.org { fixed-address 10.0.2.16; }
+host exe0007 { fixed-address 10.0.2.7, 10.0.2.17; }
+host exe0008 { fixed-address exe0008.hpc.example.org; }
+host exe0009-old { fixed-address 10.0.2.1; }
+host exe00010 { fixed-address 10.0.2.10; }
+`
+	cfg, err := dhcp.Parse([]byte(conf))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	tests := []struct {
+		node, want string
+		err        error
+	}{
+		{"exe0003", "10.0.2.3", nil},
+		{"exe0004", "", dhcp.ErrNoAddress},
+		{"exe0005", "10.0.2.5", nil},
+		{"exe0006", "", dhcp.ErrAmbiguous},
+		{"exe0007", "", dhcp.ErrAmbiguous},
+		{"exe0008", "", dhcp.ErrInvalidAddress},
+		{"exe0009", "", dhcp.ErrNoAddress},
+		{"exe0001", "", dhcp.ErrNoAddress},
+		{"", "", dhcp.ErrNoAddress},
+	}
+	for _, tc := range tests {
+		got, err := cfg.BootAddress(tc.node)
+		if got != tc.want || !errors.Is(err, tc.err) {
+			t.Errorf("BootAddress(%q) = %q, %v; want %q, %v", tc.node, got, err, tc.want, tc.err)
+		}
 	}
 }

@@ -70,6 +70,13 @@ Show what the DHCP server hands each node: its address, hardware addresses,
 client identifier and boot file. A node with several interfaces has one row
 per declaration.
 
+The MATCH column says how a declaration was found. "name" is the declaration
+named after the node or its fully qualified name, and the only one a boot
+address is taken from. "interface" is one named after the node followed by -
+or _, such as its BMC or a second port. "comment" is one whose comment names
+the node; it is shown to help find a misnamed declaration, and a node that
+has only those counts as missing.
+
   clusterctl dhcp hosts -n exe[1-4]
   clusterctl dhcp hosts -n exe0001 -o yaml`,
 		cobra.ArbitraryArgs,
@@ -90,23 +97,27 @@ per declaration.
 			t := output.NewTable(
 				output.Column{Name: "NODE"},
 				output.Column{Name: "DECLARATION"},
+				output.Column{Name: "MATCH"},
 				output.Column{Name: "ADDRESS"},
 				output.Column{Name: "MAC"},
 				output.Column{Name: "CLIENT ID", Wide: true},
 				output.Column{Name: "BOOT FILE"},
 			)
-			object := map[string][]dhcp.Host{}
+			object := map[string][]dhcp.Match{}
 			missing := 0
 			for _, node := range ns.Expand() {
-				hosts := cfg.Lookup(node)
-				if len(hosts) == 0 {
-					t.Add(node, "not in the DHCP configuration", "", "", "", "")
+				own := cfg.Lookup(node)
+				matches := append(append([]dhcp.Match(nil), own...), cfg.Mentions(node)...)
+				if len(own) == 0 {
 					missing++
+				}
+				if len(matches) == 0 {
+					t.Add(node, "not in the DHCP configuration", "", "", "", "", "")
 					continue
 				}
-				object[node] = hosts
-				for _, h := range hosts {
-					t.Add(node, h.Name, h.Address, strings.Join(h.MACs, ","), h.ClientIdentifier, h.Filename)
+				object[node] = matches
+				for _, h := range matches {
+					t.Add(node, h.Name, string(h.By), h.Address, strings.Join(h.MACs, ","), h.ClientIdentifier, h.Filename)
 				}
 			}
 			if err := a.Print(output.Result{Table: t, Object: object}); err != nil {

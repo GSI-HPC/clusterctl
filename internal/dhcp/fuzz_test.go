@@ -9,8 +9,8 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/dhcp"
 )
 
-// FuzzParse checks that parsing never panics, and that every declaration it
-// accepts has a name.
+// FuzzParse checks that parsing never panics, and that whatever it accepts
+// can be asked for a node's boot address.
 func FuzzParse(f *testing.F) {
 	for _, s := range []string{
 		sample,
@@ -35,7 +35,12 @@ func FuzzParse(f *testing.F) {
 			if h.Name == "" {
 				t.Fatalf("a declaration without a name was accepted: %q", conf)
 			}
+			address, err := cfg.BootAddress(h.Name)
+			if err == nil && address == "" {
+				t.Fatalf("BootAddress(%q) returned no address and no error", h.Name)
+			}
 			cfg.Lookup(h.Name)
+			cfg.Mentions(h.Name)
 		}
 	})
 }
