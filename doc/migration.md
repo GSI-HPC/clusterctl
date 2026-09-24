@@ -75,7 +75,7 @@ Almost every `CLUSTER_*` variable becomes a configuration field:
 | `cluster-post-install` | `clusterctl secrets push` |
 | `cluster-cinc config/run/solo` | `clusterctl cinc config/run` |
 | `cluster-iblink state/counters` | `clusterctl fabric state/counters` |
-| `mlx-hca link/cable/config` | `clusterctl hca link/cable/config` |
+| `mlx-hca link/cable/config` | `clusterctl hca link/cable`, `clusterctl hca config get/set` |
 | `cluster-slurm-nodes *` | `clusterctl slurm node *` |
 | `cluster-slurm-jobs *` | `clusterctl slurm job *` |
 | `cluster-slurm-accounts *` | `clusterctl slurm account *` |

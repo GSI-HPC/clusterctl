@@ -11,7 +11,8 @@ $ clusterctl doctor --remote
 ```
 
 `--remote` contacts every configured host role and checks the programs the
-commands need are installed.
+commands need are installed. Under `--dry-run` nothing is contacted, and each
+host role is reported as skipped rather than reachable.
 
 ## A value is not what the file says
 

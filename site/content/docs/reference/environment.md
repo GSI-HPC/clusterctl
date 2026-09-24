@@ -50,7 +50,12 @@ clusterctl refuses to run and `clusterctl doctor` says why.
 
 **On an infrastructure host**, depending on the roles a site configures:
 `ipmipower` or `ipmitool`, `fping`, the Slurm clients and `getent`,
-`ibportstate` and `ibqueryerrors`, `git`, `tcpdump`.
+`ibportstate`, `ibqueryerrors`, `ibaddr`, `iblinkinfo` and `perfquery`, `git`,
+`tcpdump`.
+
+**On your workstation or the name servers:** the `dns` commands send their
+queries themselves, to `services.dns.server` or else to the name servers in
+`/etc/resolv.conf`; `/etc/hosts` is not consulted.
 
 **On the nodes:** whatever a command was asked to run, plus `ibstat`,
 `mlxconfig` and `mst` for the adapter commands and the configuration management

@@ -445,7 +445,9 @@ type FabricService struct {
 
 // DNSService is the resolver used for forward and reverse lookups.
 type DNSService struct {
-	// Server overrides the system resolver, "10.0.0.1:53" style.
+	// Server is the name server the dns commands ask instead of those in
+	// /etc/resolv.conf: an address or host name with an optional port, 53
+	// by default. An IPv6 address may be written with or without brackets.
 	Server string `json:"server,omitempty" yaml:"server,omitempty"`
 	// Timeout bounds one query.
 	Timeout Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
