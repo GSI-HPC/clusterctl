@@ -92,16 +92,18 @@ processor name and the groups it belongs to.`,
 			if err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
-			bmc, err := a.Namer.BMC(name)
+			// A node whose service processor has no name is still
+			// described; the note says why the field is missing.
+			bmc, err := a.BMCHost(name)
 			if err != nil {
-				return exitcode.Wrap(exitcode.Usage, err)
+				a.Printf("%v\n", err)
 			}
 			memberships, _ := a.Groups.GroupsOf(name)
 
 			t := output.NewTable(output.Cols("FIELD", "VALUE")...)
 			t.Add("name", node.Name)
 			t.Add("host", fqdn)
-			t.Add("bmc", bmc)
+			addIf(t, "bmc", bmc)
 			addIf(t, "address", node.Address)
 			addIf(t, "bmcAddress", node.BMCAddress)
 			addIf(t, "rack", node.Rack)
@@ -187,7 +189,7 @@ what the out-of-band commands connect to.`,
 			}
 			mapped := a.Namer.FQDNSet
 			if bmc {
-				mapped = a.Namer.BMCSet
+				mapped = a.BMCHosts
 			}
 			names, err := mapped(ns)
 			if err != nil {

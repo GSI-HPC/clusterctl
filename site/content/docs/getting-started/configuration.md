@@ -184,8 +184,29 @@ $ clusterctl node fqdn -n 'exe[1-4]' --bmc
 exe[0001-0004].mgmt.hpc.example.org
 ```
 
-A name that already carries a domain is left exactly as written, so you can
-always name a host precisely.
+A name that already carries a domain is left as written, so you can always
+name a host precisely. Host names are not case sensitive, so `WLM01` is
+lowercased and gets the rule of `wlm01`.
+
+A `pattern` must match the whole short name: `gpu\d+` does not claim
+`login-gpu01`.
+
+The service processor of a node is named only by the `bmc` template of the
+rule that matches it. There is no fallback to the node's own name, because the
+BMC password would then be sent to the node itself. A node whose rule has no
+`bmc` template, or whose service processor cannot be named by a rule at all,
+gets its address in the inventory:
+
+```yaml
+nodes:
+  - nodes: exe0003
+    bmcAddress: 10.9.0.77
+```
+
+`bmcAddress` always wins over a derived name, which is only as good as its DNS
+record. For a name with a domain, the service processor is derived only when
+the domain is the one the rules give the node; an IP address names no service
+processor.
 
 ## Passwords
 

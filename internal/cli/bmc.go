@@ -47,15 +47,18 @@ for the count to be typed back.`,
 	)
 }
 
-// bmcSet resolves the node set and the matching service processor names.
+// bmcSet resolves the node set and the matching service processors: the
+// inventory's bmcAddress where it records one, else the name the naming
+// rules give. A node whose service processor has neither is refused before
+// anything is contacted.
 func bmcSet(a *app.App, args []string) (nodes, bmcs *nodeset.NodeSet, err error) {
 	nodes, err = selection(a, args)
 	if err != nil {
 		return nil, nil, err
 	}
-	bmcs, err = a.Namer.BMCSet(nodes)
+	bmcs, err = a.BMCHosts(nodes)
 	if err != nil {
-		return nil, nil, exitcode.Wrap(exitcode.Usage, err)
+		return nil, nil, err
 	}
 	return nodes, bmcs, nil
 }
@@ -196,7 +199,7 @@ func staggeredPowerOn(a *app.App, nodes, bmcs *nodeset.NodeSet, useIPMI bool, ba
 			}
 		}
 		a.Printf("powering on %s (%d of %d)\n", chunk, i+1, len(chunks))
-		chunkBMCs, err := a.Namer.BMCSet(chunk)
+		chunkBMCs, err := a.BMCHosts(chunk)
 		if err != nil {
 			return err
 		}
@@ -702,9 +705,9 @@ one is configured.`,
 			if err != nil {
 				return err
 			}
-			host, err := a.Namer.BMC(args[0])
+			host, err := a.BMCHost(args[0])
 			if err != nil {
-				return exitcode.Wrap(exitcode.Usage, err)
+				return err
 			}
 			url := "https://" + host
 			if _, err := fmt.Fprintln(cmd.OutOrStdout(), url); err != nil {
@@ -801,9 +804,10 @@ anyone replacing it, find out why first.`,
 			}
 			store := &redfish.PinStore{Path: path}
 			for _, node := range args {
-				host, err := a.Namer.BMC(node)
+				// The pin is kept under the host the client talked to.
+				host, err := a.BMCHost(node)
 				if err != nil {
-					return exitcode.Wrap(exitcode.Usage, err)
+					return err
 				}
 				if err := store.Remove(a.Context(), host); err != nil {
 					return err

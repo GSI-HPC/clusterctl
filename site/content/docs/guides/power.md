@@ -108,7 +108,17 @@ removed, which is how a machine ends up reinstalling every time it reboots.
 
 A service processor carries a self signed certificate that no authority
 vouches for. clusterctl records the one it sees first and refuses a change,
-the way ssh does with host keys:
+the way ssh does with host keys. It says so when it is about to record one,
+so that a first contact you did not expect is noticed:
+
+```console
+$ clusterctl bmc status -n exe0042
+no certificate is recorded for exe0042.mgmt.hpc.example.org yet; the one it presents now will be recorded and trusted from then on
+```
+
+The certificate is recorded under the host clusterctl talks to: the
+`bmcAddress` of the node when the inventory sets one, otherwise the name the
+naming rules give.
 
 ```console
 $ clusterctl bmc status -n exe0001
