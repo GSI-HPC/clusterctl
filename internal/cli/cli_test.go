@@ -58,6 +58,9 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 	if opts.stateDir != "" {
 		streams.StateDir = opts.stateDir
 	}
+	if opts.streams != nil {
+		opts.streams(&streams)
+	}
 
 	cmd := NewRootCommand(context.Background(), streams)
 	cmd.SetOut(h.out)
@@ -122,6 +125,8 @@ type harnessOptions struct {
 	bare bool
 	// stateDir is shared between runs that stand for processes of one user.
 	stateDir string
+	// streams changes the streams before the command tree is built.
+	streams func(*app.Streams)
 }
 
 // rootOf digs the root state out of a built command tree.

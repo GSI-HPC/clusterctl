@@ -314,5 +314,15 @@ without printing any of it.
 | `$XDG_STATE_HOME/clusterctl` | The generated `ssh_config-*` files, one per configuration, the multiplexing sockets, the service processor certificate pins, the tunnel process id files |
 | `$XDG_CACHE_HOME/clusterctl` | Fetched copies of remote files and resolved group listings |
 
-Both are created with mode 0700. Nothing in either is authoritative: deleting
-them costs one round trip.
+`$XDG_STATE_HOME` defaults to `~/.local/state` and `$XDG_CACHE_HOME` to
+`~/.cache`; a relative value is ignored, as the XDG specification requires.
+Without a home directory and without an absolute value, as under `env -i` or
+in a system unit without `User=`, a command that reads the configuration
+refuses to run: there is no fallback to a shared directory such as `/tmp`.
+
+Both are created with mode 0700. One that exists already has to be a
+directory, not a link to one, owned by the user running clusterctl and not
+writable by its group or anyone else; otherwise every command refuses to run
+and `doctor` names it. Whoever could write it could replace the `ssh_config`
+that `ssh -F` reads. Nothing in either is authoritative: deleting them costs
+one round trip.

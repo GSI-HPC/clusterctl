@@ -306,3 +306,70 @@ func TestWriteAtomicRefusesAnotherUsersLink(t *testing.T) {
 		t.Errorf("the link's target was written: %q", data)
 	}
 }
+
+// TestEnsureDirRefusesADirectoryOthersCanWrite keeps clusterctl from
+// trusting a state directory someone else prepared. With HOME unset it was a
+// fixed path in /tmp, created first by another user with mode 0777, and the
+// ssh_config renamed into it ran its ProxyCommand as root.
+func TestEnsureDirRefusesADirectoryOthersCanWrite(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	open := filepath.Join(base, "open")
+	if err := os.Mkdir(open, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileutil.EnsureDir(open); !errors.Is(err, fileutil.ErrUntrusted) {
+		t.Errorf("a directory with mode 0777: err = %v, want ErrUntrusted", err)
+	}
+
+	real := filepath.Join(base, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileutil.EnsureDir(link); !errors.Is(err, fileutil.ErrUntrusted) {
+		t.Errorf("a link to a directory: err = %v, want ErrUntrusted", err)
+	}
+
+	if err := fileutil.EnsureDir("relative/state"); err == nil {
+		t.Error("a relative path was accepted")
+	}
+
+	fresh := filepath.Join(base, "a", "b")
+	if err := fileutil.EnsureDir(fresh); err != nil {
+		t.Fatalf("a new directory: %v", err)
+	}
+	info, err := os.Stat(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o700); got != want {
+		t.Errorf("mode = %v, want %v", got, want)
+	}
+	if err := fileutil.EnsureDir(fresh); err != nil {
+		t.Errorf("the directory it made: %v", err)
+	}
+}
+
+func TestEnsureDirRefusesAnotherUsersDirectory(t *testing.T) {
+	t.Parallel()
+	uid, gid := otherIDs(t)
+
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(dir, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileutil.EnsureDir(dir); !errors.Is(err, fileutil.ErrUntrusted) {
+		t.Errorf("another user's directory: err = %v, want ErrUntrusted", err)
+	}
+}

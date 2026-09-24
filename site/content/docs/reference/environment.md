@@ -34,10 +34,15 @@ credential in the configuration says `fromEnv: BMC_PASSWORD`.
 | `$XDG_CACHE_HOME/clusterctl` | Fetched copies of remote files, resolved group listings |
 
 `$XDG_CONFIG_HOME` defaults to `~/.config`, `$XDG_STATE_HOME` to
-`~/.local/state`, `$XDG_CACHE_HOME` to `~/.cache`.
+`~/.local/state`, `$XDG_CACHE_HOME` to `~/.cache`. A relative value is ignored.
+Without `HOME` and without an absolute `XDG_STATE_HOME` and `XDG_CACHE_HOME`,
+as under `env -i` or in a system unit without `User=`, clusterctl refuses to
+run rather than keep its state in a directory other users share.
 
 Both the state and cache directories are created with mode 0700, and nothing in
-either is authoritative: deleting them costs one round trip.
+either is authoritative: deleting them costs one round trip. One that is there
+already must be a real directory you own that nobody else can write; otherwise
+clusterctl refuses to run and `clusterctl doctor` says why.
 
 ## What clusterctl runs
 

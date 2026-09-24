@@ -12,6 +12,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/credentials"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
+	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/groups"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
@@ -55,14 +57,19 @@ type Streams struct {
 // rather than inferred from the file mode: /dev/null is a character device
 // too, and a command run with stdin closed would otherwise be prompted and
 // then read an immediate end of file.
+//
+// A state or cache directory that cannot be known is left empty, and New
+// refuses to run without it.
 func DefaultStreams() Streams {
+	stateDir, _ := config.StateDir()
+	cacheDir, _ := config.CacheDir()
 	return Streams{
 		In:       os.Stdin,
 		Out:      os.Stdout,
 		Err:      os.Stderr,
 		IsTTY:    term.IsTerminal(int(os.Stdin.Fd())),
-		StateDir: config.StateDir(),
-		CacheDir: config.CacheDir(),
+		StateDir: stateDir,
+		CacheDir: cacheDir,
 	}
 }
 
@@ -134,6 +141,32 @@ type App struct {
 	secrets         secretStore
 }
 
+// ensureDirs creates the state and cache directories, or checks the ones
+// that are there: the ssh configuration, the certificate pins and the group
+// listings kept in them are trusted, so nobody else may be able to write
+// them.
+func ensureDirs(streams Streams) error {
+	for _, dir := range []struct {
+		name, path string
+		find       func() (string, error)
+	}{
+		{"state", streams.StateDir, config.StateDir},
+		{"cache", streams.CacheDir, config.CacheDir},
+	} {
+		if dir.path == "" {
+			_, err := dir.find()
+			if err == nil {
+				err = errors.New("none was given")
+			}
+			return fmt.Errorf("there is no %s directory: %w", dir.name, err)
+		}
+		if err := fileutil.EnsureDir(dir.path); err != nil {
+			return fmt.Errorf("the %s directory cannot be used: %w", dir.name, err)
+		}
+	}
+	return nil
+}
+
 // New resolves the configuration and builds the command context.
 func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	env := opts.Env
@@ -179,6 +212,9 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 
 	format, err := output.ParseFormat(opts.Format)
 	if err != nil {
+		return nil, exitcode.Wrap(exitcode.Usage, err)
+	}
+	if err := ensureDirs(streams); err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 

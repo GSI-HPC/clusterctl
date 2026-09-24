@@ -4,6 +4,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -47,31 +48,39 @@ func UserConfigDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if !filepath.IsAbs(home) {
+		return "", fmt.Errorf("the configuration directory %q is not an absolute path", home)
+	}
 	return filepath.Join(home, "clusterctl"), nil
 }
 
 // StateDir returns the directory holding the generated ssh configuration,
 // the control sockets and the BMC certificate pins.
-func StateDir() string {
-	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
-		return filepath.Join(dir, "clusterctl")
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".local", "state", "clusterctl")
-	}
-	return filepath.Join(os.TempDir(), "clusterctl")
+func StateDir() (string, error) {
+	return xdgDir("XDG_STATE_HOME", filepath.Join(".local", "state"))
 }
 
 // CacheDir returns the directory holding fetched copies of remote files and
 // resolved group listings.
-func CacheDir() string {
-	if dir := os.Getenv("XDG_CACHE_HOME"); dir != "" {
-		return filepath.Join(dir, "clusterctl")
+func CacheDir() (string, error) {
+	return xdgDir("XDG_CACHE_HOME", ".cache")
+}
+
+// xdgDir returns clusterctl's directory under the base directory an XDG
+// variable names, or under the home directory when it is not set. A relative
+// value is ignored, as the XDG specification requires.
+//
+// Without either there is no directory: a fixed one in /tmp would be shared
+// by every user of the host, and whoever made it first would choose the ssh
+// configuration and certificate pins clusterctl trusts.
+func xdgDir(variable, fallback string) (string, error) {
+	if dir := os.Getenv(variable); filepath.IsAbs(dir) {
+		return filepath.Join(dir, "clusterctl"), nil
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".cache", "clusterctl")
+	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
+		return filepath.Join(home, fallback, "clusterctl"), nil
 	}
-	return filepath.Join(os.TempDir(), "clusterctl-cache")
+	return "", fmt.Errorf("HOME is not set and %s is not an absolute path; set one of them", variable)
 }
 
 // ExpandPath expands a leading ~ and makes a relative path absolute against
