@@ -31,6 +31,10 @@ $ $EDITOR ~/.config/clusterctl/inventory.yaml
 $ clusterctl config validate
 ```
 
+The files are where `config init` says it wrote them. On Linux that is
+`~/.config/clusterctl`, or `$XDG_CONFIG_HOME/clusterctl` when that is set; on
+macOS it is `~/Library/Application Support/clusterctl`.
+
 Without a directory, the files go where clusterctl reads configuration from:
 the directory `CLUSTERCTL_CONFIG` or `--config` names, or else your own
 configuration directory. Give a directory to write somewhere else, such as a
@@ -143,7 +147,8 @@ are also published: `https://gsi-hpc.github.io/clusterctl/schema/v1alpha1/site.j
 ## Where files are read from
 
 Without `CLUSTERCTL_CONFIG`, clusterctl reads `/etc/clusterctl` and then your
-own configuration directory, usually `~/.config/clusterctl`. A directory
+own configuration directory: `~/.config/clusterctl` on Linux,
+`~/Library/Application Support/clusterctl` on macOS. A directory
 contributes its `.yaml` files in name order.
 
 ```console
