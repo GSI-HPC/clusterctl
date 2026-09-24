@@ -51,7 +51,7 @@ func TestEveryCommandHasAnEffect(t *testing.T) {
 // sound harmless but are not.
 func TestNothingThatWritesIsMarkedRead(t *testing.T) {
 	for _, path := range []string{
-		"bmc power", "hca config", "slurm account shares", "hostkey refresh",
+		"bmc power", "hca config set", "slurm account shares", "hostkey refresh",
 		"bmc forget", "exec", "copy", "tunnel start", "login", "mcp serve",
 		"config init",
 	} {
