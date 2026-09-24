@@ -210,6 +210,16 @@ otherwise keep running on the node with nothing watching it.
 Connection timeouts and attempts are ssh's own, set in the generated
 configuration.
 
+## Output is bounded
+
+A host controls its own output for as long as its command runs, so what is
+kept of it is bounded: 32 MiB of standard output and as much of standard error
+per command, unless the command asks for another bound. The rest is read and
+dropped, so the command is not stopped by a full pipe, and the result counts
+as failed, saying the output was cut off, because what was kept is not all the
+host said. Without the bound, a node writing without end could grow the CLI or
+the MCP server until the out-of-memory killer ended it.
+
 ## Interrupts
 
 Ctrl-C stops ssh, not the remote command. ssh is sent SIGTERM, so that it

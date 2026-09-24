@@ -90,8 +90,8 @@ func (c *Client) Copy(ctx context.Context, target Target, req CopyRequest) (*Res
 		return nil, err
 	}
 	cmd := command(ctx, args)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
+	stderr := &capture{limit: DefaultMaxOutput}
+	cmd.Stderr = stderr
 	cmd.Stdout = os.Stderr
 	// When the context ends scp is killed, but the ssh it started can hold
 	// the pipe open on a stalled connection; stop waiting for it.
