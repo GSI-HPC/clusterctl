@@ -30,7 +30,10 @@ not follow a change of `currentContext` while it runs.
 | `plan_change` | Prepare a drain or a resume, and show what would happen |
 | `apply_plan` | Carry out a plan after you confirm it |
 
-It cannot run commands on the nodes, open shells, or start tunnels.
+It cannot run commands on the nodes, open shells, or start tunnels. The
+commands `read_command` runs reach only the site's own hosts: nodes in the
+inventory, and names in the site's `domains`. `CLUSTERCTL_NODES` does not
+apply to them, and `--fanout` cannot be given.
 
 ## How a change is confirmed
 
@@ -54,6 +57,12 @@ clusterctl would ask at the terminal: yes or no, or, above
 If you decline, nothing is sent. A plan can be applied once and expires after
 ten minutes (`--plan-ttl`).
 
+The configuration is read again when the plan is applied. If the context now
+names another cluster, or the commands would now go elsewhere, the plan is
+refused and the agent has to make a new one. The question you are asked is
+the one the confirmation gate asks at that moment, so a `safety.confirmAbove`
+lowered in the meantime applies.
+
 {{< callout type="warning" >}}
 Asking you needs a client that supports MCP elicitation. With a client that
 does not, applying a plan is refused, and the refusal gives the command line to
@@ -66,7 +75,9 @@ every time; never allow that tool automatically.
 
 Every plan, refusal and apply is recorded, one JSON object per line, in
 `~/.local/state/clusterctl/mcp/audit.jsonl` (under `$XDG_STATE_HOME` when it
-is set).
+is set). An apply is recorded as `applying` before anything is sent, and
+again with how it ended. When the file cannot be written, plans and applies
+are refused.
 
 ```console
 $ jq -c '[.time, .event, .action, .nodes, .outcome]' ~/.local/state/clusterctl/mcp/audit.jsonl

@@ -59,7 +59,9 @@ asks the same question.
 
 `read_command` checks the command on a tree of its own before running it on
 another, and refuses the global options the server sets itself: `--config`,
-`--context`, `--set`, `--yes` and `--force`.
+`--context`, `--set`, `--yes`, `--force` and `--fanout`, which would
+otherwise override `fanout.max`. A `--timeout` may shorten the wait for a
+host but not lengthen it beyond the command's default.
 
 A read command still connects somewhere, so the names an agent passes are held
 to the same rule as any other selection: a node name has to be a host name.
@@ -67,6 +69,13 @@ One beginning with `-` would otherwise reach ssh as an option, and one with a
 `:`, `@`, `/`, `?` or `#` would send a Redfish read, and the site's BMC
 password, to a host and port of the agent's choosing. See
 [node sets](nodeset.md#names-are-host-names).
+
+The names are also held to the site. At a terminal the administrator may name
+any host; through `read_command` a node has to be in the inventory, or have a
+host name, as the naming rules give it, below one of the site's `domains`.
+Otherwise `hostkey scan` could be pointed at any machine the workstation
+reaches, and `dns lookup` could carry data out to a resolver in a name. A
+group whose members are neither is refused as well.
 
 ## Plan and apply
 
@@ -87,14 +96,25 @@ count. Repeating them puts the hosts into the call itself, so a client that
 asks before running a tool shows what the call touches, not just an opaque
 id. Then:
 
-1. The configuration is read again and the gate re-checked, so a host
-   protected since the plan was made is refused.
+1. The configuration is read again and the plan checked against it. The
+   pinned context has to name the same cluster, the gate has to read the
+   same hosts, and running the action against the recorder has to give the
+   same commands to the same host. Anything else is refused and needs a new
+   plan: the context may have been pointed at another cluster, or the Slurm
+   role at another host, while the plan waited. The gate is re-checked too,
+   so a host protected since the plan was made is refused.
 2. The gate's question is put to the administrator as an **MCP elicitation**:
-   the same summary, and a yes/no, or the host count above
-   `safety.confirmAbove`. The client shows it to the person and returns the
-   answer. The model neither sees nor writes it. `safety.Preview.Accept`
-   judges the answer, which is the rule the terminal prompt uses.
-3. The plan is taken, so it is applied at most once, and the action runs.
+   the summary, the context and cluster as they resolve now, and a yes/no, or
+   the host count above `safety.confirmAbove` as it reads now, so a threshold
+   lowered while the plan waited applies. The client shows it to the person
+   and returns the answer. The model neither sees nor writes it.
+   `safety.Preview.Accept` judges the answer, which is the rule the terminal
+   prompt uses.
+3. The plan is taken, so it is applied at most once. The apply is recorded
+   in the audit log before anything is sent, and nothing is sent when that
+   record cannot be written. The action then runs to its end even if the
+   client gives up on the call, since Slurm may already have taken the
+   change; it is bounded by its own timeout instead.
 
 The question travels as an input request of the `tools/call` (SEP-2322, the
 2026-07-28 protocol). The answer comes back on a retry of the same call and
@@ -134,7 +154,8 @@ confirmation come with it.
   an edit to the inventory or to the protected hosts takes effect without a
   restart. Each call also gets its own streams, and nothing a command prints
   can reach the protocol on standard output.
-- **No default node set.** `-n` and `CLUSTERCTL_NODES` do not apply; a call
+- **No default node set.** `-n` and `CLUSTERCTL_NODES` do not apply, in the
+  server's own tools and in the command tree `read_command` runs; a call
   names its nodes or selects nothing, as [safety.md](safety.md) requires.
 - **No terminal.** Anything that would prompt refuses instead, including the
   BMC password prompt. A sops encrypted Secret is opened with the keys of
@@ -146,7 +167,12 @@ confirmation come with it.
   keys act on the cluster, so that is a separate decision.
 - **An audit trail.** Every plan, refusal and apply is appended to
   `$XDG_STATE_HOME/clusterctl/mcp/audit.jsonl`: time, context, plan, action,
-  nodes, count, and outcome.
+  nodes, count, and outcome. An apply writes two lines, `applying` before
+  anything is sent and then `applied` or `failed`. A plan or an apply that
+  cannot be recorded is refused; a refusal that cannot be recorded says so.
+- **A panic is a failed call.** A panic in a handler is recovered and
+  reported as `failed:`, so it does not end the server and the plans waiting
+  in it.
 
 ## Errors
 
@@ -162,8 +188,9 @@ something is down.
 Results are bounded so that a thousand nodes do not flood the agent's
 context: `select_nodes` lists names up to 256, `describe_nodes` describes
 64, `query_slurm` returns 200 rows by default and 2000 at most, and
-`read_command` cuts output at 64 KiB. Every bound is reported (`truncated`),
-and `read_command` accepts `-o jq=EXPR` to filter on the server. The program
-is compiled before the command runs, runs with the call's context, so it stops
-when the call is cancelled, and cannot read the server's environment through
-`$ENV` or `env`.
+`read_command` cuts output at 64 KiB. A command that prints more is stopped
+at that point rather than buffered, so a jq program without end costs no more
+than the bound. Every bound is reported (`truncated`), and `read_command`
+accepts `-o jq=EXPR` to filter on the server. The program is compiled before
+the command runs, runs with the call's context, so it stops when the call is
+cancelled, and cannot read the server's environment through `$ENV` or `env`.
