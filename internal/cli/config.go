@@ -51,7 +51,9 @@ result with "clusterctl config validate" and "clusterctl doctor".
 Without DIR the files are written where configuration is read from: the
 directory --config or CLUSTERCTL_CONFIG names, or else your own configuration
 directory, usually ~/.config/clusterctl. When either names several places,
-name the one to write to. Directories that are missing are created.
+name the one to write to, and so when /etc/clusterctl, which is read together
+with your own directory, holds configuration already. Directories that are
+missing are created.
 
 The directory has to be empty. One that holds anything, hidden files
 included, is refused rather than added to: this command writes nothing next
@@ -75,7 +77,7 @@ to files it did not write, and overwrites nothing.
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			if err := refuseNonEmpty(dir); err != nil {
-				return err
+				return exitcode.Wrap(exitcode.Usage, err)
 			}
 
 			t := output.NewTable(output.Cols("FILE", "KIND", "NAME")...)
@@ -86,8 +88,10 @@ to files it did not write, and overwrites nothing.
 				t.Caption = fmt.Sprintf("%d files would be written; nothing was", len(files))
 				return format.Write(cmd.OutOrStdout(), output.Result{Table: t})
 			}
+			// Nothing was sent anywhere: a directory that cannot be
+			// written is a mistake in what was asked, not a failed target.
 			if err := writeScaffold(dir, files); err != nil {
-				return err
+				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			t.Caption = initNextSteps(r, dir, len(files))
 			return format.Write(cmd.OutOrStdout(), output.Result{Table: t})
@@ -134,8 +138,32 @@ func initDir(r *root, args []string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("no configuration directory is known for this user (%w); name one: clusterctl config init DIR", err)
 	}
+	// The search path reads the user's directory together with the ones
+	// before it, /etc/clusterctl first. A complete configuration written
+	// next to a team's would replace its documents of the same name or
+	// move the current context to the new site, and either way its
+	// protected hosts would stop applying.
+	for _, other := range configDirs() {
+		if other == dir {
+			continue
+		}
+		files, err := config.ExpandEntries([]string{other})
+		if err != nil {
+			return "", fmt.Errorf("cannot tell whether %s holds configuration (%w); name the directory to write to: clusterctl config init DIR", other, err)
+		}
+		if len(files) > 0 {
+			return "", fmt.Errorf("%s holds configuration already, which is read together with %s; "+
+				"a second one there would change what it resolves to. "+
+				"Name the directory to write to: clusterctl config init DIR",
+				other, dir)
+		}
+	}
 	return dir, nil
 }
+
+// configDirs are the directories the search path reads; the tests replace
+// it to stand in for /etc/clusterctl.
+var configDirs = config.ConfigDirs
 
 // nonBlank returns the entries that are not blank, trimmed.
 func nonBlank(entries []string) []string {
@@ -351,11 +379,13 @@ environment variable that selects a context for a single shell.`,
 			if _, err := a.Resolved.Bundle.Context(name); err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
+			// Each line is meant to be pasted, so the name is quoted
+			// for where it goes.
 			_, err = fmt.Fprintf(cmd.OutOrStdout(),
 				"For this shell:\n  export %s=%s\n\n"+
 					"For one command:\n  clusterctl --context %s ...\n\n"+
 					"Permanently, in the Config document:\n  currentContext: %s\n",
-				config.EnvContext, name, name, name)
+				config.EnvContext, shellQuote(name), shellQuote(name), config.QuoteYAML(name))
 			return err
 		})
 	cmd.ValidArgsFunction = func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {

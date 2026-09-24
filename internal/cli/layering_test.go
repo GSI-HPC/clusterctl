@@ -255,6 +255,38 @@ func TestConfigInitPinsTheInventory(t *testing.T) {
 	}
 }
 
+// Review 9.8: config init without DIR does not write a second configuration
+// next to one the search path reads already, such as a team's in
+// /etc/clusterctl.
+func TestConfigInitRefusesToShadowTheSearchPath(t *testing.T) {
+	user := isolateHome(t)
+	team := copyExample(t)
+	saved := configDirs
+	configDirs = func() []string { return []string{team, user} }
+	t.Cleanup(func() { configDirs = saved })
+
+	_, err := run(t, harnessOptions{bare: true}, "config", "init")
+	if err == nil {
+		t.Fatal("config init wrote a configuration that shadows the team's")
+	}
+	if got, want := exitcode.From(err), exitcode.Usage; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	if !strings.Contains(err.Error(), team) || !strings.Contains(err.Error(), "config init DIR") {
+		t.Errorf("error = %v, want it to name %s and the way out", err, team)
+	}
+	if _, err := os.Stat(user); err == nil {
+		t.Errorf("%s was created although config init refused", user)
+	}
+
+	// A search path directory that holds no configuration is no reason
+	// to refuse.
+	configDirs = func() []string { return []string{filepath.Join(t.TempDir(), "missing"), user} }
+	if _, err := run(t, harnessOptions{bare: true}, "config", "init"); err != nil {
+		t.Fatalf("config init failed with nothing else on the search path: %v", err)
+	}
+}
+
 // Review 9.10: config explain reports the value the commands use and the
 // line a context wrote it on.
 func TestConfigExplainCoversFlagsAndContexts(t *testing.T) {
@@ -304,5 +336,40 @@ func TestDottedKeysStayOneKey(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "exe[0001-0002]") || !strings.Contains(h.out.String(), "cluster.yaml:") {
 		t.Errorf("config explain does not show the group:\n%s", h.out)
+	}
+}
+
+// Review 9.11: use-context prints lines that can be pasted as they are.
+func TestConfigUseContextQuotesTheName(t *testing.T) {
+	dir := writeFiles(t, map[string]string{"extra.yaml": "apiVersion: clusterctl/v1alpha1\nkind: Config\n" +
+		"contexts:\n  - name: \"it's; yes\"\n    cluster: cluster1\n"})
+	h, err := run(t, harnessOptions{config: []string{dir}}, "config", "use-context", "it's; yes")
+	if err != nil {
+		t.Fatalf("config use-context failed: %v", err)
+	}
+	for _, want := range []string{
+		`export CLUSTERCTL_CONTEXT='it'\''s; yes'`,
+		`clusterctl --context 'it'\''s; yes' ...`,
+		`currentContext: "it's; yes"`,
+	} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("output does not contain %q:\n%s", want, h.out)
+		}
+	}
+}
+
+// Review 9.11: config init reports a directory it cannot use as a usage
+// error, not as a failed target.
+func TestConfigInitFailsWithUsageLocally(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := run(t, harnessOptions{bare: true}, "config", "init", filepath.Join(file, "sub"))
+	if err == nil {
+		t.Fatal("config init wrote below a regular file")
+	}
+	if got, want := exitcode.From(err), exitcode.Usage; got != want {
+		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
 	}
 }
