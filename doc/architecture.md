@@ -69,7 +69,7 @@ every command rather than in the ones that remembered to implement them.
 
 | Package | Owns |
 | --- | --- |
-| `internal/output` | Table, JSON, YAML, node set, name, JSONPath and jq rendering. |
+| `internal/output` | Table, JSON, YAML, node set, name, JSONPath and jq rendering, and escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`). |
 | `internal/exitcode` | The exit codes the command line contract fixes. |
 | `internal/version` | The build provenance, which comes from the signed tag or the VCS stamps. |
 
