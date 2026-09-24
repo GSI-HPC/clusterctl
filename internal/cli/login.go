@@ -124,17 +124,20 @@ it was given, so globs, quotes and whitespace survive:
 			}
 			// Everything after -- is the remote command; cobra hands both
 			// halves over, so the split is found here.
-			var (
-				name string
-				argv []string
-			)
+			names, argv := args, []string(nil)
 			if at := cmd.ArgsLenAtDash(); at >= 0 {
-				if at > 0 {
-					name = args[0]
-				}
-				argv = args[at:]
-			} else if len(args) > 0 {
-				name = args[0]
+				names, argv = args[:at], args[at:]
+			}
+			// A second word used to be dropped, so "login mgmt uptime"
+			// opened a shell instead of running uptime.
+			if len(names) > 1 {
+				return exitcode.Errorf(exitcode.Usage,
+					"login takes one role, host or node, got %q; put a command after --, as in "+
+						"\"clusterctl login %s -- %s\"", strings.Join(names, " "), names[0], strings.Join(names[1:], " "))
+			}
+			var name string
+			if len(names) == 1 {
+				name = names[0]
 			}
 
 			target, err := resolveTarget(a, name)
