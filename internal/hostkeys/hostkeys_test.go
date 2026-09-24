@@ -437,6 +437,26 @@ func TestScanThroughACommandReportsWhatItSaid(t *testing.T) {
 	}
 }
 
+// TestCommandConnReportsWhatItSaidOnWrite: the client speaks first in an SSH
+// handshake, so a command that has already exited fails the write, not the
+// read, and the reason has to be there too.
+func TestCommandConnReportsWhatItSaidOnWrite(t *testing.T) {
+	t.Parallel()
+
+	conn, err := hostkeys.DialCommand(context.Background(),
+		[]string{"sh", "-c", "echo 'channel 0: open failed: connect failed' >&2; exit 255"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	// Reading to the end waits for the command to exit.
+	_, _ = io.ReadAll(conn)
+	_, err = conn.Write([]byte("SSH-2.0-clusterctl\r\n"))
+	if err == nil || !strings.Contains(err.Error(), "open failed") {
+		t.Errorf("error = %v, want what the command said", err)
+	}
+}
+
 // TestHelperProxy is not a test: TestScanThroughACommand runs the test binary
 // as the command that carries the connection.
 func TestHelperProxy(t *testing.T) {
