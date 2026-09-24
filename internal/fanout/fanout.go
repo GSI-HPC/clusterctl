@@ -11,10 +11,12 @@ package fanout
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sort"
-	"strings"
 	"sync"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -114,32 +116,61 @@ func Succeeded(results []*transport.Result) *nodeset.NodeSet {
 	return ns
 }
 
+// Status says in a word how a target ended: "ok", "exit N", "unreachable"
+// when the transport could not reach it, or "interrupted" when it was
+// cancelled.
+func Status(r *transport.Result) string {
+	switch {
+	case r == nil:
+		return "no result"
+	case errors.Is(r.Err, context.Canceled):
+		return "interrupted"
+	case exitcode.From(r.Err) == exitcode.Transport:
+		return "unreachable"
+	case !r.Failed():
+		return "ok"
+	case r.ExitCode > 0:
+		return fmt.Sprintf("exit %d", r.ExitCode)
+	default:
+		return "failed"
+	}
+}
+
 // Group is a set of targets that produced identical output.
 type Group struct {
 	// Nodes are the targets that produced this output.
 	Nodes *nodeset.NodeSet `json:"nodes" yaml:"nodes"`
-	// Output is the standard output they shared.
+	// Output is the standard output they shared, exactly as it came.
 	Output string `json:"output" yaml:"output"`
 	// ExitCode is the status they shared.
 	ExitCode int `json:"exitCode" yaml:"exitCode"`
+	// Status says how they ended, as Status reports it.
+	Status string `json:"status" yaml:"status"`
 }
 
 // GroupByOutput collects targets that answered the same thing, which turns
 // the output of a thousand nodes into the handful of answers worth reading.
+//
+// Targets are grouped only when both their output and the way they ended are
+// the same: for grep -q or test -e the status is the whole answer, and a
+// node that could not be reached said nothing, which is not the same as a
+// node that answered with nothing. Output that differs only in blank lines
+// at the end is not the same output either.
 //
 // Groups come back largest first, and equally sized groups in node set order,
 // so two runs of the same command print the same thing.
 func GroupByOutput(results []*transport.Result) []Group {
 	type key struct {
 		output string
+		status string
 		code   int
 	}
 	index := map[key]*Group{}
 	for _, r := range results {
-		k := key{output: strings.TrimRight(r.Stdout, "\n"), code: r.ExitCode}
+		k := key{output: r.Stdout, status: Status(r), code: r.ExitCode}
 		g, ok := index[k]
 		if !ok {
-			g = &Group{Nodes: nodeset.New(), Output: k.output, ExitCode: k.code}
+			g = &Group{Nodes: nodeset.New(), Output: k.output, ExitCode: k.code, Status: k.status}
 			index[k] = g
 		}
 		name := r.Target.Name

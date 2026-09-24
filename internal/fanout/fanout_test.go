@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -168,7 +169,7 @@ func TestGroupByOutput(t *testing.T) {
 	if got, want := groups[0].Nodes.String(), "exe[1-3]"; got != want {
 		t.Errorf("first group = %q, want %q", got, want)
 	}
-	if got, want := groups[0].Output, "5.14.0"; got != want {
+	if got, want := groups[0].Output, "5.14.0\n"; got != want {
 		t.Errorf("first output = %q, want %q", got, want)
 	}
 	if groups[2].ExitCode == 0 && groups[1].ExitCode == 0 {
@@ -182,5 +183,36 @@ func TestRunWithNoTargets(t *testing.T) {
 	e := &fanout.Executor{Runner: &transport.Recorder{}}
 	if got := e.Run(context.Background(), nil, transport.Request{}); len(got) != 0 {
 		t.Errorf("got %d results for no targets", len(got))
+	}
+}
+
+func TestGroupByOutputKeepsApartWhatEndedDifferently(t *testing.T) {
+	t.Parallel()
+
+	down := exitcode.Wrap(exitcode.Transport, errors.New("exe4: Connection refused"))
+	results := []*transport.Result{
+		{Target: transport.Target{Name: "exe1"}, Stdout: "yes\n"},
+		{Target: transport.Target{Name: "exe2"}, Stdout: "yes\n\n"},
+		{Target: transport.Target{Name: "exe3"}, ExitCode: 1, Err: errors.New("exe3: command exited 1")},
+		{Target: transport.Target{Name: "exe4"}, ExitCode: 255, Err: down},
+		{Target: transport.Target{Name: "exe5"}, ExitCode: 255, Err: errors.New("exe5: command exited 255")},
+		{Target: transport.Target{Name: "exe6"}, ExitCode: -1, Err: context.Canceled},
+		{Target: transport.Target{Name: "exe7"}},
+	}
+	status := map[string]string{}
+	for _, g := range fanout.GroupByOutput(results) {
+		if g.Nodes.Len() != 1 {
+			t.Errorf("%s were grouped although they ended differently", g.Nodes)
+		}
+		status[g.Nodes.String()] = g.Status
+	}
+	want := map[string]string{
+		"exe1": "ok", "exe2": "ok", "exe3": "exit 1", "exe4": "unreachable",
+		"exe5": "exit 255", "exe6": "interrupted", "exe7": "ok",
+	}
+	for node, w := range want {
+		if got := status[node]; got != w {
+			t.Errorf("status of %s = %q, want %q", node, got, w)
+		}
 	}
 }
