@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 )
@@ -35,6 +36,17 @@ type Bundle struct {
 	// Secrets are the sops encrypted Secret documents, indexed by name.
 	// Their values stay encrypted until a command asks for one.
 	Secrets map[string]*Document
+
+	// contextSources says which Config document defined each context, so
+	// that its user and overrides keep their file and line.
+	contextSources map[string]contextSource
+}
+
+// contextSource is where a context was defined: a Config document and the
+// path of the context in it.
+type contextSource struct {
+	doc *Document
+	at  string
 }
 
 // Load reads the configuration files, validates every document against the
@@ -75,21 +87,30 @@ func load(files []string, read func(string) ([]byte, error)) (*Bundle, error) {
 			if err := ValidateDocument(doc); err != nil {
 				return nil, err
 			}
+			if err := checkDocumentOverrides(doc); err != nil {
+				return nil, err
+			}
 			b.Documents = append(b.Documents, doc)
-			name := documentName(doc)
+			var index map[string]*Document
 			switch doc.Kind {
 			case v1alpha1.KindConfig:
 				configDocs = append(configDocs, doc)
+				continue
 			case v1alpha1.KindSite:
-				b.Sites[name] = doc
+				index = b.Sites
 			case v1alpha1.KindCluster:
-				b.Clusters[name] = doc
+				index = b.Clusters
 			case v1alpha1.KindNodeInventory:
-				b.Inventories[name] = doc
+				index = b.Inventories
 			case v1alpha1.KindWorkstation:
-				b.Workstations[name] = doc
+				index = b.Workstations
 			case v1alpha1.KindSecret:
-				b.Secrets[name] = doc
+				index = b.Secrets
+			default:
+				continue
+			}
+			if err := addDocument(index, doc); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -109,12 +130,46 @@ func LoadDefault(env func(string) string) (*Bundle, error) {
 	return Load(files)
 }
 
+// addDocument indexes a document by name. Two documents of one kind and name
+// are an error rather than one replacing the other: the files of a directory
+// are read in name order, so a stale copy such as site_old.yaml, or a
+// personal directory that repeats a site's name, would otherwise take the
+// place of the document every administrator reads, protected hosts and all.
+func addDocument(index map[string]*Document, doc *Document) error {
+	name := documentName(doc)
+	if first, ok := index[name]; ok {
+		return fmt.Errorf("%s: a second %s %s; the first is at %s. "+
+			"Each %s is defined once: remove one of them or give it a name of its own",
+			documentAt(doc), doc.Kind, quotedName(name), documentAt(first), doc.Kind)
+	}
+	index[name] = doc
+	return nil
+}
+
+// documentAt is where a document starts, for a message that names it.
+func documentAt(doc *Document) Origin {
+	if o, ok := doc.Positions["kind"]; ok {
+		return o
+	}
+	return Origin{File: doc.File}
+}
+
+// quotedName names a document in a message; an unnamed one says so.
+func quotedName(name string) string {
+	if name == "" {
+		return "without a name"
+	}
+	return strconv.Quote(name)
+}
+
 // mergeConfigDocuments folds the Config documents into one. Contexts of the
 // same name are replaced by the later document, so a personal file can
-// override a system wide one.
+// override a system wide one. One document that names a context twice is an
+// error: only another file can mean to replace it.
 func (b *Bundle) mergeConfigDocuments(docs []*Document) error {
 	b.Config.APIVersion = v1alpha1.GroupVersion
 	b.Config.Kind = v1alpha1.KindConfig
+	b.contextSources = map[string]contextSource{}
 
 	index := map[string]int{}
 	for _, doc := range docs {
@@ -125,7 +180,15 @@ func (b *Bundle) mergeConfigDocuments(docs []*Document) error {
 		if cfg.CurrentContext != "" {
 			b.Config.CurrentContext = cfg.CurrentContext
 		}
-		for _, ctx := range cfg.Contexts {
+		seen := map[string]string{}
+		for i, ctx := range cfg.Contexts {
+			at := fmt.Sprintf("contexts[%d]", i)
+			if first, ok := seen[ctx.Name]; ok {
+				return fmt.Errorf("%s: a second context %q in one document; the first is at %s",
+					doc.Position(at+".name"), ctx.Name, doc.Position(first+".name"))
+			}
+			seen[ctx.Name] = at
+			b.contextSources[ctx.Name] = contextSource{doc: doc, at: at}
 			if at, ok := index[ctx.Name]; ok {
 				b.Config.Contexts[at] = ctx
 				continue

@@ -25,8 +25,9 @@ func bmcApp(t *testing.T) (*app.App, *strings.Builder) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	extra := t.TempDir()
-	// A document of the same kind and name replaces the example's.
+	// A copy of the example with the inventory changed: a second document
+	// of the same kind and name would be refused.
+	extra := copyExample(t, "inventory.yaml")
 	doc := string(inventory) + "    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n"
 	if err := os.WriteFile(filepath.Join(extra, "inventory.yaml"), []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
@@ -41,7 +42,7 @@ func bmcApp(t *testing.T) (*app.App, *strings.Builder) {
 		StateDir: filepath.Join(dir, "state"),
 		CacheDir: filepath.Join(dir, "cache"),
 	}, app.Options{
-		ConfigFiles: []string{exampleDir, extra},
+		ConfigFiles: []string{extra},
 		Env: func(k string) string {
 			if k == "BMC_PASSWORD" {
 				return "s3cret"

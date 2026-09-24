@@ -275,7 +275,7 @@ a value that came from a file, the line it was written on.`,
 				if where != "" && origin.Line > 0 {
 					where = fmt.Sprintf("%s:%d:%d", origin.File, origin.Line, origin.Column)
 				}
-				t.Add(path, origin.Layer, where, config.FormatValue(lookupPath(a.Resolved.Tree.Data(), path)))
+				t.Add(path, origin.Layer, where, config.FormatValue(a.Resolved.Tree.Value(path)))
 			}
 			t.Caption = fmt.Sprintf("context %s, cluster %s, site %s",
 				a.Resolved.Context.Name, a.Resolved.ClusterName, a.Resolved.SiteName)
@@ -387,7 +387,7 @@ written on.
 				return exitcode.Errorf(exitcode.Usage,
 					"nothing is set at %q; %s", path, nearestPaths(a.Resolved.Tree.Paths(), path))
 			}
-			value := lookupPath(a.Resolved.Tree.Data(), path)
+			value := a.Resolved.Tree.Value(path)
 			return a.Print(output.Result{Object: map[string]any{
 				"path":   path,
 				"value":  value,
@@ -446,19 +446,6 @@ Without an argument every kind is printed as one object keyed by kind.`,
 		})
 	cmd.ValidArgsFunction = fixed(v1alpha1.Kinds()...)
 	return cmd
-}
-
-// lookupPath reads a dotted path out of the merged tree.
-func lookupPath(data map[string]any, path string) any {
-	var current any = data
-	for _, part := range strings.Split(path, ".") {
-		m, ok := current.(map[string]any)
-		if !ok {
-			return nil
-		}
-		current = m[part]
-	}
-	return current
 }
 
 // nearestPaths suggests the configured paths closest to one that is not set.

@@ -7,11 +7,13 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
+	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 
@@ -59,14 +61,16 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 	cmd := NewRootCommand(context.Background(), streams)
 	cmd.SetOut(h.out)
 	cmd.SetErr(h.errOut)
-	var config []string
+	var args0 []string
 	if !opts.bare {
-		config = []string{"--config", exampleDir}
+		for _, file := range exampleFiles(t, opts.config) {
+			args0 = append(args0, "--config", file)
+		}
 	}
 	for _, extra := range opts.config {
-		config = append(config, "--config", extra)
+		args0 = append(args0, "--config", extra)
 	}
-	cmd.SetArgs(append(config, args...))
+	cmd.SetArgs(append(args0, args...))
 
 	// The root holds the flags; reach it to install the fake transport.
 	h.root = builtRoots[cmd]
@@ -75,14 +79,42 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 	return h, cmd.Execute()
 }
 
+// exampleFiles lists the files of the example configuration, leaving out
+// those that a directory in extra holds a file of the same name for: that
+// file takes the example's place, since a second document of the same kind
+// and name would be refused rather than replace the first.
+func exampleFiles(t *testing.T, extra []string) []string {
+	t.Helper()
+	files, err := config.ExpandEntries([]string{exampleDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, file := range files {
+		replaced := false
+		for _, dir := range extra {
+			if _, err := os.Stat(filepath.Join(dir, filepath.Base(file))); err == nil {
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, file)
+		}
+	}
+	return out
+}
+
 type harnessOptions struct {
 	recorder *transport.Recorder
 	stdin    string
 	// in replaces stdin, for an input that fails to be read.
 	in  io.Reader
 	tty bool
-	// config are read after the example configuration, so their documents
-	// replace the example's of the same kind and name.
+	// config are read after the example configuration. A file in one of
+	// them takes the place of the example's file of the same name; any
+	// other document of a kind and name the example has already is
+	// refused, except that a Config document may redefine a context.
 	config []string
 	// bare leaves the example configuration out, so that only config is
 	// read, or the search path when config is empty too.

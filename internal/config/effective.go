@@ -128,7 +128,7 @@ func (b *Bundle) Resolve(opts ResolveOptions) (*Resolved, error) {
 	}
 
 	// 5. the context
-	if err := applyContextOverrides(tree, ctx); err != nil {
+	if err := applyContextOverrides(tree, ctx, b.contextSources[ctx.Name]); err != nil {
 		return nil, err
 	}
 
@@ -175,42 +175,41 @@ func (b *Bundle) workstationFor(ctx v1alpha1.Context) *Document {
 	return b.Workstations[""]
 }
 
-// applyOverrides applies a map of dotted paths from a document.
+// applyOverrides applies the overrides table at a path of a document.
 func applyOverrides(tree *Tree, layer string, doc *Document, at string) error {
 	overrides, ok := lookup(doc.Data, at).(map[string]any)
 	if !ok {
 		return nil
 	}
-	keys := make([]string, 0, len(overrides))
-	for k := range overrides {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		o := doc.Position(at + "." + k)
-		if err := tree.SetPath(layer, k, overrides[k], o); err != nil {
-			return fmt.Errorf("%s: %w", o, err)
+	for _, k := range sortedKeys(overrides) {
+		src := at + "." + k
+		o := doc.Position(src)
+		if err := tree.override(layer, k, overrides[k], o, docOrigin(doc), src); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// applyContextOverrides applies the overrides of the selected context.
-func applyContextOverrides(tree *Tree, ctx v1alpha1.Context) error {
+// applyContextOverrides applies the user and the overrides of the selected
+// context, attributed to the Config document that defined it.
+func applyContextOverrides(tree *Tree, ctx v1alpha1.Context, src contextSource) error {
+	from := func(path string) Origin {
+		if src.doc == nil {
+			return Origin{}
+		}
+		return src.doc.Position(joinPath(src.at, path))
+	}
 	if ctx.User != "" {
-		if err := tree.SetPath(v1alpha1.LayerContext, "defaultUser", ctx.User,
-			Origin{Layer: v1alpha1.LayerContext}); err != nil {
-			return err
+		if err := tree.override(v1alpha1.LayerContext, "defaultUser", ctx.User,
+			from("user"), from, "user"); err != nil {
+			return fmt.Errorf("context %q: %w", ctx.Name, err)
 		}
 	}
-	keys := make([]string, 0, len(ctx.Overrides))
-	for k := range ctx.Overrides {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		if err := tree.SetPath(v1alpha1.LayerContext, k, ctx.Overrides[k],
-			Origin{Layer: v1alpha1.LayerContext}); err != nil {
+	for _, k := range sortedKeys(ctx.Overrides) {
+		src := "overrides." + k
+		if err := tree.override(v1alpha1.LayerContext, k, ctx.Overrides[k],
+			from(src), from, src); err != nil {
 			return fmt.Errorf("context %q: %w", ctx.Name, err)
 		}
 	}
@@ -235,7 +234,7 @@ func applyEnv(tree *Tree, env func(string) string) error {
 		}
 		o := Origin{Layer: v1alpha1.LayerEnvironment, File: name}
 		if err := tree.SetPath(v1alpha1.LayerEnvironment, envPaths[name], value, o); err != nil {
-			return fmt.Errorf("%s: %w", name, err)
+			return err
 		}
 	}
 	return nil
@@ -254,7 +253,7 @@ func applySet(tree *Tree, set map[string]string) error {
 			return fmt.Errorf("--set %s: %w", k, err)
 		}
 		if err := tree.SetPath(v1alpha1.LayerFlags, k, value, Origin{Layer: v1alpha1.LayerFlags, File: "--set"}); err != nil {
-			return fmt.Errorf("--set %s: %w", k, err)
+			return err
 		}
 	}
 	return nil

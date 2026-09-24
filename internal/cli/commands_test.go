@@ -708,16 +708,17 @@ func TestSecretsCheckReadsTheSecretsWithoutAKey(t *testing.T) {
 	}
 }
 
-// decryptableSecret writes a Secret named example, encrypted to a fresh key,
-// and a Workstation whose identities open it, into a directory the harness
-// reads after the example configuration.
+// decryptableSecret copies the example configuration into a directory, with
+// its Secret named example encrypted to a fresh key instead and a Workstation
+// whose identities open it. The harness reads it in place of the example: a
+// second Secret or Workstation of the same name would be refused.
 func decryptableSecret(t *testing.T) string {
 	t.Helper()
 	id, err := age.GenerateX25519Identity()
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
+	dir := copyExample(t, "secrets.sops.yaml", "workstation.yaml")
 	keyFile := filepath.Join(dir, ".identity")
 	secret := sopstest.Encrypt(t, "apiVersion: clusterctl/v1alpha1\nkind: Secret\nmetadata:\n  name: example\n"+
 		"data:\n  bmc-password: hunter2\nbinaryData:\n  munge-key: czNjcjN0LWtleQ==\n", id.Recipient().String())
@@ -737,7 +738,7 @@ func decryptableSecret(t *testing.T) string {
 func TestSecretsPushStreamsASecretRef(t *testing.T) {
 	dir := decryptableSecret(t)
 
-	h, err := run(t, harnessOptions{config: []string{dir}}, "secrets", "check", "--decrypt")
+	h, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "secrets", "check", "--decrypt")
 	if err != nil {
 		t.Fatalf("secrets check --decrypt failed: %v\n%s", err, h.out)
 	}
@@ -745,7 +746,7 @@ func TestSecretsPushStreamsASecretRef(t *testing.T) {
 		t.Errorf("the check should decrypt and print nothing of the secret:\n%s", h.out)
 	}
 
-	h, err = run(t, harnessOptions{config: []string{dir}, tty: true, stdin: "y\n"}, "secrets", "push", "-n", "exe0001")
+	h, err = run(t, harnessOptions{bare: true, config: []string{dir}, tty: true, stdin: "y\n"}, "secrets", "push", "-n", "exe0001")
 	// The example's nslcd keytab is a file it does not ship. Everything is
 	// decrypted before anything is written, so nothing is.
 	if err == nil || !strings.Contains(err.Error(), "nslcd.keytab.age") {
@@ -769,7 +770,7 @@ contexts:
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	h, err = run(t, harnessOptions{config: []string{dir}, tty: true, stdin: "y\n"}, "secrets", "push", "-n", "exe0001")
+	h, err = run(t, harnessOptions{bare: true, config: []string{dir}, tty: true, stdin: "y\n"}, "secrets", "push", "-n", "exe0001")
 	if err != nil {
 		t.Fatalf("secrets push failed: %v", err)
 	}
