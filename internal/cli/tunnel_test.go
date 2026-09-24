@@ -151,3 +151,22 @@ func TestTunnelStopRefusesAnUnknownName(t *testing.T) {
 		t.Errorf("tunnel stop removed a file outside the tunnels directory: %v", err)
 	}
 }
+
+// Without a Workstation document for this machine, {workstation.host} is
+// empty. Dropping the exclude would route this machine's own address into the
+// tunnel, so the profile is refused instead.
+func TestTunnelStartRefusesAnExcludeThatExpandsToNothing(t *testing.T) {
+	extra := t.TempDir()
+	workstation := "apiVersion: clusterctl/v1alpha1\nkind: Workstation\nspec:\n  sopsKeyTypes: [age]\n"
+	if err := os.WriteFile(filepath.Join(extra, "workstation.yaml"), []byte(workstation), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h, err := run(t, harnessOptions{config: []string{extra}}, "tunnel", "start", "ipmi", "--dry-run")
+	if err == nil {
+		t.Fatalf("a tunnel whose exclude expands to nothing was started:\n%s", h.out)
+	}
+	if !strings.Contains(err.Error(), "{workstation.host}") {
+		t.Errorf("error = %v, want it to name the exclude", err)
+	}
+}
