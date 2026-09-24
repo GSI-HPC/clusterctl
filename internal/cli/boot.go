@@ -767,6 +767,9 @@ previewed and confirmed like any other change.`,
 		})
 }
 
+// maxLogLines bounds boot log --lines.
+const maxLogLines = 10000
+
 func newBootLogCommand(r *root) *cobra.Command {
 	var lines int
 	cmd := leaf("log", "Show the PXE service log", `
@@ -774,6 +777,11 @@ Read the log of the PXE service, which is what to look at when a node asks
 for a boot configuration and does not get the expected one.`,
 		cobra.NoArgs,
 		func(cmd *cobra.Command, _ []string) error {
+			// The log is read into memory whole, on the way to the terminal
+			// or an agent, so the count is bounded.
+			if lines < 1 || lines > maxLogLines {
+				return exitcode.Errorf(exitcode.Usage, "--lines is %d; give between 1 and %d", lines, maxLogLines)
+			}
 			a, err := r.App()
 			if err != nil {
 				return err
@@ -797,7 +805,7 @@ for a boot configuration and does not get the expected one.`,
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output())
 			return err
 		})
-	cmd.Flags().IntVarP(&lines, "lines", "l", 50, "how many log lines to show")
+	cmd.Flags().IntVarP(&lines, "lines", "l", 50, fmt.Sprintf("how many log lines to show, at most %d", maxLogLines))
 	return cmd
 }
 
