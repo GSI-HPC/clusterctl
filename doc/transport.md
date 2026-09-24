@@ -127,6 +127,15 @@ changes: runs with the same configuration share it, a different context,
 `--config` or `--set` gets another, and a long running process such as a tunnel
 can keep using it after the command that wrote it ends.
 
+**A tunnel connects through the same file.** sshuttle runs ssh itself, and
+plain ssh would read the administrator's own `~/.ssh/known_hosts` and none of
+the settings above. So `tunnel start` hands it `--ssh-cmd` with what
+`Client.Command` returns, `ssh -F` and the generated file, quoted for
+sshuttle's shell-style split, and `--remote` with what `Client.Destination`
+returns, the account resolved as for any command. These come after a profile's
+own options, because sshuttle keeps the last value of an option, and a profile
+option that sets them is refused.
+
 **A host block matches the real host name**, never an invented alias. An alias
 with a `HostName` would stop the administrator's own blocks for that host from
 matching. For the same reason the block carries no `User`: it would also apply

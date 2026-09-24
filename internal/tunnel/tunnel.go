@@ -23,6 +23,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
+	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/tmpl"
 )
 
@@ -32,9 +33,17 @@ type Manager struct {
 	Profiles map[string]v1alpha1.TunnelSpec
 	// Networks maps a network name to a CIDR.
 	Networks map[string]string
-	// Host resolves a role name to the host sshuttle connects to.
-	Host func(role string) (host, user string, err error)
-	// StateDir holds the process id files.
+	// Destination resolves a profile's remote, a role name or a host, and
+	// the account it names, if any, to the [user@]host sshuttle connects
+	// to. The account is resolved the way every other connection resolves
+	// it, so that the context's account applies where nothing names one.
+	Destination func(remote, user string) (string, error)
+	// SSH returns the ssh command sshuttle runs, with the generated
+	// configuration: the site's host key file, strict checking and the
+	// role's jump hosts reach the tunnel only through it.
+	SSH func() ([]string, error)
+	// StateDir holds the process id files. It is an absolute path: sshuttle
+	// changes to / once it runs in the background.
 	StateDir string
 	// Binary is the sshuttle to run.
 	Binary string
@@ -54,36 +63,50 @@ func (m *Manager) Names() []string {
 }
 
 // Args builds the sshuttle argument vector for a profile.
+//
+// The options clusterctl decides come after the profile's own, because
+// sshuttle keeps the last value it is given for an option: an option of the
+// profile can neither replace the ssh command, and with it the site's host
+// key checking, nor the process id file the tunnel is found by.
 func (m *Manager) Args(name string) ([]string, error) {
-	profile, ok := m.Profiles[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown tunnel %q; the site defines %s", name, strings.Join(m.Names(), ", "))
+	profile, err := m.Profile(name)
+	if err != nil {
+		return nil, err
 	}
 	if len(profile.Subnets) == 0 {
 		return nil, fmt.Errorf("tunnel %q routes no subnet", name)
 	}
+	for _, option := range profile.Options {
+		if fixed, ok := fixedOption(option); ok {
+			return nil, fmt.Errorf("tunnel %q: the option %q is refused: clusterctl sets %s itself", name, option, fixed)
+		}
+	}
 
-	host, user := profile.Remote, profile.User
-	if m.Host != nil {
-		resolved, roleUser, err := m.Host(profile.Remote)
+	remote := profile.Remote
+	if profile.User != "" {
+		remote = profile.User + "@" + remote
+	}
+	if m.Destination != nil {
+		remote, err = m.Destination(profile.Remote, profile.User)
 		if err != nil {
 			return nil, fmt.Errorf("tunnel %q: %w", name, err)
 		}
-		host = resolved
-		if user == "" {
-			user = roleUser
-		}
 	}
-	remote := host
-	if user != "" {
-		remote = user + "@" + host
+	if m.SSH == nil {
+		// Plain ssh would read the administrator's own known_hosts rather
+		// than the site's file.
+		return nil, fmt.Errorf("tunnel %q: no ssh command with the site's configuration was given", name)
+	}
+	ssh, err := m.SSH()
+	if err != nil {
+		return nil, fmt.Errorf("tunnel %q: %w", name, err)
 	}
 
 	binary := m.Binary
 	if binary == "" {
 		binary = "sshuttle"
 	}
-	args := []string{binary, "--daemon", "--pidfile", m.PIDFile(name), "--remote", remote}
+	args := []string{binary}
 	if profile.DNS {
 		args = append(args, "--dns")
 	}
@@ -101,6 +124,12 @@ func (m *Manager) Args(name string) ([]string, error) {
 		args = append(args, "--exclude", value)
 	}
 	args = append(args, profile.Options...)
+	// sshuttle splits the ssh command the way a POSIX shell does, so a
+	// space in the path of the generated file stays inside one word.
+	args = append(args,
+		"--daemon", "--pidfile", m.PIDFile(name),
+		"--ssh-cmd", shellquote.Join(ssh),
+		"--remote", remote)
 	for _, subnet := range profile.Subnets {
 		value, err := m.resolve(subnet)
 		if err != nil {
@@ -112,6 +141,42 @@ func (m *Manager) Args(name string) ([]string, error) {
 		args = append(args, value)
 	}
 	return args, nil
+}
+
+// Profile returns a configured profile. Every operation goes through here,
+// so that a name, which also names the process id file, is never a path.
+func (m *Manager) Profile(name string) (v1alpha1.TunnelSpec, error) {
+	profile, ok := m.Profiles[name]
+	if !ok {
+		return profile, fmt.Errorf("unknown tunnel %q; the site defines %s", name, strings.Join(m.Names(), ", "))
+	}
+	return profile, nil
+}
+
+// fixedOptions are the sshuttle options clusterctl sets for every tunnel,
+// with their short forms.
+var fixedOptions = []struct{ long, short string }{
+	{"--daemon", "-D"},
+	{"--pidfile", ""},
+	{"--ssh-cmd", "-e"},
+	{"--remote", "-r"},
+}
+
+// fixedOption reports whether a profile option sets one of the fixed
+// options, in any of the spellings sshuttle's parser accepts: the short
+// form, with its value attached or not, and any abbreviation of the long
+// one.
+func fixedOption(option string) (string, bool) {
+	name, _, _ := strings.Cut(option, "=")
+	for _, fixed := range fixedOptions {
+		switch {
+		case strings.HasPrefix(name, "--") && len(name) > 2 && strings.HasPrefix(fixed.long, name):
+			return fixed.long, true
+		case fixed.short != "" && !strings.HasPrefix(option, "--") && strings.HasPrefix(option, fixed.short):
+			return fixed.long, true
+		}
+	}
+	return "", false
 }
 
 // resolve turns a network name or a template into a CIDR or a host.

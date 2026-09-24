@@ -6,6 +6,7 @@ package tunnel_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -37,15 +38,24 @@ func manager(t *testing.T) *tunnel.Manager {
 		Networks: map[string]string{"ipmi": "10.0.0.0/8", "internal": "10.10.0.0/16"},
 		StateDir: t.TempDir(),
 		Vars:     map[string]string{"workstation.host": "desk01.example.org", "nowhere": ""},
-		Host: func(role string) (string, string, error) {
-			switch role {
+		Destination: func(remote, user string) (string, error) {
+			host := remote
+			switch remote {
 			case "mgmt":
-				return "mgmt-gw.example.org", "", nil
+				host = "mgmt-gw.example.org"
 			case "pool":
-				return "pool.example.org", "root", nil
-			default:
-				return role, "", nil
+				host = "pool.example.org"
+				if user == "" {
+					user = "root"
+				}
 			}
+			if user == "" {
+				user = "admin"
+			}
+			return user + "@" + host, nil
+		},
+		SSH: func() ([]string, error) {
+			return []string{"ssh", "-F", "/state dir/ssh_config-0123456789abcdef"}, nil
 		},
 	}
 }
@@ -67,7 +77,7 @@ func TestArgsResolvesNamesAndTemplates(t *testing.T) {
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"sshuttle", "--daemon", "--pidfile", "--remote mgmt-gw.example.org",
+		"sshuttle", "--daemon", "--pidfile", "--remote admin@mgmt-gw.example.org",
 		"--exclude desk01.example.org", "10.0.0.0/8",
 	} {
 		if !strings.Contains(joined, want) {
@@ -165,6 +175,62 @@ func TestStatusDescribesEveryProfile(t *testing.T) {
 	for _, s := range status {
 		if s.Name == "" || s.Remote == "" {
 			t.Errorf("entry is incomplete: %+v", s)
+		}
+	}
+}
+
+// sshuttle runs whatever --ssh-cmd names, split as a POSIX shell would.
+func TestArgsConnectsWithTheGivenSSHCommand(t *testing.T) {
+	t.Parallel()
+
+	args, err := manager(t).Args("ipmi")
+	if err != nil {
+		t.Fatalf("Args failed: %v", err)
+	}
+	i := slices.Index(args, "--ssh-cmd")
+	if i < 0 || i+1 >= len(args) {
+		t.Fatalf("args have no --ssh-cmd: %q", args)
+	}
+	if got, want := args[i+1], "ssh -F '/state dir/ssh_config-0123456789abcdef'"; got != want {
+		t.Errorf("--ssh-cmd = %q, want %q", got, want)
+	}
+
+	m := manager(t)
+	m.SSH = nil
+	if _, err := m.Args("ipmi"); err == nil {
+		t.Error("a tunnel was built to connect with plain ssh")
+	}
+}
+
+// The ssh command and the process id file are clusterctl's to set; a
+// profile's options come before them, and one that sets them is refused.
+func TestArgsRefusesOptionsClusterctlSets(t *testing.T) {
+	t.Parallel()
+
+	for _, option := range []string{
+		"-e", "-essh", "--ssh-cmd=ssh", "--ssh", "--ssh-c",
+		"-r", "--remote", "--remote=elsewhere", "--pidfile=/tmp/x", "--pid", "-D", "--daemon",
+	} {
+		m := manager(t)
+		profile := m.Profiles["ipmi"]
+		profile.Options = []string{option, "value"}
+		m.Profiles["ipmi"] = profile
+		if _, err := m.Args("ipmi"); err == nil {
+			t.Errorf("the option %q was accepted", option)
+		}
+	}
+	for _, option := range []string{"--remote-shell=sh", "--python", "-v", "--dns", "-x"} {
+		m := manager(t)
+		profile := m.Profiles["ipmi"]
+		profile.Options = []string{option}
+		m.Profiles["ipmi"] = profile
+		args, err := m.Args("ipmi")
+		if err != nil {
+			t.Errorf("the option %q was refused: %v", option, err)
+			continue
+		}
+		if slices.Index(args, option) > slices.Index(args, "--ssh-cmd") {
+			t.Errorf("the option %q comes after --ssh-cmd: %q", option, args)
 		}
 	}
 }

@@ -466,7 +466,7 @@ func TestTunnelStartDryRunShowsTheCommand(t *testing.T) {
 		t.Fatalf("tunnel start --dry-run failed: %v", err)
 	}
 	out := h.out.String()
-	for _, want := range []string{"sshuttle", "--remote mgmt-gw.example.org", "10.0.0.0/8", "--exclude desk01.example.org"} {
+	for _, want := range []string{"sshuttle", "--remote alice_adm@mgmt-gw.example.org", "10.0.0.0/8", "--exclude desk01.example.org"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("command is missing %q:\n%s", want, out)
 		}
