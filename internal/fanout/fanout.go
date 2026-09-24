@@ -65,11 +65,18 @@ func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, buil
 	for i, target := range targets {
 		select {
 		case <-ctx.Done():
+		case sem <- struct{}{}:
+			// When a slot and the cancellation are both ready, select
+			// picks either, so the context is asked again.
+			if ctx.Err() != nil {
+				<-sem
+			}
+		}
+		if err := ctx.Err(); err != nil {
 			// Whatever has not started is reported as cancelled rather than
 			// left as a nil result.
-			results[i] = &transport.Result{Target: target, ExitCode: -1, Err: ctx.Err()}
+			results[i] = &transport.Result{Target: target, ExitCode: -1, Err: err}
 			continue
-		case sem <- struct{}{}:
 		}
 
 		wg.Add(1)

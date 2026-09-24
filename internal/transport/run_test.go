@@ -67,6 +67,7 @@ func cancelSoon(t *testing.T) context.Context {
 // an error without a code, so an interrupted slurm node drain exited 1 and an
 // interrupted boot set 3.
 func TestRunReportsAnInterruptAsInterrupted(t *testing.T) {
+	t.Parallel()
 	c := fakeClient(t, "exec sleep 30")
 	start := time.Now()
 	result, err := c.Run(cancelSoon(t), target, transport.Request{Argv: []string{"true"}, TTY: transport.TTYNone})
@@ -85,6 +86,7 @@ func TestRunReportsAnInterruptAsInterrupted(t *testing.T) {
 }
 
 func TestInteractiveReportsAnInterruptAsInterrupted(t *testing.T) {
+	t.Parallel()
 	c := fakeClient(t, "exec sleep 30")
 	err := c.Interactive(cancelSoon(t), target, transport.Request{
 		Argv: []string{"true"}, Stdin: strings.NewReader(""), Stdout: &strings.Builder{}, Stderr: &strings.Builder{},
@@ -95,6 +97,7 @@ func TestInteractiveReportsAnInterruptAsInterrupted(t *testing.T) {
 }
 
 func TestCopyReportsAnInterruptAsInterrupted(t *testing.T) {
+	t.Parallel()
 	c := fakeClient(t, "exec sleep 30")
 	result, err := c.Copy(cancelSoon(t), target, transport.CopyRequest{
 		Sources: []string{"/etc/hosts"}, Destination: "/tmp/hosts", Upload: true,
@@ -147,5 +150,41 @@ func TestRunClassifiesTheExitStatus(t *testing.T) {
 				t.Errorf("ExitResult error = %v, Run error = %v", fake.Err, result.Err)
 			}
 		})
+	}
+}
+
+// TestRunReturnsWhenADescendantHoldsTheOutput checks that an interrupt ends
+// Run even when something ssh started, such as a ProxyCommand, keeps the
+// output pipe open. Wait used to block until that process exited.
+func TestRunReturnsWhenADescendantHoldsTheOutput(t *testing.T) {
+	t.Parallel()
+	c := fakeClient(t, "sleep 60 & exec sleep 60")
+	start := time.Now()
+	result, err := c.Run(cancelSoon(t), target, transport.Request{Argv: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 20*time.Second {
+		t.Errorf("Run took %v to return after the interrupt", elapsed)
+	}
+	if !errors.Is(result.Err, context.Canceled) {
+		t.Errorf("error = %v, want an interrupt", result.Err)
+	}
+}
+
+// TestRunStopsSshGently checks that an interrupt asks ssh to stop rather than
+// killing it outright, so that it can close the session and restore the
+// terminal. Only a process that is not killed runs its trap.
+func TestRunStopsSshGently(t *testing.T) {
+	t.Parallel()
+	c := fakeClient(t, `trap 'kill $! 2>/dev/null; echo stopped gently >&2; exit 255' TERM HUP
+sleep 60 &
+wait`)
+	result, err := c.Run(cancelSoon(t), target, transport.Request{Argv: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Stderr, "stopped gently") {
+		t.Errorf("ssh was not given the chance to stop; stderr = %q", result.Stderr)
 	}
 }
