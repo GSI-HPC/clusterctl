@@ -4,9 +4,13 @@
 package cli
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -16,6 +20,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
 // secretSite writes a Secret named example with the given values, encrypted
@@ -271,6 +276,177 @@ func TestSecretsRefuseAMACOverEncryptedValuesOnly(t *testing.T) {
 	_, err := run(t, harnessOptions{config: []string{dir}}, "config", "validate")
 	if got := exitcode.From(err); got != exitcode.Usage || !strings.Contains(err.Error(), "mac_only_encrypted") {
 		t.Fatalf("config validate: exit %d (%v), want the file refused", got, err)
+	}
+}
+
+// TestSecretsPushDecryptsBeforeItAsks is the secrets push part of report
+// section 2.12: the dry run approved a push that would then stop at a secret
+// this workstation cannot open, and the real run asked first.
+func TestSecretsPushDecryptsBeforeItAsks(t *testing.T) {
+	// The example's own Secret is encrypted to keys nobody has.
+	h, err := run(t, harnessOptions{}, "secrets", "push", "-n", "exe0001", "--dry-run")
+	if got := exitcode.From(err); got != exitcode.Usage {
+		t.Fatalf("secrets push --dry-run: exit %d (%v), want %d\n%s", got, err, exitcode.Usage, h.out)
+	}
+
+	h, err = run(t, harnessOptions{tty: true, stdin: "y\n"}, "secrets", "push", "-n", "exe0001")
+	if got := exitcode.From(err); got != exitcode.Usage {
+		t.Fatalf("secrets push: exit %d (%v), want %d", got, err, exitcode.Usage)
+	}
+	if strings.Contains(h.errOut.String()+h.out.String(), "[y/N]") {
+		t.Errorf("secrets push asked before it could decrypt:\n%s", h.errOut)
+	}
+	if calls := h.recorder.Commands(); len(calls) != 0 {
+		t.Errorf("commands were sent: %q", calls)
+	}
+}
+
+const twoSecretFiles = `        - target: /etc/munge/munge.key
+          secretRef: {name: example, key: munge-key}
+        - target: /etc/bmc.pass
+          secretRef: {name: example, key: bmc-password}
+`
+
+// exe0002Unreachable answers exe0002 the way the ssh transport does when it cannot
+// connect, and every other node with success.
+func exe0002Unreachable(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+	if tg.Name == "exe0002" {
+		return &transport.Result{Target: tg, ExitCode: 255, Stderr: "ssh: connect to host exe0002 port 22: Connection timed out\n",
+			Err: exitcode.Wrap(exitcode.Transport, fmt.Errorf("%s: ssh: connect to host exe0002 port 22: Connection timed out", tg))}, nil
+	}
+	return &transport.Result{Target: tg}, nil
+}
+
+// TestSecretsPushReportsAnUnreachableNode is the secrets push part of report
+// section 8.5: a node that could not be reached was counted once per secret
+// as a failed write, exited 1 without its name and was tried again for every
+// secret.
+func TestSecretsPushReportsAnUnreachableNode(t *testing.T) {
+	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
+	rec := &transport.Recorder{Reply: exe0002Unreachable}
+	h, err := run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-3]", "-y")
+	if got := exitcode.From(err); got != exitcode.Transport {
+		t.Fatalf("secrets push: exit %d (%v), want %d\n%s", got, err, exitcode.Transport, h.out)
+	}
+	if !strings.Contains(err.Error(), "exe0002") || !strings.Contains(err.Error(), "1 of 3") {
+		t.Errorf("the error does not name the node: %v", err)
+	}
+	calls := 0
+	for _, c := range rec.Calls() {
+		if c.Target.Name == "exe0002" {
+			calls++
+		}
+	}
+	if calls != 1 {
+		t.Errorf("exe0002 was contacted %d times, want once", calls)
+	}
+	out := h.out.String()
+	if !strings.Contains(out, "Connection timed out") || !strings.Contains(out, "skipped") {
+		t.Errorf("the table does not say what happened to exe0002:\n%s", out)
+	}
+
+	// A node that answered and refused is a target failure, and the reason
+	// is shown even when the node wrote nothing to stderr.
+	rec = &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		if tg.Name == "exe0003" {
+			return &transport.Result{Target: tg, ExitCode: 1, Err: fmt.Errorf("%s: command exited 1", tg)}, nil
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	h, err = run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-3]", "-y")
+	if got := exitcode.From(err); got != exitcode.TargetFailed || !strings.Contains(err.Error(), "exe0003") {
+		t.Fatalf("secrets push: exit %d (%v), want %d naming exe0003", got, err, exitcode.TargetFailed)
+	}
+	if !strings.Contains(h.out.String(), "command exited 1") {
+		t.Errorf("the reason for the failure is missing:\n%s", h.out)
+	}
+}
+
+// TestSecretsPushKeepsAnInterrupt is the secrets push part of report section
+// 11.9: the error of each node is kept, not its string, so that an
+// interrupt still reaches the process as one.
+func TestSecretsPushKeepsAnInterrupt(t *testing.T) {
+	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, ExitCode: -1, Err: fmt.Errorf("%s: %w", tg, context.Canceled)}, nil
+	}}
+	_, err := run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-3]", "-y")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("secrets push: err = %v, want the interrupt kept", err)
+	}
+}
+
+// TestSecretsPushReplacesTheFileWhole is the secrets push part of report
+// section 8.8: the target was emptied before the payload arrived, so a
+// connection lost in between left an empty key, and install -D created
+// missing directories readable by everyone. The script is run here, in a
+// real shell, against a directory standing in for the node's.
+func TestSecretsPushReplacesTheFileWhole(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "etc", "munge", "munge.key")
+	dir, _ := secretSite{
+		values: bmcSecret, identities: true,
+		secrets: "        - target: " + target + "\n          secretRef: {name: example, key: munge-key}\n          mode: \"0400\"\n",
+	}.write(t)
+	h, err := run(t, harnessOptions{config: []string{dir}}, "secrets", "push", "-n", "exe0001", "-y")
+	if err != nil {
+		t.Fatalf("secrets push failed: %v\n%s", err, h.out)
+	}
+	calls := h.recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	script := calls[0].Request.Script
+
+	runScript := func(payload string) (string, error) {
+		cmd := exec.Command("sh", "-c", script)
+		cmd.Stdin = strings.NewReader(payload)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	// A payload cut short leaves no file behind, and says so.
+	if out, err := runScript("s3cr"); err == nil {
+		t.Fatalf("a short payload was accepted: %s", out)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("a short payload left the target behind: %v", err)
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(target), "*"))
+	if len(leftovers) != 0 {
+		t.Errorf("a short payload left files behind: %q", leftovers)
+	}
+
+	if out, err := runScript("s3cr3t-key"); err != nil {
+		t.Fatalf("the script failed: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "s3cr3t-key" {
+		t.Fatalf("target = %q, %v; want the key", got, err)
+	}
+	for path, want := range map[string]os.FileMode{
+		target:                     0o400,
+		filepath.Dir(target):       0o700,
+		filepath.Join(root, "etc"): 0o700,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s has mode %#o, want %#o", path, got, want)
+		}
+	}
+
+	// A second push replaces the file and leaves the directory as it is.
+	if err := os.Chmod(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runScript("s3cr3t-key"); err != nil {
+		t.Fatalf("the script failed on an existing file: %v\n%s", err, out)
+	}
+	if info, _ := os.Stat(filepath.Dir(target)); info.Mode().Perm() != 0o755 {
+		t.Errorf("an existing directory was changed to %#o", info.Mode().Perm())
 	}
 }
 

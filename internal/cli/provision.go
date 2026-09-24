@@ -4,9 +4,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -75,6 +78,13 @@ func newSecretsPushCommand(r *root) *cobra.Command {
 Decrypt each configured secret and write it onto the nodes with the owner and
 mode the configuration asks for.
 
+Every secret is decrypted before anything is asked or written, so a key this
+workstation lacks stops the push, and its dry run, before a node is touched.
+Each file is written beside its target and moved into place only once all of
+it has arrived, so a lost connection leaves the old file as it was. A node
+that cannot be reached is not tried again for the next secret; when no node
+that failed could be reached, the command exits 3.
+
 This overwrites files on the nodes, so it asks first.
 
   clusterctl secrets push -n exe[1-4]`,
@@ -93,6 +103,22 @@ This overwrites files on the nodes, so it asks first.
 			if err != nil {
 				return err
 			}
+
+			// Everything the push needs is worked out before it asks: the
+			// addresses of the nodes, and every secret, decrypted. A key
+			// that is missing for one of them stops the push, and the dry
+			// run, before anything is written rather than half way.
+			targets, err := a.NodeTargets(ns)
+			if err != nil {
+				return err
+			}
+			contents := make([][]byte, len(files))
+			for i, file := range files {
+				if contents[i], err = a.SecretContent(file); err != nil {
+					return err
+				}
+			}
+
 			names := make([]string, 0, len(files))
 			for _, f := range files {
 				names = append(names, f.Target)
@@ -105,67 +131,147 @@ This overwrites files on the nodes, so it asks first.
 				return dryRunOrError(err)
 			}
 
-			targets, err := a.NodeTargets(ns)
-			if err != nil {
-				return err
-			}
-
-			// Every secret is decrypted before the first is written, so a
-			// key that is missing for one of them leaves the nodes as they
-			// were rather than half provisioned.
-			contents := make([][]byte, len(files))
-			for i, file := range files {
-				if contents[i], err = a.SecretContent(file); err != nil {
-					return err
-				}
-			}
-
 			t := output.NewTable(output.Cols("NODE", "SECRET", "STATUS")...)
-			failed := 0
+			// failed holds the first failure of each node. A node that
+			// could not be reached is not tried again for the next
+			// secret, which would only wait out the connect timeout again.
+			failed := map[string]error{}
+			gone := map[string]bool{}
 			for i, file := range files {
-				plaintext := contents[i]
-				mode := file.Mode
-				if mode == "" {
-					mode = "0600"
-				}
-				// The payload arrives on stdin, so it is never an argument
-				// and never a file on this machine.
-				script := fmt.Sprintf(
-					"set -eu\numask 077\ninstall -D -m %s /dev/null %s\ncat > %s\n",
-					shellquote.Quote(mode), shellquote.Quote(file.Target), shellquote.Quote(file.Target))
-				if file.Owner != "" {
-					owner := file.Owner
-					if file.Group != "" {
-						owner += ":" + file.Group
+				var live []transport.Target
+				for _, tg := range targets {
+					if !gone[tg.Name] {
+						live = append(live, tg)
 					}
-					script += fmt.Sprintf("chown %s %s\n", shellquote.Quote(owner), shellquote.Quote(file.Target))
 				}
-
-				results := a.Executor().RunEach(a.Context(), targets, func(transport.Target) transport.Request {
+				script := secretScript(file, len(contents[i]))
+				results := a.Executor().RunEach(a.Context(), live, func(transport.Target) transport.Request {
 					return transport.Request{
 						Script:  script,
-						Stdin:   strings.NewReader(string(plaintext)),
+						Stdin:   bytes.NewReader(contents[i]),
 						Timeout: a.Timeout().Get(),
 						TTY:     transport.TTYNone,
 					}
 				})
+				byName := map[string]*transport.Result{}
 				for _, res := range results {
-					status := "written"
-					if res.Failed() {
-						status = "failed: " + strings.TrimSpace(lastNonEmpty(res.Stderr))
-						failed++
+					byName[res.Target.Name] = res
+				}
+				for _, tg := range targets {
+					if gone[tg.Name] && byName[tg.Name] == nil {
+						t.Add(tg.Name, file.Target, "skipped: the node could not be reached")
+						continue
 					}
-					t.Add(res.Target.Name, file.Target, status)
+					res := byName[tg.Name]
+					if res == nil {
+						res = &transport.Result{Target: tg, ExitCode: -1, Err: fmt.Errorf("%s: no result", tg.Name)}
+					}
+					t.Add(tg.Name, file.Target, pushStatus(res))
+					if !res.Failed() {
+						continue
+					}
+					if _, seen := failed[tg.Name]; !seen {
+						failed[tg.Name] = pushError(res)
+					}
+					if nodeUnreachable(failed[tg.Name]) {
+						gone[tg.Name] = true
+					}
 				}
 			}
 			if err := a.Print(output.Result{Table: t}); err != nil {
 				return err
 			}
-			if failed > 0 {
-				return exitcode.Errorf(exitcode.TargetFailed, "%d writes failed", failed)
-			}
-			return nil
+			return pushFailures(targets, failed)
 		})
+}
+
+// secretScript writes the payload on standard input to a temporary file
+// beside the target, checks that all of it arrived and only then moves it
+// into place, so that a connection lost half way leaves the old file, not
+// an empty one. A missing directory is created readable by root alone; one
+// that exists is left as it is. The payload is never an argument and never
+// a file on this machine.
+func secretScript(file v1alpha1.SecretFile, size int) string {
+	mode := file.Mode
+	if mode == "" {
+		mode = "0600"
+	}
+	dir := shellquote.Quote(path.Dir(file.Target))
+	var b strings.Builder
+	fmt.Fprintf(&b, "set -eu\numask 077\nmkdir -p -m 0700 %s\n", dir)
+	fmt.Fprintf(&b, "tmp=$(mktemp %s/.clusterctl.XXXXXX)\n", dir)
+	b.WriteString("trap 'rm -f \"$tmp\"' EXIT\ntrap 'rm -f \"$tmp\"; exit 1' HUP INT TERM PIPE\n")
+	b.WriteString("cat > \"$tmp\"\n")
+	b.WriteString("size=$(wc -c < \"$tmp\")\n")
+	fmt.Fprintf(&b, "if [ \"$size\" -ne %d ]; then echo \"received $size of %d bytes; the file was left as it was\" >&2; exit 1; fi\n", size, size)
+	if file.Owner != "" {
+		owner := file.Owner
+		if file.Group != "" {
+			owner += ":" + file.Group
+		}
+		fmt.Fprintf(&b, "chown %s \"$tmp\"\n", shellquote.Quote(owner))
+	}
+	fmt.Fprintf(&b, "chmod %s \"$tmp\"\n", shellquote.Quote(mode))
+	fmt.Fprintf(&b, "mv -f \"$tmp\" %s\n", shellquote.Quote(file.Target))
+	b.WriteString("trap - EXIT\n")
+	return b.String()
+}
+
+// pushStatus says what became of one secret on one node, with the reason
+// when it failed, from the node or else from the transport.
+func pushStatus(res *transport.Result) string {
+	if !res.Failed() {
+		return "written"
+	}
+	reason := strings.TrimSpace(lastNonEmpty(res.Stderr))
+	if reason == "" && res.Err != nil {
+		reason = res.Err.Error()
+	}
+	if reason == "" {
+		reason = fmt.Sprintf("exit %d", res.ExitCode)
+	}
+	return "failed: " + reason
+}
+
+// pushError is the error of a failed write, which keeps what the transport
+// said, so that an unreachable node and an interrupt keep their exit code.
+func pushError(res *transport.Result) error {
+	if res.Err != nil {
+		return res.Err
+	}
+	return fmt.Errorf("%s: exited %d", res.Target.Name, res.ExitCode)
+}
+
+// nodeUnreachable reports whether a node that failed was never there to say no.
+func nodeUnreachable(err error) bool {
+	return exitcode.From(err) == exitcode.Transport || errors.Is(err, context.Canceled)
+}
+
+// pushFailures names the nodes a push failed on. It exits 3 when none of
+// them could be reached and 1 when one of them answered, and keeps the
+// first failure wrapped, an interrupt before anything else, so that it
+// still reads as one.
+func pushFailures(targets []transport.Target, failed map[string]error) error {
+	if len(failed) == 0 {
+		return nil
+	}
+	names := nodeset.New()
+	code := exitcode.Transport
+	var cause error
+	for _, tg := range targets {
+		err, ok := failed[tg.Name]
+		if !ok {
+			continue
+		}
+		_ = names.Add(tg.Name)
+		if !nodeUnreachable(err) {
+			code = exitcode.TargetFailed
+		}
+		if cause == nil || (errors.Is(err, context.Canceled) && !errors.Is(cause, context.Canceled)) {
+			cause = err
+		}
+	}
+	return exitcode.Wrap(code, fmt.Errorf("%d of %d nodes failed: %s: %w", len(failed), len(targets), names, cause))
 }
 
 func newSecretsCheckCommand(r *root) *cobra.Command {
