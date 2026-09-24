@@ -7,8 +7,9 @@ on:
   push:
     tags: ['v*']
 
+# Read only, unless a job says otherwise: only the release job writes.
 permissions:
-  contents: write
+  contents: read
 
 env:
   # The Go release line, as in CI. The newest patch of it builds the release,
@@ -26,6 +27,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # The signer list is a repository variable, which only an administrator
       # can change, and never a file in the checkout: the tagged commit would
@@ -44,6 +46,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.verify-tag.outputs.commit }}
+          persist-credentials: false
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -67,6 +70,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # The tag may have moved since it was verified; what is built is the tag
       # object that was verified and the commit it names, or nothing.
