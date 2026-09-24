@@ -25,8 +25,9 @@ var (
 
 // Info describes the running binary.
 type Info struct {
-	// Version is the release version, "v1.4.0" style, or "devel" when the
-	// binary was not built from a tag.
+	// Version is the release version, "v1.4.0" style: the one the release
+	// build injected, or the module version "go install" built. It is
+	// "devel" for any other build, a build from a checkout included.
 	Version string `json:"version" yaml:"version"`
 	// Commit is the git revision the binary was built from, empty when the
 	// build carried no VCS information.
@@ -51,14 +52,26 @@ func Get() Info {
 		GoVersion: runtime.Version(),
 		Platform:  runtime.GOOS + "/" + runtime.GOARCH,
 	}
+	bi, _ := debug.ReadBuildInfo()
+	return fromBuildInfo(info, bi)
+}
 
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		if info.Version == "" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-			info.Version = bi.Main.Version
-		}
+// fromBuildInfo fills what the release build did not inject from the build
+// info the toolchain embedded; bi may be nil.
+//
+// A build from a checkout reports devel with its revision. The toolchain
+// derives a module version from the checkout too, a pseudo-version or a tag
+// the commit carries, but a local tag is not a signed release, so that is
+// ignored. A module version is taken only from a build that carries no VCS
+// stamps: "go install ...@v1.4.0", whose version the checksum database
+// vouches for.
+func fromBuildInfo(info Info, bi *debug.BuildInfo) Info {
+	if bi != nil {
+		checkout := false
 		for _, s := range bi.Settings {
 			switch s.Key {
 			case "vcs.revision":
+				checkout = true
 				if info.Commit == "" {
 					info.Commit = s.Value
 				}
@@ -69,6 +82,9 @@ func Get() Info {
 			case "vcs.modified":
 				info.Dirty = s.Value == "true"
 			}
+		}
+		if info.Version == "" && !checkout && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			info.Version = bi.Main.Version
 		}
 	}
 

@@ -84,12 +84,20 @@ $ go install github.com/GSI-HPC/clusterctl/cmd/clusterctl@latest
 
 Go 1.26 or newer. An older toolchain downloads the right one by itself.
 
-A build from source reports its revision rather than a version, because the
-version of a release lives only in its signed tag:
+`go install` of a release reports the version it built, without a revision:
 
 ```console
 $ clusterctl version
-devel (a1b2c3d4e5f6) built 2026-09-22T14:42:30Z go1.26.0 linux/amd64
+v1.4.0 go1.26.8 linux/amd64
+```
+
+A build from a git checkout reports its revision rather than a version, even
+on a tagged commit, because the version of a release lives only in its signed
+tag:
+
+```console
+$ go build ./cmd/clusterctl && ./clusterctl version
+devel (a1b2c3d4e5f6) built 2026-09-22T14:42:30Z go1.26.8 linux/amd64
 ```
 
 ## What has to be on the other end
