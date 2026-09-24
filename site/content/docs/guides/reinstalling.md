@@ -234,4 +234,6 @@ $ clusterctl fabric state -n exe0007     # did its fabric link come up
 ```
 
 `fabric state` works before the node has booted: the port is identified by the
-adapter identifier derived from the hardware address DHCP knows.
+adapter identifier derived from the hardware address DHCP knows. A port is up
+only when its link state is `Active`; one that is physically linked but still
+`Initialize` or `Armed` is reported down, with both states shown.

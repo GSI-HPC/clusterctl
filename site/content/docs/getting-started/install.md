@@ -104,10 +104,10 @@ tunnels.
 | Role | Programs |
 | --- | --- |
 | The Slurm host | `sinfo`, `squeue`, `sacct`, `sacctmgr`, `scontrol`, `getent` |
-| The management gateway | `ipmipower` or `ipmitool`, `fping` |
+| The management gateway | `ipmipower` or `ipmitool`, whichever `bmc.ipmi.backend` names, and `fping` |
 | The DHCP server | nothing; its files are read |
 | The PXE host | `git`, if boot configurations come from version control |
-| The fabric host | `ibportstate`, `ibqueryerrors` |
+| The fabric host | `ibportstate`, `ibqueryerrors`, `ibaddr`, `iblinkinfo`, `perfquery` |
 
 `clusterctl doctor --remote` checks all of it and says what is missing.
 
@@ -120,4 +120,6 @@ $ clusterctl completion fish > ~/.config/fish/completions/clusterctl.fish
 ```
 
 Completion knows your configuration: `-n` offers the groups your site defines
-and `--context` offers your contexts.
+and `--context` offers your contexts. It never contacts a host, so the groups
+of a source that runs a command, such as `@slurm:main`, are not offered and
+have to be typed.
