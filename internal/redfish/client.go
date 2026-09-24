@@ -43,6 +43,10 @@ type Client struct {
 	Password string
 	// SystemPath is the Redfish path of the computer system.
 	SystemPath string
+	// ResetTypes are the reset types a vendor profile says the firmware
+	// accepts. When set, a reset is checked against them rather than
+	// against what the machine advertises.
+	ResetTypes []string
 	// Timeout bounds one request.
 	Timeout time.Duration
 	// Verify checks the certificate against the system roots instead of

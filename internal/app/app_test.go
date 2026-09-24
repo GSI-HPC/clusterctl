@@ -265,3 +265,26 @@ func TestCommandLinePathsResolveAgainstTheWorkingDirectory(t *testing.T) {
 		})
 	}
 }
+
+func TestRedfishClientCarriesTheVendorResetTypes(t *testing.T) {
+	t.Parallel()
+	a, _ := bmcApp(t)
+
+	// The example's vendor2 records the reset types its firmware accepts,
+	// and the client has to check against them rather than ignore them.
+	c, err := a.RedfishClient(context.Background(), "exe0001")
+	if err != nil {
+		t.Fatalf("RedfishClient failed: %v", err)
+	}
+	if got, want := strings.Join(c.ResetTypes, ","), strings.Join(a.VendorProfile("exe0001").ResetTypes, ","); got != want || got == "" {
+		t.Errorf("client reset types = %q, want the vendor profile's %q", got, want)
+	}
+
+	c, err = a.RedfishClient(context.Background(), "wlm01")
+	if err != nil {
+		t.Fatalf("RedfishClient failed: %v", err)
+	}
+	if len(c.ResetTypes) != 0 {
+		t.Errorf("a node without a vendor list got reset types %v", c.ResetTypes)
+	}
+}

@@ -122,6 +122,9 @@ bmc:
       resetTypes: [On, ForceOff, ForceRestart, GracefulRestart, PowerCycle]
 ```
 
+A recorded list replaces what the machine advertises, and the message then
+says `its vendor profile lists` instead of `it accepts`.
+
 ## A service processor answers with a redirect
 
 ```console

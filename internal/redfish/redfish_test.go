@@ -28,6 +28,11 @@ type fakeBMC struct {
 	lastPost map[string]any
 	patches  []map[string]any
 	power    string
+	// actionInfo serves the reset types through @Redfish.ActionInfo
+	// instead of inline, as some firmware does.
+	actionInfo atomic.Bool
+	// actionInfoBroken makes the ActionInfo resource fail.
+	actionInfoBroken atomic.Bool
 	// mux serves the resources; tests add their own to it.
 	mux *http.ServeMux
 	// requests counts what reached the server, and withAuth how much of
@@ -50,7 +55,10 @@ func newFakeBMC(t *testing.T, resetTypes []string) *fakeBMC {
 		switch r.Method {
 		case http.MethodGet:
 			allowable := map[string]any{}
-			if resetTypes != nil {
+			switch {
+			case f.actionInfo.Load():
+				allowable["@Redfish.ActionInfo"] = "/redfish/v1/Systems/1/ResetActionInfo"
+			case resetTypes != nil:
 				allowable["ResetType@Redfish.AllowableValues"] = toAny(resetTypes)
 			}
 			allowable["target"] = "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset"
@@ -79,6 +87,18 @@ func newFakeBMC(t *testing.T, resetTypes []string) *fakeBMC {
 		f.resets.Add(1)
 		_ = json.NewDecoder(r.Body).Decode(&f.lastPost)
 		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/redfish/v1/Systems/1/ResetActionInfo", func(w http.ResponseWriter, _ *http.Request) {
+		if f.actionInfoBroken.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"Parameters": []any{
+				map[string]any{"Name": "Other", "AllowableValues": toAny([]string{"GracefulShutdown"})},
+				map[string]any{"Name": "ResetType", "AllowableValues": toAny(resetTypes)},
+			},
+		})
 	})
 	mux.HandleFunc("/redfish/v1/broken", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -367,6 +387,87 @@ func TestRejectedAccountIsATransportFailure(t *testing.T) {
 	}
 	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
 		t.Errorf("a refusal: exit code = %d, want %d (%v)", got, want, err)
+	}
+}
+
+func TestResetChecksTheVendorProfile(t *testing.T) {
+	t.Parallel()
+
+	// The machine advertises GracefulShutdown, but the site recorded that
+	// this firmware rejects it, so the recorded list decides.
+	f := newFakeBMC(t, []string{"On", "ForceOff", "GracefulShutdown"})
+	c := f.client(t)
+	c.ResetTypes = []string{"On", "ForceOff", "ForceRestart"}
+
+	err := c.Reset(context.Background(), redfish.ResetGracefulShutdown)
+	if err == nil {
+		t.Fatal("a reset type the vendor profile leaves out should be refused before it is sent")
+	}
+	if !strings.Contains(err.Error(), "ForceOff, ForceRestart, On") {
+		t.Errorf("error = %v, want it to list the vendor profile", err)
+	}
+	if got := f.resets.Load(); got != 0 {
+		t.Errorf("the action was sent %d times although it was refused", got)
+	}
+	if err := c.Reset(context.Background(), redfish.ResetForceRestart); err != nil {
+		t.Fatalf("a reset type the vendor profile lists should go through: %v", err)
+	}
+	if got := f.resets.Load(); got != 1 {
+		t.Errorf("the action was sent %d times, want exactly once", got)
+	}
+}
+
+func TestResetFollowsActionInfo(t *testing.T) {
+	t.Parallel()
+
+	// Some firmware lists the reset types only in a separate ActionInfo
+	// resource. Without following it, GracefulShutdown went out unchecked
+	// and the BMC's own opaque rejection came back.
+	f := newFakeBMC(t, []string{"On", "ForceOff", "ForceRestart"})
+	f.actionInfo.Store(true)
+	c := f.client(t)
+
+	err := c.Reset(context.Background(), redfish.ResetGracefulShutdown)
+	if err == nil {
+		t.Fatal("a reset type missing from ActionInfo should be refused before it is sent")
+	}
+	if !strings.Contains(err.Error(), "ForceOff, ForceRestart, On") {
+		t.Errorf("error = %v, want it to list what ActionInfo offers", err)
+	}
+	if got := f.resets.Load(); got != 0 {
+		t.Errorf("the action was sent %d times although it was refused", got)
+	}
+
+	sys, err := c.System(context.Background())
+	if err != nil {
+		t.Fatalf("System failed: %v", err)
+	}
+	if got, want := strings.Join(sys.ResetTypes, ","), "On,ForceOff,ForceRestart"; got != want {
+		t.Errorf("ResetTypes = %q, want %q", got, want)
+	}
+
+	if err := c.Reset(context.Background(), redfish.ResetForceOff); err != nil {
+		t.Fatalf("a reset type ActionInfo lists should go through: %v", err)
+	}
+	if got := f.resets.Load(); got != 1 {
+		t.Errorf("the action was sent %d times, want exactly once", got)
+	}
+}
+
+func TestResetRefusesWhenActionInfoCannotBeRead(t *testing.T) {
+	t.Parallel()
+
+	// The machine says where its list is, so a reset is not sent unchecked
+	// when that list cannot be read.
+	f := newFakeBMC(t, []string{"On", "ForceOff"})
+	f.actionInfo.Store(true)
+	f.actionInfoBroken.Store(true)
+
+	if err := f.client(t).Reset(context.Background(), redfish.ResetForceOff); err == nil {
+		t.Fatal("a reset should be refused when the ActionInfo it points to cannot be read")
+	}
+	if got := f.resets.Load(); got != 0 {
+		t.Errorf("the action was sent %d times although its check failed", got)
 	}
 }
 
