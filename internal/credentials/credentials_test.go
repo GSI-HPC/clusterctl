@@ -267,3 +267,51 @@ func TestConcurrentLookupsReadOnce(t *testing.T) {
 		t.Errorf("prompted %d times for 8 concurrent lookups, want once", asked)
 	}
 }
+
+// A relative helper resolves against the site directory, as a relative file
+// does. It ran relative to the working directory, where anyone who could
+// plant that path chose the password sent to the service processors.
+func TestRelativeHelperResolvesAgainstTheSite(t *testing.T) {
+	site := t.TempDir()
+	cwd := t.TempDir()
+	for dir, answer := range map[string]string{site: "from-config-dir", cwd: "from-cwd"} {
+		if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		script := "#!/bin/sh\necho " + answer + "\n"
+		if err := os.WriteFile(filepath.Join(dir, "scripts", "bmc-password"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "scripts", "password"), []byte(answer+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(cwd)
+
+	r := &credentials.Resolver{
+		Credentials: map[string]v1alpha1.Credential{
+			"command": {Username: "admin", Password: v1alpha1.PasswordSource{Command: []string{"scripts/bmc-password"}}},
+			"dotted":  {Username: "admin", Password: v1alpha1.PasswordSource{Command: []string{"./scripts/bmc-password"}}},
+			"file":    {Username: "admin", Password: v1alpha1.PasswordSource{File: "scripts/password"}},
+			// A bare name is still looked up in PATH.
+			"bare": {Username: "admin", Password: v1alpha1.PasswordSource{Command: []string{"echo", "from-path"}}},
+		},
+		BaseDir: site,
+		Env:     func(string) string { return "" },
+	}
+	for name, want := range map[string]string{
+		"command": "from-config-dir",
+		"dotted":  "from-config-dir",
+		"file":    "from-config-dir",
+		"bare":    "from-path",
+	} {
+		cred, err := r.Get(context.Background(), name)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if got := cred.Password(); got != want {
+			t.Errorf("%s resolved to %q, want %q", name, got, want)
+		}
+	}
+}

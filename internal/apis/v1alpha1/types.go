@@ -142,7 +142,9 @@ type PasswordSource struct {
 	// document. It is decrypted only when the credential is used.
 	SecretRef *SecretKeyRef `json:"secretRef,omitempty" yaml:"secretRef,omitempty" jsonschema:"description=Key of a sops encrypted Secret document holding the password"`
 	// Command runs a helper and reads the password from its standard output.
-	Command []string `json:"command,omitempty" yaml:"command,omitempty" jsonschema:"description=Helper command printing the password"`
+	// A helper named by a relative path resolves against the Site document;
+	// a bare name is looked up in PATH.
+	Command []string `json:"command,omitempty" yaml:"command,omitempty" jsonschema:"description=Helper command printing the password; a relative path resolves against the Site document"`
 	// Prompt asks the administrator on the terminal.
 	Prompt bool `json:"prompt,omitempty" yaml:"prompt,omitempty" jsonschema:"description=Ask on the terminal"`
 }
