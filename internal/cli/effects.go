@@ -32,6 +32,7 @@ var effects = map[string]safety.Effect{
 	"bmc web":                   safety.EffectInteractive,
 	"boot grub set":             safety.EffectChange,
 	"boot grub show":            safety.EffectRead,
+	"boot grub unset":           safety.EffectChange,
 	"boot list":                 safety.EffectRead,
 	"boot log":                  safety.EffectRead,
 	"boot set":                  safety.EffectChange,
