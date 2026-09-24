@@ -804,22 +804,39 @@ management network, and report which of them answer.`,
 				return err
 			}
 
-			// fping answers for a whole list in one run, and prints one line
-			// per host whether it answered or not.
-			argv := append([]string{"fping", "-a", "-q", "-r", "1"}, bmcs.Expand()...)
+			// fping answers for a whole list in one run and prints the hosts
+			// that answered. The list follows --, so no name is read as an
+			// option.
+			argv := append([]string{"fping", "-a", "-q", "-r", "1", "--"}, bmcs.Expand()...)
 			result, err := a.Runner.Run(a.Context(), target, transport.Request{
 				Argv:    argv,
 				Timeout: 2 * time.Minute,
 				TTY:     transport.TTYNone,
 			})
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return bmcError(a.Context(), exitcode.Wrap(exitcode.Transport, err), false)
+			}
+			// fping exits 1 when a host did not answer and 2 when a name did
+			// not resolve; anything else, or a failed connection, means the
+			// sweep itself did not run.
+			if result.Err != nil || result.ExitCode > 2 || result.ExitCode < 0 {
+				detail := strings.TrimSpace(lastNonEmpty(result.Stderr))
+				if detail == "" && result.Err != nil {
+					detail = result.Err.Error()
+				}
+				return bmcError(a.Context(), exitcode.Errorf(exitcode.Transport,
+					"the sweep with fping on %s failed (exit %d): %s", target, result.ExitCode, detail), false)
 			}
 
 			alive := nodeset.New()
 			for _, line := range result.Lines() {
-				_ = alive.Add(strings.Fields(line)[0])
+				fields := strings.Fields(line)
+				if len(fields) == 0 {
+					continue
+				}
+				_ = alive.Add(fields[0])
 			}
+			alive = alive.Intersection(bmcs)
 			t := output.NewTable(output.Cols("BMC", "STATE")...)
 			for _, name := range bmcs.Expand() {
 				state := "no answer"
@@ -831,6 +848,10 @@ management network, and report which of them answer.`,
 			t.Caption = fmt.Sprintf("%d of %d answered", alive.Len(), bmcs.Len())
 			if err := a.Print(output.Result{Table: t}); err != nil {
 				return err
+			}
+			if result.ExitCode == 2 {
+				return exitcode.Errorf(exitcode.Transport,
+					"%d service processors did not answer, and fping could not resolve some of them", bmcs.Len()-alive.Len())
 			}
 			if alive.Len() < bmcs.Len() {
 				return exitcode.Errorf(exitcode.TargetFailed,
