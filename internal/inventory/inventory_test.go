@@ -129,7 +129,7 @@ func TestQueries(t *testing.T) {
 	if got, want := strings.Join(inv.Racks(), ","), "R01,R02"; got != want {
 		t.Errorf("Racks = %q, want %q", got, want)
 	}
-	if got, want := inv.InRack("r02").String(), "exe[1-4]"; got != want {
+	if got, want := inv.InRack("R02").String(), "exe[1-4]"; got != want {
 		t.Errorf("InRack = %q, want %q", got, want)
 	}
 	if got, want := inv.NodeSet().String(), "exe[1-4],wlm01"; got != want {
@@ -405,5 +405,63 @@ func TestARefinedAddressIsFreeAgain(t *testing.T) {
 	}})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Report 4.15: an attribute an entry sets is not overwritten by the rack it
+// inherited, and a rack written only as an attribute is still a rack.
+func TestRackAttributeAndFieldAgree(t *testing.T) {
+	t.Parallel()
+
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe[0001-0004]", Rack: "R02", Level: "1"},
+		{Nodes: "exe0001", Attributes: map[string]string{"rack": "R05", "level": "3"}},
+		{Nodes: "sub0001", Attributes: map[string]string{"rack": "R07"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe1, _ := inv.Lookup("exe0001")
+	if exe1.Attributes["rack"] != "R05" || exe1.Rack != "R05" {
+		t.Errorf("exe0001: rack attribute %q, field %q, want R05 for both", exe1.Attributes["rack"], exe1.Rack)
+	}
+	if exe1.Attributes["level"] != "3" || exe1.Level != "3" {
+		t.Errorf("exe0001: level attribute %q, field %q, want 3 for both", exe1.Attributes["level"], exe1.Level)
+	}
+	if got, want := inv.WithAttribute("rack", "R02").String(), "exe[0002-0004]"; got != want {
+		t.Errorf("@rack:R02 = %q, want %q", got, want)
+	}
+	if got, want := inv.InRack("R02").String(), "exe[0002-0004]"; got != want {
+		t.Errorf("InRack(R02) = %q, want %q", got, want)
+	}
+	if got, want := inv.InRack("R07").String(), "sub0001"; got != want {
+		t.Errorf("InRack(R07) = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(inv.Racks(), ","), "R02,R05,R07"; got != want {
+		t.Errorf("Racks = %q, want %q", got, want)
+	}
+	// A rack is matched the way the @rack: group matches it.
+	if got := inv.InRack("r07").String(); got != "" {
+		t.Errorf("InRack(r07) = %q, want nothing, as @rack:r07", got)
+	}
+}
+
+// An entry that says two different things about the rack is a mistake.
+func TestRackFieldAndAttributeMustNotConflict(t *testing.T) {
+	t.Parallel()
+
+	_, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe1", Rack: "R02", Attributes: map[string]string{"rack": "R05"}},
+	}})
+	if err == nil {
+		t.Fatal("an entry setting two racks should be rejected")
+	}
+	if !strings.Contains(err.Error(), "R02") || !strings.Contains(err.Error(), "R05") {
+		t.Errorf("error = %v, want it to name both racks", err)
+	}
+	if _, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe1", Rack: "R02", Attributes: map[string]string{"rack": "R02"}},
+	}}); err != nil {
+		t.Errorf("an entry saying the same rack twice is consistent: %v", err)
 	}
 }

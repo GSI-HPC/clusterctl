@@ -115,6 +115,9 @@ func FromDocuments(docs ...Document) (*Inventory, error) {
 			if err := checkIdentifiers(entry); err != nil {
 				return nil, fmt.Errorf("%s: %w", label, err)
 			}
+			if err := checkPlacement(entry); err != nil {
+				return nil, fmt.Errorf("%s: %w", label, err)
+			}
 			for _, name := range ns.Expand() {
 				if err := b.claim(name, label); err != nil {
 					return nil, err
@@ -328,19 +331,19 @@ func (inv *Inventory) apply(name string, defaults v1alpha1.NodeDefaults, e v1alp
 		for k, v := range defaults.Attributes {
 			node.Attributes[k] = v
 		}
+		node.Rack, node.Level = node.Attributes["rack"], node.Attributes["level"]
 		inv.nodes[name] = node
 		inv.order = append(inv.order, name)
 	}
 	for k, v := range e.Attributes {
 		node.Attributes[k] = v
 	}
-	setIf(&node.Rack, e.Rack)
-	setIf(&node.Level, e.Level)
 	// The rack and the level are also exposed as attributes, so that a
 	// group source reading an attribute can build one group per rack
-	// without the rack having to be written twice.
-	setAttr(node.Attributes, "rack", node.Rack)
-	setAttr(node.Attributes, "level", node.Level)
+	// without the rack having to be written twice. Either way of writing
+	// them sets both, so that @rack:R02 and node rack R02 always agree.
+	place(node, &node.Rack, "rack", e.Rack, e.Attributes)
+	place(node, &node.Level, "level", e.Level, e.Attributes)
 	setIf(&node.Address, e.Address)
 	setIf(&node.BMCAddress, e.BMCAddress)
 	setIf(&node.CID, e.CID)
@@ -356,13 +359,32 @@ func setIf(dst *string, value string) {
 	}
 }
 
-// setAttr mirrors a field into the attribute table, leaving an attribute the
-// entry set explicitly alone.
-func setAttr(attrs map[string]string, key, value string) {
-	if value == "" {
+// place sets a field that is also an attribute, from whichever of the two an
+// entry wrote. An entry writing neither leaves both as they were, inherited
+// from an earlier entry or the defaults.
+func place(node *Node, field *string, key, value string, attrs map[string]string) {
+	if v, ok := attrs[key]; ok {
+		value = v
+	} else if value == "" {
 		return
 	}
-	attrs[key] = value
+	*field = value
+	if value == "" {
+		delete(node.Attributes, key)
+		return
+	}
+	node.Attributes[key] = value
+}
+
+// checkPlacement refuses an entry that writes the rack or the level both as a
+// field and as an attribute, with different values.
+func checkPlacement(e v1alpha1.NodeEntry) error {
+	for _, f := range [...]struct{ key, value string }{{"rack", e.Rack}, {"level", e.Level}} {
+		if v, ok := e.Attributes[f.key]; ok && f.value != "" && v != f.value {
+			return fmt.Errorf("%s is %s, and the %s attribute %s; write it once", f.key, f.value, f.key, v)
+		}
+	}
+	return nil
 }
 
 // Len reports how many nodes the inventory knows.
@@ -483,34 +505,17 @@ func (inv *Inventory) WithAttribute(key, value string) *nodeset.NodeSet {
 
 // Racks lists the racks the inventory knows, in sorted order.
 func (inv *Inventory) Racks() []string {
-	return inv.AttributeValuesOf(func(n *Node) string { return n.Rack })
+	return inv.AttributeValues("rack")
 }
 
-// AttributeValuesOf lists the distinct non-empty values a field takes.
-func (inv *Inventory) AttributeValuesOf(field func(*Node) string) []string {
-	seen := map[string]bool{}
-	for _, name := range inv.order {
-		if v := field(inv.nodes[name]); v != "" {
-			seen[v] = true
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for v := range seen {
-		out = append(out, v)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// InRack returns the nodes of one rack.
+// InRack returns the nodes of one rack. It reads the rack attribute and
+// compares it exactly, the way the @rack: group does, so that the two never
+// disagree about what a rack holds.
 func (inv *Inventory) InRack(rack string) *nodeset.NodeSet {
-	ns := nodeset.New()
-	for _, name := range inv.order {
-		if strings.EqualFold(inv.nodes[name].Rack, rack) {
-			_ = ns.Add(name)
-		}
+	if rack == "" {
+		return nodeset.New()
 	}
-	return ns
+	return inv.WithAttribute("rack", rack)
 }
 
 // BootPath returns the boot path configured for a node: the one on its
