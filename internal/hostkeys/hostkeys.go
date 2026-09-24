@@ -18,7 +18,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -552,21 +551,34 @@ type commandConn struct {
 
 func (c *commandConn) Read(p []byte) (int, error) {
 	n, err := c.out.Read(p)
-	if errors.Is(err, io.EOF) {
-		// The command ended; what it said on its way out is the reason,
-		// such as a jump host that could not be reached.
-		select {
-		case <-c.done:
-		case <-time.After(time.Second):
-		}
-		if msg := lastLine(c.stderr.String()); msg != "" {
-			return n, fmt.Errorf("%s: %s: %w", c.argv[0], msg, err)
-		}
+	if err != nil {
+		err = c.explain(err)
 	}
 	return n, err
 }
 
-func (c *commandConn) Write(p []byte) (int, error) { return c.in.Write(p) }
+// Write fails rather than Read when the command is gone before the client
+// has spoken, because in an SSH handshake the client speaks first.
+func (c *commandConn) Write(p []byte) (int, error) {
+	n, err := c.in.Write(p)
+	if err != nil {
+		err = c.explain(err)
+	}
+	return n, err
+}
+
+// explain adds what the command said on its way out to an error of the
+// connection, such as a jump host that could not be reached.
+func (c *commandConn) explain(err error) error {
+	select {
+	case <-c.done:
+	case <-time.After(time.Second):
+	}
+	if msg := lastLine(c.stderr.String()); msg != "" {
+		return fmt.Errorf("%s: %s: %w", c.argv[0], msg, err)
+	}
+	return err
+}
 
 func (c *commandConn) Close() error {
 	c.once.Do(func() {
