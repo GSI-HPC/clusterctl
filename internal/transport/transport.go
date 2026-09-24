@@ -407,7 +407,7 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 		Stderr:   stderr.String(),
 		Duration: time.Since(start),
 	}
-	result.ExitCode, result.Err = classify(target, runErr, result.Stderr)
+	result.ExitCode, result.Err = classify(ctx, target, runErr, result.Stderr)
 	return result, nil
 }
 
@@ -431,23 +431,45 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 	if cmd.Stderr == nil {
 		cmd.Stderr = os.Stderr
 	}
-	_, err = classify(target, cmd.Run(), "")
+	_, err = classify(ctx, target, cmd.Run(), "")
 	return err
 }
 
 // classify turns the outcome of running ssh into an exit code and an error
 // that carries the right code for the process.
-func classify(target Target, err error, stderr string) (int, error) {
+//
+// A command that ended because its context did is reported as interrupted,
+// whatever ssh exited with: once ssh has been killed, its status says nothing
+// about the host.
+func classify(ctx context.Context, target Target, err error, stderr string) (int, error) {
 	if err == nil {
 		return 0, nil
 	}
 	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
+	isExit := errors.As(err, &exitErr)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		code := -1
+		if isExit {
+			code = exitErr.ExitCode()
+		}
+		return code, cancelled(target, ctxErr)
+	}
+	if !isExit {
 		return -1, exitcode.Wrap(exitcode.Transport,
 			fmt.Errorf("running ssh for %s: %w", target, err))
 	}
 	code := exitErr.ExitCode()
 	return code, exited(target, code, stderr)
+}
+
+// cancelled is the error of a command that was stopped because its context
+// ended. An interrupt exits 130; a deadline is the command's failure.
+func cancelled(target Target, err error) error {
+	code := exitcode.TargetFailed
+	if errors.Is(err, context.Canceled) {
+		code = exitcode.Interrupted
+	}
+	return exitcode.Wrap(code, fmt.Errorf("%s: %w", target, err))
 }
 
 // exited is the error of a command that ran and exited with a status. ssh's

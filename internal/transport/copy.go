@@ -101,6 +101,6 @@ func (c *Client) Copy(ctx context.Context, target Target, req CopyRequest) (*Res
 	start := time.Now()
 	runErr := cmd.Run()
 	result := &Result{Target: target, Stderr: stderr.String(), Duration: time.Since(start)}
-	result.ExitCode, result.Err = classify(target, runErr, result.Stderr)
+	result.ExitCode, result.Err = classify(ctx, target, runErr, result.Stderr)
 	return result, nil
 }
