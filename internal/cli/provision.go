@@ -678,9 +678,23 @@ new file is moved into place only once it has arrived complete.
 	return cmd
 }
 
+// cincShowRow is what cinc show reports for one node.
+type cincShowRow struct {
+	Node       string `json:"node" yaml:"node"`
+	Configured bool   `json:"configured" yaml:"configured"`
+	Archive    string `json:"archive,omitempty" yaml:"archive,omitempty"`
+	RunList    string `json:"runList,omitempty" yaml:"runList,omitempty"`
+	Error      string `json:"error,omitempty" yaml:"error,omitempty"`
+}
+
 func newCincShowCommand(r *root) *cobra.Command {
 	return leaf("show [NODESET]", "Show what each node is configured from", `
-Print the configuration source and run list each node is set to use.`,
+Print the configuration source and run list each node is set to use.
+
+A node without the file is shown as not configured. A node that could not be
+read, or whose file holds anything but plain assignments, is shown as failed
+and makes the command fail, with exit code 3 when a node could not be
+reached.`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -694,7 +708,7 @@ Print the configuration source and run list each node is set to use.`,
 			path := cincConfigPath(a)
 			results, err := runOnNodes(a, ns, func(string) transport.Request {
 				return transport.Request{
-					Argv:    []string{"cat", path},
+					Script:  cincReadScript(path),
 					Timeout: a.Timeout().Get(),
 					TTY:     transport.TTYNone,
 				}
@@ -703,27 +717,42 @@ Print the configuration source and run list each node is set to use.`,
 				return err
 			}
 			t := output.NewTable(output.Cols("NODE", "ARCHIVE", "RUN LIST")...)
+			rows := make([]cincShowRow, 0, len(results))
+			outcomes := make([]*transport.Result, 0, len(results))
 			for _, res := range results {
-				if res.Failed() {
-					t.Add(res.Target.Name, "not configured", "")
-					continue
-				}
-				url, runList := "", ""
-				for _, line := range res.Lines() {
-					key, value, ok := strings.Cut(line, "=")
-					if !ok {
-						continue
+				row := cincShowRow{Node: res.Target.Name}
+				outcome := res
+				switch {
+				case res.Failed():
+					row.Error = cincDetail(res)
+				case res.Stdout == "":
+				default:
+					solo, err := parseCincSolo(res.Stdout)
+					if err == nil {
+						err = solo.check()
 					}
-					switch strings.TrimSpace(key) {
-					case "CHEF_RECIPE_URL":
-						url = value
-					case "CHEF_RUN_LIST":
-						runList = value
+					if err != nil {
+						row.Error = fmt.Sprintf("%s: %v", path, err)
+						outcome = cincRefused(res.Target, err)
+						break
 					}
+					row.Configured, row.Archive, row.RunList = true, solo.URL, solo.RunList
 				}
-				t.Add(res.Target.Name, url, runList)
+				switch {
+				case row.Error != "":
+					t.Add(row.Node, "failed: "+row.Error, "")
+				case !row.Configured:
+					t.Add(row.Node, "not configured", "")
+				default:
+					t.Add(row.Node, row.Archive, row.RunList)
+				}
+				rows = append(rows, row)
+				outcomes = append(outcomes, outcome)
 			}
-			return a.Print(output.Result{Table: t})
+			if err := a.Print(output.Result{Table: t, Object: rows}); err != nil {
+				return err
+			}
+			return cincFailureError(outcomes)
 		})
 }
 
