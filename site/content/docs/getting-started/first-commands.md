@@ -81,7 +81,7 @@ groups.rack       R02
 
 ```console
 $ clusterctl login --dry-run login
-ssh -F ~/.local/state/clusterctl/ssh_config alice_adm@login.hpc.example.org
+ssh -F ~/.local/state/clusterctl/ssh_config -- alice_adm@login.hpc.example.org
 
 $ clusterctl login login -- uptime
  14:42:30 up 31 days,  4:10,  0 users,  load average: 12.04, 11.87, 11.90
