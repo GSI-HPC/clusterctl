@@ -93,6 +93,54 @@ func (i SopsInfo) Summary() string {
 	return out
 }
 
+// DefaultSopsKeyTypes are the kinds of master key trusted when the
+// workstation names none: age, which needs nothing but a local identity.
+func DefaultSopsKeyTypes() []string { return []string{sopsage.KeyTypeIdentifier} }
+
+// CheckKeyTypes refuses a document encrypted to a kind of master key that is
+// not trusted here. The metadata that names the keys is not covered by the
+// message authentication code, so anyone who can write the file can add a
+// Vault or a key management service there, and sops would send this
+// machine's credentials to it.
+func (i SopsInfo) CheckKeyTypes(trusted []string) error {
+	if len(trusted) == 0 {
+		trusted = DefaultSopsKeyTypes()
+	}
+	var untrusted []string
+	for _, k := range i.Keys {
+		if !slices.Contains(trusted, k.Type) && !slices.Contains(untrusted, k.Type) {
+			untrusted = append(untrusted, k.Type)
+		}
+	}
+	if len(untrusted) == 0 {
+		return nil
+	}
+	sort.Strings(untrusted)
+	return fmt.Errorf("the file is encrypted to %s keys, which this workstation does not trust (it trusts %s); "+
+		"add the kind to workstation.sopsKeyTypes if the site uses it",
+		strings.Join(untrusted, " and "), strings.Join(trusted, ", "))
+}
+
+// SopsKeys says which keys may open a sops file.
+type SopsKeys struct {
+	// Identities are the age identities of workstation.identities. They
+	// are tried first.
+	Identities []age.Identity
+	// Discover lets sops look for keys itself as well: SOPS_AGE_KEY_FILE
+	// and its other variables, ~/.config/sops/age/keys.txt, a PGP agent,
+	// the credentials of a cloud key management service or Vault. That can
+	// run a program or ask for a passphrase, so it is for a terminal only.
+	Discover bool
+	// Types are the kinds of master key trusted, DefaultSopsKeyTypes when
+	// empty. A file encrypted to any other kind is refused.
+	Types []string
+}
+
+// decryptionOrder is the order sops tries the master keys of a group in:
+// the local kinds first, as the sops command does, so that a working age
+// identity is used before any service is contacted.
+var decryptionOrder = []string{sopsage.KeyTypeIdentifier, "pgp"}
+
 // InspectSops reads the sops metadata of a YAML file without decrypting
 // anything, so that a damaged or hand edited file is reported when the
 // configuration loads rather than when a node is half way through a
@@ -102,6 +150,10 @@ func InspectSops(data []byte) (SopsInfo, error) {
 	if err != nil {
 		return SopsInfo{}, err
 	}
+	return inspect(tree)
+}
+
+func inspect(tree sops.Tree) (SopsInfo, error) {
 	m := tree.Metadata
 	info := SopsInfo{
 		Groups:         len(m.KeyGroups),
@@ -139,20 +191,25 @@ func checkMetadata(m sops.Metadata) error {
 // DecryptSops decrypts a sops encrypted YAML file into memory and returns
 // the values of the given top level mappings, by key.
 //
-// The data key is recovered with the given age identities first, which are
-// the ones workstation.identities names, and then with whatever sops itself
-// finds: SOPS_AGE_KEY_FILE and its other variables, a PGP agent, or the
-// credentials of a cloud key management service. The integrity of the whole
-// file is verified before anything is returned.
+// A file encrypted to a kind of master key keys.Types does not trust is
+// refused before any key is tried. The data key is recovered with the age
+// identities of keys.Identities first, which are the ones
+// workstation.identities names, and then, with keys.Discover, with whatever
+// sops itself finds, age and PGP keys before any service. The integrity of
+// the whole file is verified before anything is returned.
 //
 // The values are read from the decrypted tree as sops holds it, never
 // written out and parsed again, and no error says anything of them.
-func DecryptSops(data []byte, identities []age.Identity, sections []string) (values map[string]map[string]string, err error) {
+func DecryptSops(data []byte, keys SopsKeys, sections []string) (values map[string]map[string]string, err error) {
 	tree, err := loadSops(data)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkMetadata(tree.Metadata); err != nil {
+	info, err := inspect(tree)
+	if err != nil {
+		return nil, err
+	}
+	if err := info.CheckKeyTypes(keys.Types); err != nil {
 		return nil, err
 	}
 	if err := checkValueTypes(tree.Branches); err != nil {
@@ -160,16 +217,25 @@ func DecryptSops(data []byte, identities []age.Identity, sections []string) (val
 	}
 	var attempts attempts
 	services := []keyservice.KeyServiceClient{}
-	if len(identities) > 0 {
-		services = append(services, recording{ageKeyService{identities: identities}, "workstation.identities", &attempts})
+	if len(keys.Identities) > 0 {
+		services = append(services, recording{ageKeyService{identities: keys.Identities}, "workstation.identities", &attempts})
 	}
-	services = append(services, recording{keyservice.NewLocalClient(), "sops", &attempts})
+	if keys.Discover {
+		services = append(services, recording{keyservice.NewLocalClient(), "sops", &attempts})
+	} else if len(keys.Identities) == 0 {
+		return nil, errors.New("no key is available without a terminal: set workstation.identities; " +
+			"sops looks for keys itself only at a terminal, where it may ask for a passphrase")
+	}
 
-	key, err := tree.Metadata.GetDataKeyWithKeyServices(services, nil)
+	key, err := tree.Metadata.GetDataKeyWithKeyServices(services, decryptionOrder)
 	if err != nil {
 		// The error of sops only counts the key groups that failed; what
 		// was tried and why it failed is what an administrator can act on.
-		return nil, fmt.Errorf("no key available here opens it: %s", attempts)
+		msg := fmt.Sprintf("no key available here opens it: %s", attempts)
+		if !keys.Discover {
+			msg += "; without a terminal only workstation.identities are tried"
+		}
+		return nil, errors.New(msg)
 	}
 
 	// From here on an error of sops may carry plaintext, and a panic in it

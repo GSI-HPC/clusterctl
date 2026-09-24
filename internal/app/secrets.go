@@ -79,14 +79,16 @@ func (a *App) SecretValues(name string) (map[string][]byte, error) {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 	// Without workstation.identities sops looks for a key itself, so a
-	// missing identity is not an error here.
-	var ids []age.Identity
+	// missing identity is not an error here. It does so only at a
+	// terminal: it can run SOPS_AGE_KEY_CMD or have gpg-agent ask for a
+	// passphrase, which under MCP or in a script nobody asked for.
+	keys := secrets.SopsKeys{Discover: a.IsTTY, Types: a.Spec.Workstation.SopsKeyTypes}
 	if len(a.Spec.Workstation.Identities) > 0 {
-		if ids, err = a.identitiesLocked(); err != nil {
+		if keys.Identities, err = a.identitiesLocked(); err != nil {
 			return nil, err
 		}
 	}
-	sections, err := secrets.DecryptSops(raw, ids, config.SecretSections())
+	sections, err := secrets.DecryptSops(raw, keys, config.SecretSections())
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, fmt.Errorf("the Secret %q (%s): %w", name, doc.File, err))
 	}
