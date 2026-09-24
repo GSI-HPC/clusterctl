@@ -4,6 +4,7 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -43,9 +44,11 @@ func (r *Recorder) Run(_ context.Context, target Target, req Request) (*Result, 
 		return nil, err
 	}
 	// The payload is read so that a caller streaming a secret over stdin
-	// behaves the same as it would against a real host.
+	// behaves the same as it would against a real host. Reply is handed a
+	// copy, so a test can see what arrived; the call does not keep it.
+	var payload []byte
 	if req.Stdin != nil {
-		if _, err := io.Copy(io.Discard, req.Stdin); err != nil {
+		if payload, err = io.ReadAll(req.Stdin); err != nil {
 			return nil, err
 		}
 	}
@@ -57,6 +60,9 @@ func (r *Recorder) Run(_ context.Context, target Target, req Request) (*Result, 
 	r.mu.Unlock()
 
 	if r.Reply != nil {
+		if req.Stdin != nil {
+			req.Stdin = bytes.NewReader(payload)
+		}
 		return r.Reply(target, req)
 	}
 	if index < len(r.Responses) {
