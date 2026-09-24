@@ -27,6 +27,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/groups"
+	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
 	"github.com/GSI-HPC/clusterctl/internal/output"
@@ -355,7 +356,27 @@ func (a *App) Select(expr string) (*nodeset.NodeSet, error) {
 	if ns.IsEmpty() {
 		return nil, exitcode.Errorf(exitcode.Usage, "%q names no node", expr)
 	}
-	return a.canonicalize(ns), nil
+	ns = a.canonicalize(ns)
+	if err := checkHostNames(ns); err != nil {
+		return nil, err
+	}
+	return ns, nil
+}
+
+// checkHostNames refuses a selection with a name that is not a host name.
+//
+// A node name ends up as an ssh destination and inside a Redfish URL, where a
+// leading "-" is an option and ":", "@", "/", "?" and "#" redirect the
+// request. It may have been typed, come from a group source or an inventory
+// file, or have been chosen by an agent, so it is checked here, once, for
+// every command.
+func checkHostNames(ns *nodeset.NodeSet) error {
+	for _, name := range ns.Expand() {
+		if err := hostname.Check(name); err != nil {
+			return exitcode.Wrap(exitcode.Usage, fmt.Errorf("node %w", err))
+		}
+	}
+	return nil
 }
 
 // canonicalize replaces each name with the one the inventory uses for that

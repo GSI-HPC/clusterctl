@@ -61,6 +61,13 @@ asks the same question.
 another, and refuses the global options the server sets itself: `--config`,
 `--context`, `--set`, `--yes` and `--force`.
 
+A read command still connects somewhere, so the names an agent passes are held
+to the same rule as any other selection: a node name has to be a host name.
+One beginning with `-` would otherwise reach ssh as an option, and one with a
+`:`, `@`, `/`, `?` or `#` would send a Redfish read, and the site's BMC
+password, to a host and port of the agent's choosing. See
+[node sets](nodeset.md#names-are-host-names).
+
 ## Plan and apply
 
 A change is two calls.
