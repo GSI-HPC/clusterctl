@@ -90,7 +90,7 @@ Exactly one per credential:
 | `file` | The first line of a file |
 | `ageFile` | An age encrypted file, with `workstation.identities` |
 | `secretRef` | `{name, key}` of a `Secret` document |
-| `command` | The standard output of a helper |
+| `command` | The first line a helper prints; a helper named by a relative path resolves against the `Site` document, a bare name is looked up in `PATH` |
 | `prompt` | The terminal |
 
 ## Cluster

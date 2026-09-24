@@ -173,7 +173,15 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		return value, nil
 
 	case len(src.Command) > 0:
-		cmd := exec.CommandContext(ctx, src.Command[0], src.Command[1:]...)
+		// A helper named by a path resolves against the site, as a file
+		// does; relative to the working directory it would be whatever
+		// the directory clusterctl was started in holds. A bare name is
+		// looked up in PATH.
+		helper := src.Command[0]
+		if strings.ContainsRune(helper, '/') {
+			helper = r.path(helper)
+		}
+		cmd := exec.CommandContext(ctx, helper, src.Command[1:]...)
 		cmd.Stderr = os.Stderr
 		out, err := cmd.Output()
 		if err != nil {
