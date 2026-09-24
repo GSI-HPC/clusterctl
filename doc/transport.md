@@ -242,6 +242,14 @@ the server presents its key, so no credentials are involved. The file is always
 rewritten completely, under a lock, and sorted, so two administrators
 refreshing at once cannot lose an entry and a diff stays readable.
 
+A file the team shares lives in a directory its group can write, best with
+the setgid bit so that new files take the directory's group. The lock file
+beside it is then readable and writable by that group, and a rewrite keeps the
+file's mode and group, and its owner when root writes it, so that the next
+administrator can still write it. A symbolic link to the file stays a link, as
+long as the administrator writing or root made it; a link anyone else made is
+refused rather than followed.
+
 `hostkey verify` reports a changed key and exits non-zero. Whether that is a
 reinstalled machine or something worth investigating is not for a program to
 decide.
