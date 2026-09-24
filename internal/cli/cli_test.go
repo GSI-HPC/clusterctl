@@ -253,8 +253,10 @@ func TestSelectionIsRequired(t *testing.T) {
 }
 
 func TestDestructiveCommandRefusesWithoutATerminal(t *testing.T) {
-	// A power action in a script must not go ahead unasked.
-	_, err := run(t, harnessOptions{tty: false}, "bmc", "power", "off", "-n", "exe1")
+	// A power action in a script must not go ahead unasked, even on a node
+	// Slurm reports idle.
+	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "exe0001 idle\n"}}}
+	_, err := run(t, harnessOptions{tty: false, recorder: rec}, "bmc", "power", "off", "-n", "exe1")
 	if err == nil {
 		t.Fatal("a power action with no terminal should be refused")
 	}
