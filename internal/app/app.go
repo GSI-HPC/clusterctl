@@ -171,6 +171,7 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		Context: opts.Context,
 		Env:     env,
 		Set:     opts.Set,
+		Fanout:  opts.Fanout,
 	})
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
@@ -189,11 +190,14 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		Format:   format,
 		opts:     opts,
 	}
+	// --fanout is applied as the flags layer of the configuration, so that
+	// config explain reports it; the built-in default is in defaults.yaml.
+	// This only catches a fanout.max of zero written somewhere.
 	if a.Spec.Fanout.Max == 0 {
 		a.Spec.Fanout.Max = fanout.DefaultMax
 	}
-	if opts.Fanout > 0 {
-		a.Spec.Fanout.Max = opts.Fanout
+	if err := a.absoluteCommandLinePaths(); err != nil {
+		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 
 	if a.Namer, err = naming.New(a.Spec.Naming, a.Spec.Domains); err != nil {
@@ -256,6 +260,51 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	a.Gate.Out = streams.Err
 
 	return a, nil
+}
+
+// absoluteCommandLinePaths makes the relative paths that were given in the
+// environment or with --set absolute against the working directory. Path
+// resolves what is left against the directory of the Site document, which is
+// right for a path written in a document: CLUSTERCTL_KNOWN_HOSTS=known_hosts
+// means the file in the directory the command was run from, not one in the
+// site checkout.
+func (a *App) absoluteCommandLinePaths() error {
+	var wd string
+	abs := func(configPath string, value *string) error {
+		if *value == "" || !a.Resolved.FromCommandLine(configPath) {
+			return nil
+		}
+		expanded := config.ExpandPath(*value, "")
+		if filepath.IsAbs(expanded) {
+			*value = expanded
+			return nil
+		}
+		if wd == "" {
+			var err error
+			if wd, err = os.Getwd(); err != nil {
+				return fmt.Errorf("%s is relative and the working directory is not known: %w", configPath, err)
+			}
+		}
+		*value = filepath.Join(wd, expanded)
+		return nil
+	}
+	if err := abs("ssh.knownHostsFile", &a.Spec.SSH.KnownHostsFile); err != nil {
+		return err
+	}
+	if err := abs("bmc.redfish.pinStore", &a.Spec.BMC.Redfish.PinStore); err != nil {
+		return err
+	}
+	for i := range a.Spec.Workstation.Identities {
+		if err := abs("workstation.identities", &a.Spec.Workstation.Identities[i]); err != nil {
+			return err
+		}
+	}
+	for i := range a.Spec.Services.Cinc.Secrets {
+		if err := abs("services.cinc.secrets", &a.Spec.Services.Cinc.Secrets[i].Source); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // loadInventory builds the node inventory from the documents the cluster

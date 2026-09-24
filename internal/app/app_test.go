@@ -5,6 +5,7 @@ package app_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -206,5 +207,43 @@ func TestPathResolvesAgainstTheSiteDocument(t *testing.T) {
 	}
 	if a.Path("") != "" {
 		t.Error("an empty path should stay empty")
+	}
+}
+
+// Review 9.11: a relative path given in the environment or with --set is
+// resolved against the working directory, where it was typed, and one
+// written in a document against the directory of the Site document.
+func TestCommandLinePathsResolveAgainstTheWorkingDirectory(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		env  map[string]string
+		set  map[string]string
+		want string
+	}{
+		{"document", nil, nil, filepath.Join(exampleDir, "ssh-known-hosts")},
+		{"environment", map[string]string{"CLUSTERCTL_KNOWN_HOSTS": "known"}, nil, filepath.Join(wd, "known")},
+		{"--set", nil, map[string]string{"ssh.knownHostsFile": "known"}, filepath.Join(wd, "known")},
+		{"--set section", nil, map[string]string{"ssh": "{knownHostsFile: known}"}, filepath.Join(wd, "known")},
+		{"absolute", nil, map[string]string{"ssh.knownHostsFile": "/etc/known"}, "/etc/known"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a, err := app.New(context.Background(), app.Streams{StateDir: t.TempDir(), CacheDir: t.TempDir()}, app.Options{
+				ConfigFiles: []string{exampleDir},
+				Env:         func(k string) string { return tc.env[k] },
+				Set:         tc.set,
+				Runner:      &transport.Recorder{},
+			})
+			if err != nil {
+				t.Fatalf("building the app: %v", err)
+			}
+			if got := a.Path(a.Spec.SSH.KnownHostsFile); got != tc.want {
+				t.Errorf("known hosts file = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

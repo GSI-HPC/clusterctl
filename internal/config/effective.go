@@ -41,6 +41,10 @@ type ResolveOptions struct {
 	Env func(string) string
 	// Set are the --set assignments, applied last.
 	Set map[string]string
+	// Fanout is what --fanout gave, zero when it was not given. It is
+	// applied with the flags, after --set, so that config explain reports
+	// the value the commands use.
+	Fanout int
 }
 
 // envPaths maps the environment variables that override configuration to the
@@ -140,6 +144,12 @@ func (b *Bundle) Resolve(opts ResolveOptions) (*Resolved, error) {
 	// 7. --set
 	if err := applySet(tree, opts.Set); err != nil {
 		return nil, err
+	}
+	if opts.Fanout > 0 {
+		o := Origin{Layer: v1alpha1.LayerFlags, File: "--fanout"}
+		if err := tree.SetPath(v1alpha1.LayerFlags, "fanout.max", int64(opts.Fanout), o); err != nil {
+			return nil, err
+		}
 	}
 
 	resolved := &Resolved{
@@ -278,3 +288,21 @@ func decodeInto(data map[string]any, target any) error {
 // Decode converts a parsed document into a typed value, rejecting keys the
 // type does not define.
 func Decode(data map[string]any, target any) error { return decodeInto(data, target) }
+
+// FromCommandLine reports whether the value at a dotted path was given in the
+// environment or on the command line rather than in a document, by the path
+// itself or by a section it is part of. A relative path given there means what
+// it means to the shell it was typed in, not what it means to the site.
+func (r *Resolved) FromCommandLine(path string) bool {
+	for p := path; p != ""; {
+		if o, ok := r.Tree.Origin(p); ok {
+			return o.Layer == v1alpha1.LayerEnvironment || o.Layer == v1alpha1.LayerFlags
+		}
+		cut := strings.LastIndex(p, ".")
+		if cut < 0 {
+			break
+		}
+		p = p[:cut]
+	}
+	return false
+}
