@@ -26,7 +26,9 @@ ambiguity was found. A fuzzing worker gives up on any input that runs for ten
 seconds, so the target lowers the expansion limits to 2¹² and skips inputs
 longer than a kilobyte: every input stays cheap, and the time goes into
 variety. Size is a separate test, which folds sets of a quarter of a million
-hosts and would take more than a minute if folding were quadratic.
+hosts and would take more than a minute if folding were quadratic. A second
+target checks that the DHCP parser never panics on any input; run it with
+`go test ./internal/dhcp/ -fuzz FuzzParse`.
 
 **A differential corpus** holds node set expressions with the answer
 ClusterShell gave for each, in `nodeset/testdata/clustershell.txt`. A test

@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -24,8 +25,10 @@ addresses, client identifiers and boot files it hands to the nodes.
 
 The configuration is parsed rather than grepped, so a declaration whose
 options are in an unusual order reports its own values and not a neighbour's.
-It is fetched once and reused for a short time, so asking about a hundred
-nodes does not fetch it a hundred times.`,
+Files named by include statements are read too, and a construct the parser
+does not understand is an error. The configuration is fetched once and reused
+for a short time, so asking about a hundred nodes does not fetch it a hundred
+times.`,
 		newDHCPHostsCommand(r),
 		newDHCPConfigCommand(r),
 		newDHCPLeasesCommand(r),
@@ -34,7 +37,8 @@ nodes does not fetch it a hundred times.`,
 	)
 }
 
-// dhcpConfig fetches and parses the server configuration.
+// dhcpConfig fetches and parses the server configuration, and every file it
+// includes.
 func dhcpConfig(a *app.App) (*dhcp.Config, error) {
 	spec := a.Spec.Services.DHCP
 	if spec.Role == "" {
@@ -45,13 +49,17 @@ func dhcpConfig(a *app.App) (*dhcp.Config, error) {
 	if path == "" {
 		path = "/etc/dhcp/dhcpd.conf"
 	}
-	data, err := a.RemoteFile(a.Context(), spec.Role, path, spec.CacheTTL.Or(2*time.Minute))
+	ttl := spec.CacheTTL.Or(2 * time.Minute)
+	cfg, err := dhcp.ParseFile(path, func(file string) ([]byte, error) {
+		return a.RemoteFile(a.Context(), spec.Role, file, ttl)
+	})
 	if err != nil {
-		return nil, err
-	}
-	cfg, err := dhcp.Parse(data)
-	if err != nil {
-		return nil, exitcode.Errorf(exitcode.TargetFailed, "parsing %s: %v", path, err)
+		// A file that could not be fetched keeps the exit code saying so.
+		var coded *exitcode.Error
+		if errors.As(err, &coded) {
+			return nil, err
+		}
+		return nil, exitcode.Errorf(exitcode.TargetFailed, "parsing %s: %w", path, err)
 	}
 	return cfg, nil
 }
