@@ -15,6 +15,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/dhcp"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -162,9 +163,12 @@ func newDHCPLeasesCommand(r *root) *cobra.Command {
 	var lines int
 	cmd := leaf("log", "Show the DHCP responses from the server log", `
 Read the DHCP exchanges out of the server's log, which is what to look at when
-a node is not coming up.`,
+a node is not coming up. At most 10000 lines are shown.`,
 		cobra.NoArgs,
 		func(cmd *cobra.Command, _ []string) error {
+			if lines < 1 || lines > maxLogLines {
+				return exitcode.Errorf(exitcode.Usage, "--lines must be between 1 and %d, not %d", maxLogLines, lines)
+			}
 			a, err := r.App()
 			if err != nil {
 				return err
@@ -178,14 +182,21 @@ a node is not coming up.`,
 				path = "/var/log/syslog"
 			}
 			result, err := a.RunOnRole(a.Context(), spec.Role, transport.Request{
-				Argv:    []string{"sh", "-c", fmt.Sprintf("grep -a dhcpd %s | tail -n %d", path, lines)},
+				Argv: []string{"sh", "-c",
+					fmt.Sprintf("grep -a -e dhcpd -- %s | tail -n %d", shellquote.Quote(path), lines)},
 				Timeout: a.Timeout().Get(),
 				TTY:     transport.TTYNone,
 			})
 			if err != nil {
 				return err
 			}
-			return say(cmd, "%s\n", result.Output())
+			// The log carries what the nodes sent, such as their host
+			// names, so control characters are shown rather than obeyed.
+			out := strings.Split(result.Output(), "\n")
+			for i, line := range out {
+				out[i] = escapeControl(line)
+			}
+			return say(cmd, "%s\n", strings.Join(out, "\n"))
 		})
 	cmd.Flags().IntVarP(&lines, "lines", "l", 50, "how many log lines to show")
 	return cmd
@@ -210,9 +221,14 @@ Run a bounded packet capture of the DHCP exchange on the server, which is what
 to do when a node asks for an address and nothing answers.
 
 The capture stops on its own after the given time, so it cannot be left
-running by accident.`,
+running by accident; --seconds must be at least 1.`,
 		cobra.NoArgs,
 		func(cmd *cobra.Command, _ []string) error {
+			// A timeout of zero or less is no timeout at all, and tcpdump
+			// would run as root until something stopped it.
+			if seconds < 1 {
+				return exitcode.Errorf(exitcode.Usage, "--seconds must be at least 1, not %d", seconds)
+			}
 			a, err := r.App()
 			if err != nil {
 				return err

@@ -771,7 +771,7 @@ previewed and confirmed like any other change.`,
 		})
 }
 
-// maxLogLines bounds boot log --lines.
+// maxLogLines bounds boot log --lines and dhcp log --lines.
 const maxLogLines = 10000
 
 func newBootLogCommand(r *root) *cobra.Command {
