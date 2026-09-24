@@ -18,6 +18,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"filippo.io/age"
 
@@ -56,6 +58,11 @@ type Resolver struct {
 	Prompt func(prompt string) (string, error)
 	// Secret reads a key of a Secret document for a secretRef source.
 	Secret func(ref v1alpha1.SecretKeyRef) ([]byte, error)
+	// NoTerminal says that nobody is at a terminal to answer a prompt, as
+	// under the MCP server. A command source then runs in a session of its
+	// own, so that a helper such as gpg's pinentry cannot ask on whatever
+	// terminal the process was started from.
+	NoTerminal bool
 
 	// reading is held across a whole lookup, so that concurrent callers
 	// wait for the one read instead of each prompting or running the
@@ -183,6 +190,12 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		}
 		cmd := exec.CommandContext(ctx, helper, src.Command[1:]...)
 		cmd.Stderr = os.Stderr
+		// A helper that leaves something behind holding its output does
+		// not keep the lookup waiting once the context has ended.
+		cmd.WaitDelay = 5 * time.Second
+		if r.NoTerminal {
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		}
 		out, err := cmd.Output()
 		if err != nil {
 			return "", fmt.Errorf("credential %q: the helper failed: %w", name, err)

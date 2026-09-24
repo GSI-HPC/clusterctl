@@ -10,7 +10,10 @@ changes. It cannot make a change you have not confirmed.
 ## Setting it up
 
 The server runs on your workstation, as you. It uses your configuration and
-your ssh agent, and stays in the context it was started in.
+your ssh agent, and stays in the context it was started in. It has no terminal
+to ask on, so ssh never prompts for a password or a passphrase: a host your
+agent cannot log in to fails the call as unreachable. Make sure the client
+passes `SSH_AUTH_SOCK` to the server.
 
 ```console
 $ claude mcp add clusterctl -- clusterctl mcp serve --context cluster1

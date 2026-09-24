@@ -47,6 +47,9 @@ func (c *Client) CopyArgs(target Target, req CopyRequest) ([]string, error) {
 	if req.Preserve {
 		args = append(args, "-p")
 	}
+	if c.noTerminal {
+		args = append(args, "-o", "BatchMode=yes")
+	}
 
 	host := target.Host
 	if user := c.userFor(target); user != "" {
@@ -89,7 +92,7 @@ func (c *Client) Copy(ctx context.Context, target Target, req CopyRequest) (*Res
 	if err != nil {
 		return nil, err
 	}
-	cmd := command(ctx, args)
+	cmd := c.command(ctx, args)
 	stderr := &capture{limit: DefaultMaxOutput}
 	cmd.Stderr = stderr
 	cmd.Stdout = os.Stderr

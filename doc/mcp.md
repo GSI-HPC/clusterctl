@@ -158,7 +158,10 @@ confirmation come with it.
   server's own tools and in the command tree `read_command` runs; a call
   names its nodes or selects nothing, as [safety.md](safety.md) requires.
 - **No terminal.** Anything that would prompt refuses instead, including the
-  BMC password prompt. A sops encrypted Secret is opened with the keys of
+  BMC password prompt. ssh runs with `BatchMode yes` and, like a password
+  helper, in a session of its own, so a host that falls back to password
+  authentication fails the call rather than putting a prompt on the terminal
+  the client runs in. A sops encrypted Secret is opened with the keys of
   `workstation.identities` alone: sops' own key discovery can run
   `SOPS_AGE_KEY_CMD` or have gpg-agent ask for a passphrase, so it is used
   only at a terminal.

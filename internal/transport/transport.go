@@ -192,6 +192,7 @@ type Client struct {
 	stateDir    string
 	knownHosts  string
 	defaultUser string
+	noTerminal  bool
 
 	once       sync.Once
 	configPath string
@@ -211,6 +212,11 @@ type Options struct {
 	KnownHostsFile string
 	// DefaultUser is the account used where nothing names one.
 	DefaultUser string
+	// NoTerminal says that nobody is at a terminal to answer a prompt, as
+	// under the MCP server. ssh is then run in batch mode and in a session
+	// of its own, so that it fails instead of asking for a password or a
+	// passphrase on whatever terminal the process was started from.
+	NoTerminal bool
 }
 
 // New returns a client. The ssh configuration is written on first use.
@@ -221,6 +227,7 @@ func New(opts Options) *Client {
 		stateDir:    opts.StateDir,
 		knownHosts:  opts.KnownHostsFile,
 		defaultUser: opts.DefaultUser,
+		noTerminal:  opts.NoTerminal,
 	}
 }
 
@@ -283,6 +290,9 @@ func (c *Client) Args(target Target, req Request) ([]string, error) {
 	}
 	if target.ForwardX11 {
 		args = append(args, "-X")
+	}
+	if c.noTerminal {
+		args = append(args, "-o", "BatchMode=yes")
 	}
 
 	dest, err := c.destination(target)
@@ -427,7 +437,7 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 		limit = DefaultMaxOutput
 	}
 	stdout, stderr := &capture{limit: limit}, &capture{limit: limit}
-	cmd := command(ctx, args)
+	cmd := c.command(ctx, args)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Stdin = req.Stdin
@@ -478,7 +488,7 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 	if err != nil {
 		return err
 	}
-	cmd := command(ctx, args)
+	cmd := c.command(ctx, args)
 	cmd.Stdin = req.Stdin
 	if cmd.Stdin == nil {
 		cmd.Stdin = os.Stdin
@@ -506,10 +516,15 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 // Stopping the client does not stop the remote command: without a terminal
 // on the host nothing tells it, and it runs until its own timeout ends it or
 // it fails to write.
-func command(ctx context.Context, args []string) *exec.Cmd {
+func (c *Client) command(ctx context.Context, args []string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = killGrace
+	if c.noTerminal {
+		// Without a controlling terminal, nothing ssh starts can open
+		// /dev/tty to prompt, whatever the configuration says.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
 	return cmd
 }
 

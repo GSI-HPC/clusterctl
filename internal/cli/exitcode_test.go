@@ -181,3 +181,17 @@ func TestInterruptEndsTheStdinRead(t *testing.T) {
 		t.Fatal("exec --stdin kept reading after the interrupt")
 	}
 }
+
+// TestNoTerminalRunsSshInBatchMode checks that ssh is told not to prompt when
+// clusterctl has no terminal, which is how the MCP server runs every command.
+func TestNoTerminalRunsSshInBatchMode(t *testing.T) {
+	for _, tty := range []bool{false, true} {
+		h, err := run(t, harnessOptions{tty: tty}, "login", "--dry-run", "install", "--", "uptime")
+		if err != nil {
+			t.Fatalf("login --dry-run failed: %v", err)
+		}
+		if got := strings.Contains(h.out.String(), "-o BatchMode=yes --"); got == tty {
+			t.Errorf("with a terminal %v, batch mode is %v:\n%s", tty, got, h.out)
+		}
+	}
+}
