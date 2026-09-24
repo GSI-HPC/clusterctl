@@ -8,6 +8,7 @@
 package sopstest
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,21 @@ func Encrypt(t testing.TB, plaintext string, recipients ...string) []byte {
 // encrypts every value, which is what sops does by default.
 func EncryptWithRegex(t testing.TB, plaintext, regex string, recipients ...string) []byte {
 	t.Helper()
+	return EncryptWith(t, plaintext, Options{Regex: regex}, recipients...)
+}
+
+// Options are the settings of sops a test varies.
+type Options struct {
+	// Regex is the encrypted_regex; an empty one encrypts every value.
+	Regex string
+	// MACOnlyEncrypted computes the message authentication code over the
+	// encrypted values only, as "sops --mac-only-encrypted" does.
+	MACOnlyEncrypted bool
+}
+
+// EncryptWith is Encrypt with the given settings.
+func EncryptWith(t testing.TB, plaintext string, opts Options, recipients ...string) []byte {
+	t.Helper()
 
 	store := sopsyaml.NewStore(&config.YAMLStoreConfig{})
 	branches, err := store.LoadPlainFile([]byte(plaintext))
@@ -54,9 +70,10 @@ func EncryptWithRegex(t testing.TB, plaintext, regex string, recipients ...strin
 	tree := sops.Tree{
 		Branches: branches,
 		Metadata: sops.Metadata{
-			KeyGroups:      []sops.KeyGroup{group},
-			EncryptedRegex: regex,
-			Version:        sopsVersion,
+			KeyGroups:        []sops.KeyGroup{group},
+			EncryptedRegex:   opts.Regex,
+			MACOnlyEncrypted: opts.MACOnlyEncrypted,
+			Version:          sopsVersion,
 		},
 	}
 	dataKey, errs := tree.GenerateDataKey()
@@ -79,4 +96,25 @@ func EncryptWithRegex(t testing.TB, plaintext, regex string, recipients ...strin
 		t.Fatalf("sopstest: writing: %v", err)
 	}
 	return out
+}
+
+// AddVaultKey adds a HashiCorp Vault master key at address to the sops
+// metadata of an encrypted file, the way anyone who can write the file can:
+// the message authentication code does not cover the metadata. The data key
+// it claims to hold is made up, so only a request to address shows that it
+// was tried.
+func AddVaultKey(t testing.TB, file []byte, address string) []byte {
+	t.Helper()
+	const at = "\nsops:\n"
+	if !strings.Contains(string(file), at) {
+		t.Fatalf("sopstest: the file has no sops metadata:\n%s", file)
+	}
+	key := at +
+		"    hc_vault:\n" +
+		"        - vault_address: " + address + "\n" +
+		"          engine_path: transit\n" +
+		"          key_name: recovery\n" +
+		"          created_at: \"2026-09-22T18:26:29Z\"\n" +
+		"          enc: vault:v1:c29tZXRoaW5n\n"
+	return []byte(strings.Replace(string(file), at, key, 1))
 }

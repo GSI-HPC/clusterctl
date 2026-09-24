@@ -100,6 +100,25 @@ func TestSecretDocumentMistakesAreReportedWhereWritten(t *testing.T) {
 			want: []string{"binaryData.bmc-password", "also under data"},
 		},
 		{
+			// sops wrote an unquoted 0600 as the integer 384 (report
+			// section 8.6); a type tag changed by hand is refused the
+			// same way (8.1).
+			name: "value sops would retype",
+			file: sealed(t, plainSecret+"  pin: 0600\n"),
+			want: []string{"binaryData.pin", "type:int", "quote it"},
+		},
+		{
+			name: "type tag changed without a key",
+			file: strings.Replace(good, ",type:str]\n", ",type:bytes]\n", 1),
+			want: []string{"data.bmc-password", "type:bytes"},
+		},
+		{
+			name: "MAC over the encrypted values only",
+			file: string(sopstest.EncryptWith(t, plainSecret,
+				sopstest.Options{Regex: sopstest.EncryptedRegex, MACOnlyEncrypted: true}, mustRecipient(t))),
+			want: []string{"secrets.sops.yaml", "mac_only_encrypted"},
+		},
+		{
 			name: "sops metadata damaged",
 			file: strings.Replace(good, "    mac: ENC[", "    notmac: ENC[", 1),
 			want: []string{"secrets.sops.yaml", "message authentication code"},
@@ -206,17 +225,27 @@ func TestSecretRefsAreCheckedWhenResolving(t *testing.T) {
 }
 
 func TestSecretValuesDecodesBinaryData(t *testing.T) {
-	values, err := config.SecretValues("s.yaml", []byte(plainSecret+"  pin: 1234\n"))
+	sections := map[string]map[string]string{
+		"data":       {"bmc-password": "hunter2", "pin": "0600"},
+		"binaryData": {"munge-key": "bXVu\nZ2U="},
+	}
+	values, err := config.SecretValues("s.yaml", sections)
 	if err != nil {
 		t.Fatalf("SecretValues failed: %v", err)
 	}
-	for key, want := range map[string]string{"bmc-password": "hunter2", "munge-key": "munge"} {
+	for key, want := range map[string]string{"bmc-password": "hunter2", "munge-key": "munge", "pin": "0600"} {
 		if got := string(values[key]); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}
 	}
-	if _, err := config.SecretValues("s.yaml", []byte(strings.Replace(plainSecret, "bXVuZ2U=", "not base64!", 1))); err == nil {
-		t.Error("binaryData that is not base64 should be refused")
+
+	sections["binaryData"]["munge-key"] = "hunter2!"
+	_, err = config.SecretValues("s.yaml", sections)
+	if err == nil {
+		t.Fatal("binaryData that is not base64 should be refused")
+	}
+	if strings.Contains(err.Error(), "hunter2") {
+		t.Errorf("the error holds the value: %v", err)
 	}
 }
 

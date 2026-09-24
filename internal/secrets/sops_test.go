@@ -6,6 +6,7 @@ package secrets_test
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -24,6 +25,8 @@ metadata:
 data:
   bmc-password: hunter2
 `
+
+var sections = []string{"data", "binaryData"}
 
 func TestSopsRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -56,12 +59,12 @@ func TestSopsRoundTrip(t *testing.T) {
 		t.Errorf("first key = %q, want the recipient", info.Keys[0].ID)
 	}
 
-	plain, err := secrets.DecryptSops(file, []age.Identity{other})
+	values, err := secrets.DecryptSops(file, []age.Identity{other}, sections)
 	if err != nil {
 		t.Fatalf("DecryptSops failed: %v", err)
 	}
-	if !strings.Contains(string(plain), "bmc-password: hunter2") {
-		t.Errorf("plaintext = %s", plain)
+	if got := values["data"]["bmc-password"]; got != "hunter2" {
+		t.Errorf("data.bmc-password = %q, want hunter2", got)
 	}
 }
 
@@ -83,7 +86,7 @@ func TestSopsOpensWithAnSSHIdentity(t *testing.T) {
 	recipient := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
 	file := sopstest.Encrypt(t, secretDoc, recipient)
 
-	if _, err := secrets.DecryptSops(file, []age.Identity{id}); err != nil {
+	if _, err := secrets.DecryptSops(file, []age.Identity{id}, sections); err != nil {
 		t.Fatalf("an ssh identity from workstation.identities should open the file: %v", err)
 	}
 }
@@ -97,12 +100,12 @@ func TestSopsRefusesTampering(t *testing.T) {
 	// The name is in the clear but covered by the message authentication
 	// code, so renaming the document is caught when it is decrypted.
 	renamed := strings.Replace(file, "name: example", "name: other", 1)
-	if _, err := secrets.DecryptSops([]byte(renamed), []age.Identity{id}); err == nil {
+	if _, err := secrets.DecryptSops([]byte(renamed), []age.Identity{id}, sections); err == nil {
 		t.Error("a document edited without sops should not decrypt")
 	}
 
 	stranger, _ := age.GenerateX25519Identity()
-	if _, err := secrets.DecryptSops([]byte(file), []age.Identity{stranger}); err == nil {
+	if _, err := secrets.DecryptSops([]byte(file), []age.Identity{stranger}, sections); err == nil {
 		t.Error("a foreign identity should not decrypt the file")
 	}
 }
@@ -117,6 +120,103 @@ func TestInspectSopsRejectsWhatSopsDidNotWrite(t *testing.T) {
 	} {
 		if _, err := secrets.InspectSops([]byte(file)); err == nil {
 			t.Errorf("%s: InspectSops should fail", name)
+		}
+	}
+}
+
+// TestSopsKeepsPlaintextOutOfErrors is report section 8.1 where the loader
+// cannot help: a file changed after the configuration loaded. sops parses
+// the plaintext as the unauthenticated type tag says, and its parser quotes
+// the value; bytes made it panic.
+func TestSopsKeepsPlaintextOutOfErrors(t *testing.T) {
+	t.Parallel()
+
+	id, _ := age.GenerateX25519Identity()
+	file := string(sopstest.Encrypt(t, secretDoc, id.Recipient().String()))
+	for _, typ := range []string{"int", "float", "bool", "time", "bytes", "comment"} {
+		retyped := strings.Replace(file, ",type:str]\n", ",type:"+typ+"]\n", 1)
+		_, err := secrets.DecryptSops([]byte(retyped), []age.Identity{id}, sections)
+		if err == nil {
+			t.Errorf("type:%s: the file decrypted", typ)
+			continue
+		}
+		if strings.Contains(err.Error(), "hunter2") {
+			t.Errorf("type:%s: the error holds the plaintext: %v", typ, err)
+		}
+	}
+
+	// A value whose ciphertext was changed opens nothing either, and says
+	// nothing of what it held.
+	broken := strings.Replace(file, "bmc-password: ENC[AES256_GCM,data:", "bmc-password: ENC[AES256_GCM,data:AAAA", 1)
+	if _, err := secrets.DecryptSops([]byte(broken), []age.Identity{id}, sections); err == nil ||
+		!strings.Contains(err.Error(), "could not be decrypted or was changed without sops") {
+		t.Errorf("a changed ciphertext: err = %v", err)
+	}
+}
+
+// TestSopsValuesComeBackAsWritten is report section 8.2: the values are
+// read from the decrypted tree, so what another YAML parser would refuse or
+// change comes back as it was encrypted.
+func TestSopsValuesComeBackAsWritten(t *testing.T) {
+	t.Parallel()
+
+	values := map[string]string{
+		"newlines":  "\n\n\n",
+		"tabbed":    "\tx\ny",
+		"separator": "a\u2028b",
+		"trailing":  "line\n\n",
+		"colon":     "a: b",
+	}
+	doc := secretDoc
+	for key, value := range values {
+		doc += "  " + key + ": " + strconv.Quote(value) + "\n"
+	}
+	id, _ := age.GenerateX25519Identity()
+	file := sopstest.Encrypt(t, doc+"# a comment, encrypted too\n", id.Recipient().String())
+	got, err := secrets.DecryptSops(file, []age.Identity{id}, sections)
+	if err != nil {
+		t.Fatalf("DecryptSops failed: %v", err)
+	}
+	for key, want := range values {
+		if got["data"][key] != want {
+			t.Errorf("%s = %q, want %q", key, got["data"][key], want)
+		}
+	}
+	if _, ok := got["metadata"]; ok {
+		t.Error("a section that was not asked for was returned")
+	}
+}
+
+// TestSopsRefusesAMACOverEncryptedValuesOnly is report section 8.7: under
+// mac_only_encrypted the name is not authenticated.
+func TestSopsRefusesAMACOverEncryptedValuesOnly(t *testing.T) {
+	t.Parallel()
+
+	id, _ := age.GenerateX25519Identity()
+	file := string(sopstest.EncryptWith(t, secretDoc,
+		sopstest.Options{Regex: sopstest.EncryptedRegex, MACOnlyEncrypted: true}, id.Recipient().String()))
+	renamed := strings.Replace(file, "name: example", "name: other", 1)
+	if _, err := secrets.InspectSops([]byte(renamed)); err == nil || !strings.Contains(err.Error(), "mac_only_encrypted") {
+		t.Errorf("InspectSops: err = %v, want mac_only_encrypted refused", err)
+	}
+	if _, err := secrets.DecryptSops([]byte(renamed), []age.Identity{id}, sections); err == nil {
+		t.Error("a renamed file under mac_only_encrypted decrypted")
+	}
+}
+
+func TestSopsValueType(t *testing.T) {
+	t.Parallel()
+
+	for in, want := range map[string]string{
+		"ENC[AES256_GCM,data:abc=,iv:def=,tag:ghi=,type:str]":     "str",
+		"ENC[AES256_GCM,data:abc=,iv:def=,tag:ghi=,type:int]":     "int",
+		"ENC[AES256_GCM,data:abc,type:int=,iv:d,tag:g,type:bool]": "bool",
+		"ENC[x]":  "",
+		"hunter2": "",
+	} {
+		got, ok := secrets.SopsValueType(in)
+		if got != want || ok != (want != "") {
+			t.Errorf("SopsValueType(%q) = %q, %v; want %q", in, got, ok, want)
 		}
 	}
 }

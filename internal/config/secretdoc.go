@@ -72,9 +72,20 @@ func checkSecret(doc *Document) []string {
 				out = append(out, fmt.Sprintf("%s: %s: the key is also under %s; a key names one value", doc.Position(path), path, other))
 			}
 			seen[key] = section
-			if s, ok := values[key].(string); !ok || !isSopsValue(s) {
+			s, _ := values[key].(string)
+			typ, ok := secrets.SopsValueType(s)
+			switch {
+			case !ok:
 				out = append(out, fmt.Sprintf("%s: %s: the value is not encrypted: it was added without sops; edit the file with \"sops %s\" instead",
 					doc.Position(path), path, filepath.Base(doc.File)))
+			case typ != "str":
+				// sops parses the plaintext as this type, and the type is
+				// not authenticated: anything but text is refused before a
+				// key is used, so that a changed tag cannot put a value
+				// into an error message.
+				out = append(out, fmt.Sprintf("%s: %s: sops encrypted the value as type:%s, not as text, and would change it; "+
+					"quote it in the plaintext, as in %s: \"0600\", and encrypt it again with \"sops %s\"",
+					doc.Position(path), path, typ, key, filepath.Base(doc.File)))
 			}
 		}
 	}
@@ -123,31 +134,33 @@ func SecretKeys(doc *Document) []string {
 	return out
 }
 
-// SecretValues reads the values out of the decrypted form of a Secret
-// document, decoding binaryData.
-func SecretValues(file string, plaintext []byte) (map[string][]byte, error) {
-	docs, err := ParseDocuments(file, plaintext)
-	if err != nil {
-		return nil, err
-	}
-	if len(docs) != 1 {
-		return nil, fmt.Errorf("%s: the decrypted file holds %d documents, want 1", file, len(docs))
-	}
-	doc := docs[0]
+// SecretSections are the top level mappings of a Secret document that hold
+// its values, which is what to ask the decryption for.
+func SecretSections() []string {
+	return append([]string(nil), secretSections...)
+}
+
+// SecretValues turns the decrypted sections of a Secret document into its
+// values by key, decoding binaryData. A value under data is used as written.
+// No error quotes a value.
+func SecretValues(file string, sections map[string]map[string]string) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	for _, section := range secretSections {
-		values, _ := doc.Data[section].(map[string]any)
-		for _, key := range sortedKeys(values) {
-			value := values[key]
-			switch value.(type) {
-			case map[string]any, []any, nil:
-				return nil, fmt.Errorf("%s: %s.%s: a value must be a string", doc.Position(section+"."+key), section, key)
+		values := sections[section]
+		keys := make([]string, 0, len(values))
+		for key := range values {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if _, dup := out[key]; dup {
+				return nil, fmt.Errorf("%s: %s.%s: the key is also in another section; a key names one value", file, section, key)
 			}
-			text := FormatValue(value)
+			text := values[key]
 			if section == "binaryData" {
 				decoded, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(text), ""))
 				if err != nil {
-					return nil, fmt.Errorf("%s: binaryData.%s is not base64: %w", doc.Position(section+"."+key), key, err)
+					return nil, fmt.Errorf("%s: binaryData.%s is not base64: %w", file, key, err)
 				}
 				out[key] = decoded
 				continue

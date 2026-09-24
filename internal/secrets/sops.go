@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -20,6 +22,29 @@ import (
 	sopsyaml "github.com/getsops/sops/v3/stores/yaml"
 	"google.golang.org/grpc"
 )
+
+// errUnreadable is all that is said about a file whose data key opened but
+// whose values did not: what sops says then can quote a decrypted value.
+var errUnreadable = errors.New("the file could not be decrypted or was changed without sops")
+
+// sopsValue is how sops writes an encrypted value; it is the expression sops
+// itself matches a value with.
+var sopsValue = regexp.MustCompile(`^ENC\[AES256_GCM,data:(.+),iv:(.+),tag:(.+),type:(.+)\]`)
+
+// SopsValueType returns the type sops recorded for an encrypted value, and
+// whether the value is one sops encrypted at all.
+//
+// sops parses the plaintext as this type after decrypting it, but the type
+// is outside what the encryption authenticates: anyone who can write the
+// file can change it, and the parser's error then quotes the plaintext. Only
+// "str" is read.
+func SopsValueType(s string) (string, bool) {
+	m := sopsValue.FindStringSubmatch(s)
+	if m == nil {
+		return "", false
+	}
+	return m[4], true
+}
 
 // SopsInfo describes a sops encrypted document, read without decrypting it.
 type SopsInfo struct {
@@ -95,20 +120,42 @@ func InspectSops(data []byte) (SopsInfo, error) {
 	if m.MessageAuthenticationCode == "" {
 		return SopsInfo{}, fmt.Errorf("the sops metadata has no message authentication code")
 	}
+	if err := checkMetadata(m); err != nil {
+		return SopsInfo{}, err
+	}
 	return info, nil
 }
 
-// DecryptSops decrypts a sops encrypted YAML file into memory and returns the
-// plaintext YAML.
+// checkMetadata refuses the settings of sops under which the message
+// authentication code does not cover the whole file.
+func checkMetadata(m sops.Metadata) error {
+	if m.MACOnlyEncrypted {
+		return fmt.Errorf("the sops metadata sets mac_only_encrypted, under which the kind and the name can be changed without a key; " +
+			"encrypt the file again without --mac-only-encrypted")
+	}
+	return nil
+}
+
+// DecryptSops decrypts a sops encrypted YAML file into memory and returns
+// the values of the given top level mappings, by key.
 //
 // The data key is recovered with the given age identities first, which are
 // the ones workstation.identities names, and then with whatever sops itself
 // finds: SOPS_AGE_KEY_FILE and its other variables, a PGP agent, or the
 // credentials of a cloud key management service. The integrity of the whole
 // file is verified before anything is returned.
-func DecryptSops(data []byte, identities []age.Identity) ([]byte, error) {
+//
+// The values are read from the decrypted tree as sops holds it, never
+// written out and parsed again, and no error says anything of them.
+func DecryptSops(data []byte, identities []age.Identity, sections []string) (values map[string]map[string]string, err error) {
 	tree, err := loadSops(data)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkMetadata(tree.Metadata); err != nil {
+		return nil, err
+	}
+	if err := checkValueTypes(tree.Branches); err != nil {
 		return nil, err
 	}
 	var attempts attempts
@@ -124,22 +171,103 @@ func DecryptSops(data []byte, identities []age.Identity) ([]byte, error) {
 		// was tried and why it failed is what an administrator can act on.
 		return nil, fmt.Errorf("no key available here opens it: %s", attempts)
 	}
+
+	// From here on an error of sops may carry plaintext, and a panic in it
+	// is a file it could not read.
+	defer func() {
+		if recover() != nil {
+			values, err = nil, errUnreadable
+		}
+	}()
 	cipher := aes.NewCipher()
 	mac, err := tree.Decrypt(key, cipher)
 	if err != nil {
-		return nil, fmt.Errorf("decrypting: %w", err)
+		return nil, errUnreadable
 	}
 	stored, err := cipher.Decrypt(tree.Metadata.MessageAuthenticationCode, key,
 		tree.Metadata.LastModified.Format(time.RFC3339))
-	if err != nil {
-		return nil, fmt.Errorf("reading the message authentication code: %w", err)
+	if err != nil || stored != mac {
+		return nil, errUnreadable
 	}
-	if stored != mac {
-		return nil, fmt.Errorf("the file was changed without sops: its message authentication code does not match")
+	return sectionValues(tree.Branches, sections)
+}
+
+// checkValueTypes refuses an encrypted value sops would parse as anything
+// but a string, before anything is decrypted.
+func checkValueTypes(branches sops.TreeBranches) error {
+	var bad error
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch v := v.(type) {
+		case string:
+			if typ, ok := SopsValueType(v); ok && typ != "str" && bad == nil {
+				bad = fmt.Errorf("%s: the value was encrypted as type:%s; only text (type:str) is read", path, typ)
+			}
+		case sops.TreeBranch:
+			for _, item := range v {
+				if _, comment := item.Key.(sops.Comment); !comment {
+					walk(joinPath(path, fmt.Sprint(item.Key)), item.Value)
+				}
+			}
+		case []any:
+			for i, e := range v {
+				walk(fmt.Sprintf("%s[%d]", path, i), e)
+			}
+		}
 	}
-	out, err := newSopsStore().EmitPlainFile(tree.Branches)
-	if err != nil {
-		return nil, fmt.Errorf("decrypting: %w", err)
+	for _, branch := range branches {
+		walk("", branch)
+	}
+	return bad
+}
+
+func joinPath(path, key string) string {
+	if path == "" {
+		return key
+	}
+	return path + "." + key
+}
+
+// sectionValues reads the strings of the named top level mappings out of a
+// decrypted tree. An error names a key, never a value.
+func sectionValues(branches sops.TreeBranches, sections []string) (map[string]map[string]string, error) {
+	if len(branches) != 1 {
+		return nil, fmt.Errorf("the file holds %d documents, want 1", len(branches))
+	}
+	out := map[string]map[string]string{}
+	for _, item := range branches[0] {
+		section, ok := item.Key.(string)
+		if !ok || !slices.Contains(sections, section) {
+			continue
+		}
+		if _, dup := out[section]; dup {
+			return nil, fmt.Errorf("%s is given twice", section)
+		}
+		values := map[string]string{}
+		switch branch := item.Value.(type) {
+		case nil:
+		case sops.TreeBranch:
+			for _, e := range branch {
+				if _, comment := e.Key.(sops.Comment); comment {
+					continue
+				}
+				key, ok := e.Key.(string)
+				if !ok {
+					return nil, fmt.Errorf("%s: the key %v is not a string", section, e.Key)
+				}
+				if _, dup := values[key]; dup {
+					return nil, fmt.Errorf("%s.%s: the key is given twice", section, key)
+				}
+				value, ok := e.Value.(string)
+				if !ok {
+					return nil, fmt.Errorf("%s.%s: a value must be a string", section, key)
+				}
+				values[key] = value
+			}
+		default:
+			return nil, fmt.Errorf("%s: must be a mapping of keys to values", section)
+		}
+		out[section] = values
 	}
 	return out, nil
 }
