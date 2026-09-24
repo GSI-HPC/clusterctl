@@ -30,7 +30,7 @@ credential in the configuration says `fromEnv: BMC_PASSWORD`.
 | Path | Holds |
 | --- | --- |
 | `/etc/clusterctl`, `$XDG_CONFIG_HOME/clusterctl` | The configuration, searched in that order |
-| `$XDG_STATE_HOME/clusterctl` | The generated `ssh_config`, multiplexing sockets, service processor certificate pins, tunnel process id files |
+| `$XDG_STATE_HOME/clusterctl` | The generated `ssh_config-*` files, one per configuration, multiplexing sockets, service processor certificate pins, tunnel process id files |
 | `$XDG_CACHE_HOME/clusterctl` | Fetched copies of remote files, resolved group listings |
 
 `$XDG_CONFIG_HOME` defaults to `~/.config`, `$XDG_STATE_HOME` to

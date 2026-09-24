@@ -263,7 +263,7 @@ without printing any of it.
 
 | Directory | Holds |
 | --- | --- |
-| `$XDG_STATE_HOME/clusterctl` | The generated `ssh_config`, the multiplexing sockets, the service processor certificate pins, the tunnel process id files |
+| `$XDG_STATE_HOME/clusterctl` | The generated `ssh_config-*` files, one per configuration, the multiplexing sockets, the service processor certificate pins, the tunnel process id files |
 | `$XDG_CACHE_HOME/clusterctl` | Fetched copies of remote files and resolved group listings |
 
 Both are created with mode 0700. Nothing in either is authoritative: deleting

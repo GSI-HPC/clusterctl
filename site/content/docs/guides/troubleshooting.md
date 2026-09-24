@@ -48,14 +48,14 @@ up on the node.
 
 ```console
 $ clusterctl login --dry-run install
-ssh -F ~/.local/state/clusterctl/ssh_config -A -- root@installer.hpc.example.org
+ssh -F ~/.local/state/clusterctl/ssh_config-3f9c2a1b7d4e5f60 -A -- root@installer.hpc.example.org
 ```
 
 Run that command by hand with `-v`. Because clusterctl drives the ordinary ssh
 client with a generated configuration, what you see is what it does.
 
 ```console
-$ cat ~/.local/state/clusterctl/ssh_config
+$ cat ~/.local/state/clusterctl/ssh_config-3f9c2a1b7d4e5f60
 ```
 
 Common causes:
@@ -66,6 +66,8 @@ Common causes:
 | Exit code 3 and a timeout | The network is not reachable: a tunnel may need starting |
 | `no matching host key type` | An sshd too old for current defaults: `legacyAlgorithms: true` on that role |
 | A jump host is not used | `proxyJump` is a property of the role, not a flag |
+| `terminating, 1 bad configuration options` | A misspelt keyword in `options` or an included file; `ssh -G -F FILE HOST` names it |
+| Your own `~/.ssh/config` is not used | The site's `ssh.include` replaces the default list; add `~/.ssh/config` to it |
 
 ## A node set resolves to the wrong thing
 
