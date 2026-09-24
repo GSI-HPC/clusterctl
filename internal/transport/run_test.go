@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,12 @@ import (
 // Run and Copy can be driven through a real process without a host.
 func fakeClient(t *testing.T, script string) *transport.Client {
 	t.Helper()
+	return fakeClientWith(t, script, transport.Options{})
+}
+
+// fakeClientWith is fakeClient with further options.
+func fakeClientWith(t *testing.T, script string, opts transport.Options) *transport.Client {
+	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("no shell available")
 	}
@@ -31,11 +38,10 @@ func fakeClient(t *testing.T, script string) *transport.Client {
 	// and is answered at once, whatever the script does otherwise.
 	version := "[ \"$1\" = -V ] && { echo OpenSSH_9.6p1 >&2; exit 0; }\n"
 	writeScript(t, binary, "#!/bin/sh\n"+version+script+"\n")
-	return transport.New(transport.Options{
-		SSH:            v1alpha1.SSHSpec{Binary: binary, ScpBinary: binary},
-		StateDir:       dir,
-		KnownHostsFile: filepath.Join(dir, "ssh-known-hosts"),
-	})
+	opts.SSH = v1alpha1.SSHSpec{Binary: binary, ScpBinary: binary}
+	opts.StateDir = dir
+	opts.KnownHostsFile = filepath.Join(dir, "ssh-known-hosts")
+	return transport.New(opts)
 }
 
 // writeScript writes an executable script from a child process. Written
@@ -305,5 +311,55 @@ func TestRunBoundsTheOutput(t *testing.T) {
 	if err != nil || result.Failed() || result.Truncated || len(result.Stdout) != 1000 {
 		t.Errorf("output exactly at the bound: failed = %v, truncated = %v, kept %d, error %v",
 			result.Failed(), result.Truncated, len(result.Stdout), err)
+	}
+}
+
+// TestNoTerminalNeverPrompts checks that without a terminal ssh and scp run
+// in batch mode and in a session of their own. When a host fell back to
+// password authentication, a read_command call under the MCP server put
+// ssh's password prompt on the terminal the MCP client runs in.
+func TestNoTerminalNeverPrompts(t *testing.T) {
+	t.Parallel()
+	if _, err := os.Stat("/proc/self/stat"); err != nil {
+		t.Skip("no /proc to read the session from")
+	}
+	// The fake ssh prints whether it leads its own session, and its options.
+	script := `read -r pid _ _ _ _ sid _ < /proc/$$/stat
+[ "$sid" = "$pid" ] && echo own || echo shared
+echo "$@"`
+	for _, tc := range []struct {
+		noTerminal bool
+		session    string
+		batch      bool
+	}{{true, "own", true}, {false, "shared", false}} {
+		c := fakeClientWith(t, script, transport.Options{NoTerminal: tc.noTerminal})
+
+		result, err := c.Run(context.Background(), target, transport.Request{Argv: []string{"true"}})
+		if err != nil || result.Failed() {
+			t.Fatalf("Run failed: %v %v", err, result.Err)
+		}
+		lines := strings.SplitN(result.Stdout, "\n", 2)
+		if lines[0] != tc.session {
+			t.Errorf("NoTerminal %v: ssh's session is %q, want %q", tc.noTerminal, lines[0], tc.session)
+		}
+		options, _, _ := strings.Cut(lines[1], " -- ")
+		if got := strings.Contains(options, "-o BatchMode=yes"); got != tc.batch {
+			t.Errorf("NoTerminal %v: ssh was run as %q; batch mode %v, want %v", tc.noTerminal, lines[1], got, tc.batch)
+		}
+
+		copied, err := c.Copy(context.Background(), target, transport.CopyRequest{
+			Sources: []string{"/etc/hosts"}, Destination: "/tmp/hosts", Upload: true,
+		})
+		if err != nil || copied.Failed() {
+			t.Fatalf("Copy failed: %v %v", err, copied.Err)
+		}
+		args, err := c.CopyArgs(target, transport.CopyRequest{Sources: []string{"a"}, Destination: "b", Upload: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		options, _, _ = strings.Cut(strings.Join(args, " "), " -- ")
+		if got := strings.Contains(options, "-o BatchMode=yes"); got != tc.batch {
+			t.Errorf("NoTerminal %v: scp is run as %q; batch mode %v, want %v", tc.noTerminal, args, got, tc.batch)
+		}
 	}
 }

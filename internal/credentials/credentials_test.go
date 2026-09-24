@@ -315,3 +315,30 @@ func TestRelativeHelperResolvesAgainstTheSite(t *testing.T) {
 		}
 	}
 }
+
+// TestHelperHasNoTerminalWithoutOne checks that without a terminal a
+// password helper runs in a session of its own, so that a helper such as
+// gpg's pinentry cannot put a prompt on the terminal an MCP client runs in.
+func TestHelperHasNoTerminalWithoutOne(t *testing.T) {
+	if _, err := os.Stat("/proc/self/stat"); err != nil {
+		t.Skip("no /proc to read the session from")
+	}
+	// The helper prints whether it leads its own session.
+	script := `read -r pid _ _ _ _ sid _ < /proc/$$/stat; [ "$sid" = "$pid" ] && echo own || echo shared`
+	for _, tc := range []struct {
+		noTerminal bool
+		want       string
+	}{{true, "own"}, {false, "shared"}} {
+		r := resolver(t, map[string]v1alpha1.Credential{
+			"bmc": {Username: "admin", Password: v1alpha1.PasswordSource{Command: []string{"sh", "-c", script}}},
+		}, nil)
+		r.NoTerminal = tc.noTerminal
+		cred, err := r.Get(context.Background(), "bmc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cred.Password() != tc.want {
+			t.Errorf("NoTerminal %v: the helper's session is %q, want %q", tc.noTerminal, cred.Password(), tc.want)
+		}
+	}
+}

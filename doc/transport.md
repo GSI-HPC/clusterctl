@@ -210,6 +210,16 @@ otherwise keep running on the node with nothing watching it.
 Connection timeouts and attempts are ssh's own, set in the generated
 configuration.
 
+## Without a terminal, nothing prompts
+
+When clusterctl's standard input is not a terminal, as under the MCP server or
+in a script, nobody is there to answer a prompt. ssh and scp then run with
+`-o BatchMode=yes` and in a session of their own, and so does a `password.command`
+helper, so none of them can open `/dev/tty` and ask for a password or a
+passphrase on whatever terminal the process was started from. A host that
+wants one fails instead; the ssh agent is how a key is used without a
+terminal.
+
 ## Output is bounded
 
 A host controls its own output for as long as its command runs, so what is
