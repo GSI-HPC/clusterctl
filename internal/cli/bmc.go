@@ -382,10 +382,12 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs 
 	if action == ipmi.ActionStatus || action == ipmi.ActionOn {
 		return nil
 	}
-	if a.Spec.Safety.SlurmAware == nil || !*a.Spec.Safety.SlurmAware {
+	if a.Spec.Safety.SlurmAware != nil && !*a.Spec.Safety.SlurmAware {
+		a.Printf("the Slurm job check is off (safety.slurmAware is false); nothing checks whether %s run jobs\n", nodes)
 		return nil
 	}
 	if a.Spec.Slurm.Role == "" {
+		a.Printf("slurm.role names no host, so the Slurm job check is skipped; nothing checks whether %s run jobs\n", nodes)
 		return nil
 	}
 	// The check is a safeguard, not a dependency: a cluster whose workload

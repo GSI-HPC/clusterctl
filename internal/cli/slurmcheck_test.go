@@ -101,6 +101,22 @@ func TestSlurmCheckIsOnForAFreshConfiguration(t *testing.T) {
 	}
 }
 
+// Turning the check off is allowed, but it is said before the question, so
+// that nobody takes the preview for a checked one.
+func TestSlurmCheckSaysWhenItIsOff(t *testing.T) {
+	rec := sinfoAnswers("exe0007 allocated\n", 0)
+	h, err := powerOffIPMI(t, rec, "-n", "exe7", "--set", "safety.slurmAware=false")
+	if err != nil {
+		t.Fatalf("power off with the check turned off failed: %v", err)
+	}
+	if sinfo, _ := sinfoCalls(rec); sinfo != 0 {
+		t.Errorf("sinfo was sent %d times with the check turned off", sinfo)
+	}
+	if !strings.Contains(h.errOut.String(), "safety.slurmAware") {
+		t.Errorf("nothing says the job check was skipped:\n%s", h.errOut)
+	}
+}
+
 // Section 2.10: --force lifts host protection, not the job check, and the
 // protected host is named before the job check runs.
 func TestForceDoesNotLoseJobs(t *testing.T) {
