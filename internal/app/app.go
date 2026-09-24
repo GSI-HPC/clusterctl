@@ -97,6 +97,10 @@ type Options struct {
 	Force bool
 	// Fanout overrides how many hosts are worked on at once.
 	Fanout int
+	// SiteHostsOnly refuses a node that is neither in the inventory nor in
+	// one of the site's domains. The MCP server sets it for the commands an
+	// agent runs.
+	SiteHostsOnly bool
 	// Env reads environment variables; nil reads the process environment.
 	Env func(string) string
 	// Runner replaces the ssh transport for everything a command runs. A
@@ -517,6 +521,11 @@ func (a *App) Select(expr string) (*nodeset.NodeSet, error) {
 	}
 	if err := checkHostNames(ns); err != nil {
 		return nil, err
+	}
+	if a.opts.SiteHostsOnly {
+		if err := a.checkSiteHosts(ns); err != nil {
+			return nil, err
+		}
 	}
 	return ns, nil
 }

