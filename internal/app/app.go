@@ -319,6 +319,7 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	a.Gate.Interactive = streams.IsTTY
 	a.Gate.In = streams.In
 	a.Gate.Out = streams.Err
+	a.Gate.Context = ctx
 
 	return a, nil
 }

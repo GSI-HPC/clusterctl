@@ -46,14 +46,37 @@ func (a *App) promptPassword(prompt string) (string, error) {
 		return "", exitcode.Errorf(exitcode.Usage,
 			"a password is needed but there is no terminal to ask on; configure another password source")
 	}
+	fd := int(os.Stdin.Fd())
+	// ReadPassword turns echo off and cannot be cancelled. When an interrupt
+	// ends the wait, the terminal is put back from here, or it would be left
+	// without echo once the process has gone.
+	state, stateErr := term.GetState(fd)
+	type answer struct {
+		secret []byte
+		err    error
+	}
+	answered := make(chan answer, 1)
 	_, _ = fmt.Fprint(a.Err, prompt)
-	secret, err := term.ReadPassword(int(os.Stdin.Fd()))
+	go func() {
+		secret, err := term.ReadPassword(fd)
+		answered <- answer{secret, err}
+	}()
+	var got answer
+	select {
+	case got = <-answered:
+	case <-a.Context().Done():
+		if stateErr == nil {
+			_ = term.Restore(fd, state)
+		}
+		_, _ = fmt.Fprintln(a.Err)
+		return "", exitcode.Wrap(exitcode.Interrupted, a.Context().Err())
+	}
 	// The terminal echoed nothing, so the cursor is still on the prompt.
 	_, _ = fmt.Fprintln(a.Err)
-	if err != nil {
-		return "", err
+	if got.err != nil {
+		return "", got.err
 	}
-	return string(secret), nil
+	return string(got.secret), nil
 }
 
 // InventoryNode returns the inventory entry of the machine a name refers to.

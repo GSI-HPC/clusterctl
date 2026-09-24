@@ -181,12 +181,29 @@ func readAll(a *app.App) ([]byte, error) {
 	if a.In == nil {
 		return nil, exitcode.Errorf(exitcode.Usage, "--stdin was given but there is nothing to read")
 	}
-	payload, err := io.ReadAll(a.In)
-	if err != nil {
-		return nil, exitcode.Wrap(exitcode.Usage,
-			fmt.Errorf("reading standard input for --stdin, nothing was sent: %w", err))
+	type input struct {
+		payload []byte
+		err     error
 	}
-	return payload, nil
+	// A read cannot be cancelled, so it is left behind when an interrupt
+	// ends the wait; the process is about to exit.
+	read := make(chan input, 1)
+	go func() {
+		payload, err := io.ReadAll(a.In)
+		read <- input{payload, err}
+	}()
+	var got input
+	select {
+	case got = <-read:
+	case <-a.Context().Done():
+		return nil, exitcode.Wrap(exitcode.Interrupted,
+			fmt.Errorf("reading standard input for --stdin, nothing was sent: %w", a.Context().Err()))
+	}
+	if got.err != nil {
+		return nil, exitcode.Wrap(exitcode.Usage,
+			fmt.Errorf("reading standard input for --stdin, nothing was sent: %w", got.err))
+	}
+	return got.payload, nil
 }
 
 // printExec renders what the nodes answered.

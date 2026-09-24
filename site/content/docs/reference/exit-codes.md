@@ -33,6 +33,14 @@ the first that applies of `130` (a host was not tried because of an
 interrupt), `3` (a host could not be reached) and `1` (a host answered with a
 failure). A run in which one node refused and another was down exits `3`.
 
+## An interrupt is 130
+
+The first Ctrl-C, or a SIGTERM, stops the command: nothing new is started,
+a prompt stops waiting, and the command exits `130`, even when what it
+interrupted failed in some other way first. A second Ctrl-C ends the process
+at once. The commands already running on the nodes are not stopped; their
+timeout ends them.
+
 ## A declined confirmation is 130
 
 Declining a prompt is an interruption, not a failure:

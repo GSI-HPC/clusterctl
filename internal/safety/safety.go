@@ -10,6 +10,7 @@ package safety
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -57,6 +58,9 @@ type Gate struct {
 	// In and Out are the terminal the prompt uses.
 	In  io.Reader
 	Out io.Writer
+	// Context is the one an interrupt cancels. Once it has ended nothing is
+	// confirmed, and a prompt waiting for an answer gives up.
+	Context context.Context
 
 	protectOnce  sync.Once
 	protected    *nodeset.NodeSet
@@ -219,6 +223,9 @@ func isAre(n int) string {
 // Confirm runs the full gate: the protected host check, then the preview and
 // the prompt. It returns nil when the action may proceed.
 func (g *Gate) Confirm(a Action) error {
+	if err := g.interrupted(); err != nil {
+		return err
+	}
 	p, err := g.Preview(a)
 	if err != nil {
 		return err
@@ -345,11 +352,45 @@ func (g *Gate) read() (string, error) {
 	if g.In == nil {
 		return "", exitcode.Errorf(exitcode.Interrupted, "nothing to read a confirmation from")
 	}
-	line, err := bufio.NewReader(g.In).ReadString('\n')
-	if err != nil && line == "" {
+	type answer struct {
+		line string
+		err  error
+	}
+	// The read cannot be cancelled, so it is left behind when the context
+	// ends; the process is about to exit.
+	answered := make(chan answer, 1)
+	go func() {
+		line, err := bufio.NewReader(g.In).ReadString('\n')
+		answered <- answer{line, err}
+	}()
+	var got answer
+	select {
+	case got = <-answered:
+	case <-g.done():
+		g.printf("\n")
+		return "", g.interrupted()
+	}
+	if got.err != nil && got.line == "" {
 		return "", exitcode.Errorf(exitcode.Interrupted, "not confirmed, nothing was done")
 	}
-	return line, nil
+	return got.line, g.interrupted()
+}
+
+// done is closed when the gate's context ends; without one it never is.
+func (g *Gate) done() <-chan struct{} {
+	if g.Context == nil {
+		return nil
+	}
+	return g.Context.Done()
+}
+
+// interrupted returns the error of the gate's context once it has ended,
+// coded so that it exits 130 wherever it is reported.
+func (g *Gate) interrupted() error {
+	if g.Context == nil {
+		return nil
+	}
+	return exitcode.Wrap(exitcode.Interrupted, g.Context.Err())
 }
 
 func (g *Gate) printf(format string, args ...any) {

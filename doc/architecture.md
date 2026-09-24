@@ -111,5 +111,10 @@ bounded separately by `bmc.redfish.maxConcurrent`, because a service processor
 is much slower than a node and a wide fan-out to them achieves nothing.
 
 Cancellation travels through one `context.Context` from the signal handler in
-`main` down to every request. A second interrupt is left to the default
-handler, so a command that is stuck in a syscall can still be killed.
+`main` down to every request. The first SIGINT or SIGTERM cancels it: no new
+target is started, the prompts and the `--stdin` read stop waiting, ssh is sent
+SIGTERM and killed if it is still there five seconds later, and the command
+exits 130 however the interrupted work failed. The handler is removed at that
+moment, so a second interrupt gets the default action and ends the process,
+even one stuck in a syscall. The remote commands already running are not
+signalled; their timeout on the host ends them.

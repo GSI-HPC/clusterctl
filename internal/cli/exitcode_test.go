@@ -5,8 +5,10 @@ package cli
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -146,5 +148,36 @@ func TestInterruptedCommandExits130(t *testing.T) {
 	}
 	if !strings.Contains(h.errOut.String(), "interrupted") {
 		t.Errorf("stderr does not say the command was interrupted:\n%s", h.errOut)
+	}
+}
+
+// TestInterruptEndsTheStdinRead checks that exec --stdin gives up waiting for
+// its input when interrupted, and sends nothing. The read ignored the
+// context, so Ctrl-C was lost while it waited.
+func TestInterruptEndsTheStdinRead(t *testing.T) {
+	stdin, typing := io.Pipe()
+	t.Cleanup(func() { _ = typing.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	type outcome struct {
+		h    *harness
+		code int
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		h, code := exitCodeOf(t, harnessOptions{in: stdin, ctx: ctx}, "exec", "--stdin", "-n", "exe[1-2]", "--", "cat")
+		done <- outcome{h, code}
+	}()
+	select {
+	case got := <-done:
+		if got.code != exitcode.Interrupted {
+			t.Errorf("exit code = %d, want %d; stderr:\n%s", got.code, exitcode.Interrupted, got.h.errOut)
+		}
+		if calls := got.h.recorder.Calls(); len(calls) != 0 {
+			t.Errorf("%d requests were sent after the interrupt", len(calls))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("exec --stdin kept reading after the interrupt")
 	}
 }
