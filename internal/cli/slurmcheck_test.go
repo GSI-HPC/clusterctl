@@ -117,6 +117,53 @@ func TestSlurmCheckSaysWhenItIsOff(t *testing.T) {
 	}
 }
 
+// Section 3.2: draining, failing and flagged states run jobs too, and a state
+// the check does not know is not taken for idle.
+func TestSlurmCheckRefusesEveryBusyState(t *testing.T) {
+	refused := []string{
+		"allocated", "mixed", "allocated*", "completing",
+		// The review found these let through.
+		"draining", "draining*", "draining@", "failing",
+		"mixed-", "allocated^", "allocated%", "mixed!", "completing%",
+		// Slurm prints fail for a mixed node, and maint and reboot for one
+		// whose jobs are completing.
+		"fail", "maint", "reboot^",
+		// Compound and unknown states.
+		"mixed+drain", "idle+completing", "reboot_issued", "unknown", "something_new",
+	}
+	for _, state := range refused {
+		t.Run(state, func(t *testing.T) {
+			rec := sinfoAnswers("exe0007 "+state+"\n", 0)
+			_, err := powerOffIPMI(t, rec, "-n", "exe7")
+			if err == nil {
+				t.Fatalf("a node in state %s was powered off", state)
+			}
+			if got, want := exitcode.From(err), exitcode.Usage; got != want {
+				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
+			}
+			if !strings.Contains(err.Error(), "exe0007") || !strings.Contains(err.Error(), "--lose-jobs") {
+				t.Errorf("error = %v, want it to name the node and the override", err)
+			}
+			if _, other := sinfoCalls(rec); other != 0 {
+				t.Errorf("the power action was sent for state %s", state)
+			}
+		})
+	}
+
+	idle := []string{"idle", "idle*", "idle~", "drained", "drained*", "down*", "reserved", "powered_down", "idle+drain"}
+	for _, state := range idle {
+		t.Run(state, func(t *testing.T) {
+			rec := sinfoAnswers("exe0007 "+state+"\n", 0)
+			if _, err := powerOffIPMI(t, rec, "-n", "exe7"); err != nil {
+				t.Fatalf("a node in state %s was refused: %v", state, err)
+			}
+			if _, other := sinfoCalls(rec); other == 0 {
+				t.Errorf("the power action was not sent for state %s", state)
+			}
+		})
+	}
+}
+
 // Section 2.10: --force lifts host protection, not the job check, and the
 // protected host is named before the job check runs.
 func TestForceDoesNotLoseJobs(t *testing.T) {
