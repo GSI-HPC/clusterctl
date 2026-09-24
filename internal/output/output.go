@@ -169,7 +169,7 @@ func writeNodeset(w io.Writer, r Result) error {
 	if ns.IsEmpty() {
 		return nil
 	}
-	_, err = fmt.Fprintln(w, ns.String())
+	_, err = fmt.Fprintln(w, EscapeCell(ns.String()))
 	return err
 }
 
@@ -179,7 +179,7 @@ func writeNames(w io.Writer, r Result) error {
 		return err
 	}
 	for _, name := range ns.Expand() {
-		if _, err := fmt.Fprintln(w, name); err != nil {
+		if _, err := fmt.Fprintln(w, EscapeCell(name)); err != nil {
 			return err
 		}
 	}
