@@ -35,7 +35,10 @@ Without a directory, the files go where clusterctl reads configuration from:
 the directory `CLUSTERCTL_CONFIG` or `--config` names, or else your own
 configuration directory. Give a directory to write somewhere else, such as a
 new one in the repository the site documents are to live in. Directories that
-are missing are created. `--dry-run` lists the files without writing them:
+are missing are created. Your own directory is read together with
+`/etc/clusterctl`, so when `/etc/clusterctl` holds a configuration already,
+such as your team's, `config init` asks for a directory rather than write a
+second one that would change what the team's resolves to. `--dry-run` lists the files without writing them:
 
 ```console
 $ clusterctl config init ./site-config --dry-run
@@ -96,6 +99,7 @@ metadata:
   name: cluster1
 spec:
   site: example
+  inventories: [example]
   slurm:
     role: login
   groups:

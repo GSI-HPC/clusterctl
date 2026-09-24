@@ -43,6 +43,34 @@ rules only makes sense as a whole.
 Each layer is validated against the schema of its kind **before** it is merged,
 so a mistake is reported at the line it was written on.
 
+A `Site`, `Cluster`, `NodeInventory`, `Workstation` or `Secret` is defined
+once: a second document of the same kind and name, such as a stale
+`site_old.yaml`, is an error that names both. Only a context of the `Config`
+document may be defined again, in a later file, and then replaces the earlier
+one.
+
+## Overrides
+
+An `overrides` table, of a `Cluster`, a `Workstation` or a context, and
+`--set PATH=VALUE` address the merged configuration by dotted path. Each path
+and value is checked against the schema of the merged configuration, in every
+context and not only the current one: a key is matched with the case it was
+written in, so `safety.protectedhosts` is refused with a suggestion rather than
+taken for `safety.protectedHosts`, and a value of the wrong type, `null`
+included, is refused. A mapping value merges key by key, the way a mapping in
+a document does, so these two mean the same and neither touches
+`safety.protectedHosts`:
+
+```yaml
+overrides:
+  safety.confirmAbove: 4
+  safety: {confirmAbove: 4}
+```
+
+A relative path given in the environment or with `--set` is resolved against
+the working directory; one written in a document is resolved against the
+directory of the `Site` document.
+
 ## Config
 
 ```yaml
