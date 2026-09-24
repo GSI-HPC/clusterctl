@@ -145,6 +145,31 @@ SECRET   FILE                               KEYS  ENCRYPTED TO  USED  STATUS
 example  /etc/clusterctl/secrets.sops.yaml  2     3 age         2     decrypts
 ```
 
+### Configuration management
+
+`cinc config` writes the archive URL, and the run list if you give one, into
+`/etc/cinc/solo` on each node (`services.cinc.soloConfigPath` moves it). The
+URL must be an `http` or `https` URL. Each value is written quoted, and the new
+file replaces the old one only once it has arrived complete. It replaces it
+whole: leave out `--run-list` and a run list written earlier is gone, and the
+client falls back to the run list of the archive.
+
+`cinc run` reads that file without sourcing it and hands the two values to the
+client as arguments; any other assignment in the file is ignored. A node whose file holds anything but plain assignments,
+such as an unquoted `$(...)` left by hand or by an older tool, is refused and
+the client is not started there; run `cinc config` again to rewrite it.
+
+```console
+$ clusterctl cinc show -n exe[0007-0008]
+NODE     ARCHIVE                                                         RUN LIST
+exe0007  http://installer/cinc/latest.tgz                                role[exe]
+exe0008  failed: ssh: connect to host exe0008 port 22: No route to host
+```
+
+`cinc show` lists a node without the file as `not configured`. A node it could
+not read is shown as failed and makes the command fail, with exit code `3`
+when the node could not be reached.
+
 ## Boot configurations
 
 ```console

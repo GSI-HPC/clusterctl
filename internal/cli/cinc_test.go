@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -314,6 +315,80 @@ func TestCincRunRefusesAFileThatIsNotPlainAssignments(t *testing.T) {
 				t.Errorf("the client was started: %q", runs)
 			}
 		})
+	}
+}
+
+// Report 10.7: cinc show listed a node it could not reach as "not
+// configured" and exited 0.
+func TestCincShowReportsNodesItCouldNotRead(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		switch tg.Name {
+		case "exe0003":
+			const detail = "ssh: connect to host exe0003 port 22: No route to host"
+			return &transport.Result{Target: tg, ExitCode: 255, Stderr: detail + "\n"},
+				exitcode.Wrap(exitcode.Transport, fmt.Errorf("%s: %s", tg, detail))
+		case "exe0004":
+			// The file does not exist: the node is reachable and simply
+			// not configured.
+			return &transport.Result{Target: tg}, nil
+		}
+		return &transport.Result{Target: tg,
+			Stdout: "CHEF_RECIPE_URL='http://installer/cinc/a.tgz?v=1&t=2'\nCHEF_RUN_LIST=role[exe]\n"}, nil
+	}}
+
+	h, err := run(t, harnessOptions{recorder: rec}, "cinc", "show", "-n", "exe[1-4]")
+	if got := exitcode.From(err); got != exitcode.Transport {
+		t.Errorf("exit code = %d (%v), want %d", got, err, exitcode.Transport)
+	}
+	rows := map[string]string{}
+	for _, line := range strings.Split(h.out.String(), "\n") {
+		if name, rest, ok := strings.Cut(line, " "); ok {
+			rows[name] = rest
+		}
+	}
+	if !strings.Contains(rows["exe0003"], "No route to host") || strings.Contains(rows["exe0003"], "not configured") {
+		t.Errorf("exe0003 row = %q, want the transport failure", rows["exe0003"])
+	}
+	if !strings.Contains(rows["exe0004"], "not configured") {
+		t.Errorf("exe0004 row = %q, want it not configured", rows["exe0004"])
+	}
+	if !strings.Contains(rows["exe0001"], "http://installer/cinc/a.tgz?v=1&t=2") {
+		t.Errorf("exe0001 row = %q, want the unquoted URL", rows["exe0001"])
+	}
+
+	h, _ = run(t, harnessOptions{recorder: rec}, "-o", "json", "cinc", "show", "-n", "exe[1-4]")
+	var objects []map[string]any
+	if err := json.Unmarshal(h.out.Bytes(), &objects); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, h.out)
+	}
+	byNode := map[string]map[string]any{}
+	for _, o := range objects {
+		byNode[fmt.Sprint(o["node"])] = o
+	}
+	if len(byNode) != 4 {
+		t.Fatalf("JSON holds %d nodes, want all 4:\n%s", len(byNode), h.out)
+	}
+	if e, _ := byNode["exe0003"]["error"].(string); !strings.Contains(e, "No route to host") {
+		t.Errorf("exe0003 = %v, want an error field", byNode["exe0003"])
+	}
+	if c, _ := byNode["exe0004"]["configured"].(bool); c || byNode["exe0004"]["error"] != nil {
+		t.Errorf("exe0004 = %v, want it reported as not configured without an error", byNode["exe0004"])
+	}
+	if byNode["exe0001"]["archive"] != "http://installer/cinc/a.tgz?v=1&t=2" || byNode["exe0001"]["runList"] != "role[exe]" {
+		t.Errorf("exe0001 = %v", byNode["exe0001"])
+	}
+}
+
+// A file that is not plain assignments is shown as such rather than as what
+// sourcing it would have produced, and counts as a failure.
+func TestCincShowFlagsAFileItCannotRead(t *testing.T) {
+	rec := cincNode("CHEF_RECIPE_URL=http://installer/$(id)\x1b[2J.tgz\n")
+	h, err := run(t, harnessOptions{recorder: rec}, "cinc", "show", "-n", "exe0001")
+	if got := exitcode.From(err); got != exitcode.TargetFailed {
+		t.Errorf("exit code = %d (%v), want %d", got, err, exitcode.TargetFailed)
+	}
+	if strings.Contains(h.out.String(), "\x1b") {
+		t.Errorf("a control character from the node reached the terminal: %q", h.out)
 	}
 }
 
