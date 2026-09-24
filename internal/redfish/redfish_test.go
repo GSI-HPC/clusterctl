@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 )
 
@@ -295,5 +296,52 @@ func TestPinMismatchExplainsTheWayOut(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message %q does not mention %q", msg, want)
 		}
+	}
+}
+
+// Section 5.12 of the September 2026 review: a processor that cannot be
+// reached exits 3, like any other host, and not 1 as if it had refused.
+func TestUnreachableProcessorIsATransportFailure(t *testing.T) {
+	t.Parallel()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+	c := &redfish.Client{Host: "example.com", Username: "admin", Password: "secret",
+		Transport: &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, addr)
+		}}}
+	_, err = c.PowerState(context.Background())
+	if err == nil {
+		t.Fatal("a closed port answered")
+	}
+	if got, want := exitcode.From(err), exitcode.Transport; got != want {
+		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
+	}
+}
+
+// A processor that turns the account away could not be authenticated with,
+// which exits 3 too; one that refuses a request exits 1.
+func TestRejectedAccountIsATransportFailure(t *testing.T) {
+	t.Parallel()
+
+	f := newFakeBMC(t, []string{"On"})
+	c := f.client(t)
+	c.Password = "wrong"
+	_, err := c.PowerState(context.Background())
+	if got, want := exitcode.From(err), exitcode.Transport; got != want {
+		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
+	}
+
+	err = f.client(t).SetBootOverride(context.Background(), "Floppy", false)
+	if err == nil {
+		t.Fatal("an unsupported boot source was accepted")
+	}
+	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
+		t.Errorf("a refusal: exit code = %d, want %d (%v)", got, want, err)
 	}
 }
