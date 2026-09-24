@@ -174,6 +174,7 @@ spec:
   host: desk01.example.org     # {workstation.host} in tunnel templates
   addresses: {}
   identities: [~/.ssh/id_ed25519]
+  sopsKeyTypes: [age]          # the kinds of key a Secret may be encrypted to
   browser: firefox
   pager: less
   sshuttleBinary: sshuttle
@@ -190,7 +191,7 @@ kind: Secret
 metadata:
   name: example                  # what secretRef.name refers to
 data:
-  bmc-password: ENC[AES256_GCM,...]   # text
+  bmc-password: ENC[AES256_GCM,...]   # text; quote 0600, true or a date
 binaryData:
   munge-key: ENC[AES256_GCM,...]      # base64, decoded before use
 sops: {}                         # written by sops
@@ -205,8 +206,16 @@ $ sops --encrypt --encrypted-regex '^(data|binaryData)$' --in-place secrets.sops
 A reference, `secretRef: {name: example, key: bmc-password}`, is a password
 source in a credential and replaces `source` in `services.cinc.secrets`. It is
 checked against the keys when the configuration loads and decrypted when a
-command uses it: with `workstation.identities` first, then with the keys sops
-finds itself (`SOPS_AGE_KEY_FILE`, a PGP agent, cloud KMS credentials).
+command uses it: with `workstation.identities` first, then, at a terminal
+only, with the keys sops finds itself (`SOPS_AGE_KEY_FILE`, a PGP agent,
+cloud KMS or Vault credentials), age and PGP before any service.
+
+A Secret encrypted to a kind of key that `workstation.sopsKeyTypes` does not
+list, age alone when unset, is refused before any key is tried: the sops
+metadata that names the keys is not authenticated, and a Vault address added
+there would otherwise receive your Vault token. A value sops did not store as
+text, such as an unquoted `0600`, and a file encrypted with
+`--mac-only-encrypted` are refused when the configuration loads.
 
 Hidden files in a configuration directory are not read, so `.sops.yaml` can sit
 next to the documents.

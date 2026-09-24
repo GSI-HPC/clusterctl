@@ -69,20 +69,35 @@ services:
   `secrets push` decrypt the Secret document a reference names, once per
   process, with the sops library. The plaintext never touches the disk. The
   message authentication code is verified first, so a value or a name edited
-  without sops is refused.
+  without sops is refused. The values are read from the tree sops decrypted,
+  never written out and parsed again, and an error says nothing of them.
 - **Keys come from the workstation, then from sops.** The age identities in
   `workstation.identities`, OpenSSH keys among them, are tried first, so a
   workstation that already opens `ageFile` secrets opens Secret documents with
-  no more setup. Then sops looks itself: `SOPS_AGE_KEY_FILE` and its other
-  variables, a PGP agent, or the credentials of a cloud KMS or Vault. When
-  none works, the error names each key that was tried and why it failed.
+  no more setup. Then, at a terminal only, sops looks itself:
+  `SOPS_AGE_KEY_FILE` and its other variables, a PGP agent, or the
+  credentials of a cloud KMS or Vault, age and PGP keys before any service,
+  as the sops command orders them. Without a terminal its search, which can
+  run a program or ask for a passphrase, is not used. When none works, the
+  error names each key that was tried and why it failed.
+- **Only the kinds of key the workstation trusts.** The keys a file is
+  encrypted to are named in its sops metadata, which the message
+  authentication code does not cover, and sops would contact whatever Vault
+  or key management service is named there with this machine's credentials.
+  A Secret naming a kind of key that `workstation.sopsKeyTypes` does not list,
+  age alone by default, is refused before any key is tried.
 - **Checked where it is written.** At load time the loader refuses a Secret
   that is not encrypted, a value that was added without sops, a Secret whose
   kind or name sops encrypted too (with the command that encrypts only the
   values), a Secret that is not alone in its file, a key given under both
-  `data` and `binaryData`, and sops metadata it cannot read.
+  `data` and `binaryData`, and sops metadata it cannot read. It also refuses
+  a value sops stored as anything but a string, which sops would parse after
+  decrypting, by a type tag that is not authenticated, and a file encrypted
+  with `mac_only_encrypted`, whose message authentication code leaves the
+  kind and the name out.
 - **`binaryData` for bytes.** A value under `data` is used as written, and a
-  password loses a trailing newline. A value under `binaryData` is base64
+  password loses a trailing newline. A value YAML would read as a number, a
+  boolean or a date is quoted, or sops stores it as one. A value under `binaryData` is base64
   decoded first, because a munge key or a keytab is not text.
 - **clusterctl does not encrypt.** Creating, editing and re-keying a Secret is
   what `sops` does, with the site's `.sops.yaml`. clusterctl ignores hidden
@@ -93,7 +108,8 @@ services:
   printing nothing of the plaintext.
 - **The sops library, not the sops binary.** The binary stays self-contained:
   no workstation needs a matching sops installed for clusterctl to read a
-  Secret, and every key type sops supports works.
+  Secret, and every key type sops supports works once the workstation trusts
+  it.
 
 ## What that costs
 

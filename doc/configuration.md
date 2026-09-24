@@ -182,6 +182,7 @@ metadata:
   name: example
 data:            # text, used as written
   bmc-password: hunter2
+  pin: "0600"    # quoted, or sops would store the number 384
 binaryData:      # base64, decoded before use
   munge-key: 8qL5N...==
 ```
@@ -213,16 +214,47 @@ Nothing is decrypted while the configuration loads. The names and keys of a
 Secret are readable without a key, so a reference to one that does not exist is
 reported at its line, and a command that uses no secret needs no key. When a
 command does use one, the document is decrypted into memory with the keys of
-`workstation.identities` first and then with whatever sops finds itself:
-`SOPS_AGE_KEY_FILE`, a PGP agent, the credentials of a cloud KMS.
+`workstation.identities` first. At a terminal, sops then looks for a key
+itself: `SOPS_AGE_KEY_FILE` and its other variables, a PGP agent, the
+credentials of a cloud KMS or Vault, trying age and PGP keys before any
+service. Without a terminal, under MCP or in a script, only
+`workstation.identities` are used, because sops' own search can run a program
+or ask for a passphrase.
 
-The loader also refuses what sops would not have written:
+The keys a file is encrypted to are listed in its sops metadata, which the
+message authentication code does not cover: anyone who can write the file can
+add a Vault address there, and sops would send this machine's Vault token to
+it. A Secret is therefore refused when it names a kind of key the workstation
+does not trust, before any key is tried. Only age is trusted unless
+`workstation.sopsKeyTypes` lists more:
+
+```yaml
+kind: Workstation
+spec:
+  identities: [~/.ssh/id_ed25519]
+  sopsKeyTypes: [age, pgp]   # age, pgp, kms, gcp_kms, azure_kv, hc_vault, hckms
+```
+
+The loader also refuses what sops would not have written, and what it did
+write but clusterctl will not read:
 
 ```
 $ clusterctl config validate
 clusterctl: secrets.sops.yaml is not valid:
   secrets.sops.yaml:9:5: data.pdu-password: the value is not encrypted: it was added without sops; edit the file with "sops secrets.sops.yaml" instead
 ```
+
+- **A value that is not text.** sops stores an unquoted `0600`, `007`, `true`
+  or `2001-12-14` as a number, a boolean or a date, and hands back `384`, `7`,
+  `true` or `2001-12-14T00:00:00Z`. Quote such a value in the plaintext. The
+  type sops records is not authenticated either, so a value whose type is
+  anything but a string is refused before it is decrypted.
+- **`mac_only_encrypted`.** Under it the message authentication code covers
+  only the encrypted values, and the kind and the name could be changed
+  without a key.
+
+When a Secret cannot be decrypted, the error says which keys were tried and
+nothing of the values.
 
 `clusterctl secrets check --decrypt` proves this workstation opens every Secret
 without printing any of it.

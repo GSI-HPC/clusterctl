@@ -108,8 +108,13 @@ $ clusterctl secrets push -n exe0007
 
 The plaintext is decrypted into memory on your workstation and streamed to the
 node over standard input. It never lands on either disk, and it never appears
-in an argument vector. Every secret is decrypted before the first is written,
-so a key you lack leaves the node untouched.
+in an argument vector. Every secret is decrypted before you are asked, so a
+key you lack stops the push, and its `--dry-run`, before the node is touched.
+On the node, each file is written beside its target and moved into place only
+once all of it has arrived, so a dropped connection leaves the old file.
+
+A node that cannot be reached is named, is not tried again for the remaining
+secrets, and makes the push exit `3` when it is the only kind of failure.
 
 A secret can come from a sops encrypted `Secret` document instead of a file of
 its own:
