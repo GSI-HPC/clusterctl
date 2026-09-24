@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -108,16 +109,34 @@ func (a *App) RunOnRole(ctx context.Context, role string, req transport.Request)
 	}
 	result, err := a.Runner.Run(ctx, target, req)
 	if err != nil {
+		if hasCode(err) {
+			return nil, err
+		}
 		return nil, exitcode.Wrap(exitcode.Transport, err)
 	}
 	if result.Failed() {
-		if result.Err != nil {
-			return result, exitcode.Wrap(exitcode.Transport, result.Err)
+		// ssh's own failure arrives coded as a transport failure, and an
+		// interrupt as one. Anything else happened on a host that answered,
+		// and what it said is the reason.
+		if hasCode(result.Err) {
+			return result, result.Err
 		}
-		return result, exitcode.Errorf(exitcode.TargetFailed, "%s: %s",
-			target, firstNonEmptyLine(result.Stderr, result.Stdout))
+		if strings.TrimSpace(result.Stderr+result.Stdout) == "" {
+			return result, exitcode.Errorf(exitcode.TargetFailed, "%s: command exited %d", target, result.ExitCode)
+		}
+		// The message came from the host, so it is quoted: a control
+		// character in it cannot rewrite the terminal it is printed on.
+		return result, exitcode.Errorf(exitcode.TargetFailed, "%s: exit %d: %q",
+			target, result.ExitCode, firstNonEmptyLine(result.Stderr, result.Stdout))
 	}
 	return result, nil
+}
+
+// hasCode reports whether an error already says which exit code it asks for,
+// or is an interrupt, which report turns into 130.
+func hasCode(err error) bool {
+	var coded *exitcode.Error
+	return errors.As(err, &coded) || errors.Is(err, context.Canceled)
 }
 
 func firstNonEmptyLine(candidates ...string) string {
