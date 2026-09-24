@@ -329,12 +329,15 @@ func TestDestructiveCommandRefusesProtectedHosts(t *testing.T) {
 }
 
 func TestDryRunChangesNothing(t *testing.T) {
-	h, err := run(t, harnessOptions{}, "provision", "reinstall", "-n", "exe0001", "--dry-run")
+	isolateHome(t)
+	t.Setenv("BMC_PASSWORD", "secret")
+	h, err := run(t, harnessOptions{recorder: slurmAllIdle(t)}, "provision", "reinstall", "-n", "exe0001", "--dry-run")
 	if err != nil {
 		t.Fatalf("a dry run should succeed: %v", err)
 	}
-	if len(h.recorder.Calls()) != 0 {
-		t.Errorf("a dry run sent %d commands, want none", len(h.recorder.Calls()))
+	// Slurm is asked, as the real run would; nothing else is sent.
+	if sinfo, other := sinfoCalls(h.recorder); sinfo != 1 || other != 0 {
+		t.Errorf("a dry run sent sinfo %d times and %d other commands, want sinfo once and nothing else", sinfo, other)
 	}
 	if !strings.Contains(h.errOut.String(), "Would reinstall") {
 		t.Errorf("the dry run says nothing:\n%s", h.errOut)

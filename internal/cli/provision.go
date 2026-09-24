@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -25,7 +27,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
-	"github.com/GSI-HPC/clusterctl/internal/inventory"
+	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
@@ -876,9 +878,9 @@ Log in to the host that publishes the configuration archives.`,
 
 func newProvisionCommand(r *root) *cobra.Command {
 	return group("provision", "Reinstall nodes end to end", `
-Run the whole reinstallation of a node set: forget its host keys, point the
-PXE service at the installation, tell the machine to boot from the network
-once, and reset it.
+Run the whole reinstallation of a node set: point the PXE service at the
+installation, tell the machine to boot from the network once, forget its host
+keys, and reset it.
 
 Each step is the command of the same name, so anything that goes wrong can be
 picked up and repeated by hand.`,
@@ -892,15 +894,31 @@ func newProvisionReinstallCommand(r *root) *cobra.Command {
 		bootPath string
 		keepKeys bool
 		noReset  bool
+		loseJobs bool
 	)
 
 	cmd := leaf("reinstall [NODESET]", "Reinstall a node set from the network", `
-Reinstall nodes: remove their host keys, configure the network boot, set the
-machines to boot from the network once, and reset them.
+Reinstall nodes: configure the network boot, set the machines to boot from
+the network once, remove their host keys, and reset them.
 
-This destroys everything on the nodes. It previews what it will do, refuses
-protected hosts, and above the configured host count asks for the count to be
-typed back.
+This destroys everything on the nodes. Before it asks, it resolves every
+node's address, boot path, service processor and BMC credential, checks that
+each boot path exists on the PXE host, and asks Slurm whether the nodes run
+jobs, so that nothing is changed for a set that would stop half way. It
+refuses protected hosts, lists each boot path with its nodes, and above the
+configured host count asks for the count to be typed back.
+
+A node that Slurm reports running a job, or cannot say about, is refused
+unless --lose-jobs is given; --force gets past a protected host, not this
+check. With --no-reset nothing is reset, so Slurm is not asked, and each node
+reinstalls at its next network boot.
+
+The boot override is set over Redfish, so a node whose bmc.order does not
+start with redfish is refused.
+
+When a step fails, the boot links and boot overrides of every node that was
+not reset are removed again. Whatever could not be removed is named, with the
+commands that remove it.
 
   clusterctl provision reinstall -n exe0001
   clusterctl provision reinstall -n @rack:R02 --dry-run`,
@@ -914,139 +932,532 @@ typed back.
 			if err != nil {
 				return err
 			}
+			action := safety.Action{Verb: "reinstall", Targets: ns}
+			// A protected host is named before anything is looked up or
+			// asked, so that a refusal never leaves it out.
+			if err := a.Gate.Check(action); err != nil {
+				return err
+			}
 
-			// Everything that can be resolved is resolved before the first
-			// change, so a set with one unknown node stops here rather than
-			// halfway through.
-			plans := map[string]string{}
-			for _, node := range ns.Expand() {
-				path := bootPath
-				if path == "" {
-					resolved, _, err := inventory.BootPath(a.Inventory, a.Spec.BootPaths, node)
-					if err != nil {
-						return exitcode.Wrap(exitcode.Usage, err)
-					}
-					path = resolved
-				}
-				plans[node] = path
-				if _, err := nodeAddress(a, node); err != nil {
+			// Everything is resolved before the first change, so that a
+			// set with one node that cannot be reinstalled stops here
+			// rather than halfway through.
+			plan, err := planReinstall(a, ns, bootPath, keepKeys)
+			if err != nil {
+				return err
+			}
+			if !noReset {
+				if err := checkSlurmIdle(a, ns, ipmi.ActionReset, loseJobs); err != nil {
 					return err
 				}
 			}
-
-			if err := a.Gate.Confirm(safety.Action{
-				Verb:    "reinstall",
-				Targets: ns,
-				Detail:  "everything on these machines is lost",
-			}); err != nil {
+			details := []string{"everything on these machines is lost", describeBootLinks(plan.links)}
+			if noReset {
+				details = append(details, "the machines are not reset: each one reinstalls at its next network boot")
+			} else {
+				details = append(details, "then each machine is set to boot from the network once and reset through Redfish")
+			}
+			if a.DryRun() {
+				details = append(details, dryRunChecks)
+			} else if err := checkBootLinks(a, plan.role, plan.root, plan.links); err != nil {
+				return err
+			}
+			action.Detail = strings.Join(details, "\n  ")
+			if err := a.Gate.Confirm(action); err != nil {
 				return dryRunOrError(err)
 			}
 
-			steps := output.NewTable(output.Cols("STEP", "RESULT")...)
-			record := func(step string, err error) error {
-				if err != nil {
-					steps.Add(step, "failed: "+err.Error())
-					_ = a.Print(output.Result{Table: steps})
-					return err
-				}
-				steps.Add(step, "ok")
-				return nil
+			err = plan.run(a, noReset)
+			t := output.NewTable(
+				output.Column{Name: "NODE"},
+				output.Column{Name: "BOOT PATH", Wide: true},
+				output.Column{Name: "BOOT LINK"},
+				output.Column{Name: "BOOT ONCE"},
+				output.Column{Name: "RESET"},
+				output.Column{Name: "STATE"},
+			)
+			for _, n := range plan.nodes {
+				t.Add(n.Node, n.BootPath, orDash(n.BootLink), orDash(n.BootOnce), orDash(n.Reset), n.State)
 			}
-
-			if !keepKeys {
-				path := a.Path(a.Spec.SSH.KnownHostsFile)
-				err := hostkeys.Modify(a.Context(), path, func(f *hostkeys.File) error {
-					for _, node := range ns.Expand() {
-						host, err := a.Namer.FQDN(node)
-						if err != nil {
-							return err
-						}
-						f.Remove(host)
-						f.Remove(node)
-					}
-					return nil
-				})
-				if err := record("forget the host keys", err); err != nil {
-					return err
-				}
+			t.Caption = plan.caption(noReset)
+			if printErr := a.Print(output.Result{Table: t, Object: plan.nodes}); printErr != nil && err == nil {
+				err = printErr
 			}
-
-			if err := record("configure the network boot", setBootPaths(a, plans)); err != nil {
-				return err
-			}
-
-			bootErr := forEachBMCError(a, ns, func(node string, c *redfish.Client) error {
-				return c.SetBootOverride(a.Context(), "Pxe", false)
-			})
-			if err := record("boot from the network once", bootErr); err != nil {
-				return err
-			}
-
-			if !noReset {
-				resetErr := forEachBMCError(a, ns, func(node string, c *redfish.Client) error {
-					return c.Reset(a.Context(), redfish.ResetForceRestart)
-				})
-				if err := record("reset the machines", resetErr); err != nil {
-					return err
-				}
-			}
-
-			steps.Caption = fmt.Sprintf("%s is reinstalling; follow it with \"clusterctl boot log\"", ns)
-			return a.Print(output.Result{Table: steps})
+			return err
 		})
 
 	cmd.Flags().StringVar(&bootPath, "boot-path", "", "boot configuration to install from (default: from the cluster rules)")
 	cmd.Flags().BoolVar(&keepKeys, "keep-host-keys", false, "leave the host key file alone")
 	cmd.Flags().BoolVar(&noReset, "no-reset", false, "configure everything but do not reset the machines")
+	addLoseJobsFlag(cmd, &loseJobs)
 	return cmd
 }
 
-// setBootPaths writes the boot path links for a whole set in one call.
-func setBootPaths(a *app.App, plans map[string]string) error {
-	role, err := pxeRole(a)
-	if err != nil {
-		return err
-	}
-	root := a.Spec.Services.PXESrv.Root
-	if root == "" {
-		root = "/srv/pxesrv"
-	}
-	var script strings.Builder
-	script.WriteString("set -eu\n")
-	for node, path := range plans {
-		address, err := nodeAddress(a, node)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(&script, "ln -sfn %s %s\n",
-			shellquote.Quote(path), shellquote.Quote(filepath.Join(root, address)))
-	}
-	_, err = a.RunOnRole(a.Context(), role, transport.Request{
-		Script:  script.String(),
-		Timeout: a.Timeout().Get(),
-		TTY:     transport.TTYNone,
-	})
-	return err
+// provisionClient builds the Redfish client of a node's service processor.
+// It is a variable so that the tests can put a fake processor behind it.
+var provisionClient = func(a *app.App, ctx context.Context, node string) (*redfish.Client, error) {
+	return a.RedfishClient(ctx, node)
 }
 
-// forEachBMCError runs an action against every service processor and reports
-// the first failure, having tried all of them.
-func forEachBMCError(a *app.App, ns *nodeset.NodeSet, do func(string, *redfish.Client) error) error {
-	var failures []string
-	for _, node := range ns.Expand() {
-		client, err := a.RedfishClient(a.Context(), node)
+// What became of one change of a reinstall on one node.
+const (
+	stepSet     = "set"
+	stepSent    = "sent"
+	stepFailed  = "failed"
+	stepUnknown = "unknown"
+	stepNotSent = "not sent"
+	// stepUnreachable is a request that never reached the processor.
+	stepUnreachable = "unreachable"
+	stepRemoved     = "removed"
+	stepCleared     = "cleared"
+)
+
+// The state a reinstall leaves a node in.
+const (
+	stateReinstalling = "reinstalling"
+	stateArmed        = "armed"
+	stateDisarmed     = "disarmed"
+	stateUnchanged    = "unchanged"
+)
+
+// reinstallNode is what a reinstall does to one node, and how far it got.
+type reinstallNode struct {
+	Node     string `json:"node"`
+	Address  string `json:"address"`
+	BootPath string `json:"bootPath"`
+	Mode     string `json:"mode"`
+	BMC      string `json:"bmc"`
+	// BootLink, BootOnce and Reset say what became of each change: set or
+	// sent, failed, unknown or not sent, and removed or cleared when it was
+	// undone again. They are empty for a change that was not tried.
+	BootLink string `json:"bootLink,omitempty"`
+	BootOnce string `json:"bootOnce,omitempty"`
+	Reset    string `json:"reset,omitempty"`
+	// State is reinstalling, armed when the node reinstalls at its next
+	// network boot, disarmed when what was armed was undone, or unchanged.
+	State  string   `json:"state"`
+	Errors []string `json:"errors,omitempty"`
+
+	hostNames []string
+	client    *redfish.Client
+}
+
+func (n *reinstallNode) note(what string, err error) {
+	if err != nil {
+		n.Errors = append(n.Errors, printable(what+": "+err.Error()))
+	}
+}
+
+// linked says whether a node may carry the boot link this reinstall wrote.
+func (n *reinstallNode) linked() bool {
+	return n.BootLink == stepSet || n.BootLink == stepUnknown
+}
+
+// overridden says whether a node's processor may hold the boot override
+// this reinstall asked for. A request that failed may still have been
+// carried out, so only one that was never sent, or never reached the
+// processor, counts as not set.
+func (n *reinstallNode) overridden() bool {
+	return n.BootOnce == stepSet || n.BootOnce == stepFailed
+}
+
+// reinstallPlan is everything a reinstall needs, resolved before anything
+// is changed.
+type reinstallPlan struct {
+	role, root string
+	nodes      []*reinstallNode
+	links      []bootLink
+	// knownHosts is the host key file, or empty when it is left alone.
+	knownHosts    string
+	keysForgotten bool
+}
+
+// planReinstall resolves, for every node, the address and boot path of its
+// boot link, its service processor, its BMC credential and the names its
+// host keys are filed under. Nothing is changed, and nothing is sent to a
+// node or a service processor.
+func planReinstall(a *app.App, ns *nodeset.NodeSet, explicit string, keepKeys bool) (*reinstallPlan, error) {
+	role, err := pxeRole(a)
+	if err != nil {
+		return nil, err
+	}
+	links, err := resolveBootLinks(a, ns, explicit, false)
+	if err != nil {
+		return nil, err
+	}
+	p := &reinstallPlan{role: role, root: pxeRoot(a), links: links}
+	if !keepKeys {
+		p.knownHosts = a.Path(a.Spec.SSH.KnownHostsFile)
+	}
+
+	// The boot override is only ever set over Redfish. A node whose order
+	// puts another transport first may have a processor that does not
+	// speak Redfish, or should not be sent the account over it.
+	var elsewhere []string
+	for _, l := range links {
+		if order := a.BMCOrder(l.Node); strings.ToLower(strings.TrimSpace(order[0])) != "redfish" {
+			elsewhere = append(elsewhere, l.Node)
+		}
+	}
+	if len(elsewhere) > 0 {
+		return nil, exitcode.Errorf(exitcode.Usage,
+			"bmc.order reaches %s over another transport before Redfish, and provision reinstall "+
+				"sets the network boot over Redfish only; reinstall it step by step with "+
+				"boot set, bmc boot set, hostkey remove and bmc power reset", fold(elsewhere))
+	}
+
+	for _, l := range links {
+		n := &reinstallNode{Node: l.Node, Address: l.Address, BootPath: l.Path, Mode: l.Mode, State: stateUnchanged}
+		if a.DryRun() {
+			// A dry run contacts no processor, so it builds no client,
+			// which would announce a certificate it is about to record;
+			// the processor and the credential are resolved all the same.
+			if n.BMC, err = a.BMCHost(l.Node); err != nil {
+				return nil, err
+			}
+			if _, err := a.BMCCredential(a.Context(), l.Node); err != nil {
+				return nil, fmt.Errorf("%s: %w", l.Node, err)
+			}
+		} else {
+			if n.client, err = provisionClient(a, a.Context(), l.Node); err != nil {
+				return nil, fmt.Errorf("%s: %w", l.Node, err)
+			}
+			n.BMC = n.client.Host
+		}
+		if !keepKeys {
+			fqdn, err := a.Namer.FQDN(l.Node)
+			if err != nil {
+				return nil, exitcode.Wrap(exitcode.Usage, err)
+			}
+			n.hostNames = []string{fqdn, l.Node}
+		}
+		p.nodes = append(p.nodes, n)
+	}
+	return p, nil
+}
+
+// run carries out a plan: it writes the boot links, sets the boot overrides,
+// forgets the host keys and resets the machines. The host keys, which
+// cannot be put back, go only once every machine is armed. When a step
+// fails, every node that was not reset is disarmed again.
+func (p *reinstallPlan) run(a *app.App, noReset bool) error {
+	err := writeBootLinks(a, p.role, p.root, p.links)
+	for i, l := range p.links {
+		p.nodes[i].BootLink = l.Result
+		if l.Error != "" {
+			p.nodes[i].Errors = append(p.nodes[i].Errors, "boot link: "+l.Error)
+		}
+	}
+	if err != nil {
+		return p.fail(a, "configuring the network boot", err, p.nodes)
+	}
+
+	errs := forEachBMCError(a, p.clients(p.nodes), func(ctx context.Context, _ int, c *redfish.Client) error {
+		return c.SetBootOverride(ctx, "Pxe", false)
+	})
+	for i, n := range p.nodes {
+		n.BootOnce = stepOutcome(errs[i], stepSet)
+		n.note("boot once", errs[i])
+	}
+	if err := nodeFailures(p.nodes, errs); err != nil {
+		return p.fail(a, "setting the machines to boot from the network once", err, p.nodes)
+	}
+
+	if p.knownHosts != "" {
+		err := hostkeys.Modify(a.Context(), p.knownHosts, func(f *hostkeys.File) error {
+			for _, n := range p.nodes {
+				for _, name := range n.hostNames {
+					f.Remove(name)
+				}
+			}
+			return nil
+		})
 		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", node, err))
+			return p.fail(a, "forgetting the host keys", err, p.nodes)
+		}
+		p.keysForgotten = true
+	}
+
+	if noReset {
+		p.settle()
+		return nil
+	}
+	errs = forEachBMCError(a, p.clients(p.nodes), func(ctx context.Context, _ int, c *redfish.Client) error {
+		return c.Reset(ctx, redfish.ResetForceRestart)
+	})
+	// A node whose reset failed is disarmed with the rest, even though a
+	// reset that timed out may have been carried out: the machine then
+	// boots its old system, rather than reinstalling at some later boot
+	// that nobody confirmed.
+	var left []*reinstallNode
+	for i, n := range p.nodes {
+		n.Reset = stepOutcome(errs[i], stepSent)
+		n.note("reset", errs[i])
+		if errs[i] != nil {
+			left = append(left, n)
+		}
+	}
+	if err := nodeFailures(p.nodes, errs); err != nil {
+		return p.fail(a, "resetting the machines", err, left)
+	}
+	p.settle()
+	return nil
+}
+
+func (p *reinstallPlan) clients(nodes []*reinstallNode) []*redfish.Client {
+	out := make([]*redfish.Client, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.client
+	}
+	return out
+}
+
+// settle works out the state of every node from what became of each change.
+func (p *reinstallPlan) settle() {
+	for _, n := range p.nodes {
+		switch {
+		case n.Reset == stepSent:
+			n.State = stateReinstalling
+		case n.linked() || n.overridden():
+			n.State = stateArmed
+		case n.BootLink == stepRemoved || n.BootOnce == stepCleared:
+			n.State = stateDisarmed
+		default:
+			n.State = stateUnchanged
+		}
+	}
+}
+
+// fail disarms the given nodes after a step failed: it clears each boot
+// override that may have been set and removes each boot link that may have
+// been written. It returns the error of the step, followed by what became
+// of the set and, for whatever is still armed, the commands that disarm it.
+func (p *reinstallPlan) fail(a *app.App, step string, stepErr error, left []*reinstallNode) error {
+	var overridden []*reinstallNode
+	for _, n := range left {
+		if n.overridden() {
+			overridden = append(overridden, n)
+		}
+	}
+	errs := forEachBMCError(a, p.clients(overridden), func(ctx context.Context, _ int, c *redfish.Client) error {
+		return c.ClearBootOverride(ctx)
+	})
+	for i, n := range overridden {
+		if errs[i] == nil {
+			n.BootOnce = stepCleared
+		}
+		n.note("clearing the boot override", errs[i])
+	}
+
+	var linked []*reinstallNode
+	var links []bootLink
+	for _, n := range left {
+		if n.linked() {
+			linked = append(linked, n)
+			links = append(links, bootLink{Node: n.Node, Address: n.Address, Path: n.BootPath, Mode: n.Mode})
+		}
+	}
+	if len(links) > 0 {
+		_ = removeBootLinks(a, p.role, p.root, links)
+		for i, n := range linked {
+			if links[i].Result == stepRemoved {
+				n.BootLink = stepRemoved
+				continue
+			}
+			n.Errors = append(n.Errors, "removing the boot link: "+links[i].Error)
+		}
+	}
+	p.settle()
+
+	var parts []string
+	if reinstalling := p.inState(stateReinstalling); len(reinstalling) > 0 {
+		parts = append(parts, fold(reinstalling)+" is reinstalling")
+	}
+	if disarmed := p.inState(stateDisarmed); len(disarmed) > 0 {
+		msg := "the boot links and boot overrides of " + fold(disarmed) + " were removed again"
+		if p.keysForgotten {
+			msg += fmt.Sprintf(`, but their host keys are forgotten; "clusterctl hostkey refresh -n %s" writes them again`,
+				fold(disarmed))
+		}
+		parts = append(parts, msg)
+	}
+	if armed := p.inState(stateArmed); len(armed) > 0 {
+		parts = append(parts, armedAdvice(p.nodes))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "nothing was changed")
+	}
+	return fmt.Errorf("%s failed: %w; %s", step, stepErr, strings.Join(parts, "; "))
+}
+
+// armedAdvice names the nodes left armed and the commands that disarm them.
+func armedAdvice(nodes []*reinstallNode) string {
+	var armed, overridden, linked []string
+	for _, n := range nodes {
+		if n.State != stateArmed {
 			continue
 		}
-		if err := do(node, client); err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", node, err))
+		armed = append(armed, n.Node)
+		if n.overridden() {
+			overridden = append(overridden, n.Node)
+		}
+		if n.linked() {
+			linked = append(linked, n.Node)
 		}
 	}
-	if len(failures) > 0 {
-		return exitcode.Errorf(exitcode.TargetFailed, "%s", strings.Join(failures, "; "))
+	var commands []string
+	if len(overridden) > 0 {
+		commands = append(commands, fmt.Sprintf(`"clusterctl bmc boot unset -n %s"`, fold(overridden)))
 	}
-	return nil
+	if len(linked) > 0 {
+		commands = append(commands, fmt.Sprintf(`"clusterctl boot unset -n %s"`, fold(linked)))
+	}
+	return fmt.Sprintf("%s is left armed and reinstalls at its next network boot; disarm it with %s",
+		fold(armed), strings.Join(commands, " and "))
+}
+
+func (p *reinstallPlan) inState(state string) []string {
+	var out []string
+	for _, n := range p.nodes {
+		if n.State == state {
+			out = append(out, n.Node)
+		}
+	}
+	return out
+}
+
+// caption sums up a reinstall that went through.
+func (p *reinstallPlan) caption(noReset bool) string {
+	if len(p.inState(stateReinstalling)) == len(p.nodes) {
+		return fmt.Sprintf(`%s is reinstalling; follow it with "clusterctl provision status" and "clusterctl boot log"`,
+			fold(p.inState(stateReinstalling)))
+	}
+	if noReset && len(p.inState(stateArmed)) == len(p.nodes) {
+		return armedAdvice(p.nodes)
+	}
+	return ""
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// errBMCNotSent marks a request the command was interrupted before.
+var errBMCNotSent = errors.New("not sent: the command was interrupted first")
+
+// stepOutcome names what became of one request to a processor.
+func stepOutcome(err error, done string) string {
+	switch {
+	case err == nil:
+		return done
+	case errors.Is(err, errBMCNotSent):
+		return stepNotSent
+	case neverReached(err):
+		return stepUnreachable
+	default:
+		return stepFailed
+	}
+}
+
+// neverReached says whether an error proves that a request never reached
+// the processor: its name did not resolve, nothing accepted the connection,
+// or it presented another certificate than the one recorded. A request
+// that failed any other way may have been carried out.
+func neverReached(err error) bool {
+	var (
+		dnsErr *net.DNSError
+		opErr  *net.OpError
+		pin    *redfish.PinMismatchError
+	)
+	return errors.As(err, &dnsErr) || errors.As(err, &pin) ||
+		(errors.As(err, &opErr) && opErr.Op == "dial")
+}
+
+// forEachBMCError sends one request to each processor in parallel, bounded
+// by the configured concurrency, and returns the error of each one. A nil
+// client is skipped. Once the command is interrupted nothing more is sent.
+func forEachBMCError(a *app.App, clients []*redfish.Client, do func(context.Context, int, *redfish.Client) error) []error {
+	errs := make([]error, len(clients))
+	limit := a.Spec.BMC.Redfish.MaxConcurrent
+	if limit < 1 {
+		limit = 8
+	}
+	ctx := a.Context()
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i, c := range clients {
+		if c == nil {
+			continue
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			errs[i] = fmt.Errorf("%w: %w", errBMCNotSent, ctx.Err())
+			continue
+		}
+		wg.Add(1)
+		go func(i int, c *redfish.Client) {
+			defer func() { <-sem; wg.Done() }()
+			errs[i] = do(ctx, i, c)
+		}(i, c)
+	}
+	wg.Wait()
+	return errs
+}
+
+// nodeFailures names the nodes whose request failed. It exits with the
+// code that tells the most: an interrupt, then a host that could not be
+// reached, then a configuration problem, then a refusal.
+func nodeFailures(nodes []*reinstallNode, errs []error) error {
+	names := make([]string, len(nodes))
+	for i, n := range nodes {
+		names[i] = n.Node
+	}
+	return namedFailures(names, errs)
+}
+
+func namedFailures(names []string, errs []error) error {
+	var parts []string
+	var failed []error
+	code := exitcode.OK
+	for i, err := range errs {
+		if err == nil {
+			continue
+		}
+		parts = append(parts, printable(fmt.Sprintf("%s: %v", names[i], err)))
+		failed = append(failed, err)
+		c := exitcode.From(err)
+		if errors.Is(err, context.Canceled) {
+			c = exitcode.Interrupted
+		}
+		if codeWeight(c) > codeWeight(code) {
+			code = c
+		}
+	}
+	if len(failed) == 0 {
+		return nil
+	}
+	return &exitcode.Error{Code: code, Err: &hostFailures{message: strings.Join(parts, "; "), errs: failed}}
+}
+
+func codeWeight(code int) int {
+	switch code {
+	case exitcode.OK:
+		return 0
+	case exitcode.Interrupted:
+		return 4
+	case exitcode.Transport:
+		return 3
+	case exitcode.Usage:
+		return 2
+	default:
+		return 1
+	}
 }
 
 func newProvisionStatusCommand(r *root) *cobra.Command {
