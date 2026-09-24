@@ -210,6 +210,9 @@ reinstall needs one, and prints nothing of the plaintext.
 				if err == nil {
 					info, err = secrets.InspectSops(raw)
 				}
+				if err == nil {
+					err = info.CheckKeyTypes(a.Spec.Workstation.SopsKeyTypes)
+				}
 				if err == nil && decrypt {
 					status = "decrypts"
 					_, err = a.SecretValues(name)

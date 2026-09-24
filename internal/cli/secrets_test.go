@@ -4,9 +4,12 @@
 package cli
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"filippo.io/age"
@@ -163,6 +166,100 @@ func TestSecretValuesAreNotParsedTwice(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), `"status": "decrypts"`) || leaked(h, err) {
 		t.Errorf("the check should decrypt and print nothing of the secret:\n%s", h.out)
+	}
+}
+
+// vaultServer counts the requests a made-up Vault receives, and whether they
+// carried the token.
+func vaultServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		t.Logf("the Vault received %s %s with token %q", r.Method, r.URL.Path, r.Header.Get("X-Vault-Token"))
+		http.Error(w, "no", http.StatusForbidden)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &requests
+}
+
+// TestSecretsTrustOnlyTheConfiguredKeyTypes is report sections 8.3 and 8.4:
+// an hc_vault key added to the metadata, which the message authentication
+// code does not cover, made clusterctl send the administrator's Vault token
+// to the address it named, before the age identity was even tried.
+func TestSecretsTrustOnlyTheConfiguredKeyTypes(t *testing.T) {
+	srv, requests := vaultServer(t)
+	t.Setenv("VAULT_TOKEN", "hvs.ADMIN-SECRET-TOKEN")
+	addVault := func(file []byte) []byte { return sopstest.AddVaultKey(t, file, srv.URL) }
+
+	// Only age is trusted unless the workstation says otherwise, so the
+	// file is refused before any key is tried, and says why.
+	dir, _ := secretSite{values: bmcSecret, identities: true, edit: addVault}.write(t)
+	h, err := run(t, harnessOptions{config: []string{dir}, tty: true}, "secrets", "check", "--decrypt")
+	if exitcode.From(err) != exitcode.TargetFailed {
+		t.Fatalf("secrets check --decrypt: err = %v, want the file refused\n%s", err, h.out)
+	}
+	for _, want := range []string{"hc_vault", "sopsKeyTypes"} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("the refusal does not mention %q:\n%s", want, h.out)
+		}
+	}
+	h, err = run(t, harnessOptions{config: []string{dir}, tty: true}, "secrets", "check")
+	if exitcode.From(err) != exitcode.TargetFailed || !strings.Contains(h.out.String(), "hc_vault") {
+		t.Errorf("secrets check should report the key type without decrypting: %v\n%s", err, h.out)
+	}
+
+	// A workstation that trusts Vault as well still tries its age identity
+	// first, and needs nothing else.
+	dir, _ = secretSite{
+		values: bmcSecret, identities: true, edit: addVault,
+		workstation: "  sopsKeyTypes: [age, hc_vault]\n",
+	}.write(t)
+	h, err = run(t, harnessOptions{config: []string{dir}, tty: true}, "secrets", "check", "--decrypt")
+	if err != nil {
+		t.Fatalf("secrets check --decrypt with Vault trusted failed: %v\n%s", err, h.out)
+	}
+
+	if n := requests.Load(); n != 0 {
+		t.Errorf("the Vault named by the file received %d requests", n)
+	}
+}
+
+// TestSecretsWithoutATerminalUseOnlyTheWorkstationIdentities is report
+// section 10.6: without a terminal, as under MCP, sops' own key discovery ran
+// SOPS_AGE_KEY_CMD and asked gpg-agent for a passphrase, with nobody there
+// to have asked for it.
+func TestSecretsWithoutATerminalUseOnlyTheWorkstationIdentities(t *testing.T) {
+	dir, keyFile := secretSite{values: bmcSecret}.write(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	probe := filepath.Join(t.TempDir(), "probe")
+	if err := os.WriteFile(probe, []byte("#!/bin/sh\ntouch "+marker+"\ncat "+keyFile+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SOPS_AGE_KEY_CMD", probe)
+	t.Setenv("SOPS_AGE_KEY_FILE", keyFile)
+	t.Setenv("HOME", t.TempDir())
+
+	h, err := run(t, harnessOptions{config: []string{dir}}, "secrets", "check", "--decrypt")
+	if exitcode.From(err) != exitcode.TargetFailed {
+		t.Fatalf("secrets check --decrypt without a terminal: err = %v, want a refusal\n%s", err, h.out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("SOPS_AGE_KEY_CMD ran without a terminal")
+	}
+	for _, want := range []string{"workstation.identities", "terminal"} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("the refusal does not mention %q:\n%s", want, h.out)
+		}
+	}
+	if strings.Contains(h.out.String(), keyFile) {
+		t.Errorf("the refusal names a key file sops found:\n%s", h.out)
+	}
+
+	// At a terminal, sops looks for a key itself, as before.
+	h, err = run(t, harnessOptions{config: []string{dir}, tty: true}, "secrets", "check", "--decrypt")
+	if err != nil {
+		t.Fatalf("secrets check --decrypt at a terminal failed: %v\n%s", err, h.out)
 	}
 }
 

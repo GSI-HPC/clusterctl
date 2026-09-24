@@ -51,8 +51,9 @@ binaryData:
 		}
 	}
 
+	// At a terminal, where sops may look for a key itself.
 	a, err := app.New(context.Background(), app.Streams{
-		In: strings.NewReader(""), Out: &strings.Builder{}, Err: &strings.Builder{},
+		In: strings.NewReader(""), Out: &strings.Builder{}, Err: &strings.Builder{}, IsTTY: true,
 		StateDir: filepath.Join(dir, "state"), CacheDir: filepath.Join(dir, "cache"),
 	}, app.Options{
 		ConfigFiles: []string{exampleDir, dir},

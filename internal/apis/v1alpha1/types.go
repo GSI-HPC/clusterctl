@@ -614,6 +614,12 @@ type WorkstationSpec struct {
 	Pager   string `json:"pager,omitempty" yaml:"pager,omitempty"`
 	// Identities are the age identities used to decrypt secrets.
 	Identities []string `json:"identities,omitempty" yaml:"identities,omitempty"`
+	// SopsKeyTypes are the kinds of master key a Secret document may be
+	// encrypted to, age alone when unset. sops contacts the key management
+	// service or Vault a file's metadata names with this machine's
+	// credentials, and that metadata is not authenticated, so a kind is
+	// used only when it is listed here.
+	SopsKeyTypes []string `json:"sopsKeyTypes,omitempty" yaml:"sopsKeyTypes,omitempty" jsonschema:"enum=age,enum=pgp,enum=kms,enum=gcp_kms,enum=azure_kv,enum=hc_vault,enum=hckms"`
 	// SshuttleBinary overrides where sshuttle is found.
 	SshuttleBinary string `json:"sshuttleBinary,omitempty" yaml:"sshuttleBinary,omitempty"`
 	// Overrides are applied on top of the cluster layer on this machine.
