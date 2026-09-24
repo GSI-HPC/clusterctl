@@ -805,7 +805,8 @@ func newBootGrubCommand(r *root) *cobra.Command {
 Link the GRUB configuration a node loads over TFTP to an installation target.
 
 GRUB looks for a file named after the node's address in hexadecimal, which is
-what this command computes.
+what this command computes. Unlike a PXE boot path, the link has no one-shot
+form: GRUB loads the target at every boot until "boot grub unset" removes it.
 
   clusterctl boot grub set exe0001 /srv/tftp/grub/1.0/grub.cfg.install-exec`,
 		cobra.ExactArgs(2),
@@ -814,37 +815,17 @@ what this command computes.
 			if err != nil {
 				return err
 			}
-			role := a.Spec.Services.TFTP.Role
-			if role == "" {
-				return exitcode.Errorf(exitcode.Usage, "no host role runs the TFTP service; set services.tftp.role")
-			}
-			grubPath := a.Spec.Services.TFTP.GrubPath
-			if grubPath == "" {
-				grubPath = "/srv/tftp/grub"
-			}
-			address, err := nodeAddress(a, args[0])
-			if err != nil {
-				return err
-			}
-			hex, err := addressToHex(address)
-			if err != nil {
-				return exitcode.Wrap(exitcode.Usage, err)
-			}
-			link := grubPath + "/grub.cfg-" + hex
-
-			ns, err := a.Select(args[0])
+			role, node, link, err := grubLink(a, args[0])
 			if err != nil {
 				return err
 			}
 			if err := a.Gate.Confirm(safety.Action{
 				Verb:    "set the GRUB configuration of",
-				Targets: ns,
-				Detail:  link + " -> " + args[1],
+				Targets: singleNode(node),
+				Detail: fmt.Sprintf("%s -> %s, persistently: it stays until \"clusterctl boot grub unset %s\"",
+					link, args[1], node),
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
-				return err
+				return dryRunOrError(err)
 			}
 			if _, err := a.RunOnRole(a.Context(), role, transport.Request{
 				Argv:    []string{"ln", "-sfn", args[1], link},
@@ -853,7 +834,38 @@ what this command computes.
 			}); err != nil {
 				return err
 			}
-			a.Printf("%s now loads %s\n", args[0], args[1])
+			a.Printf("%s now loads %s at every boot, until \"clusterctl boot grub unset %s\"\n", node, args[1], node)
+			return nil
+		})
+
+	unset := leaf("unset NODE", "Remove a node's GRUB configuration link", `
+Remove the link that points a node's GRUB configuration at a target, so GRUB
+no longer finds a configuration named after the node.`,
+		cobra.ExactArgs(1),
+		func(cmd *cobra.Command, args []string) error {
+			a, err := r.App()
+			if err != nil {
+				return err
+			}
+			role, node, link, err := grubLink(a, args[0])
+			if err != nil {
+				return err
+			}
+			if err := a.Gate.Confirm(safety.Action{
+				Verb:    "remove the GRUB configuration of",
+				Targets: singleNode(node),
+				Detail:  "removes " + link,
+			}); err != nil {
+				return dryRunOrError(err)
+			}
+			if _, err := a.RunOnRole(a.Context(), role, transport.Request{
+				Argv:    []string{"rm", "-f", "--", link},
+				Timeout: a.Timeout().Get(),
+				TTY:     transport.TTYNone,
+			}); err != nil {
+				return err
+			}
+			a.Printf("removed the GRUB configuration of %s\n", node)
 			return nil
 		})
 
@@ -883,7 +895,43 @@ which is the address in hexadecimal.`,
 
 	return group("grub", "Configure what a node loads over TFTP", `
 GRUB asks the TFTP service for a configuration named after the node's address
-in hexadecimal. These commands compute that name and set the link.`, set, show)
+in hexadecimal. These commands compute that name and set or remove the link.`, set, unset, show)
+}
+
+// grubLink resolves the TFTP role, the one node named and the GRUB link
+// named after its address.
+func grubLink(a *app.App, expr string) (role, node, link string, err error) {
+	role = a.Spec.Services.TFTP.Role
+	if role == "" {
+		return "", "", "", exitcode.Errorf(exitcode.Usage, "no host role runs the TFTP service; set services.tftp.role")
+	}
+	grubPath := a.Spec.Services.TFTP.GrubPath
+	if grubPath == "" {
+		grubPath = "/srv/tftp/grub"
+	}
+	ns, err := a.Select(expr)
+	if err != nil {
+		return "", "", "", err
+	}
+	if ns.Len() != 1 {
+		return "", "", "", exitcode.Errorf(exitcode.Usage, "%s is %d nodes; name one", expr, ns.Len())
+	}
+	node = ns.Expand()[0]
+	addresses, err := nodeAddresses(a, []string{node})
+	if err != nil {
+		return "", "", "", err
+	}
+	hex, err := addressToHex(addresses[0])
+	if err != nil {
+		return "", "", "", exitcode.Wrap(exitcode.Usage, err)
+	}
+	return role, node, grubPath + "/grub.cfg-" + hex, nil
+}
+
+func singleNode(node string) *nodeset.NodeSet {
+	ns := nodeset.New()
+	_ = ns.Add(node)
+	return ns
 }
 
 // addressToHex renders an IPv4 address the way GRUB asks for it: eight upper

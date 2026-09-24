@@ -409,6 +409,30 @@ func TestBootSetHonoursAStaticRule(t *testing.T) {
 	}
 }
 
+func TestBootGrubSetSaysItPersistsAndCanBeUnset(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "boot", "grub", "set", "exe0001", "/srv/tftp/grub/1.0/grub.cfg.install-exec", "--dry-run")
+	if err != nil {
+		t.Fatalf("boot grub set --dry-run failed: %v", err)
+	}
+	if !strings.Contains(h.errOut.String(), "boot grub unset") {
+		t.Errorf("the preview does not say the link stays until it is removed:\n%s", h.errOut)
+	}
+
+	h, err = run(t, harnessOptions{}, "boot", "grub", "unset", "exe0001", "-y")
+	if err != nil {
+		t.Fatalf("boot grub unset failed: %v", err)
+	}
+	commands := h.recorder.Commands()
+	if len(commands) != 1 || !strings.Contains(commands[0], "rm -f -- /srv/tftp/grub/grub.cfg-0A000201") {
+		t.Errorf("commands = %q, want the GRUB link removed", commands)
+	}
+
+	h, err = run(t, harnessOptions{}, "boot", "grub", "unset", "exe0001")
+	if err == nil || len(h.recorder.Calls()) != 0 {
+		t.Errorf("boot grub unset without a terminal should be refused and send nothing, got %v", err)
+	}
+}
+
 // 5.9: the question has to show every boot path that will be written.
 func TestBootSetPreviewListsEveryPath(t *testing.T) {
 	h, err := run(t, harnessOptions{}, "--force", "--dry-run", "boot", "set", "-n", "dbm01,exe0001")
