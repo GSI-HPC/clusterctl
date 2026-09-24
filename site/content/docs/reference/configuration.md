@@ -186,11 +186,27 @@ spec:
       bootPath: /srv/pxesrv/boot/special
 ```
 
+Entries are applied in order, and a later entry refines the nodes it names.
+Write a host the same way in every entry: `exe1`, `exe0001` and `EXE0001` are
+one host, so an entry naming `exe1` after one naming `exe[0001-1024]` is
+refused rather than guessed at. The error names both entries and the spelling
+to use.
+
 `rack` and `level` are also exposed as attributes, so a group source reading an
-attribute can build one group per rack.
+attribute can build one group per rack. Writing either the field or the
+attribute sets both, so `attributes: {rack: R05}` moves a node to rack `R05`
+for `node rack` and `@rack:R05` alike. An entry writing both with different
+values is refused.
 
 Fields describing a single machine — `address`, `bmcAddress`, `cid`, `macs` —
-may only be set by an entry naming exactly one node.
+may only be set by an entry naming exactly one node, and no two nodes may share
+a value: a copied address would send a reinstall meant for one machine to
+another. An address and a `bmcAddress` share one space, and MACs are compared
+however they are written. `address` must be an IP address, without a prefix
+length or zone; `bmcAddress` an IP address or a host name; each of `macs` a
+48-bit MAC address. Whether these hold is judged on what the inventory ends up
+holding, so a refinement that moves an address away frees it. `config validate`
+reports a violation with the file and line of each entry involved.
 
 `bmcAddress` wins over the name the naming rules derive: the `bmc` commands,
 `provision` and the recorded certificate all use it.

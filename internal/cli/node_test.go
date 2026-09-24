@@ -18,9 +18,9 @@ import (
 // inventory in an error.
 var inventoryPositions = regexp.MustCompile(`inventory\.yaml:\d+`)
 
-// Report 4.3: exe1 written after exe[0001-0010] made a thirteenth node that no
-// selection reached, so its class, its address and everything else it said
-// were silently ignored. It names the same host as exe0001, and which of the
+// Report 4.3: exe1 written after exe[0001-0010] made a second record for
+// exe0001 that no selection reached, so its class, its address and everything
+// else it said were silently ignored. It names the same host as exe0001, and which of the
 // two the author meant cannot be told, so the inventory is refused.
 func TestInventoryRefusesTwoSpellingsOfOneHost(t *testing.T) {
 	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
