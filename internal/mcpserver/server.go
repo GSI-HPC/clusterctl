@@ -293,6 +293,25 @@ func (l *auditLog) record(e auditEntry) error {
 	return f.Close()
 }
 
+// record appends an entry to the audit log. A failure is logged and
+// returned, so that the caller can refuse what it cannot record.
+func (s *Server) record(e auditEntry) error {
+	if err := s.audit.record(e); err != nil {
+		s.logf("the audit log cannot be written: %v", err)
+		return fmt.Errorf("the audit log %s cannot be written: %w", s.audit.path, err)
+	}
+	return nil
+}
+
+// refusal records a refused call and returns its error, noting when the
+// refusal could not be recorded.
+func (s *Server) refusal(e auditEntry, err error) error {
+	if auditErr := s.record(e); auditErr != nil {
+		return fmt.Errorf("%w (%w)", err, auditErr)
+	}
+	return err
+}
+
 // instructions tell the agent how the tools fit together.
 func (s *Server) instructions() string {
 	return strings.TrimSpace(fmt.Sprintf(`

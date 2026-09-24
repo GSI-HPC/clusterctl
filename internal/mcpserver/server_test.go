@@ -587,7 +587,7 @@ func TestPlansAndAppliesAreAudited(t *testing.T) {
 		}
 		outcomes = append(outcomes, e.Event+" "+strings.SplitN(e.Outcome, ":", 2)[0])
 	}
-	want := []string{"plan planned", "apply applied", "plan refused"}
+	want := []string{"plan planned", "apply applying", "apply applied", "plan refused"}
 	if strings.Join(outcomes, ",") != strings.Join(want, ",") {
 		t.Errorf("audit = %v, want %v", outcomes, want)
 	}

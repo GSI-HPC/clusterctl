@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,7 +18,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
@@ -133,7 +133,12 @@ type plan struct {
 	nodes   *nodeset.NodeSet
 	reason  string
 	preview safety.Preview
-	expires time.Time
+	// cluster and commands are what the plan was made for: the cluster the
+	// pinned context named, and what would be sent, host by host. A plan is
+	// applied only while both are still what the configuration gives.
+	cluster  string
+	commands []string
+	expires  time.Time
 	// asked is the state of the question put to the administrator, which
 	// the answer has to carry back. It is empty until the question is asked
 	// and cleared once it is answered, so one answer confirms one attempt.
@@ -272,23 +277,42 @@ type planOutput struct {
 }
 
 func (s *Server) planChange(ctx context.Context, _ *mcp.CallToolRequest, in planInput) (*mcp.CallToolResult, *planOutput, error) {
+	entry := auditEntry{Event: "plan", Context: s.context, Action: in.Action, Nodes: in.Nodes}
+	p, out, err := s.preparePlan(ctx, in, &entry)
+	if err != nil {
+		entry.Outcome = "refused: " + err.Error()
+		return nil, nil, callError(s.refusal(entry, err))
+	}
+	// A plan that cannot be recorded is not offered.
+	entry.Plan, entry.Outcome = p.id, "planned"
+	if err := s.record(entry); err != nil {
+		return nil, nil, callError(err)
+	}
+	s.plans.add(p)
+	out.ExpiresAt = p.expires.UTC()
+	return nil, out, nil
+}
+
+// preparePlan resolves, checks and previews a change, filling in the audit
+// entry as it learns the nodes, and returns the plan without storing it.
+func (s *Server) preparePlan(ctx context.Context, in planInput, entry *auditEntry) (*plan, *planOutput, error) {
 	ch, ok := changes[in.Action]
 	if !ok {
-		return nil, nil, callError(exitcode.Errorf(exitcode.Usage,
-			"unknown action %q; plan_change offers %s", in.Action, strings.Join(changeNames(), ", ")))
+		return nil, nil, exitcode.Errorf(exitcode.Usage,
+			"unknown action %q; plan_change offers %s", in.Action, strings.Join(changeNames(), ", "))
 	}
 	reason, err := planReason(ch, in.Reason)
 	if err != nil {
-		return nil, nil, callError(err)
+		return nil, nil, err
 	}
 
 	a, _, err := s.app(ctx)
 	if err != nil {
-		return nil, nil, callError(err)
+		return nil, nil, err
 	}
 	ns, err := a.Select(in.Nodes)
 	if err != nil {
-		return nil, nil, callError(err)
+		return nil, nil, err
 	}
 	action := safety.Action{Verb: ch.verb, Targets: ns}
 	if reason != "" {
@@ -296,24 +320,20 @@ func (s *Server) planChange(ctx context.Context, _ *mcp.CallToolRequest, in plan
 		// question put to the user.
 		action.Detail = fmt.Sprintf("reason: %q", reason)
 	}
-	refused := func(err error) error {
-		_ = s.audit.record(auditEntry{Event: "plan", Context: s.context, Action: in.Action,
-			Nodes: ns.String(), Count: ns.Len(), Detail: action.Detail, Outcome: "refused: " + err.Error()})
-		return callError(err)
-	}
+	entry.Nodes, entry.Count, entry.Detail = ns.String(), ns.Len(), action.Detail
 	preview, err := a.Gate.Preview(action)
 	if err != nil {
-		return nil, nil, refused(err)
+		return nil, nil, err
 	}
 
 	c, err := a.Slurm()
 	if err != nil {
-		return nil, nil, callError(err)
+		return nil, nil, err
 	}
 	// slurmctld expands ALL and NodeSet names, which the preview counts as
 	// one host each; the plan stands only for a set Slurm reads as itself.
 	if err := c.CheckNodes(ctx, ns); err != nil {
-		return nil, nil, refused(err)
+		return nil, nil, err
 	}
 	// The action is run against a recorder: what it records is exactly what
 	// apply_plan will send, rendered the way --dry-run prints it.
@@ -321,11 +341,12 @@ func (s *Server) planChange(ctx context.Context, _ *mcp.CallToolRequest, in plan
 	dry := *c
 	dry.Runner = recorder
 	if err := ch.run(ctx, &dry, ns, reason); err != nil {
-		return nil, nil, callError(exitcode.Wrap(exitcode.Usage, err))
+		return nil, nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 
-	p := &plan{id: randomID(), action: in.Action, nodes: ns, reason: reason, preview: preview}
-	s.plans.add(p)
+	p := &plan{id: randomID(), action: in.Action, nodes: ns, reason: reason, preview: preview,
+		cluster: a.Resolved.ClusterName, commands: describeCalls(recorder)}
+	entry.Nodes, entry.Count, entry.Detail = preview.Targets, preview.Count, preview.Detail
 
 	out := &planOutput{
 		PlanID:        p.id,
@@ -337,10 +358,7 @@ func (s *Server) planChange(ctx context.Context, _ *mcp.CallToolRequest, in plan
 		Detail:        preview.Detail,
 		CommandLine:   shellquote.Join(ch.argv(ns, reason)),
 		CountRequired: preview.CountRequired,
-		ExpiresAt:     p.expires.UTC(),
-	}
-	for _, call := range recorder.Calls() {
-		out.Commands = append(out.Commands, call.Describe())
+		Commands:      p.commands,
 	}
 
 	// The current state helps the administrator judge the plan. When the
@@ -353,10 +371,16 @@ func (s *Server) planChange(ctx context.Context, _ *mcp.CallToolRequest, in plan
 		out.CurrentState = statesOf(nodes)
 		out.Warnings = append(out.Warnings, ch.warn(nodes, jobs, ns)...)
 	}
+	return p, out, nil
+}
 
-	_ = s.audit.record(auditEntry{Event: "plan", Context: s.context, Plan: p.id, Action: in.Action,
-		Nodes: preview.Targets, Count: preview.Count, Detail: preview.Detail, Outcome: "planned"})
-	return nil, out, nil
+// describeCalls renders what a recorder was asked to send, host by host.
+func describeCalls(r *transport.Recorder) []string {
+	var out []string
+	for _, call := range r.Calls() {
+		out = append(out, call.Describe())
+	}
+	return out
 }
 
 // applyInput is the argument of apply_plan.
@@ -378,69 +402,132 @@ type applyOutput struct {
 }
 
 func (s *Server) applyPlan(ctx context.Context, req *mcp.CallToolRequest, in applyInput) (*mcp.CallToolResult, *applyOutput, error) {
+	entry := auditEntry{Event: "apply", Context: s.context, Plan: in.PlanID, Nodes: in.Nodes, Count: in.Count}
+	result, out, err := s.apply(ctx, req, in, &entry)
+	if err != nil {
+		if entry.Outcome == "" {
+			entry.Outcome = "refused: " + err.Error()
+		}
+		return nil, nil, callError(s.refusal(entry, err))
+	}
+	return result, out, nil
+}
+
+// apply checks a plan against the current configuration, has it confirmed
+// and carries it out. It fills in the audit entry as it goes and records
+// the outcome of a plan it took; an error it returns before that is
+// recorded by the caller.
+func (s *Server) apply(ctx context.Context, req *mcp.CallToolRequest, in applyInput, entry *auditEntry) (*mcp.CallToolResult, *applyOutput, error) {
 	p, err := s.plans.get(in.PlanID)
 	if err != nil {
-		return nil, nil, callError(err)
+		return nil, nil, err
 	}
+	entry.Action = p.action
 	// Repeating the plan puts the hosts into the call itself, so that a
 	// client asking for approval of the call shows what it touches.
 	if in.Nodes != p.preview.Targets || in.Count != p.preview.Count {
-		return nil, nil, callError(exitcode.Errorf(exitcode.Usage,
+		return nil, nil, exitcode.Errorf(exitcode.Usage,
 			"plan %s is for %d hosts %s, not %d hosts %s; repeat the plan exactly",
-			p.id, p.preview.Count, p.preview.Targets, in.Count, in.Nodes))
+			p.id, p.preview.Count, p.preview.Targets, in.Count, in.Nodes)
 	}
 	ch := changes[p.action]
-	entry := auditEntry{Event: "apply", Context: s.context, Plan: p.id, Action: p.action,
-		Nodes: p.preview.Targets, Count: p.preview.Count, Detail: p.preview.Detail}
+	entry.Nodes, entry.Count, entry.Detail = p.preview.Targets, p.preview.Count, p.preview.Detail
 
-	// The configuration is read again: a host protected since the plan was
-	// made is refused now.
+	// The configuration is read again, and the plan stands only while it
+	// still means what the user is about to confirm: the same cluster, the
+	// same hosts, and the same commands sent to the same place. The gate is
+	// asked again too, so a host protected since the plan was made is
+	// refused, and the question is the one the gate asks now.
 	a, _, err := s.app(ctx)
 	if err != nil {
-		return nil, nil, callError(err)
+		return nil, nil, err
 	}
-	if _, err := a.Gate.Preview(safety.Action{Verb: ch.verb, Targets: p.nodes, Detail: p.preview.Detail}); err != nil {
-		entry.Outcome = "refused: " + err.Error()
-		_ = s.audit.record(entry)
-		return nil, nil, callError(err)
+	if cluster := a.Resolved.ClusterName; cluster != p.cluster {
+		return nil, nil, exitcode.Errorf(exitcode.Usage,
+			"plan %s was made for cluster %s, but context %s now names cluster %s; make a new plan",
+			p.id, p.cluster, s.context, cluster)
+	}
+	preview, err := a.Gate.Preview(safety.Action{Verb: ch.verb, Targets: p.nodes, Detail: p.preview.Detail})
+	if err != nil {
+		return nil, nil, err
+	}
+	if preview.Targets != p.preview.Targets || preview.Count != p.preview.Count {
+		return nil, nil, exitcode.Errorf(exitcode.Usage,
+			"plan %s is for %d hosts %s, but the gate now reads %d hosts %s; make a new plan",
+			p.id, p.preview.Count, p.preview.Targets, preview.Count, preview.Targets)
+	}
+	c, err := a.Slurm()
+	if err != nil {
+		return nil, nil, err
+	}
+	recorder := &transport.Recorder{}
+	dry := *c
+	dry.Runner = recorder
+	if err := ch.run(ctx, &dry, p.nodes, p.reason); err != nil {
+		return nil, nil, exitcode.Wrap(exitcode.Usage, err)
+	}
+	if now := describeCalls(recorder); !slices.Equal(now, p.commands) {
+		return nil, nil, exitcode.Errorf(exitcode.Usage,
+			"plan %s would send %s, but the configuration now sends %s; make a new plan",
+			p.id, strings.Join(p.commands, "; "), strings.Join(now, "; "))
 	}
 
 	if s.opts.Confirm == ConfirmElicit {
-		result, err := s.confirm(req, p)
+		result, err := s.confirm(req, p, preview, a.Resolved.ClusterName)
 		if result != nil || err != nil {
 			if err != nil {
 				entry.Outcome = "declined: " + err.Error()
-				_ = s.audit.record(entry)
 			}
-			return result, nil, callError(err)
+			return result, nil, err
 		}
 	}
 
 	if !s.plans.take(p) {
-		return nil, nil, callError(exitcode.Errorf(exitcode.Usage, "plan %s was applied already", p.id))
+		return nil, nil, exitcode.Errorf(exitcode.Usage, "plan %s was applied already", p.id)
 	}
-	if err := s.execute(ctx, a, ch, p); err != nil {
+	// A change that cannot be recorded is not made. The plan is used up
+	// either way, so that it cannot be applied twice.
+	entry.Outcome = "applying"
+	if err := s.record(*entry); err != nil {
+		entry.Outcome = "not applied: " + err.Error()
+		return nil, nil, fmt.Errorf("nothing was sent, and plan %s is used up: %w", p.id, err)
+	}
+	if err := s.execute(ctx, c, ch, p); err != nil {
 		entry.Outcome = "failed: " + err.Error()
-		_ = s.audit.record(entry)
-		return nil, nil, callError(err)
+		return nil, nil, err
 	}
 	entry.Outcome = "applied"
-	_ = s.audit.record(entry)
+	message := fmt.Sprintf("%s done: %s", ch.verb, p.preview.Summary())
+	if err := s.record(*entry); err != nil {
+		// The change was made; the agent is told so, and that the record
+		// of how it ended is missing.
+		message += "; " + err.Error()
+	}
 	return nil, &applyOutput{
 		PlanID: p.id, Context: s.context, Action: p.action, Nodes: p.preview.Targets, Count: p.preview.Count,
-		Applied: true, Message: fmt.Sprintf("%s done: %s", ch.verb, p.preview.Summary()),
+		Applied: true, Message: message,
 	}, nil
 }
 
-func (s *Server) execute(ctx context.Context, a *app.App, ch change, p *plan) error {
-	c, err := a.Slurm()
-	if err != nil {
-		return err
-	}
+// execute sends a change through the client it was checked against.
+//
+// Once a plan is taken the change runs to its end: a client that gives up
+// on the call would otherwise kill the local ssh after Slurm took the
+// change, and the change would be recorded as failed. Each Slurm client
+// call is bounded by its own timeout, and the whole by applyTimeout.
+func (s *Server) execute(ctx context.Context, c *slurm.Client, ch change, p *plan) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), applyTimeout(c))
+	defer cancel()
 	if err := ch.run(ctx, c, p.nodes, p.reason); err != nil {
 		return exitcode.Wrap(exitcode.TargetFailed, err)
 	}
 	return nil
+}
+
+// applyTimeout bounds one apply: twice the Slurm client timeout, and five
+// minutes at least.
+func applyTimeout(c *slurm.Client) time.Duration {
+	return max(5*time.Minute, 2*c.Timeout)
 }
 
 // confirm puts the gate's question to the administrator through the client
@@ -450,8 +537,9 @@ func (s *Server) execute(ctx context.Context, a *app.App, ch change, p *plan) er
 //
 // The question travels as an input request of the tool call: the client
 // shows it to the administrator and calls the tool again with the answer,
-// which the model never sees or writes.
-func (s *Server) confirm(req *mcp.CallToolRequest, p *plan) (*mcp.CallToolResult, error) {
+// which the model never sees or writes. The question and the rule are those
+// of the gate as it reads now, which the answer is judged by on the retry.
+func (s *Server) confirm(req *mcp.CallToolRequest, p *plan, preview safety.Preview, cluster string) (*mcp.CallToolResult, error) {
 	caps := req.ClientCapabilities()
 	if caps == nil || caps.Elicitation == nil {
 		return nil, exitcode.Errorf(exitcode.Usage,
@@ -463,7 +551,7 @@ func (s *Server) confirm(req *mcp.CallToolRequest, p *plan) (*mcp.CallToolResult
 	answer, ok := req.Params.InputResponses[confirmKey]
 	if !ok {
 		return &mcp.CallToolResult{
-			InputRequests: mcp.InputRequestMap{confirmKey: s.question(p)},
+			InputRequests: mcp.InputRequestMap{confirmKey: s.question(preview, cluster)},
 			RequestState:  s.plans.ask(p),
 		}, nil
 	}
@@ -475,19 +563,19 @@ func (s *Server) confirm(req *mcp.CallToolRequest, p *plan) (*mcp.CallToolResult
 	if !ok || result.Action != "accept" {
 		return nil, exitcode.Errorf(exitcode.Interrupted, "the user did not confirm, nothing was done")
 	}
-	return nil, p.preview.Accept(answerText(p.preview, result.Content))
+	return nil, preview.Accept(answerText(preview, result.Content))
 }
 
 // question is the elicitation that stands in for the gate's prompt.
-func (s *Server) question(p *plan) *mcp.ElicitParams {
-	message := fmt.Sprintf("About to %s\n", p.preview.Summary())
-	if p.preview.Detail != "" {
-		message += "  " + p.preview.Detail + "\n"
+func (s *Server) question(preview safety.Preview, cluster string) *mcp.ElicitParams {
+	message := fmt.Sprintf("About to %s\n", preview.Summary())
+	if preview.Detail != "" {
+		message += "  " + preview.Detail + "\n"
 	}
-	message += fmt.Sprintf("Context %s, cluster %s.\n", s.context, s.cluster)
+	message += fmt.Sprintf("Context %s, cluster %s.\n", s.context, cluster)
 
-	if p.preview.CountRequired {
-		message += p.preview.Question()
+	if preview.CountRequired {
+		message += preview.Question()
 		return &mcp.ElicitParams{
 			Message: message,
 			RequestedSchema: map[string]any{
@@ -496,7 +584,7 @@ func (s *Server) question(p *plan) *mcp.ElicitParams {
 					"count": map[string]any{
 						"type":        "integer",
 						"title":       "Number of hosts",
-						"description": fmt.Sprintf("Type the number of hosts to %s", p.preview.Verb),
+						"description": fmt.Sprintf("Type the number of hosts to %s", preview.Verb),
 					},
 				},
 				"required": []string{"count"},
@@ -511,7 +599,7 @@ func (s *Server) question(p *plan) *mcp.ElicitParams {
 			"properties": map[string]any{
 				"confirm": map[string]any{
 					"type":    "boolean",
-					"title":   fmt.Sprintf("Yes, %s %d hosts", p.preview.Verb, p.preview.Count),
+					"title":   fmt.Sprintf("Yes, %s %d hosts", preview.Verb, preview.Count),
 					"default": false,
 				},
 			},
