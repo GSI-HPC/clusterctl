@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
+	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 )
 
@@ -73,4 +74,46 @@ func TestNoStateDirectoryIsRefused(t *testing.T) {
 	if !strings.Contains(err.Error(), "XDG_STATE_HOME") {
 		t.Errorf("the error does not say what to set: %v", err)
 	}
+}
+
+// TestAMisspelledConfigIsReported is report section 9.5: a file named with
+// --config or CLUSTERCTL_CONFIG that did not exist was skipped, and its
+// currentContext with it, so the command resolved to the site's default
+// context and exited 0.
+func TestAMisspelledConfigIsReported(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "test-ctx.yaml")
+	if err := os.WriteFile(good, []byte("apiVersion: clusterctl/v1alpha1\nkind: Config\ncurrentContext: cluster2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h, err := run(t, harnessOptions{config: []string{good}}, "config", "validate")
+	if err != nil {
+		t.Fatalf("config validate failed: %v", err)
+	}
+	if !strings.Contains(h.out.String(), "context cluster2 resolves") {
+		t.Fatalf("the context file is not read:\n%s", h.out)
+	}
+
+	misspelled := filepath.Join(dir, "test-ctx.yml")
+	check := func(t *testing.T, h *harness, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("a missing configuration was skipped:\n%s", h.out)
+		}
+		if got, want := exitcode.From(err), exitcode.Usage; got != want {
+			t.Errorf("exit code = %d, want %d", got, want)
+		}
+		if !strings.Contains(err.Error(), misspelled) {
+			t.Errorf("the error does not name the missing file: %v", err)
+		}
+	}
+	t.Run("--config", func(t *testing.T) {
+		h, err := run(t, harnessOptions{config: []string{misspelled}}, "config", "validate")
+		check(t, h, err)
+	})
+	t.Run(config.EnvConfig, func(t *testing.T) {
+		t.Setenv(config.EnvConfig, exampleDir+string(os.PathListSeparator)+misspelled)
+		h, err := run(t, harnessOptions{bare: true}, "bmc", "power", "off", "-n", "exe0001", "--dry-run")
+		check(t, h, err)
+	})
 }

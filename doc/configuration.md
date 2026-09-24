@@ -48,6 +48,11 @@ list of files and directories, most general first. Without it, clusterctl reads
 name order, leaving out hidden files such as `.sops.yaml`. `--config` takes the
 same entries.
 
+A place missing from the built-in search path is skipped, because a site may
+use only one of them. An entry of `--config` or `CLUSTERCTL_CONFIG` that does
+not exist is a usage error: it is most likely misspelled, and without it the
+command would resolve to another context.
+
 ## Starting a configuration
 
 `clusterctl config init [DIR]` writes the least configuration that resolves: a

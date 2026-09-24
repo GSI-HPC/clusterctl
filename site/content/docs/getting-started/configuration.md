@@ -150,7 +150,9 @@ $ export CLUSTERCTL_CONFIG=/srv/site-config:~/.config/clusterctl
 $ clusterctl --config ./examples/site config validate
 ```
 
-Both take files and directories, most general first.
+Both take files and directories, most general first. Every place they name
+has to exist: a misspelled one is an error, not a file quietly left out. Of the
+two directories read without them, one that is missing is skipped.
 
 {{< callout type="info" >}}
 Keep the `Site`, `Cluster`, `NodeInventory` and sops encrypted `Secret`

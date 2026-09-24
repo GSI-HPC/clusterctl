@@ -4,7 +4,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -100,9 +102,21 @@ func ExpandPath(path, base string) string {
 	return filepath.Join(base, path)
 }
 
-// SearchPath returns the files to read, in the order they are layered.
+// SearchPath returns the files to read, in the order they are layered. The
+// entries of CLUSTERCTL_CONFIG have to exist; the configuration directories
+// searched without it may not.
 func SearchPath(env func(string) string) ([]string, error) {
-	return ExpandEntries(SearchEntries(env))
+	if entries := EnvEntries(env); entries != nil {
+		return ExpandEntries(entries)
+	}
+	return ExpandSearchDirs(ConfigDirs())
+}
+
+// ExpandSearchDirs is ExpandEntries for the directories of the built-in
+// search path, which a site may or may not use: one that does not exist is
+// skipped.
+func ExpandSearchDirs(dirs []string) ([]string, error) {
+	return expandEntries(dirs, true)
 }
 
 // SearchEntries returns the files and directories configuration is read from
@@ -129,9 +143,19 @@ func EnvEntries(env func(string) string) []string {
 
 // ExpandEntries turns files and directories into the list of files to read,
 // in the order they are layered. A directory contributes its YAML files in
-// name order; an entry that does not exist is skipped, because the search
-// path names places a site may or may not use.
+// name order.
+//
+// Every entry has to exist. These are the ones named with --config or
+// CLUSTERCTL_CONFIG, and one that is not there is most likely misspelled:
+// leaving it out would take its currentContext and its overrides with it,
+// and the command would run against another context without a word.
 func ExpandEntries(entries []string) ([]string, error) {
+	return expandEntries(entries, false)
+}
+
+// expandEntries is ExpandEntries, skipping an entry that does not exist
+// when skipMissing is set.
+func expandEntries(entries []string, skipMissing bool) ([]string, error) {
 	var files []string
 	for _, entry := range entries {
 		entry = strings.TrimSpace(entry)
@@ -141,8 +165,11 @@ func ExpandEntries(entries []string) ([]string, error) {
 		entry = ExpandPath(entry, "")
 		info, err := os.Stat(entry)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
+			if errors.Is(err, fs.ErrNotExist) {
+				if skipMissing {
+					continue
+				}
+				return nil, fmt.Errorf("the configuration %s does not exist: %w", entry, fs.ErrNotExist)
 			}
 			return nil, err
 		}
