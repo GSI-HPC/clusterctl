@@ -18,7 +18,9 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/cli"
 	"github.com/GSI-HPC/clusterctl/internal/mcpserver"
+	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
+	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // exampleDir is the configuration shipped with the documentation. Its
@@ -40,19 +42,41 @@ func (c *cluster) reply(target transport.Target, req transport.Request) (*transp
 	}
 	switch req.Argv[0] {
 	case "sinfo":
-		result.Stdout = strings.Join([]string{
-			"exe0001|drained|main|64|256000|ib|(null)|ticket 4711: DIMM|root|2026-09-01T10:00:00",
-			"exe0002|mixed|main|64|256000|ib|(null)|(null)||",
-			"exe0003|idle|main|64|256000|ib|(null)|(null)||",
-		}, "\n") + "\n"
+		result.Stdout = slurm.Render(req, slurmNodes(slurm.Arg(req, "--nodes"))...)
 	case "squeue":
-		result.Stdout = "4711|alice|physics|main|RUNNING|exe0002|1|64|1-00:00:00|2:00:00|100|None|/home/alice|job.sh\n"
+		result.Stdout = slurm.Render(req, slurm.Row{"i": "4711", "u": "alice", "a": "physics", "P": "main",
+			"T": "RUNNING", "N": "exe0002", "D": "1", "C": "64", "l": "1-00:00:00", "M": "2:00:00", "Q": "100",
+			"r": "None", "Z": "/home/alice", "o": "job.sh"})
 	case "scontrol":
 		c.mu.Lock()
 		c.changes = append(c.changes, strings.Join(req.Argv, " "))
 		c.mu.Unlock()
 	}
 	return result, nil
+}
+
+// slurmNodes returns the nodes sinfo lists for a --nodes argument: exe0001
+// to exe0003 as they are, every other exe node idle, and nothing for a
+// name Slurm does not know.
+func slurmNodes(list string) []slurm.Row {
+	known := []slurm.Row{
+		{"N": "exe0001", "T": "drained", "R": "main", "c": "64", "E": "ticket 4711: DIMM", "u": "root", "H": "2026-09-01T10:00:00"},
+		{"N": "exe0002", "T": "mixed", "R": "main", "c": "64", "E": "none", "u": "Unknown", "H": "Unknown"},
+		{"N": "exe0003", "T": "idle", "R": "main", "c": "64", "E": "none", "u": "Unknown", "H": "Unknown"},
+	}
+	if list == "" {
+		return known
+	}
+	var out []slurm.Row
+	for _, name := range nodeset.MustParse(list).Expand() {
+		switch {
+		case name == "exe0001" || name == "exe0002" || name == "exe0003":
+			out = append(out, known[name[len(name)-1]-'1'])
+		case strings.HasPrefix(name, "exe"):
+			out = append(out, slurm.Row{"N": name, "T": "idle", "R": "main", "c": "64", "E": "none"})
+		}
+	}
+	return out
 }
 
 func (c *cluster) sent() []string {

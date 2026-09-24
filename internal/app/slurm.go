@@ -21,7 +21,10 @@ func (a *App) Slurm() (*slurm.Client, error) {
 		return nil, err
 	}
 	return &slurm.Client{
-		Runner:  a.Runner,
+		Runner: a.Runner,
+		// The clients that only read run for real in a dry run too: the
+		// checks made before a change have to see the cluster.
+		Reader:  a.ReadRunner,
 		Target:  target,
 		Spec:    a.Spec.Slurm,
 		Timeout: a.Timeout().Get(),

@@ -86,13 +86,35 @@ var changes = map[string]change{
 		warn: func(nodes []slurm.Node, _ []slurm.Job, _ *nodeset.NodeSet) []string {
 			var out []string
 			for _, n := range nodes {
-				if n.Reason != "" && n.Reason != "(null)" {
+				if n.Reason != "" {
 					out = append(out, fmt.Sprintf("%s was taken out with the reason %q", n.Name, n.Reason))
 				}
 			}
 			return out
 		},
 	},
+}
+
+// planReason checks the reason of a plan. The agent writes it, and it reaches
+// the question put to the user and the node record in Slurm, so it is held
+// to the rules of slurm node drain. An action that takes no reason refuses
+// one rather than carrying text into the question that nothing uses.
+func planReason(ch change, reason string) (string, error) {
+	reason = strings.TrimSpace(reason)
+	if !ch.needsReason {
+		if reason != "" {
+			return "", exitcode.Errorf(exitcode.Usage, "%s takes no reason; leave it out", ch.verb)
+		}
+		return "", nil
+	}
+	if reason == "" {
+		return "", exitcode.Errorf(exitcode.Usage,
+			"%s needs a reason: say what is wrong and where it is tracked", ch.verb)
+	}
+	if err := slurm.ValidateReason(reason); err != nil {
+		return "", err
+	}
+	return reason, nil
 }
 
 func changeNames() []string {
@@ -255,10 +277,9 @@ func (s *Server) planChange(ctx context.Context, _ *mcp.CallToolRequest, in plan
 		return nil, nil, callError(exitcode.Errorf(exitcode.Usage,
 			"unknown action %q; plan_change offers %s", in.Action, strings.Join(changeNames(), ", ")))
 	}
-	reason := strings.TrimSpace(in.Reason)
-	if ch.needsReason && reason == "" {
-		return nil, nil, callError(exitcode.Errorf(exitcode.Usage,
-			"%s needs a reason: say what is wrong and where it is tracked", ch.verb))
+	reason, err := planReason(ch, in.Reason)
+	if err != nil {
+		return nil, nil, callError(err)
 	}
 
 	a, _, err := s.app(ctx)
@@ -271,18 +292,28 @@ func (s *Server) planChange(ctx context.Context, _ *mcp.CallToolRequest, in plan
 	}
 	action := safety.Action{Verb: ch.verb, Targets: ns}
 	if reason != "" {
-		action.Detail = "reason: " + reason
+		// Quoted, so that what the agent wrote reads as one value in the
+		// question put to the user.
+		action.Detail = fmt.Sprintf("reason: %q", reason)
+	}
+	refused := func(err error) error {
+		_ = s.audit.record(auditEntry{Event: "plan", Context: s.context, Action: in.Action,
+			Nodes: ns.String(), Count: ns.Len(), Detail: action.Detail, Outcome: "refused: " + err.Error()})
+		return callError(err)
 	}
 	preview, err := a.Gate.Preview(action)
 	if err != nil {
-		_ = s.audit.record(auditEntry{Event: "plan", Context: s.context, Action: in.Action,
-			Nodes: ns.String(), Count: ns.Len(), Detail: action.Detail, Outcome: "refused: " + err.Error()})
-		return nil, nil, callError(err)
+		return nil, nil, refused(err)
 	}
 
 	c, err := a.Slurm()
 	if err != nil {
 		return nil, nil, callError(err)
+	}
+	// slurmctld expands ALL and NodeSet names, which the preview counts as
+	// one host each; the plan stands only for a set Slurm reads as itself.
+	if err := c.CheckNodes(ctx, ns); err != nil {
+		return nil, nil, refused(err)
 	}
 	// The action is run against a recorder: what it records is exactly what
 	// apply_plan will send, rendered the way --dry-run prints it.

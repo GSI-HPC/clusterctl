@@ -14,6 +14,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
+	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -592,12 +593,12 @@ func TestSlurmPartitionAndAccounts(t *testing.T) {
 }
 
 func TestSlurmJobSummaryCountsPerUser(t *testing.T) {
-	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
-		return &transport.Result{Target: tg, Stdout: strings.Join([]string{
-			"1|alice|proj|main|PENDING|||1|1:00:00|0:00|1000|Priority||",
-			"2|alice|proj|main|PENDING|||1|1:00:00|0:00|1000|Priority||",
-			"3|bob|proj|main|PENDING|||1|1:00:00|0:00|900|Priority||",
-		}, "\n")}, nil
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, Stdout: slurm.Render(req,
+			slurm.Row{"i": "1", "u": "alice", "a": "proj", "P": "main", "T": "PENDING"},
+			slurm.Row{"i": "2", "u": "alice", "a": "proj", "P": "main", "T": "PENDING"},
+			slurm.Row{"i": "3", "u": "bob", "a": "proj", "P": "main", "T": "PENDING"},
+		)}, nil
 	}}
 	h, err := run(t, harnessOptions{recorder: rec}, "slurm", "job", "summary")
 	if err != nil {
