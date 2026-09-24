@@ -179,15 +179,22 @@ func nonBlank(entries []string) []string {
 // refuseNonEmpty stops config init from writing into a directory that holds
 // anything at all. Whatever is there was put there by someone else, and
 // documents written next to it could change what it resolves to.
+//
+// Nor does it write into a directory someone other than this user or root
+// owns or can write, or create one inside such a directory: whoever can
+// write it can add to the configuration clusterctl is then pointed at.
 func refuseNonEmpty(dir string) error {
 	info, err := os.Stat(dir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return nil
+		return refuseUntrustedParent(dir)
 	case err != nil:
 		return err
 	case !info.IsDir():
 		return exitcode.Errorf(exitcode.Usage, "%s is not a directory", dir)
+	}
+	if err := fileutil.CheckTrusted(dir); err != nil {
+		return exitcode.Wrap(exitcode.Usage, fmt.Errorf("config init writes only into a directory of its own: %w", err))
 	}
 	items, err := os.ReadDir(dir)
 	if err != nil {
@@ -207,6 +214,25 @@ func refuseNonEmpty(dir string) error {
 	return exitcode.Errorf(exitcode.Usage,
 		"%s is not empty (%s); config init writes only into an empty directory: name a new one, clusterctl config init DIR",
 		dir, strings.Join(names, ", "))
+}
+
+// refuseUntrustedParent checks the closest directory that exists above a
+// directory config init is going to create.
+func refuseUntrustedParent(dir string) error {
+	for {
+		parent := filepath.Dir(dir)
+		_, err := os.Stat(parent)
+		switch {
+		case err == nil:
+			if err := fileutil.CheckTrustedParent(dir); err != nil {
+				return exitcode.Wrap(exitcode.Usage, fmt.Errorf("config init creates a directory only where others cannot replace it: %w", err))
+			}
+			return nil
+		case !errors.Is(err, fs.ErrNotExist) || parent == dir:
+			return err
+		}
+		dir = parent
+	}
 }
 
 // writeScaffold writes the files of a new configuration, all of them or none:

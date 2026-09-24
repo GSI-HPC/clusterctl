@@ -21,7 +21,17 @@ import (
 
 // ErrUntrusted is matched by errors.Is for every file or directory refused
 // because someone other than this user or root could have written it.
-var ErrUntrusted = errors.New("untrusted")
+var ErrUntrusted = errors.New("written by someone else")
+
+// untrustedError says which file was refused and why, and is ErrUntrusted.
+type untrustedError struct{ msg string }
+
+func (e *untrustedError) Error() string        { return e.msg }
+func (e *untrustedError) Is(target error) bool { return target == ErrUntrusted }
+
+func untrusted(format string, args ...any) error {
+	return &untrustedError{fmt.Sprintf(format, args...)}
+}
 
 // maxLinks bounds how many symbolic links a write follows, the way the
 // kernel bounds a path lookup.
@@ -299,19 +309,55 @@ func EnsureDir(path string) error {
 	}
 	switch {
 	case info.Mode()&fs.ModeSymlink != 0:
-		return fmt.Errorf("%s is a symbolic link, not a directory: %w", path, ErrUntrusted)
+		return untrusted("%s is a symbolic link, not a directory", path)
 	case !info.IsDir():
 		return fmt.Errorf("%s is not a directory", path)
 	}
 	if uid, _, ok := owner(info); ok && uid != os.Geteuid() {
-		return fmt.Errorf("%s is owned by uid %d, not by this user (uid %d): %w",
-			path, uid, os.Geteuid(), ErrUntrusted)
+		return untrusted("%s is owned by uid %d, not by this user (uid %d)",
+			path, uid, os.Geteuid())
 	}
 	if info.Mode().Perm()&0o022 != 0 {
-		return fmt.Errorf("%s can be written by others (mode %v); run chmod go-w %s: %w",
-			path, info.Mode().Perm(), path, ErrUntrusted)
+		return untrusted("%s can be written by others (mode %v); run chmod go-w %s",
+			path, info.Mode().Perm(), path)
 	}
 	return nil
+}
+
+// CheckTrusted refuses a file or directory that someone other than this
+// user or root could have written: one another user owns, or one its group
+// or anyone can write. Configuration names the programs clusterctl runs, so
+// it is held to what OpenSSH holds ~/.ssh/config to. A link is followed, and
+// what it points at is checked.
+func CheckTrusted(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if err := trustedOwner(path, info); err != nil {
+		return err
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return untrusted("%s can be written by others than its owner (mode %v); run chmod go-w %s",
+			path, info.Mode().Perm(), path)
+	}
+	return nil
+}
+
+// CheckTrustedParent checks the directory holding path, whoever could
+// replace path. A directory with the sticky bit set may be writable by
+// anyone, the way /tmp is, because nobody can then replace or remove a file
+// another user put there.
+func CheckTrustedParent(path string) error {
+	dir := filepath.Dir(path)
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&fs.ModeSticky != 0 {
+		return trustedOwner(dir, info)
+	}
+	return CheckTrusted(dir)
 }
 
 // trustedOwner refuses a file neither this user nor root owns.
@@ -320,8 +366,8 @@ func trustedOwner(path string, info fs.FileInfo) error {
 	if !ok || uid == 0 || uid == os.Geteuid() {
 		return nil
 	}
-	return fmt.Errorf("%s is owned by uid %d, neither this user (uid %d) nor root: %w",
-		path, uid, os.Geteuid(), ErrUntrusted)
+	return untrusted("%s is owned by uid %d, neither this user (uid %d) nor root",
+		path, uid, os.Geteuid())
 }
 
 // CopyTo copies a reader into a new file with the given permission.

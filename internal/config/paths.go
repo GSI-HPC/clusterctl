@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 )
 
 // Environment variables that steer where configuration and state live.
@@ -169,21 +171,46 @@ func expandEntries(entries []string, skipMissing bool) ([]string, error) {
 				if skipMissing {
 					continue
 				}
-				return nil, fmt.Errorf("the configuration %s does not exist: %w", entry, fs.ErrNotExist)
+				return nil, &fs.PathError{Op: "reading configuration", Path: entry, Err: fs.ErrNotExist}
 			}
 			return nil, err
 		}
 		if !info.IsDir() {
+			if err := checkTrusted(entry); err != nil {
+				return nil, err
+			}
+			if err := fileutil.CheckTrustedParent(entry); err != nil {
+				return nil, fmt.Errorf("refusing to read configuration: %w", err)
+			}
 			files = append(files, entry)
 			continue
+		}
+		if err := checkTrusted(entry); err != nil {
+			return nil, err
 		}
 		matches, err := yamlFilesIn(entry)
 		if err != nil {
 			return nil, err
 		}
+		for _, match := range matches {
+			if err := checkTrusted(match); err != nil {
+				return nil, err
+			}
+		}
 		files = append(files, matches...)
 	}
 	return files, nil
+}
+
+// checkTrusted refuses a configuration file or directory someone other than
+// this user or root could have written. The configuration names programs
+// clusterctl runs, ssh.binary and a password command among them, so whoever
+// can write it runs their programs with the administrator's credentials.
+func checkTrusted(path string) error {
+	if err := fileutil.CheckTrusted(path); err != nil {
+		return fmt.Errorf("refusing to read configuration: %w", err)
+	}
+	return nil
 }
 
 // yamlFilesIn lists the YAML files of a directory in name order, leaving out
