@@ -4,6 +4,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -88,36 +90,73 @@ func resultsTable(results []*transport.Result) *output.Table {
 		output.Column{Name: "ERROR", Wide: true},
 	)
 	for _, r := range results {
-		status := "ok"
-		if r.Failed() {
-			status = fmt.Sprintf("exit %d", r.ExitCode)
-		}
-		detail := ""
-		if r.Err != nil {
-			detail = r.Err.Error()
-		} else if r.Failed() {
-			detail = strings.TrimSpace(lastNonEmpty(r.Stderr))
-		}
+		status, detail := fanout.Status(r), failureDetail(r)
 		t.Add(r.Target.Name, status, firstLine(r.Output()), detail)
 	}
 	return t
 }
 
+// failureDetail is what a failed target said about its failure: the last
+// line of its standard error, or the error of the transport when it said
+// nothing. A command that exited non-zero without a word is described by its
+// status alone.
+func failureDetail(r *transport.Result) string {
+	if !r.Failed() {
+		return ""
+	}
+	if line := strings.TrimSpace(lastNonEmpty(r.Stderr)); line != "" {
+		return line
+	}
+	if r.Err != nil && (r.ExitCode <= 0 || exitcode.From(r.Err) == exitcode.Transport) {
+		return r.Err.Error()
+	}
+	return ""
+}
+
 // failureError turns the failures of a fan-out into the error the process
-// exits with, which is a target failure rather than a usage or transport
-// problem.
+// exits with.
+//
+// The code says the worst thing that happened, in this order: a target that
+// was interrupted exits 130, one that could not be reached 3, and one that
+// answered with a failure 1. The errors of the targets are kept, not their
+// strings, so that the caller can still tell a cancellation from a failure.
 func failureError(results []*transport.Result) error {
 	failures := fanout.Failures(results)
 	if len(failures) == 0 {
 		return nil
 	}
 	names := nodeset.New()
+	code := exitcode.TargetFailed
+	var errs []error
 	for _, f := range failures {
 		_ = names.Add(f.Target.Name)
+		if f.Err == nil {
+			continue
+		}
+		errs = append(errs, f.Err)
+		switch {
+		case errors.Is(f.Err, context.Canceled):
+			code = exitcode.Interrupted
+		case code != exitcode.Interrupted && exitcode.From(f.Err) == exitcode.Transport:
+			code = exitcode.Transport
+		}
 	}
-	return exitcode.Errorf(exitcode.TargetFailed, "%d of %d hosts failed: %s",
-		len(failures), len(results), names)
+	return &exitcode.Error{Code: code, Err: &hostFailures{
+		message: fmt.Sprintf("%d of %d hosts failed: %s", len(failures), len(results), names),
+		errs:    errs,
+	}}
 }
+
+// hostFailures is the summary of a fan-out that did not succeed everywhere,
+// with the error of each target that failed underneath it.
+type hostFailures struct {
+	message string
+	errs    []error
+}
+
+func (e *hostFailures) Error() string { return e.message }
+
+func (e *hostFailures) Unwrap() []error { return e.errs }
 
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
