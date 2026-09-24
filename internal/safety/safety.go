@@ -15,23 +15,37 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // Gate decides whether a destructive action may go ahead.
 type Gate struct {
-	// Protected are the hosts no destructive command touches unless Force
-	// is set.
-	Protected *nodeset.NodeSet
+	// ProtectedHosts are the node set expressions of safety.protectedHosts.
+	// The hosts they name are touched by no destructive command unless
+	// Force is set.
+	ProtectedHosts []string
+	// Resolve turns one protected host entry into the machines it names,
+	// under the names the targets of an action are given. It is called the
+	// first time the protected hosts are needed, not when the gate is built,
+	// so that an entry naming a group asks its source only when a command
+	// is about to change something. NewGate sets nodeset.Parse.
+	Resolve func(expr string) (*nodeset.NodeSet, error)
+	// Known are the nodes the site knows. When it is set, an action on a
+	// name outside it is refused unless Force is set: a name the site does
+	// not know may be another spelling of a protected machine.
+	Known *nodeset.NodeSet
 	// ConfirmAbove asks for the host count to be typed back when an action
 	// targets more than this many hosts.
 	ConfirmAbove int
 	// AssumeYes answers every prompt with yes, for -y and for scripts.
 	AssumeYes bool
-	// Force allows a protected host to be touched.
+	// Force allows a protected host, or one the site does not know, to be
+	// touched.
 	Force bool
 	// DryRun reports what would happen and does nothing.
 	DryRun bool
@@ -43,19 +57,95 @@ type Gate struct {
 	// In and Out are the terminal the prompt uses.
 	In  io.Reader
 	Out io.Writer
+
+	protectOnce  sync.Once
+	protected    *nodeset.NodeSet
+	protectedErr error
 }
 
-// NewGate builds a gate from the safety configuration of a site.
-func NewGate(spec v1alpha1.SafetySpec) (*Gate, error) {
-	protected := nodeset.New()
-	for i, expr := range spec.ProtectedHosts {
-		ns, err := nodeset.Parse(expr)
-		if err != nil {
-			return nil, fmt.Errorf("safety.protectedHosts[%d]: %w", i, err)
-		}
-		protected = protected.Union(ns)
+// NewGate builds a gate from the safety configuration of a site. resolve
+// turns a protected host entry into the machines it names; nil parses it as
+// a plain node set.
+func NewGate(spec v1alpha1.SafetySpec, resolve func(expr string) (*nodeset.NodeSet, error)) (*Gate, error) {
+	if resolve == nil {
+		resolve = func(expr string) (*nodeset.NodeSet, error) { return nodeset.Parse(expr) }
 	}
-	return &Gate{Protected: protected, ConfirmAbove: spec.ConfirmAbove}, nil
+	return &Gate{
+		ProtectedHosts: append([]string(nil), spec.ProtectedHosts...),
+		Resolve:        resolve,
+		ConfirmAbove:   spec.ConfirmAbove,
+	}, nil
+}
+
+// Protected returns every protected host. It resolves the entries once, and
+// an entry that cannot be resolved is an error rather than an entry that
+// protects nothing.
+func (g *Gate) Protected() (*nodeset.NodeSet, error) {
+	g.protectOnce.Do(func() {
+		protected := nodeset.New()
+		for i, expr := range g.ProtectedHosts {
+			resolve := g.Resolve
+			if resolve == nil {
+				resolve = func(expr string) (*nodeset.NodeSet, error) { return nodeset.Parse(expr) }
+			}
+			ns, err := resolve(expr)
+			if err != nil {
+				err = fmt.Errorf("safety.protectedHosts[%d] %q: %w", i, expr, err)
+				// A group source that could not be reached has said so
+				// with a code of its own; anything else is the
+				// configuration's fault.
+				var coded *exitcode.Error
+				if !errors.As(err, &coded) {
+					err = exitcode.Wrap(exitcode.Usage, err)
+				}
+				g.protectedErr = err
+				return
+			}
+			protected = protected.Union(ns)
+		}
+		g.protected = protected
+	})
+	return g.protected, g.protectedErr
+}
+
+// ProtectedIn returns the targets that are protected hosts.
+//
+// A target is protected when it is a protected host, and also when its
+// short name is one: the name may have been written with a domain the site
+// does not use, and the gate cannot tell whether that reaches the same
+// machine, so it assumes it does.
+func (g *Gate) ProtectedIn(targets *nodeset.NodeSet) (*nodeset.NodeSet, error) {
+	protected, err := g.Protected()
+	if err != nil {
+		return nil, err
+	}
+	hit := targets.Intersection(protected)
+	if protected.IsEmpty() {
+		return hit, nil
+	}
+	shorts := nodeset.New()
+	for _, name := range protected.Expand() {
+		if !hostname.IsIP(name) {
+			_ = shorts.Add(strings.ToLower(short(name)))
+		}
+	}
+	for _, name := range targets.Expand() {
+		if hostname.IsIP(name) || hit.Contains(name) {
+			continue
+		}
+		if shorts.Contains(strings.ToLower(short(name))) {
+			_ = hit.Add(name)
+		}
+	}
+	return hit, nil
+}
+
+// short returns a host name without its domain.
+func short(name string) string {
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		return name[:i]
+	}
+	return name
 }
 
 // Action describes what is about to happen, for the prompt and the preview.
@@ -67,24 +157,51 @@ type Action struct {
 	// Detail is an extra line shown before the prompt, such as the command
 	// that will run.
 	Detail string
+	// NotNodes says the targets are not nodes, such as the accounting
+	// database, so the inventory has nothing to say about them.
+	NotNodes bool
 }
 
-// Check refuses an action that touches a protected host, unless the gate was
-// forced.
+// Check refuses an action that touches a protected host, or a host the site
+// does not know, unless the gate was forced. When the protected hosts cannot
+// be worked out, every action is refused: an entry that cannot be resolved
+// must not protect nothing. --force gets past that too, since it would get
+// past the protected hosts anyway, but says so.
 func (g *Gate) Check(a Action) error {
 	if a.Targets == nil || a.Targets.IsEmpty() {
 		return exitcode.Errorf(exitcode.Usage, "no hosts were selected for %s", a.Verb)
 	}
-	if g.Force || g.Protected == nil || g.Protected.IsEmpty() {
+	hit, err := g.ProtectedIn(a.Targets)
+	if g.Force {
+		if err != nil {
+			g.printf("The protected hosts could not be worked out; going ahead because --force was given: %v\n", err)
+		}
 		return nil
 	}
-	hit := a.Targets.Intersection(g.Protected)
-	if hit.IsEmpty() {
-		return nil
+	if err != nil {
+		return fmt.Errorf("%s was refused, because the protected hosts could not be worked out: %w", a.Verb, err)
 	}
-	return exitcode.Errorf(exitcode.Usage,
-		"%s would touch the protected host%s %s; pass --force to do it anyway",
-		a.Verb, plural(hit.Len()), hit)
+	if !hit.IsEmpty() {
+		return exitcode.Errorf(exitcode.Usage,
+			"%s would touch the protected host%s %s; pass --force to do it anyway",
+			a.Verb, plural(hit.Len()), hit)
+	}
+	if g.Known != nil && !a.NotNodes {
+		if unknown := a.Targets.Difference(g.Known); !unknown.IsEmpty() {
+			return exitcode.Errorf(exitcode.Usage,
+				"%s would touch %s, which the inventory does not know, so the gate cannot tell whether "+
+					"%s protected; pass --force to do it anyway",
+				a.Verb, unknown, isAre(unknown.Len()))
+		}
+	}
+	return nil
+}
+
+func isAre(n int) string {
+	if n == 1 {
+		return "it is"
+	}
+	return "they are"
 }
 
 // Confirm runs the full gate: the protected host check, then the preview and

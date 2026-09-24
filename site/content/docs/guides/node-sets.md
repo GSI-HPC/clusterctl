@@ -85,6 +85,24 @@ $ clusterctl node hw -n '-oProxyCommand=...'
 clusterctl: "-oProxyCommand=..." is not a host name: it begins with -
 ```
 
+## One machine, one name
+
+A name is turned into the name the inventory uses for the machine it refers
+to. Case and a final dot make no difference, other padding is resolved, and a
+node's host name, its service processor name and the addresses the inventory
+records for it all name the node. Names that turn out to be one machine are
+one node:
+
+```console
+$ clusterctl node select 'exe0001,EXE1,exe0001.hpc.example.org.,10.0.2.1'
+exe0001
+```
+
+So a command runs once on a machine however many ways it was named, and a
+protected host is refused however it was written. A name with a domain the
+naming rules do not give it is left as it is, and a change to a name the
+inventory does not know needs `--force`.
+
 ## Groups
 
 A group is resolved by a source. Which sources exist is configuration:

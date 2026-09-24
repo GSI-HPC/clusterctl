@@ -756,6 +756,8 @@ previewed and confirmed like any other change.`,
 				Verb:    "update the boot configurations from version control on",
 				Targets: singleNode(target.Host),
 				Detail:  fmt.Sprintf("git -C %s pull --ff-only, on the %s host", path, role),
+				// The target is the PXE service's host, not a node.
+				NotNodes: true,
 			}); err != nil {
 				return dryRunOrError(err)
 			}

@@ -6,6 +6,7 @@ package app
 import (
 	"strings"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
 	"github.com/GSI-HPC/clusterctl/nodeset"
@@ -107,4 +108,25 @@ func (a *App) machine(name string) string {
 		}
 	}
 	return n
+}
+
+// protectedHosts resolves one safety.protectedHosts entry into machines,
+// the way a selection is resolved, so that the gate compares machines rather
+// than spellings. An entry naming a machine the inventory does not know is
+// refused: it most likely protects nothing.
+func (a *App) protectedHosts(expr string) (*nodeset.NodeSet, error) {
+	ns, err := nodeset.ParseWith(expr, a.Groups)
+	if err != nil {
+		return nil, err
+	}
+	if ns, err = a.canonicalize(ns); err != nil {
+		return nil, err
+	}
+	if a.Inventory != nil && a.Inventory.Len() > 0 {
+		if unknown := ns.Difference(a.Inventory.NodeSet()); !unknown.IsEmpty() {
+			return nil, exitcode.Errorf(exitcode.Usage,
+				"it names %s, which the inventory does not know; write the inventory name of the machine", unknown)
+		}
+	}
+	return ns, nil
 }

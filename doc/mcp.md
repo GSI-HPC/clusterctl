@@ -75,8 +75,8 @@ A change is two calls.
 **`plan_change`** resolves the node set **once**. The plan keeps the result,
 because `@slurm:main` may name different nodes by the time the plan is applied than
 when it was read. It then runs `safety.Gate.Preview`, which applies the same
-checks as the prompt (protected hosts, an empty selection) and describes the
-question without asking it. Finally it runs the action against a
+checks as the prompt (protected hosts, nodes the inventory does not know, an
+empty selection) and describes the question without asking it. Finally it runs the action against a
 `transport.Recorder`, so the plan lists exactly what `apply_plan` will send,
 rendered the way `--dry-run` prints it. The plan also carries the current
 Slurm state of the nodes, warnings (a drained node's reason is about to be

@@ -353,6 +353,11 @@ publishes it.`,
 			if err != nil {
 				return err
 			}
+			// Protected host entries that name a group are otherwise only
+			// resolved when a command is about to change something.
+			if _, err := a.Gate.Protected(); err != nil {
+				return err
+			}
 			t := output.NewTable(output.Cols("FILE", "KIND", "NAME")...)
 			for _, doc := range a.Resolved.Bundle.Documents {
 				name := ""

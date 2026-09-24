@@ -165,7 +165,7 @@ are about to do and ask before doing it.`),
 	flags.StringArrayVar(&r.setValues, "set", nil, "override one configuration value as PATH=VALUE, repeatable")
 	flags.BoolVar(&r.dryRun, "dry-run", false, "report what would be done and change nothing")
 	flags.BoolVarP(&r.assumeYes, "yes", "y", false, "answer the confirmation prompts with yes")
-	flags.BoolVar(&r.force, "force", false, "allow protected hosts to be touched")
+	flags.BoolVar(&r.force, "force", false, "allow protected hosts, and nodes the inventory does not know, to be touched")
 	flags.IntVar(&r.fanout, "fanout", 0, "how many hosts to work on at once (default: from the configuration)")
 
 	registerCompletions(cmd, r)

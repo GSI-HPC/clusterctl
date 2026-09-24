@@ -192,5 +192,24 @@ $ clusterctl bmc power off -n 'exe[1-4],wlm01'
 clusterctl: power off would touch the protected host wlm01; pass --force to do it anyway
 ```
 
+The protected hosts are compared by machine, not by spelling. `WLM01`,
+`wlm01.`, `wlm01.hpc.example.org`, its service processor
+`wlm01.mgmt.hpc.example.org` and its inventory address `10.0.1.1` are all
+wlm01, and are refused as it is. An entry may name a machine in any of these
+ways, or name a group, but every machine it names has to be in the inventory:
+
+```console
+$ clusterctl config validate
+clusterctl: safety.protectedHosts[0] "wlm02": it names wlm02, which the inventory does not know; write the inventory name of the machine
+```
+
+An entry with a group is resolved when a command is about to change
+something, and by `config validate`. If its source cannot be asked, every
+change is refused until it can, or until `--force` is given.
+
+A change to a node the inventory does not know is refused too, because the
+gate cannot tell whether it is another name for a protected host. Pass
+`--force` when you mean it.
+
 `confirmAbove` is the host count above which the number has to be typed back
 rather than confirmed with a `y`.

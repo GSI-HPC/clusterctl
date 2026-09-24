@@ -23,7 +23,10 @@ func TestPlanRefusesNamesSlurmDoesNotReadAsThemselves(t *testing.T) {
 		{map[string]any{"action": "drain", "nodes": "exe[1-2],zz1", "reason": "maint"}, "does not know zz1"},
 	}
 	for _, tc := range tests {
-		if msg := f.refused(t, "plan_change", tc.args); !strings.Contains(msg, tc.want) {
+		// The safety gate refuses a name the inventory does not know before
+		// Slurm is asked; either refusal keeps the plan from standing.
+		if msg := f.refused(t, "plan_change", tc.args); !strings.Contains(msg, tc.want) &&
+			!strings.Contains(msg, "which the inventory does not know") {
 			t.Errorf("%v: message = %q, want %q", tc.args, msg, tc.want)
 		}
 	}
