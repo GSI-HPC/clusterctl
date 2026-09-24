@@ -132,7 +132,10 @@ confirmation come with it.
 - **No default node set.** `-n` and `CLUSTERCTL_NODES` do not apply; a call
   names its nodes or selects nothing, as [safety.md](safety.md) requires.
 - **No terminal.** Anything that would prompt refuses instead, including the
-  BMC password prompt.
+  BMC password prompt. A sops encrypted Secret is opened with the keys of
+  `workstation.identities` alone: sops' own key discovery can run
+  `SOPS_AGE_KEY_CMD` or have gpg-agent ask for a passphrase, so it is used
+  only at a terminal.
 - **The administrator's identity.** It runs as the user who started it, with
   their ssh agent. A shared server reachable over HTTP would change whose
   keys act on the cluster, so that is a separate decision.

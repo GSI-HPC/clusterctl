@@ -10,6 +10,11 @@ spec:
   host: desk01.example.org
   identities:
     - ~/.ssh/id_ed25519
+  # The kinds of key a sops encrypted Secret may be encrypted to. Only age
+  # is trusted when this is unset: a file naming any other kind is refused,
+  # because sops would use this machine's credentials for whatever key
+  # management service or Vault the file names.
+  sopsKeyTypes: [age]
   overrides:
     # This machine is on a slow link, so give connections longer. A context
     # override still wins over this, because the context layer is applied
