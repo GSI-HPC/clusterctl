@@ -18,7 +18,8 @@
 //
 // Operators have no precedence; an expression is evaluated strictly from left
 // to right. Whitespace acts as a union operator, so the arguments of a command
-// line may be joined with a space and parsed in one call.
+// line may be joined with a space and parsed in one call. The operators !, &
+// and ^ need an operand on each side: "exe[1-10]&" is an error, not exe[1-10].
 //
 // # Node names
 //

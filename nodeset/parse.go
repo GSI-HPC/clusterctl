@@ -65,12 +65,21 @@ const (
 )
 
 // parseExpression evaluates a full node set expression left to right.
+//
+// A comma or whitespace between two operands is a union, and an empty operand
+// of a union is nothing: "a,,b" and "a," are accepted. The other operators
+// need an operand on both sides. "a&" is what a command substitution that
+// printed nothing leaves behind, and evaluating it as "a" would select every
+// host of a instead of none, so it is an error, as it is in ClusterShell.
 func parseExpression(expr string, res Resolver, depth int) (*NodeSet, error) {
 	if depth > maxGroupDepth {
 		return nil, fmt.Errorf("group references nested more than %d levels deep", maxGroupDepth)
 	}
 	result := New()
 	op := opUnion
+	// operand reports whether the last thing read was an operand, and
+	// pendingOp whether a set operator is waiting for its right operand.
+	operand, pendingOp := false, false
 	pending := strings.Builder{}
 	depthBracket := 0
 
@@ -85,7 +94,7 @@ func parseExpression(expr string, res Resolver, depth int) (*NodeSet, error) {
 			return err
 		}
 		apply(result, op, ts)
-		op = opUnion
+		op, operand, pendingOp = opUnion, true, false
 		if result.Len() > maxSetElements {
 			return fmt.Errorf("%q expands to more than %d hosts", expr, maxSetElements)
 		}
@@ -110,12 +119,25 @@ func parseExpression(expr string, res Resolver, depth int) (*NodeSet, error) {
 			if err := flush(); err != nil {
 				return nil, err
 			}
-		case c == byte(opUnion) || c == byte(opDifference) ||
-			c == byte(opIntersection) || c == byte(opSymmetric):
+		case c == byte(opUnion):
 			if err := flush(); err != nil {
 				return nil, err
 			}
-			op = operator(c)
+			if pendingOp {
+				return nil, missingOperand(expr, op, "right")
+			}
+			operand = false
+		case c == byte(opDifference) || c == byte(opIntersection) || c == byte(opSymmetric):
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			if pendingOp {
+				return nil, missingOperand(expr, op, "right")
+			}
+			if !operand {
+				return nil, missingOperand(expr, operator(c), "left")
+			}
+			op, operand, pendingOp = operator(c), false, true
 		default:
 			pending.WriteByte(c)
 		}
@@ -126,7 +148,15 @@ func parseExpression(expr string, res Resolver, depth int) (*NodeSet, error) {
 	if err := flush(); err != nil {
 		return nil, err
 	}
+	if pendingOp {
+		return nil, missingOperand(expr, op, "right")
+	}
 	return result, nil
+}
+
+// missingOperand reports an operator written without one of its operands.
+func missingOperand(expr string, op operator, side string) error {
+	return fmt.Errorf("in %q: the %c operator has no %s operand", expr, op, side)
 }
 
 func apply(dst *NodeSet, op operator, src *NodeSet) {
