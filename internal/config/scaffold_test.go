@@ -179,3 +179,26 @@ func TestScaffoldPointsEditorsAtTheSchema(t *testing.T) {
 		}
 	}
 }
+
+// Review 9.11: a name that a YAML 1.2 reader such as yq takes for a number,
+// 1e3 or 08, is written quoted, and so is every other name, so that no
+// reader has to guess.
+func TestScaffoldQuotesEveryName(t *testing.T) {
+	files, err := config.Scaffold(config.ScaffoldOptions{Site: "08", Cluster: "1e3", User: "007"})
+	if err != nil {
+		t.Fatalf("Scaffold failed: %v", err)
+	}
+	want := map[string][]string{
+		"config.yaml":    {`currentContext: "1e3"`, `name: "1e3"`, `cluster: "1e3"`, `user: "007"`},
+		"cluster.yaml":   {`name: "1e3"`, `site: "08"`, `- "08"`},
+		"inventory.yaml": {`name: "08"`},
+		"site.yaml":      {`name: "08"`},
+	}
+	for _, f := range files {
+		for _, w := range want[f.Name] {
+			if !strings.Contains(string(f.Data), w) {
+				t.Errorf("%s does not contain %s:\n%s", f.Name, w, f.Data)
+			}
+		}
+	}
+}

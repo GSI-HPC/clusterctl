@@ -216,6 +216,45 @@ func TestContextNamedTwiceInOneDocumentIsRefused(t *testing.T) {
 	}
 }
 
+// Review 9.6: a cluster written by config init takes the nodes of its own
+// site only, also when another site is loaded with it.
+func TestConfigInitPinsTheInventory(t *testing.T) {
+	a := filepath.Join(t.TempDir(), "a")
+	b := filepath.Join(t.TempDir(), "b")
+	if _, err := run(t, harnessOptions{bare: true, config: []string{a}},
+		"config", "init", a, "--site", "sitea", "--cluster", "alpha", "--domain", "a.example.org"); err != nil {
+		t.Fatalf("config init failed: %v", err)
+	}
+	if _, err := run(t, harnessOptions{bare: true, config: []string{b}},
+		"config", "init", b, "--site", "siteb", "--cluster", "beta", "--domain", "b.example.org"); err != nil {
+		t.Fatalf("config init failed: %v", err)
+	}
+	// Both scaffolds have a Config document; the second one's context
+	// names differ, so they add up. Site b gets compute nodes.
+	inv := filepath.Join(b, "inventory.yaml")
+	data, err := os.ReadFile(inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "  nodes: []",
+		"  nodes:\n    - nodes: gpu[01-04]\n      attributes: {class: compute}", 1))
+	if err := os.WriteFile(inv, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h, err := run(t, harnessOptions{bare: true, config: []string{a, b}}, "--context", "beta", "node", "fqdn", "-n", "@compute")
+	if err != nil {
+		t.Fatalf("node fqdn on beta failed: %v", err)
+	}
+	if got, want := strings.TrimSpace(h.out.String()), "gpu[01-04].b.example.org"; got != want {
+		t.Errorf("beta: node fqdn = %q, want %q", got, want)
+	}
+	h, err = run(t, harnessOptions{bare: true, config: []string{a, b}}, "--context", "alpha", "node", "fqdn", "-n", "@compute")
+	if err == nil {
+		t.Errorf("alpha selected the nodes of site b: %s", h.out)
+	}
+}
+
 // Review 9.10: config explain reports the value the commands use and the
 // line a context wrote it on.
 func TestConfigExplainCoversFlagsAndContexts(t *testing.T) {

@@ -9,6 +9,11 @@ metadata:
   name: {{yaml .Cluster}}
 spec:
   site: {{yaml .Site}}
+  # The NodeInventory documents that hold this cluster's nodes. Without this
+  # list the cluster takes every inventory that is loaded, those of other
+  # sites read with this one included.
+  inventories:
+    - {{yaml .Site}}
 
   slurm:
     # The host role the Slurm clients run on.
