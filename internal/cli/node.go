@@ -86,7 +86,11 @@ processor name and the groups it belongs to.`,
 			}
 			name := args[0]
 			node, ok := a.Inventory.Lookup(name)
-			if !ok {
+			if ok {
+				// exe1 finds exe0001; the names shown are the ones the
+				// acting commands use, built from the inventory's name.
+				name = node.Name
+			} else {
 				node = &inventory.Node{Name: name}
 				a.Printf("%s is not in the inventory; showing what the naming rules produce\n", name)
 			}
