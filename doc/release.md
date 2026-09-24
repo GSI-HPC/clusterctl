@@ -128,7 +128,9 @@ says why the notes live there.
 ## The Go toolchain
 
 `go.mod` says `go 1.26.0`: the oldest Go that compiles the module, which is
-what someone running `go install` needs to know. The workflows build with the
+what someone running `go install` needs to know. A local toolchain older than
+that switches to exactly 1.26.0, without the patch releases after it; install
+the newest 1.26 with `mise install` rather than rely on the switch. The workflows build with the
 newest patch of the 1.26 line instead — `GO_VERSION` in each workflow, resolved
 with `check-latest` — because Go ships security fixes to the standard library
 as patch releases, and a binary is only as patched as the toolchain that linked
