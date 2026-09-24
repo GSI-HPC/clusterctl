@@ -144,7 +144,8 @@ when the path is direct.
 ## Something changed that should not have
 
 Every destructive command understands `--dry-run` and prints what it would do
-without sending anything. It is also what to use when reading an unfamiliar
+without changing anything. Lookups, such as resolving a group or asking Slurm
+about a node, still run. It is also what to use when reading an unfamiliar
 command's behaviour:
 
 ```console

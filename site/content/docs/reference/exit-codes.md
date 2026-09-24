@@ -49,6 +49,11 @@ $ echo $?
 A destructive command with no terminal to ask on exits `2`, because that is a
 usage problem: pass `-y` if you meant it.
 
-## A dry run is 0
+## A dry run is 0 when the real run would go ahead
 
-`--dry-run` prints what would happen and exits zero, having sent nothing.
+`--dry-run` prints what would change and exits zero, having changed nothing.
+The lookups and checks still run for real, so a dry run that the real run's
+checks would refuse exits with the code the real run would, such as `2` for a
+node running a Slurm job or a drain without a reason. A lookup that a dry run
+does not make is named in the preview, so a check that did not run is never
+counted as passed.

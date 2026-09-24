@@ -141,8 +141,8 @@ done
 clusterctl bmc power soft -n '@rack:R02' -y
 ```
 
-Put `--dry-run` in front of it first. It prints what would happen and exits
-zero, having contacted nothing.
+Put `--dry-run` in front of it first. It prints what would happen and changes
+nothing; the lookups it needs, such as the Slurm job check, still run.
 
 ## Overriding configuration for one command
 
