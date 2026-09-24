@@ -117,6 +117,21 @@ semicolon stays a group name.
 Groups may refer to groups. A cycle is reported after sixteen levels rather
 than looping.
 
+### Names are host names
+
+The node set language accepts more than a host name may contain, because a
+set is also used for things that are not hosts. A node name, though, becomes
+an ssh destination and the host of a Redfish URL, where a leading `-` is an
+option and `:`, `@`, `/`, `?` and `#` set the port, the account, the path, the
+query and the fragment. So `App.Select`, which every command and the MCP
+server use to turn an expression into nodes, refuses a selection with any name
+that is not a host name: dot separated labels of ASCII letters, digits and
+hyphens, none empty, none longer than 63 characters, none beginning or ending
+with a hyphen, and at most 253 characters in all, with an optional final dot.
+The check runs on every name the expression resolves to, so names from a group
+source or the inventory are held to it too. It lives in `internal/hostname`,
+and ssh and the Redfish client apply it again to the host they are given.
+
 ## Rendering for other tools
 
 `clusterctl node select` prints the folded form. Slurm and FreeIPMI parse one

@@ -56,6 +56,22 @@ comes back under the names the site gave them even when you typed `exe1`.
 not part of what it identifies.
 {{< /callout >}}
 
+## What a name may contain
+
+A node name is used as a host name, so every name a set resolves to has to be
+one: letters, digits and hyphens, in labels separated by dots, with no label
+beginning or ending with a hyphen. Anything else, such as a name beginning
+with `-` or containing `:`, `@`, `/`, `?`, `#`, `_` or a space, is refused
+with exit code 2 before anything is sent. This holds for names that come from
+a group source or the inventory as well as for names you type, and it is what
+stops a name from turning into an ssh option or sending a Redfish request,
+with the BMC password, to another host.
+
+```console
+$ clusterctl node hw -n '-oProxyCommand=...'
+clusterctl: node "-oProxyCommand=..." is not a host name: the label "-oProxyCommand=" begins with a hyphen
+```
+
 ## Groups
 
 A group is resolved by a source. Which sources exist is configuration:
