@@ -86,6 +86,10 @@ func (p *pxeHost) reply(tg transport.Target, req transport.Request) (*transport.
 	switch {
 	case len(req.Argv) > 0 && req.Argv[0] == "cat":
 		return &transport.Result{Target: tg, Stdout: p.dhcp}, nil
+	case len(req.Argv) > 1 && req.Argv[0] == "find":
+		// The BSD find of a macOS runner has no -printf, so the listing
+		// is answered here, the way GNU find on the PXE host prints it.
+		return p.listLinks(tg, req.Argv[1])
 	case req.Script != "":
 		cmd = exec.CommandContext(context.Background(), "bash", "-c", req.Script)
 	case len(req.Argv) > 0:
@@ -105,6 +109,25 @@ func (p *pxeHost) reply(tg transport.Target, req transport.Request) (*transport.
 	}
 	res.Stdout, res.Stderr = stdout.String(), stderr.String()
 	return res, nil
+}
+
+func (p *pxeHost) listLinks(tg transport.Target, dir string) (*transport.Result, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out strings.Builder
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		target, err := os.Readlink(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		out.WriteString(e.Name() + "\t" + target + "\n")
+	}
+	return &transport.Result{Target: tg, Stdout: out.String()}, nil
 }
 
 // run runs clusterctl against the host, with -y unless the arguments say
