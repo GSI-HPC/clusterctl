@@ -7,6 +7,7 @@ package naming
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -23,6 +24,7 @@ type Namer struct {
 }
 
 type rule struct {
+	index    int
 	prefixes []string
 	pattern  *regexp.Regexp
 	fqdn     string
@@ -38,9 +40,15 @@ func New(spec v1alpha1.NamingSpec, domains map[string]string) (*Namer, error) {
 	tmpl.Prefixed("domains", domains, n.vars)
 
 	for i, r := range spec.Rules {
-		compiled := rule{prefixes: r.Match.Prefixes, fqdn: r.FQDN, bmc: r.BMC}
+		compiled := rule{index: i + 1, fqdn: r.FQDN, bmc: r.BMC}
+		// Names are lowercased before they are matched, so are prefixes.
+		for _, p := range r.Match.Prefixes {
+			compiled.prefixes = append(compiled.prefixes, strings.ToLower(p))
+		}
 		if r.Match.Pattern != "" {
-			re, err := regexp.Compile(r.Match.Pattern)
+			// The pattern names the whole short name. Matched as a
+			// substring, gpu[0-9]+ would also claim login-gpu01.
+			re, err := regexp.Compile("^(?:" + r.Match.Pattern + ")$")
 			if err != nil {
 				return nil, fmt.Errorf("naming rule %d: invalid pattern %q: %w", i+1, r.Match.Pattern, err)
 			}
@@ -63,8 +71,11 @@ func (n *Namer) Domain(role string) string { return n.domains[role] }
 // FQDN returns the host name of a node.
 //
 // A name that already carries a domain is returned unchanged, so that an
-// administrator can always name a host exactly.
+// administrator can always name a host exactly. Host names are not case
+// sensitive, so a name is lowercased first: WLM01 is wlm01, and gets its
+// rule.
 func (n *Namer) FQDN(node string) (string, error) {
+	node = strings.ToLower(node)
 	if strings.Contains(node, ".") {
 		return node, nil
 	}
@@ -78,19 +89,53 @@ func (n *Namer) FQDN(node string) (string, error) {
 	return n.expand(r.fqdn, node)
 }
 
-// BMC returns the host name of a node's service processor. Any domain on the
-// input is dropped first, because the service processor lives in a different
-// domain than the node.
+// BMC returns the host name of a node's service processor.
+//
+// The name comes from the bmc template of the first rule that matches the
+// short name, and nothing else: a node whose rule has none, or that no rule
+// matches, is refused rather than given its own name, because the site's BMC
+// account would then be sent to the node. For the same reason a template
+// that gives the node's short name or host name back is refused. A node
+// whose service processor cannot be named by a rule has its address written
+// in the inventory, which the commands prefer.
+//
+// A name with a domain is accepted only when it is the host name the rules
+// give its short name. Any other domain names a different machine, whose
+// service processor the rules do not know. An IP address is refused too: it
+// has no short name, and cutting it at the first dot named one host for a
+// whole subnet.
 func (n *Namer) BMC(node string) (string, error) {
-	short := node
-	if i := strings.IndexByte(short, '.'); i >= 0 {
-		short = short[:i]
+	name := strings.TrimSuffix(strings.ToLower(node), ".")
+	if net.ParseIP(name) != nil {
+		return "", fmt.Errorf("%q is an address, not a node name; the naming rules cannot name its service processor", node)
+	}
+	short := Short(name)
+	fqdn, err := n.FQDN(short)
+	if err != nil {
+		return "", err
+	}
+	if name != short && !strings.EqualFold(name, fqdn) {
+		return "", fmt.Errorf("%q is not the host name the naming rules give %s, which is %s; "+
+			"name the node by its short name or its host name", node, short, fqdn)
 	}
 	r, ok := n.match(short)
-	if !ok || r.bmc == "" {
-		return short, nil
+	if !ok {
+		return "", fmt.Errorf("no naming rule matches %s, so its service processor has no name; "+
+			"add a rule with a bmc template or set bmcAddress in the inventory", short)
 	}
-	return n.expand(r.bmc, short)
+	if r.bmc == "" {
+		return "", fmt.Errorf("naming rule %d, which matches %s, has no bmc template, so its service processor "+
+			"has no name; add one or set bmcAddress in the inventory", r.index, short)
+	}
+	bmc, err := n.expand(r.bmc, short)
+	if err != nil {
+		return "", err
+	}
+	if strings.EqualFold(bmc, short) || strings.EqualFold(bmc, fqdn) {
+		return "", fmt.Errorf("naming rule %d names the service processor of %s %s, which is the node itself; "+
+			"give the rule a bmc template in another domain or set bmcAddress in the inventory", r.index, short, bmc)
+	}
+	return bmc, nil
 }
 
 func (n *Namer) match(node string) (rule, bool) {

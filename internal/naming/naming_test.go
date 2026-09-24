@@ -173,3 +173,118 @@ func TestShort(t *testing.T) {
 		}
 	}
 }
+
+// A pattern names the whole short name, as the schema says: gpu[0-9]+ claimed
+// login-gpu01 while it matched a substring.
+func TestPatternMatchesTheWholeName(t *testing.T) {
+	t.Parallel()
+
+	n, err := naming.New(v1alpha1.NamingSpec{
+		Rules: []v1alpha1.NamingRule{
+			{Match: v1alpha1.NamingMatch{Pattern: `gpu[0-9]+`}, FQDN: "{name}.{domains.hpc}", BMC: "{name}.{domains.mgmt}"},
+			{FQDN: "{name}.{domains.site}", BMC: "bmc-{name}.{domains.mgmt}"},
+		},
+	}, map[string]string{"hpc": "hpc.example.org", "site": "example.org", "mgmt": "mgmt.example.org"})
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	for node, want := range map[string]string{
+		"gpu01":       "gpu01.hpc.example.org",
+		"login-gpu01": "login-gpu01.example.org",
+		"gpu01x":      "gpu01x.example.org",
+	} {
+		if got, err := n.FQDN(node); err != nil || got != want {
+			t.Errorf("FQDN(%q) = %q, %v; want %q", node, got, err, want)
+		}
+	}
+}
+
+// Every case here used to produce a name, and every name was a host other
+// than the service processor: the node itself, "10.mgmt.example.org" for a
+// whole subnet, or the BMC of a host in another domain.
+func TestBMCRefusesWhatItCannotDerive(t *testing.T) {
+	t.Parallel()
+	domains := map[string]string{"hpc": "hpc.example.org", "site": "example.org", "mgmt": "mgmt.example.org"}
+
+	// The rule config init writes: no bmc template at all.
+	scaffold, err := naming.New(v1alpha1.NamingSpec{
+		Rules: []v1alpha1.NamingRule{{FQDN: "{name}.{domains.hpc}"}},
+	}, domains)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	// A rule that matches, and a later one that would have a template: the
+	// first match decides, as it does for the host name.
+	partial, err := naming.New(v1alpha1.NamingSpec{
+		Rules: []v1alpha1.NamingRule{
+			{Match: v1alpha1.NamingMatch{Prefixes: []string{"exe"}}, FQDN: "{name}.{domains.hpc}"},
+			{Match: v1alpha1.NamingMatch{Prefixes: []string{"sub"}}, FQDN: "{name}.{domains.hpc}", BMC: "{name}.{domains.mgmt}"},
+		},
+	}, domains)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	// Templates that give the node's own names back.
+	itself, err := naming.New(v1alpha1.NamingSpec{
+		Rules: []v1alpha1.NamingRule{
+			{Match: v1alpha1.NamingMatch{Prefixes: []string{"exe"}}, FQDN: "{name}.{domains.hpc}", BMC: "{name}"},
+			{FQDN: "{name}.{domains.hpc}", BMC: "{name}.{domains.hpc}"},
+		},
+	}, domains)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	cases := []struct {
+		name  string
+		namer *naming.Namer
+		node  string
+	}{
+		{"a rule without a bmc template", scaffold, "exe01"},
+		{"the first matching rule without one", partial, "exe01"},
+		{"no rule matching", partial, "login01"},
+		{"a template giving the short name", itself, "exe01"},
+		{"a template giving the host name", itself, "login01"},
+		{"an IPv4 address", exampleNamer(t), "10.0.2.1"},
+		{"an IPv6 address", exampleNamer(t), "fe80::1"},
+		// The rules give login01 the host name login01.example.org, so
+		// this names a different machine whose BMC they do not know.
+		{"a domain the rules do not give", exampleNamer(t), "login01.hpc.example.org"},
+		{"an unrelated domain", exampleNamer(t), "exe0001.other.org"},
+	}
+	for _, tc := range cases {
+		if got, err := tc.namer.BMC(tc.node); err == nil {
+			t.Errorf("%s: BMC(%q) = %q, want it refused", tc.name, tc.node, got)
+		}
+	}
+	if got, err := scaffold.BMCSet(nodeset.MustParse("exe[01-02]")); err == nil {
+		t.Errorf("BMCSet = %s, want it refused", got)
+	}
+}
+
+// Host names are not case sensitive, and a trailing dot only says the name
+// is absolute, so neither may pick another rule or another domain.
+func TestNamesAreCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	n := exampleNamer(t)
+
+	for node, want := range map[string]string{
+		"WLM01":   "wlm01.hpc.example.org",
+		"Exe0001": "exe0001.hpc.example.org",
+	} {
+		if got, err := n.FQDN(node); err != nil || got != want {
+			t.Errorf("FQDN(%q) = %q, %v; want %q", node, got, err, want)
+		}
+	}
+	for node, want := range map[string]string{
+		"WLM01":                    "wlm01.mgmt.hpc.example.org",
+		"EXE0001.HPC.Example.org":  "exe0001.mgmt.hpc.example.org",
+		"exe0001.":                 "exe0001.mgmt.hpc.example.org",
+		"exe0001.hpc.example.org.": "exe0001.mgmt.hpc.example.org",
+		"login01.example.org":      "bmc-login01.mgmt.example.org",
+	} {
+		if got, err := n.BMC(node); err != nil || got != want {
+			t.Errorf("BMC(%q) = %q, %v; want %q", node, got, err, want)
+		}
+	}
+}
