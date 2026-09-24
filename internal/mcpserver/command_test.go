@@ -23,6 +23,38 @@ type commandResult struct {
 	Truncated bool   `json:"truncated"`
 }
 
+// 1.8: a timeout only shortens the wait for a host; an agent cannot make a
+// read command wait on a host for longer than it would by default.
+func TestReadCommandCapsTheTimeout(t *testing.T) {
+	f := start(t, setup{})
+	msg := f.refused(t, "read_command", map[string]any{"args": []string{"hostkey", "scan", "--timeout", "1h", "-n", "exe1"}})
+	if !strings.HasPrefix(msg, "rejected:") || !strings.Contains(msg, "--timeout") {
+		t.Errorf("message = %q, want --timeout refused", msg)
+	}
+	var out commandResult
+	f.call(t, "read_command", map[string]any{"args": []string{"hostkey", "scan", "--timeout", "2s", "-n", "exe1"}}, &out)
+	if strings.Contains(out.Error, "--timeout") {
+		t.Errorf("a shorter timeout was refused: %+v", out)
+	}
+}
+
+// 10.11: --fanout would override fanout.max, which --set may not.
+func TestReadCommandPinsTheFanout(t *testing.T) {
+	f := start(t, setup{})
+	for _, args := range [][]string{
+		{"node", "hw", "--fanout", "100000", "-n", "exe[1-10]"},
+		{"--fanout=100000", "node", "hw", "-n", "exe[1-10]"},
+	} {
+		msg := f.refused(t, "read_command", map[string]any{"args": args})
+		if !strings.HasPrefix(msg, "rejected:") || !strings.Contains(msg, "--fanout") {
+			t.Errorf("%v: message = %q, want --fanout refused", args, msg)
+		}
+	}
+	if sent := f.cluster.sent(); len(sent) != 0 {
+		t.Errorf("sent %v", sent)
+	}
+}
+
 // tree builds a command tree with one read command that runs fn.
 func tree(fn func(cmd *cobra.Command) error) func(context.Context, app.Streams) *cobra.Command {
 	return func(_ context.Context, streams app.Streams) *cobra.Command {
