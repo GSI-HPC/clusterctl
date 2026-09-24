@@ -682,7 +682,8 @@ func TestBMCWebPrintsTheURL(t *testing.T) {
 }
 
 func TestBMCForgetRemovesAPin(t *testing.T) {
-	h, err := run(t, harnessOptions{}, "bmc", "forget", "exe0001")
+	_, set := pinFile(t, "exe0001.mgmt.hpc.example.org")
+	h, err := run(t, harnessOptions{}, append(set, "bmc", "forget", "-y", "exe0001")...)
 	if err != nil {
 		t.Fatalf("bmc forget failed: %v", err)
 	}
