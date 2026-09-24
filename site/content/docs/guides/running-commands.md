@@ -21,20 +21,49 @@ naming rules.
 
 ```console
 $ clusterctl exec -n '@compute' -- uptime -p
-$ clusterctl exec -n 'exe[1-4]' -r -- systemctl is-active slurmd
+$ clusterctl exec 'exe[1-4]' -r -- systemctl is-active slurmd
 $ clusterctl exec -n '@compute' --dedup -- uname -r
 ```
 
-`--dedup` collapses the nodes that answered the same thing, which is what makes
-a thousand-node answer readable:
+The command always follows `--`. Everything before it belongs to clusterctl,
+so without it the `-r` of `shutdown -r now` would be read as `--root` and the
+`-n` of `grep -n` would replace the node set. exec refuses a command that is
+not preceded by `--` rather than guess:
+
+```console
+$ clusterctl exec -n exe0001 shutdown -r now
+clusterctl: the command has to follow --, so that its options are not read as clusterctl's: clusterctl exec [-n NODESET] -- COMMAND...
+```
+
+The node set goes before `--`, as for every other node command, or in `-n`. It
+wins over `CLUSTERCTL_NODES`. Giving it both ways is refused, because a word
+of the command written before `--` would otherwise be taken for a node:
+
+```console
+$ clusterctl exec -n exe0001 sudo -- reboot
+clusterctl: "sudo" is a node set, and -n already names one; give the nodes once, and the command after --
+```
+
+`--dedup` collapses the nodes that answered the same thing, and ended the same
+way, which is what makes a thousand-node answer readable. Each group says how
+its nodes ended: `ok`, `exit N`, `unreachable` or `interrupted`, so that for
+`grep -q` or `test -e`, where the status is the whole answer, the groups still
+tell the nodes apart:
 
 ```console
 $ clusterctl exec -n '@compute' --dedup -- rpm -q slurm
-exe[0001-1020] (1020)
+exe[0001-1020] (1020): ok
   slurm-24.05.4-1.el9.x86_64
-exe[1021-1024] (4)
+exe[1021-1024] (4): ok
   slurm-23.11.6-1.el9.x86_64
 ```
+
+## Protected hosts and confirmation
+
+exec does not ask before it runs, but a host in `safety.protectedHosts` is
+refused on every run, and only `--force` gets past. `--confirm` adds the
+question the destructive commands ask. `--dry-run` shows the same preview and
+makes the same decision as the real run.
 
 ## Your command arrives intact
 
@@ -72,7 +101,13 @@ free for data.
 $ clusterctl exec -n '@compute' --stdin --script 'cat > /etc/motd' < motd.txt
 ```
 
-The input is read once and replayed to each node.
+The input is read once and replayed to each node. If it cannot be read to the
+end, for example because a directory was redirected, nothing is sent and exec
+exits 2: a truncated file on every node is worse than none.
+
+Standard input carries the payload, so the question `--confirm` asks cannot be
+read from it. `--stdin --confirm` needs `-y`, and `--dry-run` previews it as
+usual, with the size of the payload.
 
 ## Timeouts
 
@@ -115,15 +150,27 @@ A failing node does not stop the others, and every node is reported:
 $ clusterctl exec -n 'exe[1-4]' -- systemctl is-active slurmd
 exe0001: active
 exe0002: active
-exe0004: active
 exe0003: failed
+exe0004: active
+exe0003: exit 3
 clusterctl: 1 of 4 hosts failed: exe0003
 $ echo $?
 1
 ```
 
-Exit code 1 means clusterctl worked and a target failed. Exit code 3 would mean
-a host could not be reached at all.
+Each node that failed gets a line on standard error with how it ended and the
+last line it wrote to standard error, for example
+`exe0005: exit 5: Unit slurmd.service could not be found.` or
+`exe0006: unreachable: ssh: connect to host exe0006 port 22: Connection refused`.
+
+Exit code 1 means clusterctl worked and a target failed. Exit code 3 means a
+host could not be reached at all, and 130 that the run was interrupted before
+every node had answered. When several of these happen in one run, the exit code
+is the first of 130, 3 and 1 that applies.
+
+What a node prints is its own, so control characters in it are shown as escapes
+such as `\x1b` or `\r` rather than passed to your terminal, where they could
+overwrite another node's line. The machine formats carry the output unchanged.
 
 For a machine, ask for it:
 
