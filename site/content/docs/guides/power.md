@@ -189,6 +189,10 @@ it. Forgetting goes through the same confirmation as any other change, and
 replacing a certificate on purpose. If it changed and nobody replaced it, find
 out why first: the next connection trusts whatever it is shown.
 
+When several commands reach a new service processor at the same time, only the
+certificate recorded first is accepted; one that presents a different
+certificate in the meantime is refused like a change.
+
 A redirect is never followed. Following one would send an action a second
 time, and could send the credentials to the same host over plain HTTP, so the
 command stops and names where the service processor pointed.
