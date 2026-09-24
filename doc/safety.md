@@ -14,7 +14,11 @@ Everything that changes or destroys something goes through
 ## What a destructive command passes through
 
 1. **A node set must have been selected.** There is no fallback to a set left
-   over from an earlier command, and an empty selection is a usage error.
+   over from an earlier command, and an empty selection is a usage error. An
+   explicit `-n` is final: given empty, as `-n "$(...)"` is when the command
+   inside selects nothing, it is refused and `CLUSTERCTL_NODES` is not read in
+   its place. A node set given with `-n` twice is refused rather than all but
+   the last being dropped.
 
 2. **Protected hosts are refused.** `safety.protectedHosts` is a list of node
    set expressions. A command touching one of them stops and names it; only

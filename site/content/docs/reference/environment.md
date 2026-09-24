@@ -9,7 +9,7 @@ weight: 2
 | --- | --- |
 | `CLUSTERCTL_CONFIG` | Replaces the configuration search path. A `PATH`-style list of files and directories, most general first. |
 | `CLUSTERCTL_CONTEXT` | Selects the context, as `--context` does. |
-| `CLUSTERCTL_NODES` | The node set commands act on when `-n` is not given. |
+| `CLUSTERCTL_NODES` | The node set commands act on when neither `-n` nor a node set argument is given. An empty `-n` is an error, never a fall-back to it. |
 | `CLUSTERCTL_FANOUT` | `fanout.max` |
 | `CLUSTERCTL_CONNECT_TIMEOUT` | `ssh.connectTimeout` |
 | `CLUSTERCTL_COMMAND_TIMEOUT` | `fanout.commandTimeout` |

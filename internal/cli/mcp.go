@@ -56,7 +56,7 @@ Register it with Claude Code:
   claude mcp add clusterctl -- clusterctl mcp serve --context prod`,
 		cobra.NoArgs,
 		func(cmd *cobra.Command, _ []string) error {
-			if r.assumeYes || r.force || r.dryRun || r.nodes != "" {
+			if r.assumeYes || r.force || r.dryRun || len(r.nodes) > 0 {
 				return exitcode.Errorf(exitcode.Usage,
 					"mcp serve does not take --yes, --force, --dry-run or --nodes; the server never confirms or forces anything itself")
 			}

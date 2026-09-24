@@ -34,7 +34,7 @@ type root struct {
 
 	configFiles []string
 	contextName string
-	nodes       string
+	nodes       []string
 	format      string
 	setValues   []string
 	dryRun      bool
@@ -63,10 +63,15 @@ func (r *root) App() (*app.App, error) {
 		set[strings.TrimSpace(key)] = value
 	}
 
+	nodes, _, err := r.nodesFromFlagOrEnv()
+	if err != nil {
+		return nil, err
+	}
+
 	a, err := app.New(r.context(), r.streams, app.Options{
 		ConfigFiles: r.configFiles,
 		Context:     r.contextName,
-		Nodes:       r.nodesFromFlagOrEnv(),
+		Nodes:       nodes,
 		Format:      r.format,
 		Set:         set,
 		DryRun:      r.dryRun,
@@ -82,11 +87,27 @@ func (r *root) App() (*app.App, error) {
 	return a, nil
 }
 
-func (r *root) nodesFromFlagOrEnv() string {
-	if r.nodes != "" {
-		return r.nodes
+// nodesFromFlagOrEnv returns the default node set and whether it came from
+// -n rather than from the environment.
+//
+// An explicit -n is final: CLUSTERCTL_NODES is read only when -n is absent,
+// never in place of an empty -n, which is what -n "$(...)" gives when the
+// command inside selects nothing. A repeated -n is refused rather than
+// having all but the last dropped.
+func (r *root) nodesFromFlagOrEnv() (nodes string, fromFlag bool, err error) {
+	switch len(r.nodes) {
+	case 0:
+		return os.Getenv(config.EnvNodes), false, nil
+	case 1:
+		if strings.TrimSpace(r.nodes[0]) == "" {
+			return "", true, exitcode.Errorf(exitcode.Usage,
+				"-n was given an empty node set; %s is not used in its place", config.EnvNodes)
+		}
+		return r.nodes[0], true, nil
+	default:
+		return "", true, exitcode.Errorf(exitcode.Usage,
+			"-n was given %d times; give the whole node set in one -n", len(r.nodes))
 	}
-	return os.Getenv(config.EnvNodes)
 }
 
 func (r *root) context() context.Context {
@@ -134,7 +155,10 @@ are about to do and ask before doing it.`),
 	flags.StringSliceVar(&r.configFiles, "config", nil,
 		"configuration file or directory to read, repeatable (default: "+config.EnvConfig+" or the search path)")
 	flags.StringVar(&r.contextName, "context", "", "context to act on (default: the current one)")
-	flags.StringVarP(&r.nodes, "nodes", "n", "", "node set to act on, for example 'exe[1-10],@idle'")
+	// An array, not a single string, so that a repeated -n can be told
+	// apart from one given once, and an empty -n from none.
+	flags.StringArrayVarP(&r.nodes, "nodes", "n", nil,
+		"node set to act on, for example 'exe[1-10],@idle' (default: "+config.EnvNodes+")")
 	flags.StringVarP(&r.format, "output", "o", "table",
 		"output format: "+strings.Join(output.Formats(), ", "))
 	flags.StringArrayVar(&r.setValues, "set", nil, "override one configuration value as PATH=VALUE, repeatable")

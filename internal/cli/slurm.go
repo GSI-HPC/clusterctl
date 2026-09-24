@@ -201,7 +201,10 @@ Print a node set of the machines Slurm knows, optionally limited to a state
 group, ready to be passed to another command.
 
   clusterctl slurm node nodeset idle
-  clusterctl exec -n "$(clusterctl slurm node nodeset drain)" -- uptime`,
+  clusterctl exec -n "$(clusterctl slurm node nodeset drain)" -- uptime
+
+When no node is in the state, nothing is printed, and the -n it fills in is
+refused as empty rather than replaced by CLUSTERCTL_NODES.`,
 		cobra.MaximumNArgs(1),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
