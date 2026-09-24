@@ -272,7 +272,7 @@ clusterctl administers the HPC cluster %[2]s (context %[1]s). The server is
 pinned to that context.
 
 Nodes are named with ClusterShell node set expressions: exe[0001-0010],
-ranges and lists like exe[1-4,7], groups like @rack:R02 or @idle (a bare
+ranges and lists like exe[1-4,7], groups like @rack:R02 or @slurm:main (a bare
 @name uses the default group source), and the operators , (union),
 ! (difference), & (intersection) and ^ (symmetric difference), evaluated
 strictly left to right. Resolve an expression with select_nodes before

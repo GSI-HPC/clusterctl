@@ -50,7 +50,7 @@ commands need are there.
 $ clusterctl node select '@compute'
 exe[0001-1024]
 
-$ clusterctl node select '@compute!@drained' --count
+$ clusterctl node select "@compute!$(clusterctl slurm node nodeset drain)" --count
 1019
 
 $ clusterctl node groups

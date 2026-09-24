@@ -18,7 +18,7 @@ $ clusterctl node select 'exe[1-10/2]'             # with a step
 $ clusterctl node select 'exe[1,5,9-12]'           # several ranges
 $ clusterctl node select 'rack[1-2]node[01-04]'    # two dimensions
 $ clusterctl node select '@compute'                # a group
-$ clusterctl node select '@slurm:idle'             # a group from a source
+$ clusterctl node select '@slurm:main'             # a group from a source
 ```
 
 ## Combining sets
@@ -26,8 +26,8 @@ $ clusterctl node select '@slurm:idle'             # a group from a source
 | Operator | Meaning | Example |
 | --- | --- | --- |
 | `,` or a space | union | `exe[1-4],sub[1-2]` |
-| `!` | difference | `@compute!@drained` |
-| `&` | intersection | `@idle&@rack:R02` |
+| `!` | difference | `@compute!@static:infra` |
+| `&` | intersection | `@slurm:main&@rack:R02` |
 | `^` | in exactly one | `@yesterday^@today` |
 
 {{< callout type="warning" >}}
@@ -117,6 +117,13 @@ $ echo $?
 3
 ```
 
+{{< callout type="info" >}}
+The `slurm` source maps a group to a **partition**, so `@slurm:main` is every
+node of the partition `main`. Slurm states such as idle or drained are not
+groups. Ask for them with `slurm node nodeset` and pass the result on, as
+shown under [Passing a set to another tool](#passing-a-set-to-another-tool).
+{{< /callout >}}
+
 ```console
 $ clusterctl node groups exe0007
 SOURCE     GROUPS
@@ -187,6 +194,7 @@ $ clusterctl slurm node nodeset drain
 exe[0007,0042,0511]
 
 $ clusterctl exec -n "$(clusterctl slurm node nodeset idle)" -- uptime
+$ clusterctl node select "@compute!$(clusterctl slurm node nodeset drain)" --count
 ```
 
 When no node is in that state, the inner command prints nothing and `-n` is
@@ -201,7 +209,7 @@ think about it.
 ## Checking a set before you use it
 
 ```console
-$ clusterctl node select '@rack:R02&@slurm:idle' --expand
+$ clusterctl node select '@rack:R02&@slurm:main' --expand
 $ clusterctl node list '@rack:R02'
 $ clusterctl node fqdn -n '@rack:R02'
 ```

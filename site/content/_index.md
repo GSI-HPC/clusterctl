@@ -41,7 +41,7 @@ description: >-
 <h2>Nouns and verbs, not scripts.</h2>
 <p class="cx-sub">Every command is a noun then a verb, and the global flags mean the same thing in all of them.</p>
 <div class="cx-command-grid">
-<a href="docs/guides/node-sets/"><code>node select '@idle&amp;@rack:R02'</code><p>Node sets with groups from the inventory, the racks and Slurm, and set operations that mean what they say.</p></a>
+<a href="docs/guides/node-sets/"><code>node select '@slurm:main&amp;@rack:R02'</code><p>Node sets with groups from the inventory, the racks and Slurm, and set operations that mean what they say.</p></a>
 <a href="docs/guides/running-commands/"><code>exec --dedup -- uname -r</code><p>A thousand nodes answer; the ones that agree collapse into one line. Your quoting arrives intact.</p></a>
 <a href="docs/guides/power/"><code>bmc power on -n '@rack:R02'</code><p>Redfish first, pinned certificates, and a rack powered on in batches so the breaker stays in.</p></a>
 <a href="docs/guides/reinstalling/"><code>provision reinstall --dry-run</code><p>PXE and GRUB boot paths, DHCP checks and secrets streamed to the node, rehearsed first.</p></a>

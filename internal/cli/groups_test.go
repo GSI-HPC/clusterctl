@@ -4,13 +4,18 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -291,6 +296,48 @@ func TestNodeGroupsKeepsWhatTheOtherSourcesFound(t *testing.T) {
 				if !strings.Contains(out, want) {
 					t.Errorf("output is missing %q:\n%s", want, out)
 				}
+			}
+		})
+	}
+}
+
+// Report 4.19: the help used @idle and @drained, which no source provides.
+// Every group an example names has to resolve against the example site.
+func TestHelpExamplesNameGroupsThatExist(t *testing.T) {
+	cmd := NewRootCommand(context.Background(), app.Streams{})
+	var texts []string
+	var walk func(*cobra.Command)
+	walk = func(c *cobra.Command) {
+		texts = append(texts, c.Long, c.Example)
+		texts = append(texts, c.LocalFlags().FlagUsages())
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+	}
+	walk(cmd)
+
+	refs := map[string]bool{}
+	pattern := regexp.MustCompile(`@[A-Za-z0-9_.:-]*[A-Za-z0-9_]`)
+	for _, text := range texts {
+		for _, ref := range pattern.FindAllString(text, -1) {
+			// Redfish's @odata properties are not groups.
+			if !strings.HasPrefix(ref, "@odata.") {
+				refs[ref] = true
+			}
+		}
+	}
+	if len(refs) == 0 {
+		t.Fatal("no group reference found in the help; the pattern is wrong")
+	}
+
+	// The login node knows the example cluster's partitions and nothing
+	// else, so a Slurm state is not mistaken for a partition.
+	sinfo := fakeSinfo(map[string]string{"main": "exe[0001-0008]", "debug": "exe[0009-0010]"})
+	for _, ref := range sortedMapKeys(refs) {
+		t.Run(ref, func(t *testing.T) {
+			_, err := run(t, harnessOptions{recorder: &transport.Recorder{Reply: sinfo}}, "node", "select", ref)
+			if err != nil {
+				t.Errorf("the help names %s, which does not resolve: %v", ref, err)
 			}
 		})
 	}

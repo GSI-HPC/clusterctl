@@ -23,7 +23,7 @@ exe[1,5,9-12]             several ranges
 rack[1-2]node[01-04]      two numeric dimensions
 exe[1-4].hpc.example.org  a name with a domain
 @compute                  a group
-@slurm:idle               a group from a named source
+@slurm:main               a group from a named source
 @*                        every host the default source knows
 ```
 

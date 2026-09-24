@@ -74,7 +74,7 @@ func (s *Server) addReadTools() {
 
 // selectInput is the argument of select_nodes.
 type selectInput struct {
-	Expression string `json:"expression" jsonschema:"node set expression, for example exe[1-10], @rack:R02 or @exe&@idle"`
+	Expression string `json:"expression" jsonschema:"node set expression, for example exe[1-10], @rack:R02 or @exe&@rack:R02"`
 }
 
 // selectOutput is what select_nodes returns.

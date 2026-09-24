@@ -143,7 +143,7 @@ This is the node set calculator: ranges, groups and the set operators are all
 evaluated, strictly from left to right.
 
   clusterctl node select 'exe[1-10]!exe5'
-  clusterctl node select '@idle&@rack:R02' --expand
+  clusterctl node select '@slurm:main&@rack:R02' --expand
   clusterctl node select '@exe' --count`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
