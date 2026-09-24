@@ -28,6 +28,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 )
 
@@ -229,20 +230,60 @@ func (c *Client) Args(target Target, req Request) ([]string, error) {
 		args = append(args, "-X")
 	}
 
-	dest := target.Host
-	if user := c.userFor(target); user != "" {
-		dest = user + "@" + target.Host
+	dest, err := c.destination(target)
+	if err != nil {
+		return nil, err
 	}
-	args = append(args, dest)
+	// The destination follows "--", so that nothing in it can be read as an
+	// option, as CopyArgs does for scp.
+	args = append(args, "--", dest)
 
 	command, err := RemoteCommand(req)
 	if err != nil {
 		return nil, err
 	}
 	if command != "" {
-		args = append(args, "--", command)
+		args = append(args, command)
 	}
 	return args, nil
+}
+
+// destination renders the [user@]host ssh connects to, refusing a host or an
+// account that is not spelled as one. Either may come from a node set that an
+// agent or a group source supplied.
+func (c *Client) destination(target Target) (string, error) {
+	if err := hostname.CheckHost(target.Host); err != nil {
+		return "", exitcode.Wrap(exitcode.Usage, fmt.Errorf("%s: %w", target.Name, err))
+	}
+	user := c.userFor(target)
+	if user == "" {
+		return target.Host, nil
+	}
+	if !isUserName(user) {
+		return "", exitcode.Errorf(exitcode.Usage,
+			"%s: %q is not a user name: use letters, digits, '.', '_' and '-', not beginning with '-'",
+			target.Name, user)
+	}
+	return user + "@" + target.Host, nil
+}
+
+// isUserName reports whether an account is spelled in the portable user name
+// alphabet of POSIX, in which ssh gives no character a meaning.
+func isUserName(user string) bool {
+	if user == "" || user[0] == '-' {
+		return false
+	}
+	for i := 0; i < len(user); i++ {
+		if !isUserChar(user[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isUserChar(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+		c == '.' || c == '_' || c == '-'
 }
 
 // userFor resolves the account to log in as.

@@ -48,7 +48,7 @@ up on the node.
 
 ```console
 $ clusterctl login --dry-run install
-ssh -F ~/.local/state/clusterctl/ssh_config -A root@installer.hpc.example.org
+ssh -F ~/.local/state/clusterctl/ssh_config -A -- root@installer.hpc.example.org
 ```
 
 Run that command by hand with `-v`. Because clusterctl drives the ordinary ssh

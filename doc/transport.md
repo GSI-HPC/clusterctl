@@ -27,7 +27,7 @@ the tests: every vector that goes in comes back out unchanged.
 
 ```
 $ clusterctl login --dry-run install -- ls '/srv/*.log'
-ssh -F ~/.local/state/clusterctl/ssh_config -A root@installer.hpc.example.org -- ls '/srv/*.log'
+ssh -F ~/.local/state/clusterctl/ssh_config -A -- root@installer.hpc.example.org ls '/srv/*.log'
 ```
 
 A script is sent as one `bash -c '<script>'` argument for the same reason, and
@@ -36,6 +36,19 @@ and its data corrupts both.
 
 One argument is capped at 131072 bytes by the kernel. A command over that is
 reported, with the advice to send the payload over standard input instead.
+
+## A destination is never an option
+
+The destination follows `--`, as the source and destination of `scp` do, so
+ssh cannot read a host name that begins with `-` as an option such as
+`-oProxyCommand=`. That alone would still hand ssh a name it was never meant to
+see, so the destination is checked as well: the host has to be a host name
+(letters, digits, hyphens and dots, no label beginning or ending with a
+hyphen) or an IP address, and the account has to be spelled in the portable
+user name alphabet, letters, digits, `.`, `_` and `-`, not beginning with `-`.
+Anything else is refused with exit code 2 before ssh runs. Node names are
+checked earlier still, when they are selected; see
+[node sets](nodeset.md#names-are-host-names).
 
 ## The generated ssh configuration
 
