@@ -6,6 +6,7 @@ package redfish_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,10 @@ type fakeBMC struct {
 	lastPost map[string]any
 	patches  []map[string]any
 	power    string
+	// requests counts what reached the server, and withAuth how much of
+	// it carried credentials.
+	requests atomic.Int32
+	withAuth atomic.Int32
 }
 
 func newFakeBMC(t *testing.T, resetTypes []string) *fakeBMC {
@@ -83,7 +88,13 @@ func newFakeBMC(t *testing.T, resetTypes []string) *fakeBMC {
 		})
 	})
 
-	f.server = httptest.NewTLSServer(mux)
+	f.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.requests.Add(1)
+		if r.Header.Get("Authorization") != "" {
+			f.withAuth.Add(1)
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(f.server.Close)
 	return f
 }
@@ -118,6 +129,14 @@ func dialOnly(server *httptest.Server) http.RoundTripper {
 		return d.DialContext(ctx, network, addr)
 	}
 	return rt
+}
+
+// dialTo connects to one address whatever host a request names.
+func dialTo(addr string) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, addr)
+	}
 }
 
 func TestSystem(t *testing.T) {
@@ -343,5 +362,82 @@ func TestRejectedAccountIsATransportFailure(t *testing.T) {
 	}
 	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
 		t.Errorf("a refusal: exit code = %d, want %d (%v)", got, want, err)
+	}
+}
+
+// pinningClient talks to the fake BMC through the real pinning transport,
+// which the other tests bypass.
+func (f *fakeBMC) pinningClient(t *testing.T, store *redfish.PinStore) *redfish.Client {
+	t.Helper()
+	c := f.client(t)
+	c.Transport = nil
+	c.DialContext = dialTo(f.server.Listener.Addr().String())
+	c.Pins = store
+	return c
+}
+
+func (f *fakeBMC) fingerprint() string {
+	return redfish.Fingerprint(f.server.Certificate())
+}
+
+func TestPinningRecordsTheFirstCertificate(t *testing.T) {
+	t.Parallel()
+
+	f := newFakeBMC(t, nil)
+	store := &redfish.PinStore{Path: filepath.Join(t.TempDir(), "pins")}
+	c := f.pinningClient(t, store)
+	host := c.Host
+
+	if _, err := c.System(context.Background()); err != nil {
+		t.Fatalf("first contact failed: %v", err)
+	}
+	pin, ok, err := store.Get(host)
+	if err != nil || !ok {
+		t.Fatalf("no pin was recorded for %s: %v", host, err)
+	}
+	if want := f.fingerprint(); pin != want {
+		t.Errorf("pin = %q, want the server's certificate %q", pin, want)
+	}
+
+	// A fresh client, as the next command would build, is checked against
+	// the recorded pin and let through.
+	if _, err := f.pinningClient(t, store).System(context.Background()); err != nil {
+		t.Fatalf("a matching certificate was refused: %v", err)
+	}
+}
+
+func TestPinningRefusesAChangedCertificate(t *testing.T) {
+	t.Parallel()
+
+	// Every httptest server presents the same certificate, so the pin of
+	// an earlier certificate is written directly.
+	const earlier = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	f := newFakeBMC(t, nil)
+	store := &redfish.PinStore{Path: filepath.Join(t.TempDir(), "pins")}
+	c := f.pinningClient(t, store)
+	if err := store.Set(context.Background(), c.Host, earlier); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := c.Post(context.Background(), "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+		map[string]any{"ResetType": "ForceOff"})
+	var mismatch *redfish.PinMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("error = %v, want a PinMismatchError", err)
+	}
+	if mismatch.Recorded != earlier || mismatch.Seen != f.fingerprint() {
+		t.Errorf("mismatch = %+v, want recorded %s and seen %s", mismatch, earlier, f.fingerprint())
+	}
+	if got := f.requests.Load(); got != 0 {
+		t.Errorf("%d requests reached the server behind a changed certificate", got)
+	}
+	if got := f.withAuth.Load(); got != 0 {
+		t.Errorf("the credentials were sent %d times to a changed certificate", got)
+	}
+	if got := f.resets.Load(); got != 0 {
+		t.Errorf("the reset was sent %d times to a changed certificate", got)
+	}
+	if pin, _, _ := store.Get(c.Host); pin != earlier {
+		t.Errorf("the recorded pin was replaced by %q", pin)
 	}
 }

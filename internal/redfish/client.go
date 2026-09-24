@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -53,6 +54,9 @@ type Client struct {
 	MinTLSVersion string
 	// Transport overrides the HTTP transport, which the tests use.
 	Transport http.RoundTripper
+	// DialContext overrides how the pinning transport connects, so that the
+	// tests can reach a test server through the real TLS checks.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 
 	client *http.Client
 }
@@ -112,6 +116,7 @@ func (c *Client) httpClient(ctx context.Context) (*http.Client, error) {
 		rt = &http.Transport{
 			TLSClientConfig:     tlsConfig,
 			TLSHandshakeTimeout: timeout,
+			DialContext:         c.DialContext,
 			// Actions must never be replayed, so nothing here retries.
 			DisableKeepAlives: false,
 		}
