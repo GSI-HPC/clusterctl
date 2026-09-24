@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -80,7 +81,7 @@ node carries.
 			}
 			nodes, err := c.Nodes(a.Context(), ns, statesFor(state))
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 
 			t := output.NewTable(
@@ -95,9 +96,6 @@ node carries.
 			)
 			for _, n := range nodes {
 				reason := n.Reason
-				if reason == "(null)" {
-					reason = ""
-				}
 				if reason != "" && n.ReasonUser != "" {
 					reason = fmt.Sprintf("%s [%s]", reason, n.ReasonUser)
 				}
@@ -128,7 +126,14 @@ Set the nodes to drain so that no new job is scheduled on them. Jobs already
 running are left alone.
 
 The reason is mandatory and comes first, because a drained node with no reason
-is a node nobody dares resume. Say what is wrong and where it is tracked.
+is a node nobody dares resume. Say what is wrong and where it is tracked, on
+one line of at most 200 characters and without |. A reason that names nodes
+is refused, since that is what a forgotten reason looks like, and so are nodes
+named both after the reason and with -n.
+
+The nodes are checked against Slurm before anything is shown: slurmctld reads
+ALL as every node and a NodeSet name of slurm.conf as its members, so a name
+Slurm does not read as exactly the node named is refused.
 
   clusterctl slurm node drain 'ticket 4711: failing DIMM' -n exe0007`,
 		cobra.MinimumNArgs(1),
@@ -137,19 +142,22 @@ is a node nobody dares resume. Say what is wrong and where it is tracked.
 			if err != nil {
 				return err
 			}
-			c, err := slurmClient(a)
-			if err != nil {
+			reason := strings.TrimSpace(args[0])
+			if err := slurm.ValidateReason(reason); err != nil {
 				return err
 			}
-			reason := args[0]
-			ns, err := selection(a, args[1:])
+			if reasonNamesNodes(a, reason) {
+				return exitcode.Errorf(exitcode.Usage,
+					"the reason %q names nodes; give the reason first and quote it, then the nodes", reason)
+			}
+			c, ns, err := slurmNodes(a, args[1:])
 			if err != nil {
 				return err
 			}
 			if err := a.Gate.Confirm(safety.Action{
 				Verb:    "drain",
 				Targets: ns,
-				Detail:  "reason: " + reason,
+				Detail:  fmt.Sprintf("reason: %q", reason),
 			}); err != nil {
 				if safety.IsDryRun(err) {
 					return nil
@@ -157,7 +165,7 @@ is a node nobody dares resume. Say what is wrong and where it is tracked.
 				return err
 			}
 			if err := c.Drain(a.Context(), ns, reason); err != nil {
-				return exitcode.Wrap(exitcode.TargetFailed, err)
+				return err
 			}
 			a.Printf("drained %s\n", ns)
 			return nil
@@ -166,18 +174,16 @@ is a node nobody dares resume. Say what is wrong and where it is tracked.
 
 func newSlurmNodeResumeCommand(r *root) *cobra.Command {
 	return leaf("resume [NODESET]", "Put nodes back into production", `
-Set the nodes to resume so that jobs are scheduled on them again.`,
+Set the nodes to resume so that jobs are scheduled on them again.
+
+The nodes are checked against Slurm before anything is shown, as for drain.`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
 			if err != nil {
 				return err
 			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
-			ns, err := selection(a, args)
+			c, ns, err := slurmNodes(a, args)
 			if err != nil {
 				return err
 			}
@@ -188,11 +194,44 @@ Set the nodes to resume so that jobs are scheduled on them again.`,
 				return err
 			}
 			if err := c.Resume(a.Context(), ns); err != nil {
-				return exitcode.Wrap(exitcode.TargetFailed, err)
+				return err
 			}
 			a.Printf("resumed %s\n", ns)
 			return nil
 		})
+}
+
+// slurmNodes selects the nodes a Slurm change acts on and checks that Slurm
+// reads them as exactly those nodes, before the gate shows them.
+//
+// Nodes named both as arguments and with -n are refused by App.Select.
+func slurmNodes(a *app.App, args []string) (*slurm.Client, *nodeset.NodeSet, error) {
+	c, err := slurmClient(a)
+	if err != nil {
+		return nil, nil, err
+	}
+	ns, err := selection(a, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := c.CheckNodes(a.Context(), ns); err != nil {
+		return nil, nil, err
+	}
+	return c, ns, nil
+}
+
+// reasonNamesNodes reports whether a drain reason reads as nodes: a group
+// reference, or a node set holding a node the inventory knows. That is what
+// the first node argument looks like when the reason was forgotten.
+func reasonNamesNodes(a *app.App, reason string) bool {
+	if strings.HasPrefix(reason, "@") {
+		return true
+	}
+	ns, err := nodeset.Parse(reason)
+	if err != nil || a.Inventory == nil {
+		return false
+	}
+	return !ns.Intersection(a.Inventory.NodeSet()).IsEmpty()
 }
 
 func newSlurmNodesetCommand(r *root) *cobra.Command {
@@ -221,7 +260,7 @@ refused as empty rather than replaced by CLUSTERCTL_NODES.`,
 			}
 			ns, err := c.NodeSet(a.Context(), statesFor(state))
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 			if a.Format.IsMachine() {
 				return a.Print(output.Result{Nodes: ns, Object: ns.Expand()})
@@ -278,7 +317,7 @@ nodes they run on.
 			}
 			jobs, err := c.Jobs(a.Context(), filter)
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 
 			t := output.NewTable(
@@ -347,7 +386,7 @@ Read what finished out of the accounting database.
 			}
 			jobs, err := c.History(a.Context(), filter)
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 
 			t := output.NewTable(
@@ -395,7 +434,7 @@ before deciding whose work is filling the queue.`,
 			filter := slurm.JobFilter{States: strings.Split(strings.ToUpper(state), ",")}
 			jobs, err := c.Jobs(a.Context(), filter)
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 
 			type key struct{ user, account, partition string }
@@ -451,7 +490,7 @@ List the accounts of the accounting database.`,
 			}
 			accounts, err := c.Accounts(a.Context(), first(args))
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 			t := output.NewTable(
 				output.Column{Name: "ACCOUNT"},
@@ -479,7 +518,7 @@ List the associations of an account with the limits they carry.`,
 			}
 			assoc, err := c.AccountLimits(a.Context(), first(args))
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 			t := output.NewTable(output.Cols(
 				"ACCOUNT", "USER", "MAX SUBMIT", "MAX JOBS", "MAX NODES", "MAX CPUS", "MAX WALL", "FAIRSHARE")...)
@@ -490,16 +529,15 @@ List the associations of an account with the limits they carry.`,
 		})
 
 	add := leaf("add ACCOUNT [ORGANIZATION] [DESCRIPTION]", "Create an account", `
-Add an account to the accounting database. The organisation and the
-description default to what the cluster configuration says and to the account
-name.`,
+Add an account to the accounting database, in the cluster whose login node the
+clients run on. The organisation and the description default to what the
+cluster configuration says and to the account name.
+
+An account name is letters, digits and . _ @ - only: sacctmgr reads a comma as
+a list and brackets as a range, so proj[1-100] would create a hundred accounts.`,
 		cobra.RangeArgs(1, 3),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
 			if err != nil {
 				return err
 			}
@@ -510,11 +548,20 @@ name.`,
 			if len(args) > 2 {
 				desc = args[2]
 			}
-			if err := confirmChange(a, "create the Slurm account "+args[0]); err != nil {
+			if err := errors.Join(slurm.ValidateName("account", args[0]),
+				slurm.ValidateText("organisation", org), slurm.ValidateText("description", desc)); err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
+			}
+			c, err := slurmClient(a)
+			if err != nil {
+				return err
+			}
+			if err := confirmAccounting(a, c, fmt.Sprintf("create the Slurm account %s of the organisation %s",
+				args[0], c.Organization(org))); err != nil {
 				return err
 			}
 			if err := c.AddAccount(a.Context(), args[0], org, desc); err != nil {
-				return exitcode.Wrap(exitcode.TargetFailed, err)
+				return err
 			}
 			a.Printf("account %s created\n", args[0])
 			return nil
@@ -528,6 +575,14 @@ Add coordinators to an account.`,
 			if err != nil {
 				return err
 			}
+			if err := slurm.ValidateName("account", args[0]); err != nil {
+				return err
+			}
+			for _, user := range args[1:] {
+				if err := slurm.ValidateUserName(user); err != nil {
+					return err
+				}
+			}
 			c, err := slurmClient(a)
 			if err != nil {
 				return err
@@ -537,37 +592,43 @@ Add coordinators to an account.`,
 				return err
 			}
 			if err := c.SetCoordinators(a.Context(), args[0], args[1:]); err != nil {
-				return exitcode.Wrap(exitcode.TargetFailed, err)
+				return err
 			}
 			a.Printf("coordinators of %s set\n", args[0])
 			return nil
 		})
 
 	shares := leaf("shares [ACCOUNT] [VALUE]", "Read or set fair share", `
-List the fair-share values of the accounts, or set the value of one.`,
+List the fair-share values of the accounts, or set the value of one in the
+cluster whose login node the clients run on.`,
 		cobra.MaximumNArgs(2),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
 			if err != nil {
 				return err
 			}
+			if len(args) == 2 {
+				if err := errors.Join(slurm.ValidateName("account", args[0]), slurm.ValidateFairShare(args[1])); err != nil {
+					return exitcode.Wrap(exitcode.Usage, err)
+				}
+			}
 			c, err := slurmClient(a)
 			if err != nil {
 				return err
 			}
 			if len(args) == 2 {
-				if err := confirmChange(a, fmt.Sprintf("set the fair share of %s to %s", args[0], args[1])); err != nil {
+				if err := confirmAccounting(a, c, fmt.Sprintf("set the fair share of %s to %s", args[0], args[1])); err != nil {
 					return err
 				}
 				if err := c.SetFairShare(a.Context(), args[0], args[1]); err != nil {
-					return exitcode.Wrap(exitcode.TargetFailed, err)
+					return err
 				}
 				a.Printf("fair share of %s set to %s\n", args[0], args[1])
 				return nil
 			}
 			assoc, err := c.Shares(a.Context(), first(args))
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 			t := output.NewTable(output.Cols("ACCOUNT", "USER", "FAIRSHARE")...)
 			for _, x := range assoc {
@@ -596,7 +657,7 @@ List the users of the accounting database with their accounts.`,
 			}
 			users, err := c.Users(a.Context(), first(args))
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 			t := output.NewTable(output.Cols("USER", "ACCOUNT", "DEFAULT", "FAIRSHARE")...)
 			for _, u := range users {
@@ -606,31 +667,24 @@ List the users of the accounting database with their accounts.`,
 		})
 
 	add := leaf("add USER [ACCOUNT] [DEFAULT_ACCOUNT]", "Associate a user with an account", `
-Associate a user with an account, creating the association when the user has
-none yet.
+Associate a user with an account in the cluster whose login node the clients
+run on, creating the user when it has no association there yet. ACCOUNT
+defaults to slurm.defaultAccount. DEFAULT_ACCOUNT becomes the user's default
+account, which for a new user is ACCOUNT unless given; a default account the
+user is not associated with is associated too. The confirmation says what the
+defaults resolved to.
 
 The cluster is asked whether the user exists at all before anything is
-written, with getent rather than id, so that a local account on the login node
-is not mistaken for a directory user.`,
+written, with getent. getent reads the name service switch of the login node,
+local accounts included, so check the directory when that matters. A number
+is refused, because getent would resolve it as a user ID.`,
 		cobra.RangeArgs(1, 3),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
 			if err != nil {
 				return err
 			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
 			user := args[0]
-			exists, err := c.HasPosixUser(a.Context(), user)
-			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
-			}
-			if !exists {
-				return exitcode.Errorf(exitcode.Usage,
-					"the cluster does not know a user account %q; check the directory before adding it to Slurm", user)
-			}
 			account, defaultAccount := "", ""
 			if len(args) > 1 {
 				account = args[1]
@@ -638,33 +692,68 @@ is not mistaken for a directory user.`,
 			if len(args) > 2 {
 				defaultAccount = args[2]
 			}
-			if err := confirmChange(a, fmt.Sprintf("associate %s with the Slurm account %s", user, account)); err != nil {
+			if err := slurm.ValidateUserName(user); err != nil {
 				return err
 			}
-			if err := c.AddUser(a.Context(), user, account, defaultAccount); err != nil {
-				return exitcode.Wrap(exitcode.TargetFailed, err)
+			for _, name := range []string{account, defaultAccount} {
+				if name == "" {
+					continue
+				}
+				if err := slurm.ValidateName("account", name); err != nil {
+					return err
+				}
+			}
+			c, err := slurmClient(a)
+			if err != nil {
+				return err
+			}
+			exists, err := c.HasPosixUser(a.Context(), user)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return exitcode.Errorf(exitcode.Usage,
+					"the cluster does not know a user account %q; check the directory before adding it to Slurm", user)
+			}
+			addition, err := c.PlanUserAdd(a.Context(), user, account, defaultAccount)
+			if err != nil {
+				return err
+			}
+			if !addition.Changes() {
+				a.Printf("user %s is associated with %s already\n", user, addition.Account)
+				return nil
+			}
+			if err := confirmChange(a, addition.String()); err != nil {
+				return err
+			}
+			if err := c.AddUser(a.Context(), addition); err != nil {
+				return err
 			}
 			a.Printf("user %s associated\n", user)
 			return nil
 		})
 
 	setDefault := leaf("default USER ACCOUNT", "Set the default account of a user", `
-Change which account a user's jobs are charged to by default.`,
+Change which account a user's jobs are charged to by default, in the cluster
+whose login node the clients run on.`,
 		cobra.ExactArgs(2),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
 			if err != nil {
 				return err
 			}
+			if err := errors.Join(slurm.ValidateUserName(args[0]), slurm.ValidateName("account", args[1])); err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
+			}
 			c, err := slurmClient(a)
 			if err != nil {
 				return err
 			}
-			if err := confirmChange(a, fmt.Sprintf("set the default account of %s to %s", args[0], args[1])); err != nil {
+			if err := confirmAccounting(a, c, fmt.Sprintf("set the default account of %s to %s", args[0], args[1])); err != nil {
 				return err
 			}
 			if err := c.SetDefaultAccount(a.Context(), args[0], args[1]); err != nil {
-				return exitcode.Wrap(exitcode.TargetFailed, err)
+				return err
 			}
 			a.Printf("default account of %s set to %s\n", args[0], args[1])
 			return nil
@@ -691,7 +780,7 @@ they offer.`,
 			}
 			partitions, err := c.Partitions(a.Context(), first(args))
 			if err != nil {
-				return exitcode.Wrap(exitcode.Transport, err)
+				return err
 			}
 			t := output.NewTable(
 				output.Column{Name: "PARTITION"},
@@ -711,6 +800,16 @@ they offer.`,
 			}
 			return a.Print(output.Result{Table: t, Object: partitions})
 		})
+}
+
+// confirmAccounting asks before a change to the accounting database that
+// applies to one cluster, and names that cluster.
+func confirmAccounting(a *app.App, c *slurm.Client, what string) error {
+	cluster, err := c.Cluster(a.Context())
+	if err != nil {
+		return err
+	}
+	return confirmChange(a, what+" in the Slurm cluster "+cluster)
 }
 
 // confirmChange asks before a change to the accounting database, which has no

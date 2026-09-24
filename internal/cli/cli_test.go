@@ -15,6 +15,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 
 	"github.com/spf13/cobra"
@@ -329,10 +330,12 @@ func TestDryRunChangesNothing(t *testing.T) {
 }
 
 func TestSlurmNodeListParsesTheClientOutput(t *testing.T) {
-	rec := &transport.Recorder{Responses: []*transport.Result{{
-		Stdout: "exe0001|idle|main|128|515000|amd|(null)|||\n" +
-			"exe0002|drained|main|128|515000|amd|(null)|ticket 4711|alice|2026-09-01\n",
-	}}}
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, Stdout: slurm.Render(req,
+			slurm.Row{"N": "exe0001", "T": "idle", "R": "main", "c": "128", "E": "none", "u": "Unknown"},
+			slurm.Row{"N": "exe0002", "T": "drained", "R": "main", "c": "128", "E": "ticket 4711", "u": "alice"},
+		)}, nil
+	}}
 	h, err := run(t, harnessOptions{recorder: rec}, "slurm", "node", "list")
 	if err != nil {
 		t.Fatalf("slurm node list failed: %v", err)
@@ -347,21 +350,24 @@ func TestSlurmNodeListParsesTheClientOutput(t *testing.T) {
 }
 
 func TestSlurmDrainNeedsAReasonAndConfirmation(t *testing.T) {
-	h, err := run(t, harnessOptions{tty: true, stdin: "y\n"},
+	h, err := run(t, harnessOptions{tty: true, stdin: "y\n", recorder: newSlurmCluster().recorder()},
 		"slurm", "node", "drain", "ticket 4711: failing DIMM", "-n", "exe0007")
 	if err != nil {
 		t.Fatalf("slurm node drain failed: %v", err)
 	}
-	if len(h.recorder.Calls()) == 0 {
-		t.Fatal("nothing was sent")
+	var command string
+	for _, c := range h.recorder.Commands() {
+		if strings.Contains(c, "scontrol update") {
+			command = c
+		}
 	}
-	command := h.recorder.Commands()[0]
 	if !strings.Contains(command, "'reason=ticket 4711: failing DIMM'") {
 		t.Errorf("command = %q, want the reason as one argument", command)
 	}
 
 	// A declined confirmation must leave the cluster alone.
-	h, err = run(t, harnessOptions{tty: true, stdin: "n\n"},
+	cluster := newSlurmCluster()
+	_, err = run(t, harnessOptions{tty: true, stdin: "n\n", recorder: cluster.recorder()},
 		"slurm", "node", "drain", "reason", "-n", "exe0007")
 	if err == nil {
 		t.Fatal("a declined action should not proceed")
@@ -369,8 +375,8 @@ func TestSlurmDrainNeedsAReasonAndConfirmation(t *testing.T) {
 	if got, want := exitcode.From(err), exitcode.Interrupted; got != want {
 		t.Errorf("exit code = %d, want %d", got, want)
 	}
-	if len(h.recorder.Calls()) != 0 {
-		t.Errorf("a declined action sent %d commands", len(h.recorder.Calls()))
+	if changes := cluster.changes(); len(changes) != 0 {
+		t.Errorf("a declined action sent %v", changes)
 	}
 }
 
