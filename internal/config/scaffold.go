@@ -10,10 +10,9 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"text/template"
-
-	"github.com/goccy/go-yaml"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 )
@@ -164,16 +163,16 @@ func (o ScaffoldOptions) check() error {
 	return nil
 }
 
-// yamlScalar writes a string so that it reads back as the same string: a
-// cluster called 1 or a site called yes would otherwise come back as a number
-// or a boolean.
-func yamlScalar(s string) (string, error) {
-	out, err := yaml.Marshal(s)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSuffix(string(out), "\n"), nil
-}
+// yamlScalar writes a string so that it reads back as the same string with
+// every YAML reader. It is always double quoted: a cluster called 1 or a site
+// called yes is a number or a boolean unquoted, and which plain scalars are
+// strings differs between YAML 1.1 and 1.2 readers, so that 1e3 and 08 read
+// as numbers to yq although they did not to the parser that wrote them.
+func yamlScalar(s string) (string, error) { return QuoteYAML(s), nil }
+
+// QuoteYAML writes a string as a double quoted YAML scalar. The escapes Go
+// writes are a subset of the ones YAML reads.
+func QuoteYAML(s string) string { return strconv.Quote(s) }
 
 // schemaURL is where the JSON Schema of a kind is published, for the comment
 // that points an editor at it.
