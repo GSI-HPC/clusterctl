@@ -4,12 +4,15 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
+	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // exampleWith writes a copy of an example document, changed by edit, into a
@@ -46,6 +49,87 @@ func ipmiHosts(h *harness) []string {
 	return hosts
 }
 
+// ipmiAnswer builds a reply for the recording transport that answers every
+// IPMI run the way a working backend does, with answer for each processor
+// the run names, and succeeds for everything else.
+func ipmiAnswer(answer func(bmc string) string) func(transport.Target, transport.Request) (*transport.Result, error) {
+	return func(target transport.Target, req transport.Request) (*transport.Result, error) {
+		var out strings.Builder
+		for _, bmc := range ipmiRequestHosts(req) {
+			fmt.Fprintf(&out, "%s: %s\n", bmc, answer(bmc))
+		}
+		return &transport.Result{Target: target, Stdout: out.String()}, nil
+	}
+}
+
+// ipmiOK answers every IPMI run with success: "ok" for an action and "on" for
+// a status.
+func ipmiOK() *transport.Recorder {
+	return &transport.Recorder{Reply: func(target transport.Target, req transport.Request) (*transport.Result, error) {
+		if isSinfo(req) {
+			return sinfoAllIdle(target, req), nil
+		}
+		state := "ok"
+		switch {
+		case strings.Contains(req.Script, "--stat"):
+			state = "on"
+		case strings.Contains(req.Script, "chassis power status"):
+			state = "Chassis Power is on"
+		case strings.Contains(req.Script, "chassis power "):
+			for action, text := range map[string]string{
+				"on": "Up/On", "off": "Down/Off", "cycle": "Cycle", "reset": "Reset", "soft": "Soft",
+			} {
+				if strings.Contains(req.Script, "chassis power "+action+" ") {
+					state = "Chassis Power Control: " + text
+				}
+			}
+		}
+		return ipmiAnswer(func(string) string { return state })(target, req)
+	}}
+}
+
+// sinfoAllIdle answers sinfo with every node it was asked about idle.
+func sinfoAllIdle(target transport.Target, req transport.Request) *transport.Result {
+	var out strings.Builder
+	for i, arg := range req.Argv {
+		if arg != "-n" || i+1 == len(req.Argv) {
+			continue
+		}
+		if ns, err := nodeset.Parse(req.Argv[i+1]); err == nil {
+			for _, name := range ns.Expand() {
+				fmt.Fprintf(&out, "%s idle\n", name)
+			}
+		}
+	}
+	return &transport.Result{Target: target, Stdout: out.String()}
+}
+
+// ipmiRequestHosts returns the processors an IPMI run names.
+func ipmiRequestHosts(req transport.Request) []string {
+	fields := strings.Fields(req.Script)
+	for i, f := range fields {
+		if f == "--hostname" && i+1 < len(fields) {
+			ns, err := nodeset.Parse(strings.Trim(fields[i+1], `'"`))
+			if err != nil {
+				return nil
+			}
+			return ns.Expand()
+		}
+		if f == "for" && i+2 < len(fields) && fields[i+1] == "h" && fields[i+2] == "in" {
+			var hosts []string
+			for _, h := range fields[i+3:] {
+				if h == "do" || strings.HasSuffix(h, ";") {
+					hosts = append(hosts, strings.Trim(strings.TrimSuffix(h, ";"), `'`))
+					break
+				}
+				hosts = append(hosts, strings.Trim(h, `'`))
+			}
+			return hosts
+		}
+	}
+	return nil
+}
+
 // With a bmc template and a bmcAddress, the derived name won, so a stale DNS
 // record sent the power action to another device.
 func TestBMCPowerUsesTheInventoryAddress(t *testing.T) {
@@ -54,7 +138,7 @@ func TestBMCPowerUsesTheInventoryAddress(t *testing.T) {
 		return s + "    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n"
 	})
 
-	h, err := run(t, harnessOptions{config: []string{inventory}, recorder: slurmAllIdle(t)},
+	h, err := run(t, harnessOptions{config: []string{inventory}, recorder: ipmiOK()},
 		"bmc", "power", "cycle", "--ipmi", "-y", "-n", "exe[0003-0004]")
 	if err != nil {
 		t.Fatalf("bmc power failed: %v\n%s", err, h.errOut)
@@ -122,7 +206,7 @@ func TestBMCRefusesANodeWithoutAServiceProcessorName(t *testing.T) {
 	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
 		return s + "    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n"
 	})
-	h, err = run(t, harnessOptions{config: []string{site, inventory}, recorder: slurmAllIdle(t)},
+	h, err = run(t, harnessOptions{config: []string{site, inventory}, recorder: ipmiOK()},
 		"bmc", "power", "cycle", "--ipmi", "-y", "-n", "exe0003")
 	if err != nil {
 		t.Fatalf("bmc power with a bmcAddress failed: %v\n%s", err, h.errOut)
@@ -191,8 +275,7 @@ func TestBMCKeepsTheVendorProfileForEverySpelling(t *testing.T) {
 			t.Errorf("-n %s: the preview does not use the vendor's order:\n%s", spelling, preview)
 		}
 
-		h, err = run(t, harnessOptions{config: []string{site}, recorder: slurmAllIdle(t)},
-			"bmc", "power", "off", "--ipmi", "-y", "-n", spelling)
+		h, err = run(t, harnessOptions{config: []string{site}, recorder: ipmiOK()}, "bmc", "power", "off", "--ipmi", "-y", "-n", spelling)
 		if err != nil {
 			t.Fatalf("-n %s: bmc power failed: %v", spelling, err)
 		}
