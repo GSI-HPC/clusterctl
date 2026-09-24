@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -384,12 +386,247 @@ func cincConfigPath(a *app.App) string {
 	return "/etc/cinc/solo"
 }
 
+// The configuration file on a node holds shell assignments, the format the
+// shell toolkit sourced. clusterctl writes every value quoted, so the file
+// stays safe for anything that still sources it, and reads it back without
+// a shell, so nothing in it is ever run as root.
+const (
+	cincURLKey     = "CHEF_RECIPE_URL"
+	cincRunListKey = "CHEF_RUN_LIST"
+)
+
+// cincSolo is what the configuration file of a node names.
+type cincSolo struct {
+	URL     string
+	RunList string
+}
+
+// render writes the file, one quoted assignment per value. A run list is
+// written only when there is one, and the file replaces the old one whole.
+func (c cincSolo) render() string {
+	body := cincURLKey + "=" + shellquote.Quote(c.URL) + "\n"
+	if c.RunList != "" {
+		body += cincRunListKey + "=" + shellquote.Quote(c.RunList) + "\n"
+	}
+	return body
+}
+
+// check reports whether the client can be run with what the file names.
+func (c cincSolo) check() error {
+	if c.URL == "" {
+		return fmt.Errorf("%s is not set", cincURLKey)
+	}
+	if err := checkCincURL(c.URL); err != nil {
+		return err
+	}
+	return checkCincRunList(c.RunList)
+}
+
+// checkCincURL accepts the archive locations the client can fetch: an http
+// or https URL with a host and nothing a line or a word would end at.
+func checkCincURL(s string) error {
+	if strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return fmt.Errorf("archive URL %q contains whitespace or a control character", s)
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return fmt.Errorf("archive URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("archive URL %q is not an http or https URL", s)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("archive URL %q names no host", s)
+	}
+	return nil
+}
+
+// checkCincRunList refuses a run list that would end the line it is written
+// on, or carry anything else a terminal would act on.
+func checkCincRunList(s string) error {
+	if strings.IndexFunc(s, unicode.IsControl) >= 0 {
+		return fmt.Errorf("run list %q contains a control character", s)
+	}
+	return nil
+}
+
+// parseCincSolo reads a configuration file without a shell. Every line is a
+// comment or an assignment, and the two values clusterctl uses must be
+// literal words: quoted, escaped or plain, but never anything a shell would
+// expand or run. A file that sourcing would make do more than assign is
+// refused rather than guessed at.
+func parseCincSolo(text string) (cincSolo, error) {
+	var c cincSolo
+	for n, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, value, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		if !ok || !isShellName(name) {
+			return cincSolo{}, fmt.Errorf("line %d is not an assignment: %q", n+1, line)
+		}
+		var target *string
+		switch name {
+		case cincURLKey:
+			target = &c.URL
+		case cincRunListKey:
+			target = &c.RunList
+		default:
+			continue
+		}
+		word, err := shellLiteral(value)
+		if err != nil {
+			return cincSolo{}, fmt.Errorf("line %d, %s: %w", n+1, name, err)
+		}
+		*target = word
+	}
+	return c, nil
+}
+
+func isShellName(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '_', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return s != ""
+}
+
+// shellLiteral decodes the value of an assignment the way a shell would,
+// provided the shell would do nothing but take it literally. It is the
+// reverse of shellquote.Quote, and it also reads the unquoted values the
+// shell toolkit wrote.
+func shellLiteral(s string) (string, error) {
+	var b strings.Builder
+	i := 0
+word:
+	for ; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c < 0x20 && c != '\t', c == 0x7f:
+			return "", fmt.Errorf("contains the control character %q", c)
+		case c == ' ', c == '\t':
+			break word
+		case c == '\'':
+			end := strings.IndexByte(s[i+1:], '\'')
+			if end < 0 {
+				return "", errors.New("has an unterminated ' quote")
+			}
+			b.WriteString(s[i+1 : i+1+end])
+			i += end + 1
+		case c == '"':
+			end := strings.IndexByte(s[i+1:], '"')
+			if end < 0 {
+				return "", errors.New(`has an unterminated " quote`)
+			}
+			quoted := s[i+1 : i+1+end]
+			if j := strings.IndexAny(quoted, "$`\\"); j >= 0 {
+				return "", fmt.Errorf("has %q inside double quotes, which the shell would expand", quoted[j])
+			}
+			b.WriteString(quoted)
+			i += end + 1
+		case c == '\\':
+			if i+1 == len(s) {
+				return "", errors.New("ends in a backslash")
+			}
+			i++
+			b.WriteByte(s[i])
+		case strings.IndexByte("$`;&|<>()~", c) >= 0:
+			return "", fmt.Errorf("has an unquoted %q, which the shell would interpret", c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	if rest := strings.TrimLeft(s[i:], " \t"); rest != "" && !strings.HasPrefix(rest, "#") {
+		return "", fmt.Errorf("is followed by %q, which the shell would run as a command", rest)
+	}
+	return b.String(), nil
+}
+
+// cincReadScript prints the configuration file of a node, or nothing when
+// there is none, so that a node without one is told apart from a node that
+// could not be read.
+func cincReadScript(file string) string {
+	q := shellquote.Quote(file)
+	return fmt.Sprintf("if [ -e %s ]; then exec cat -- %s; fi\n", q, q)
+}
+
+// cincWriteScript replaces file with the size bytes that arrive on standard
+// input. They go to a temporary file beside it first and are moved into
+// place only once all of them are there, so a connection that drops halfway
+// leaves the old file rather than an empty or truncated one. Missing
+// directories are made for a world readable file, whatever the umask of the
+// remote user.
+func cincWriteScript(file string, size int) string {
+	dir := filepath.Dir(file)
+	return fmt.Sprintf(`set -eu
+umask 022
+mkdir -p -- %[1]s
+tmp=$(mktemp %[2]s)
+trap 'rm -f -- "$tmp"' EXIT
+cat > "$tmp"
+size=$(($(wc -c < "$tmp")))
+if [ "$size" -ne %[4]d ]; then
+	echo "received $size of %[4]d bytes; %[3]s is unchanged" >&2
+	exit 1
+fi
+chmod 0644 "$tmp"
+mv -f -- "$tmp" %[3]s
+trap - EXIT
+`,
+		shellquote.Quote(dir),
+		shellquote.Quote(filepath.Join(dir, "."+filepath.Base(file)+".XXXXXX")),
+		shellquote.Quote(file), size)
+}
+
+// cincDetail says why a node failed, with anything the node sent escaped.
+func cincDetail(res *transport.Result) string {
+	if line := strings.TrimSpace(lastNonEmpty(res.Stderr)); line != "" {
+		return escapeControl(line)
+	}
+	if res.Err != nil {
+		return escapeControl(res.Err.Error())
+	}
+	return fmt.Sprintf("exit %d", res.ExitCode)
+}
+
+// cincRefused stands in for a node on which nothing was run because what it
+// answered cannot be used.
+func cincRefused(target transport.Target, err error) *transport.Result {
+	return &transport.Result{Target: target, ExitCode: -1, Err: err}
+}
+
+// cincFailureError is failureError, except that a node that could not be
+// reached makes it exit with the transport code, as the contract promises.
+func cincFailureError(results []*transport.Result) error {
+	err := failureError(results)
+	if err == nil {
+		return nil
+	}
+	for _, res := range results {
+		if res.Failed() && exitcode.From(res.Err) == exitcode.Transport {
+			return exitcode.Wrap(exitcode.Transport, err)
+		}
+	}
+	return err
+}
+
 func newCincConfigCommand(r *root) *cobra.Command {
 	var runList string
 
 	cmd := leaf("config URL [NODESET]", "Point a node set at a configuration archive", `
 Write the archive URL, and optionally the run list, into the configuration
-file the client reads on each node.
+file the client reads on each node. The file is replaced whole, so leaving
+out --run-list removes a run list written before, and cinc run then uses the
+run list of the archive.
+
+The URL must be an http or https URL. Each value is written quoted, and the
+new file is moved into place only once it has arrived complete.
 
   clusterctl cinc config http://installer/cinc/latest.tgz -n exe[1-4]`,
 		cobra.MinimumNArgs(1),
@@ -398,14 +635,18 @@ file the client reads on each node.
 			if err != nil {
 				return err
 			}
+			solo := cincSolo{URL: args[0], RunList: runList}
+			if err := solo.check(); err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
+			}
 			ns, err := selection(a, args[1:])
 			if err != nil {
 				return err
 			}
 			path := cincConfigPath(a)
-			detail := args[0]
-			if runList != "" {
-				detail += " with run list " + runList
+			detail := solo.URL
+			if solo.RunList != "" {
+				detail += " with run list " + solo.RunList
 			}
 			if err := a.Gate.Confirm(safety.Action{
 				Verb: "set the configuration source of", Targets: ns, Detail: detail,
@@ -413,12 +654,8 @@ file the client reads on each node.
 				return dryRunOrError(err)
 			}
 
-			body := fmt.Sprintf("CHEF_RECIPE_URL=%s\n", args[0])
-			if runList != "" {
-				body += fmt.Sprintf("CHEF_RUN_LIST=%s\n", runList)
-			}
-			script := fmt.Sprintf("set -eu\ninstall -D -m 0644 /dev/null %s\ncat > %s\n",
-				shellquote.Quote(path), shellquote.Quote(path))
+			body := solo.render()
+			script := cincWriteScript(path, len(body))
 
 			targets, err := a.NodeTargets(ns)
 			if err != nil {
@@ -435,7 +672,7 @@ file the client reads on each node.
 			if err := a.Print(output.Result{Table: resultsTable(results), Object: results}); err != nil {
 				return err
 			}
-			return failureError(results)
+			return cincFailureError(results)
 		})
 	cmd.Flags().StringVarP(&runList, "run-list", "R", "", "run list to write alongside the archive URL")
 	return cmd
@@ -495,7 +732,12 @@ func newCincRunCommand(r *root) *cobra.Command {
 
 	cmd := leaf("run [NODESET]", "Run the configuration management client on a node set", `
 Run the configuration management client on each node, using the archive and
-run list it is configured with.
+run list it is configured with. Without a run list, in the file or given
+here, the client uses the run list of the archive.
+
+The configuration file is read, never sourced: a node whose file holds
+anything but plain assignments, or names no http or https archive, is refused
+and the client is not started there.
 
 This changes the nodes, so it asks first.`,
 		cobra.ArbitraryArgs,
@@ -503,6 +745,9 @@ This changes the nodes, so it asks first.`,
 			a, err := r.App()
 			if err != nil {
 				return err
+			}
+			if err := checkCincRunList(runList); err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			ns, err := selection(a, args)
 			if err != nil {
@@ -512,39 +757,80 @@ This changes the nodes, so it asks first.`,
 			if binary == "" {
 				binary = "cinc-solo"
 			}
+			path := cincConfigPath(a)
+			// The archive and run list come from each node's file, which is
+			// read only once the run is confirmed, so a dry run cannot show
+			// them and says so.
+			detail := binary
+			if a.DryRun() {
+				detail += fmt.Sprintf(", with the archive and run list from each node's %s, which a dry run does not read", path)
+			}
 			if err := a.Gate.Confirm(safety.Action{
-				Verb: "run the configuration management on", Targets: ns, Detail: binary,
+				Verb: "run the configuration management on", Targets: ns, Detail: detail,
 			}); err != nil {
 				return dryRunOrError(err)
 			}
 
-			override := ""
-			if runList != "" {
-				override = " --override-runlist " + shellquote.Quote(runList)
-			}
-			script := fmt.Sprintf(
-				"set -eu\n. %s\nexec %s --minimal-ohai --recipe-url \"$CHEF_RECIPE_URL\"%s\n",
-				shellquote.Quote(cincConfigPath(a)), shellquote.Quote(binary), override)
-			if runList == "" {
-				script = fmt.Sprintf(
-					"set -eu\n. %s\nexec %s --minimal-ohai --recipe-url \"$CHEF_RECIPE_URL\" --override-runlist \"$CHEF_RUN_LIST\"\n",
-					shellquote.Quote(cincConfigPath(a)), shellquote.Quote(binary))
-			}
-
-			results, err := runOnNodes(a, ns, func(string) transport.Request {
+			reads, err := runOnNodes(a, ns, func(string) transport.Request {
 				return transport.Request{
-					Script:  script,
-					Timeout: a.Timeout().Or(30 * time.Minute),
+					Script:  cincReadScript(path),
+					Timeout: a.Timeout().Get(),
 					TTY:     transport.TTYNone,
 				}
 			})
 			if err != nil {
 				return err
 			}
+
+			// Each node is handed what its own file names as arguments, so
+			// no value in the file reaches a shell.
+			results := make([]*transport.Result, len(reads))
+			argv := map[string][]string{}
+			index := map[string]int{}
+			var ready []transport.Target
+			for i, res := range reads {
+				if res.Failed() {
+					results[i] = res
+					a.Printf("%s: not run: reading %s: %s\n", res.Target.Name, path, cincDetail(res))
+					continue
+				}
+				solo, err := parseCincSolo(res.Stdout)
+				if err == nil && res.Stdout == "" {
+					err = errors.New("the file does not exist; point the node at an archive with cinc config")
+				}
+				if err == nil {
+					err = solo.check()
+				}
+				if err != nil {
+					results[i] = cincRefused(res.Target, fmt.Errorf("%s: %w", path, err))
+					a.Printf("%s: not run: %s: %v\n", res.Target.Name, path, err)
+					continue
+				}
+				if runList != "" {
+					solo.RunList = runList
+				}
+				command := []string{binary, "--minimal-ohai", "--recipe-url", solo.URL}
+				if solo.RunList != "" {
+					command = append(command, "--override-runlist", solo.RunList)
+				}
+				argv[res.Target.Name] = command
+				index[res.Target.Name] = i
+				ready = append(ready, res.Target)
+			}
+			for _, res := range a.Executor().RunEach(a.Context(), ready, func(t transport.Target) transport.Request {
+				return transport.Request{
+					Argv:    argv[t.Name],
+					Timeout: a.Timeout().Or(30 * time.Minute),
+					TTY:     transport.TTYNone,
+				}
+			}) {
+				results[index[res.Target.Name]] = res
+			}
+
 			if err := a.Print(output.Result{Table: resultsTable(results), Object: results}); err != nil {
 				return err
 			}
-			return failureError(results)
+			return cincFailureError(results)
 		})
 	cmd.Flags().StringVarP(&runList, "run-list", "R", "", "run list to use for this run only")
 	return cmd
