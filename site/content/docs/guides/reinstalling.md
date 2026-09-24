@@ -3,8 +3,8 @@ title: Reinstalling nodes
 weight: 4
 ---
 
-A reinstall is four steps: forget the node's host keys, point the PXE service
-at an installation, tell the machine to boot from the network once, and reset
+A reinstall is four steps: point the PXE service at an installation, tell the
+machine to boot from the network once, forget the node's host keys, and reset
 it. `clusterctl provision reinstall` does all four, and each step is also a
 command of its own so anything that goes wrong can be picked up by hand.
 
@@ -41,25 +41,68 @@ its address in the inventory to settle it.
 $ clusterctl provision reinstall -n exe0007 --dry-run
 Would reinstall 1 host: exe0007
   everything on these machines is lost
+  /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2, for the next request: exe0007 (10.0.2.7)
+  then each machine is set to boot from the network once and reset through Redfish
+  not checked in a dry run: that the boot paths exist on the PXE host and that no persistent link is in the way
 
 $ clusterctl provision reinstall -n exe0007
 About to reinstall 1 host: exe0007
   everything on these machines is lost
+  /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2, for the next request: exe0007 (10.0.2.7)
+  then each machine is set to boot from the network once and reset through Redfish
 Continue? [y/N] y
-STEP                          RESULT
-forget the host keys          ok
-configure the network boot    ok
-boot from the network once    ok
-reset the machines            ok
+NODE     BOOT LINK  BOOT ONCE  RESET  STATE
+exe0007  set        set        sent   reinstalling
 
-exe0007 is reinstalling; follow it with "clusterctl boot log"
+exe0007 is reinstalling; follow it with "clusterctl provision status" and "clusterctl boot log"
 ```
 
+The steps run in this order: write the boot link on the PXE host, set the
+machine to boot from the network once, forget its host keys, and reset it.
+The host keys go last, just before the reset, because they are the one change
+that cannot be undone.
+
 {{< callout type="info" >}}
-Everything is resolved before the first machine is touched. A set with one
-node that has no boot path stops before anything changes, rather than leaving
-half the set configured.
+Everything is resolved before the first machine is touched: each node's
+address, boot path, service processor and BMC credential. The boot paths are
+checked on the PXE host, and Slurm is asked whether the nodes run jobs. A set
+with one node that fails any of these stops before anything changes, rather
+than leaving half the set configured.
 {{< /callout >}}
+
+Slurm is asked the way `bmc power reset` asks it: a node that runs a job, or
+that Slurm cannot say about, is refused unless `--lose-jobs` is given, and a
+dry run asks too. `--force` gets past a protected host, not this check. With
+`--no-reset` nothing is reset, so Slurm is not asked.
+
+The boot override is set over Redfish. A node whose `bmc.order` puts IPMI
+first is refused; reinstall it step by step, as below.
+
+### When a step fails
+
+If a step fails, every node that was not reset is disarmed: its boot override
+is cleared and its boot link removed, so it does not reinstall at some later
+boot nobody confirmed. The table shows what became of each step on each node,
+and the error says which nodes are reinstalling, which were disarmed, and
+which could not be, with the commands that finish the job:
+
+```console
+$ clusterctl provision reinstall -n 'exe[0001-0003]'
+...
+NODE     BOOT LINK  BOOT ONCE    RESET  STATE
+exe0001  removed    set          -      armed
+exe0002  removed    unreachable  -      disarmed
+exe0003  removed    cleared      -      disarmed
+
+clusterctl: setting the machines to boot from the network once failed:
+exe0002: exe0002.mgmt.hpc.example.org: dial tcp: connection refused; the boot
+links and boot overrides of exe[0002-0003] were removed again; exe0001 is left
+armed and reinstalls at its next network boot;
+disarm it with "clusterctl bmc boot unset -n exe0001"
+```
+
+A service processor that cannot be reached exits `3`, a missing credential
+`2`, and a processor that refused `1`.
 
 The boot path comes from the cluster rules unless `--boot-path` names one:
 
@@ -77,24 +120,33 @@ A node matched by two rules is an error, not a silent first match.
 
 ```console
 $ clusterctl provision status -n exe0007
-NODE     POWER  SSH  UPTIME
-exe0007  On     no
+NODE     BOOT PATH                                   POWER  SSH  UPTIME  ERROR
+exe0007  /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2  On     no
 
 $ clusterctl boot log
 $ clusterctl dhcp log
 ```
 
+The boot path is the node's link on the PXE service, which the installation
+consumes, so `none` once the machine has fetched it. A node that does not
+answer over ssh yet is not an error. A boot path or power state that cannot
+be read is, and fails the command with exit code `3` when the host could not
+be reached; the JSON output lists every node, with an `error` field for the
+ones that failed.
+
 ## Doing it by hand
 
 ```console
-$ clusterctl hostkey remove -n exe0007
 $ clusterctl boot set -n exe0007
 $ clusterctl bmc boot set Pxe -n exe0007
+$ clusterctl hostkey remove -n exe0007
 $ clusterctl bmc power reset -n exe0007
 ```
 
 Useful flags: `--keep-host-keys` leaves the host key file alone,
 `--no-reset` configures everything and lets you reset the machine yourself.
+A set left armed that way reinstalls at its next network boot; `clusterctl bmc
+boot unset` and `clusterctl boot unset` disarm it.
 
 ## Afterwards
 
