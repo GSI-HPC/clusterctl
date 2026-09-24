@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,10 +13,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
+	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -32,6 +35,7 @@ const (
 	statusOK   = "ok"
 	statusWarn = "warning"
 	statusFail = "failed"
+	statusSkip = "skipped"
 )
 
 func newDoctorCommand(r *root) *cobra.Command {
@@ -43,7 +47,8 @@ a missing ssh client, a host key file that is not there, an unreadable age
 identity.
 
 With --remote the infrastructure hosts are contacted as well and asked whether
-the tools the commands rely on are installed.
+the tools the commands rely on are installed. Under --dry-run nothing is
+contacted, and each host is reported as skipped rather than as reachable.
 
   clusterctl doctor
   clusterctl doctor --remote`,
@@ -55,7 +60,14 @@ the tools the commands rely on are installed.
 			a, err := r.App()
 			if err != nil {
 				checks = append(checks, check{"configuration", statusFail, err.Error()})
-				return printChecks(nil, streams, checks)
+				// Without a configuration there is no App to print through,
+				// but -o was still asked for: a caller parsing JSON must not
+				// be handed a table.
+				format, ferr := output.ParseFormat(r.format)
+				if ferr != nil {
+					format, _ = output.ParseFormat(output.FormatTable)
+				}
+				return printChecks(nil, format, streams, checks)
 			}
 			checks = append(checks,
 				check{"configuration", statusOK, fmt.Sprintf("context %s, cluster %s, site %s",
@@ -65,7 +77,7 @@ the tools the commands rely on are installed.
 			if remote {
 				checks = append(checks, remoteChecks(a)...)
 			}
-			return printChecks(a, streams, checks)
+			return printChecks(a, a.Format, streams, checks)
 		})
 
 	cmd.Flags().BoolVar(&remote, "remote", false, "also contact the infrastructure hosts")
@@ -92,7 +104,7 @@ func localChecks(a *app.App) []check {
 	if path, err := a.SSH.ConfigPath(); err != nil {
 		checks = append(checks, check{"generated ssh configuration", statusFail, err.Error()})
 	} else {
-		checks = append(checks, check{"generated ssh configuration", statusOK, path})
+		checks = append(checks, sshConfigCheck(a, path))
 	}
 
 	known := a.Path(a.Spec.SSH.KnownHostsFile)
@@ -137,18 +149,18 @@ func localChecks(a *app.App) []check {
 	// An age identity that cannot be read only shows up when a secret is
 	// needed, which is the worst moment to find out.
 	if paths := a.IdentityPaths(); len(paths) > 0 {
-		missing := 0
+		var unreadable []string
 		for _, p := range paths {
-			if _, err := os.Stat(p); err != nil {
-				missing++
+			if err := readableFile(p); err != nil {
+				unreadable = append(unreadable, err.Error())
 			}
 		}
-		switch missing {
+		switch len(unreadable) {
 		case 0:
 			checks = append(checks, check{"age identities", statusOK, fmt.Sprintf("%d readable", len(paths))})
 		default:
 			checks = append(checks, check{"age identities", statusFail,
-				fmt.Sprintf("%d of %d cannot be read", missing, len(paths))})
+				fmt.Sprintf("%d of %d cannot be read: %s", len(unreadable), len(paths), strings.Join(unreadable, "; "))})
 		}
 	}
 
@@ -180,11 +192,105 @@ func remoteTools(a *app.App) map[string][]string {
 		tools[role] = append(tools[role], names...)
 	}
 	add(a.Spec.Slurm.Role, "sinfo", "squeue", "sacct", "sacctmgr", "scontrol", "getent")
-	add(a.Spec.BMC.IPMI.Via, baseName(a.Spec.BMC.IPMI.IpmipowerPath), "fping")
+	add(a.Spec.BMC.IPMI.Via, ipmiBinary(a.Spec.BMC.IPMI), "fping")
 	add(a.Spec.Services.DHCP.Role, "dhcpd")
 	add(a.Spec.Services.PXESrv.Role, "git")
-	add(a.Spec.Services.Fabric.Role, "ibportstate", "ibqueryerrors")
+	add(a.Spec.Services.Fabric.Role, "ibportstate", "ibqueryerrors", "ibaddr", "iblinkinfo", "perfquery")
 	return tools
+}
+
+// ipmiBinary is the program the configured IPMI back end runs, at the path
+// it runs it from. The defaults are the ones internal/ipmi uses.
+func ipmiBinary(spec v1alpha1.IPMISpec) string {
+	if spec.Backend == ipmi.BackendIpmitool {
+		if spec.IpmitoolPath != "" {
+			return spec.IpmitoolPath
+		}
+		return "/usr/bin/ipmitool"
+	}
+	if spec.IpmipowerPath != "" {
+		return spec.IpmipowerPath
+	}
+	return "/usr/sbin/ipmipower"
+}
+
+// toolCheck is the line of the remote script that prints a tool when it is
+// missing. A tool given as a path has to be that executable; a bare name is
+// looked up in PATH. The name comes from the configuration, so it is quoted.
+func toolCheck(tool string) string {
+	q := shellQuote(tool)
+	if strings.Contains(tool, "/") {
+		return fmt.Sprintf("test -x %s || echo %s\n", q, q)
+	}
+	return fmt.Sprintf("command -v %s >/dev/null 2>&1 || echo %s\n", q, q)
+}
+
+// readableFile opens a file the way reading it would, so that a directory,
+// a dangling link or a file without read permission is caught; a stat alone
+// passes all three.
+func readableFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s is a directory", path)
+	}
+	return nil
+}
+
+// sshConfigCheck has the ssh client read the generated configuration for
+// every host role, the way a connection would, and reports everything it
+// says. One misspelt option breaks every connection, and ssh names the
+// option on a line before the last one, which is all a failed connection
+// reports.
+func sshConfigCheck(a *app.App, path string) check {
+	const name = "generated ssh configuration"
+	binary, err := exec.LookPath(a.SSH.Binary())
+	if err != nil {
+		// The ssh client check says so already.
+		return check{name, statusWarn, path + " was not read: no ssh client"}
+	}
+	hosts := []string{}
+	for _, role := range a.RoleNames() {
+		if target, err := a.Role(role); err == nil {
+			hosts = append(hosts, target.Host)
+		}
+	}
+	if len(hosts) == 0 {
+		hosts = append(hosts, "localhost")
+	}
+	for _, host := range hosts {
+		ctx, cancel := context.WithTimeout(a.Context(), 10*time.Second)
+		var stderr strings.Builder
+		cmd := exec.CommandContext(ctx, binary, "-G", "-F", path, "--", host)
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		cancel()
+		if err != nil {
+			detail := strings.Join(nonEmptyLines(stderr.String()), "; ")
+			if detail == "" {
+				detail = err.Error()
+			}
+			return check{name, statusFail, fmt.Sprintf("ssh cannot read %s for %s: %s", path, host, detail)}
+		}
+	}
+	return check{name, statusOK, path}
+}
+
+func nonEmptyLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func remoteChecks(a *app.App) []check {
@@ -195,6 +301,13 @@ func remoteChecks(a *app.App) []check {
 		target, err := a.Role(role)
 		if err != nil {
 			checks = append(checks, check{"role " + role, statusFail, err.Error()})
+			continue
+		}
+		// A dry run contacts nothing, and the recorder that stands in for
+		// the hosts answers every request with success. Reporting that as
+		// reachable would be a check that was never made.
+		if a.DryRunRecorder != nil {
+			checks = append(checks, check{"role " + role, statusSkip, "not contacted under --dry-run"})
 			continue
 		}
 		result, err := a.Runner.Run(a.Context(), target, transport.Request{
@@ -224,7 +337,7 @@ func remoteChecks(a *app.App) []check {
 			if tool == "" {
 				continue
 			}
-			fmt.Fprintf(&script, "command -v %s >/dev/null 2>&1 || echo %s\n", tool, tool)
+			script.WriteString(toolCheck(tool))
 		}
 		missing, err := a.Runner.Run(a.Context(), target, transport.Request{
 			Script:  script.String(),
@@ -245,9 +358,9 @@ func remoteChecks(a *app.App) []check {
 	return checks
 }
 
-func printChecks(a *app.App, streams app.Streams, checks []check) error {
+func printChecks(a *app.App, format output.Format, streams app.Streams, checks []check) error {
 	t := output.NewTable(output.Cols("CHECK", "STATUS", "DETAIL")...)
-	failed, warned := 0, 0
+	failed, warned, skipped := 0, 0, 0
 	for _, c := range checks {
 		t.Add(c.Name, c.Status, c.Detail)
 		switch c.Status {
@@ -255,19 +368,22 @@ func printChecks(a *app.App, streams app.Streams, checks []check) error {
 			failed++
 		case statusWarn:
 			warned++
+		case statusSkip:
+			skipped++
 		}
 	}
 	t.Caption = fmt.Sprintf("%d checks, %d failed, %d warnings", len(checks), failed, warned)
+	if skipped > 0 {
+		t.Caption += fmt.Sprintf(", %d skipped", skipped)
+	}
 
+	result := output.Result{Table: t, Object: checks}
 	if a != nil {
-		if err := a.Print(output.Result{Table: t, Object: checks}); err != nil {
+		if err := a.Print(result); err != nil {
 			return err
 		}
-	} else {
-		format, _ := output.ParseFormat("table")
-		if err := format.Write(streams.Out, output.Result{Table: t}); err != nil {
-			return err
-		}
+	} else if err := format.Write(streams.Out, result); err != nil {
+		return err
 	}
 	if failed > 0 {
 		return exitcode.Errorf(exitcode.TargetFailed, "%d checks failed", failed)
