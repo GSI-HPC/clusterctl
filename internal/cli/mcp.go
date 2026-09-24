@@ -95,12 +95,14 @@ Register it with Claude Code:
 
 // CommandTree returns a function that builds a fresh command tree writing to
 // the given streams, for the MCP server's read-only commands. Each call gets a
-// tree of its own, so calls running at the same time share no flag state. A
+// tree of its own, so calls running at the same time share no flag state. The
+// tree ignores CLUSTERCTL_NODES and refuses a node outside the site. A
 // non-nil runner replaces the ssh transport, as it does in the tests.
 func CommandTree(runner transport.Runner) func(context.Context, app.Streams) *cobra.Command {
 	return func(ctx context.Context, streams app.Streams) *cobra.Command {
 		cmd, r := newRoot(ctx, streams)
 		r.runner = runner
+		r.agent = true
 		cmd.SetIn(streams.In)
 		cmd.SetOut(streams.Out)
 		cmd.SetErr(streams.Err)

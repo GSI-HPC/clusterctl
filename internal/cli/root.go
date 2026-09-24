@@ -44,6 +44,9 @@ type root struct {
 
 	// runner replaces the transport; only the tests set it.
 	runner transport.Runner
+	// agent says the tree runs the commands of an MCP client: there is no
+	// default node set, and only the site's hosts may be named.
+	agent bool
 
 	cached *app.App
 }
@@ -80,6 +83,7 @@ func (r *root) App() (*app.App, error) {
 		Force:         r.force,
 		Fanout:        r.fanout,
 		Runner:        r.runner,
+		SiteHostsOnly: r.agent,
 	})
 	if err != nil {
 		return nil, err
@@ -98,6 +102,11 @@ func (r *root) App() (*app.App, error) {
 func (r *root) nodesFromFlagOrEnv() (nodes string, fromFlag bool, err error) {
 	switch len(r.nodes) {
 	case 0:
+		// The variable is a default for the administrator's shell. An
+		// agent names its nodes or selects none.
+		if r.agent {
+			return "", false, nil
+		}
 		return os.Getenv(config.EnvNodes), false, nil
 	case 1:
 		if strings.TrimSpace(r.nodes[0]) == "" {
