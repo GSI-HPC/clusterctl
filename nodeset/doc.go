@@ -27,7 +27,8 @@
 // it was written in brackets. "exe0001" and "exe[0001]" parse identically, and
 // "10.0.1.7" has four dimensions. A dimension holding a single value is
 // rendered without brackets, so folding is stable: parsing the output of
-// String and folding it again yields the same string.
+// String and folding it again yields the same string. A name may not begin
+// with "-".
 //
 // Zero padding is not part of a node's identity: "exe1" and "exe01" are the
 // same host, so Parse("exe1,exe01") holds one host and Contains("exe01") is
@@ -37,4 +38,7 @@
 // holding exe0001 answers "exe0001". In a range the padding of the first bound
 // applies to the whole range, and a last bound padded to another width, such
 // as exe[1-010], is an error.
+//
+// These rules, and the others where this package differs from ClusterShell,
+// are listed in doc/nodeset.md in the source repository.
 package nodeset

@@ -18,13 +18,21 @@ in the test is quoted, run through `sh -c 'printf %s\n ...'`, and compared with
 what went in.
 
 **A fuzz target** checks the two properties a node set expression must satisfy:
-parsing never panics, and folding is idempotent. It runs in CI for a bounded
+parsing never panics, and folding is idempotent. It compares the hosts before
+and after folding name by name, so a fold that renamed `exe3` to `exe03` would
+be caught, which a padding-blind membership check would not. It runs in CI for a bounded
 time and locally with `go test -fuzz`. It is how the adjacent-numeric-parts
 ambiguity was found. A fuzzing worker gives up on any input that runs for ten
 seconds, so the target lowers the expansion limits to 2¹² and skips inputs
 longer than a kilobyte: every input stays cheap, and the time goes into
 variety. Size is a separate test, which folds sets of a quarter of a million
 hosts and would take more than a minute if folding were quadratic.
+
+**A differential corpus** holds node set expressions with the answer
+ClusterShell gave for each, in `nodeset/testdata/clustershell.txt`. A test
+checks that clusterctl names the same hosts, except on the lines marked as one
+of the divergences `doc/nodeset.md` lists, where it checks that the answers
+still differ. `clustershell.py` next to it records the answers again.
 
 **A fake BMC** serves the Redfish surface clusterctl uses, over TLS, from
 `httptest`. It is how the reset-type check, the once-only action and the boot
