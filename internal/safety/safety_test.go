@@ -19,7 +19,8 @@ func gate(t *testing.T, answer string) (*safety.Gate, *bytes.Buffer) {
 	g, err := safety.NewGate(v1alpha1.SafetySpec{
 		ProtectedHosts: []string{"wlm01", "dbm01"},
 		ConfirmAbove:   4,
-	})
+		PowerOnBatch:   8,
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewGate failed: %v", err)
 	}
@@ -155,11 +156,100 @@ func TestEmptyTargetsAreRefused(t *testing.T) {
 	}
 }
 
-func TestNewGateRejectsBadProtectedHosts(t *testing.T) {
+func TestBadProtectedHostsRefuseEveryAction(t *testing.T) {
 	t.Parallel()
 
-	if _, err := safety.NewGate(v1alpha1.SafetySpec{ProtectedHosts: []string{"exe["}}); err == nil {
-		t.Error("a malformed protected host expression should be reported")
+	g, err := safety.NewGate(v1alpha1.SafetySpec{ProtectedHosts: []string{"exe["}, PowerOnBatch: 8}, nil)
+	if err != nil {
+		t.Fatalf("NewGate failed: %v", err)
+	}
+	if _, err := g.Protected(); err == nil || !strings.Contains(err.Error(), "safety.protectedHosts[0]") {
+		t.Errorf("Protected() = %v, want the malformed entry reported", err)
+	}
+	g.AssumeYes = true
+	err = g.Confirm(action("power off", "exe1"))
+	if err == nil {
+		t.Fatal("an action went ahead although the protected hosts could not be worked out")
+	}
+	if got, want := exitcode.From(err), exitcode.Usage; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+
+	// --force gets past a protected host, so it gets past not knowing
+	// which hosts those are, but it says so.
+	out := &bytes.Buffer{}
+	g.Out = out
+	g.Force = true
+	if err := g.Confirm(action("power off", "exe1")); err != nil {
+		t.Errorf("--force should allow it, got %v", err)
+	}
+	if !strings.Contains(out.String(), "could not be worked out") {
+		t.Errorf("--force went ahead without saying so:\n%s", out)
+	}
+}
+
+// A protected host entry is resolved when it is first needed, so that an
+// entry naming a group asks its source only when something is about to
+// change.
+func TestProtectedHostsAreResolvedOnceWhenNeeded(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	g, err := safety.NewGate(v1alpha1.SafetySpec{ProtectedHosts: []string{"@infra"}, PowerOnBatch: 8},
+		func(expr string) (*nodeset.NodeSet, error) {
+			calls++
+			return nodeset.Parse("wlm01")
+		})
+	if err != nil {
+		t.Fatalf("NewGate failed: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("NewGate resolved the protected hosts %d times, want not yet", calls)
+	}
+	g.AssumeYes = true
+	for range 2 {
+		if err := g.Confirm(action("power off", "wlm01")); err == nil {
+			t.Error("a host the resolver named was not protected")
+		}
+	}
+	if calls != 1 {
+		t.Errorf("the resolver ran %d times, want once", calls)
+	}
+}
+
+func TestProtectedHostUnderAnotherDomainIsProtected(t *testing.T) {
+	t.Parallel()
+
+	g, _ := gate(t, "y\n")
+	for _, name := range []string{"wlm01.elsewhere.example.org", "WLM01.example.org", "dbm1.example.org"} {
+		err := g.Check(action("power off", name))
+		if err == nil || !strings.Contains(err.Error(), "protected host") {
+			t.Errorf("Check(%s) = %v, want it refused as protected", name, err)
+		}
+	}
+	if err := g.Check(action("power off", "wlm011.example.org")); err != nil {
+		t.Errorf("Check(wlm011.example.org) = %v, want it allowed", err)
+	}
+}
+
+func TestUnknownHostsNeedForce(t *testing.T) {
+	t.Parallel()
+
+	g, _ := gate(t, "y\n")
+	g.Known = nodeset.MustParse("exe[01-10],wlm01,dbm01")
+	if err := g.Check(action("power off", "exe[1-2]")); err != nil {
+		t.Errorf("known hosts were refused: %v", err)
+	}
+	err := g.Check(action("power off", "exe[1-2],ghost1"))
+	if err == nil || !strings.Contains(err.Error(), "ghost1") || !strings.Contains(err.Error(), "--force") {
+		t.Errorf("Check = %v, want ghost1 refused with the way out", err)
+	}
+	if err := g.Check(safety.Action{Verb: "change", Targets: nodeset.MustParse("accounting"), NotNodes: true}); err != nil {
+		t.Errorf("an action on something that is not a node was refused: %v", err)
+	}
+	g.Force = true
+	if err := g.Check(action("power off", "ghost1")); err != nil {
+		t.Errorf("--force should allow it, got %v", err)
 	}
 }
 

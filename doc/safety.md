@@ -29,10 +29,29 @@ Everything that changes or destroys something goes through
    clusterctl: power off would touch the protected host wlm01; pass --force to do it anyway
    ```
 
-3. **The action is previewed.** What will happen, to how many hosts, and which
+   The comparison is by machine, not by spelling. `App.Select` maps every
+   name to the one the inventory uses before the gate sees it: case and a
+   final dot are dropped, other padding is resolved, and the host name and
+   the service processor name the naming rules give a node, and the
+   addresses the inventory records for it, all become the node's name. So
+   `WLM01`, `wlm01.`, `wlm01.hpc.example.org`, `wlm01.mgmt.hpc.example.org`
+   and `10.0.1.1` are all wlm01, and one machine named several ways is one
+   target, reset once. The protected host entries are resolved the same way,
+   so an entry may name a machine by any of these too. A name with a domain
+   the rules do not give its short name is left as written, and counts as
+   protected when its short name is.
+
+3. **Names the inventory does not know are refused.** A name no machine of the
+   inventory answers to cannot be told apart from another spelling of a
+   protected host, so a change to it needs `--force` as well. A site without
+   an inventory has nothing to compare with and is not checked. The Slurm
+   accounting commands and `boot sync`, which name no node, are not checked
+   either.
+
+4. **The action is previewed.** What will happen, to how many hosts, and which
    ones — before anything is sent.
 
-4. **It is confirmed.** Below `safety.confirmAbove` hosts, a yes is enough.
+5. **It is confirmed.** Below `safety.confirmAbove` hosts, a yes is enough.
    Above it, the host count has to be read off the preview and typed back,
    because a `y` is too easy to type by reflex:
 
@@ -41,7 +60,7 @@ Everything that changes or destroys something goes through
    This is more than 8 hosts. Type the number of hosts to continue:
    ```
 
-5. **Without a terminal, it does not run.** A destructive command in a script
+6. **Without a terminal, it does not run.** A destructive command in a script
    that cannot be asked is refused, not carried out. `-y` confirms in advance
    and is the supported way to automate.
 
@@ -56,11 +75,27 @@ changes are recorded and printed instead of sent. A lookup that a dry run
 skips is named in the preview, so a preview never reads a check it did not
 make as passed.
 
-Steps 2 to 4 are also available separately. `Gate.Preview` runs the checks and
+Steps 2 to 5 are also available separately. `Gate.Preview` runs the checks and
 describes the question without asking it, and `Preview.Accept` judges an
 answer by the same rule as the prompt. The MCP server uses these to put the
 question to the administrator through the client instead of a terminal; see
 [mcp.md](mcp.md).
+
+## Where the protected hosts come from
+
+Each entry of `safety.protectedHosts` is resolved into machines the way a
+selection is, group references included, and every machine it names has to be
+one the inventory knows. An entry written as a host name or in capitals used to
+protect only that spelling, and so, silently, nothing; now it protects the
+machine, and an entry naming no machine the inventory knows is refused.
+
+Entries without a group are resolved when the configuration is loaded, so a
+wrong one stops every command, `config validate` included. Entries with a group
+are resolved the first time a command is about to change something, so that a
+group source that cannot be asked does not stop the commands that only look;
+`config validate` resolves them too. An entry that cannot be resolved refuses
+every change rather than protecting nothing. `--force`, which gets past the
+protected hosts anyway, gets past that as well, and says so.
 
 ## What a command does
 

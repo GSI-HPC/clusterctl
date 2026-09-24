@@ -34,7 +34,7 @@ $ clusterctl [--context C] [-n NODESET] [-o FORMAT] [--dry-run] [-y] NOUN VERB
 | `--context` | Which cluster to act on |
 | `--dry-run` | Say what would happen and change nothing |
 | `-y`, `--yes` | Answer the confirmations in advance |
-| `--force` | Allow a protected host to be touched |
+| `--force` | Allow a protected host, or a node the inventory does not know, to be touched |
 | `--set` | Override one configuration value for this command |
 
 ## A note on safety

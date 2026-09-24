@@ -364,7 +364,9 @@ func TestSlurmCheckCoversLongHostLists(t *testing.T) {
 		}
 		return &transport.Result{Target: tg}, nil
 	}}
-	_, err := run(t, harnessOptions{recorder: rec}, "bmc", "power", "off", "-n", expr, "--dry-run")
+	// The inventory does not list these nodes, so --force gets past the
+	// gate's unknown-node check; it does not switch off the Slurm check.
+	_, err := run(t, harnessOptions{recorder: rec}, "bmc", "power", "off", "-n", expr, "--dry-run", "--force")
 	if err == nil {
 		t.Fatal("the power action went ahead for a long set with one busy node")
 	}

@@ -103,9 +103,13 @@ func (s *Server) selectNodes(ctx context.Context, _ *mcp.CallToolRequest, in sel
 	if a.Inventory.Len() > 0 {
 		out.Unknown = ns.Difference(a.Inventory.NodeSet()).String()
 	}
-	if a.Gate.Protected != nil {
-		out.Protected = ns.Intersection(a.Gate.Protected).String()
+	// The gate's own comparison, so that a set the gate would refuse is
+	// never reported as free of protected hosts.
+	protected, err := a.Gate.ProtectedIn(ns)
+	if err != nil {
+		return nil, nil, callError(err)
 	}
+	out.Protected = protected.String()
 	return nil, out, nil
 }
 

@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -290,8 +291,23 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		Context:   ctx,
 	})
 
-	if a.Gate, err = safety.NewGate(a.Spec.Safety); err != nil {
+	if a.Gate, err = safety.NewGate(a.Spec.Safety, a.protectedHosts); err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
+	}
+	if a.Inventory.Len() > 0 {
+		a.Gate.Known = a.Inventory.NodeSet()
+	}
+	// Entries without a group need nothing but the configuration, so a
+	// wrong one is reported by every command, config validate included.
+	// Entries with one are resolved when a command is about to change
+	// something, so that a group source that cannot be asked does not stop
+	// the commands that only look.
+	if !slices.ContainsFunc(a.Spec.Safety.ProtectedHosts, func(expr string) bool {
+		return strings.Contains(expr, "@")
+	}) {
+		if _, err := a.Gate.Protected(); err != nil {
+			return nil, err
+		}
 	}
 	a.Gate.AssumeYes = opts.AssumeYes
 	a.Gate.Force = opts.Force

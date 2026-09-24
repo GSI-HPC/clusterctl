@@ -817,7 +817,7 @@ func confirmAccounting(a *app.App, c *slurm.Client, what string) error {
 func confirmChange(a *app.App, what string) error {
 	ns := nodeset.New()
 	_ = ns.Add("accounting")
-	err := a.Gate.Confirm(safety.Action{Verb: what + " on", Targets: ns})
+	err := a.Gate.Confirm(safety.Action{Verb: what + " on", Targets: ns, NotNodes: true})
 	if safety.IsDryRun(err) {
 		return safety.ErrDryRun
 	}
