@@ -5,9 +5,13 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 )
@@ -59,5 +63,91 @@ func TestTunnelStartUsesTheGeneratedSSHConfiguration(t *testing.T) {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("%s is missing %q", config, want)
 		}
+	}
+}
+
+// sleeper starts a process of this user that is not a tunnel.
+func sleeper(t *testing.T) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start sleep: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-done
+	})
+	return cmd
+}
+
+// alive reports whether a process started by sleeper still runs. Waiting on
+// it in the background reaps it, so a signalled one does not linger as a
+// zombie that still answers signal 0.
+func alive(cmd *exec.Cmd) bool {
+	time.Sleep(100 * time.Millisecond)
+	return cmd.Process.Signal(syscall.Signal(0)) == nil
+}
+
+func writePIDFile(t *testing.T, path string, pid int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A process id file outlives a crash, and the number in it can later belong
+// to another process of the same user. That process is not the tunnel: it is
+// neither reported as one nor stopped.
+func TestTunnelStopLeavesAnUnrelatedProcessAlone(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	victim := sleeper(t)
+	writePIDFile(t, filepath.Join(state, "tunnels", "ipmi.pid"), victim.Process.Pid)
+
+	h, err := run(t, harnessOptions{stateDir: state}, "tunnel", "status", "-o", "json")
+	if err != nil {
+		t.Fatalf("tunnel status failed: %v", err)
+	}
+	if strings.Contains(h.out.String(), `"running": true`) {
+		t.Errorf("an unrelated process was reported as a running tunnel:\n%s", h.out)
+	}
+
+	if _, err := run(t, harnessOptions{stateDir: state}, "tunnel", "stop", "ipmi"); err == nil {
+		t.Error("stopping a tunnel whose process id names another process succeeded")
+	}
+	if !alive(victim) {
+		t.Fatal("tunnel stop signalled an unrelated process")
+	}
+	if _, err := os.Stat(filepath.Join(state, "tunnels", "ipmi.pid")); err == nil {
+		t.Error("the stale process id file was kept")
+	}
+}
+
+// Only a configured profile is stopped: a name is never a path.
+func TestTunnelStopRefusesAnUnknownName(t *testing.T) {
+	dir := t.TempDir()
+	state := filepath.Join(dir, "state")
+	victim := sleeper(t)
+	outside := filepath.Join(dir, "victim.pid")
+	writePIDFile(t, outside, victim.Process.Pid)
+
+	_, err := run(t, harnessOptions{stateDir: state}, "tunnel", "stop", "../../victim")
+	if err == nil {
+		t.Error("stopping a tunnel the site does not define succeeded")
+	} else if !strings.Contains(err.Error(), "unknown tunnel") {
+		t.Errorf("error = %v, want it to name the tunnel as unknown", err)
+	}
+	if !alive(victim) {
+		t.Error("tunnel stop signalled the process named in a file outside the tunnels directory")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Errorf("tunnel stop removed a file outside the tunnels directory: %v", err)
 	}
 }

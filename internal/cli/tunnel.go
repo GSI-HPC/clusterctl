@@ -86,7 +86,8 @@ func newTunnelStatusCommand(r *root) *cobra.Command {
 Report every profile and whether it is running.
 
 A process id file left behind by a crash is not reported as a running tunnel:
-the process is checked as well.`,
+the process it names has to be alive and running with that file, as sshuttle
+started by tunnel start does.`,
 		cobra.NoArgs,
 		func(cmd *cobra.Command, _ []string) error {
 			a, err := r.App()
@@ -148,18 +149,23 @@ jump hosts and account apply.`,
 
 func newTunnelStopCommand(r *root) *cobra.Command {
 	cmd := leaf("stop NAME", "Bring a tunnel down", `
-Stop a running tunnel profile.`,
+Stop a running tunnel profile. Only the process running with the profile's
+process id file is signalled; a stale file is removed.`,
 		cobra.ExactArgs(1),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
 			if err != nil {
 				return err
 			}
+			m := manager(a)
+			if _, err := m.Profile(args[0]); err != nil {
+				return exitcode.Wrap(exitcode.Usage, err)
+			}
 			if a.DryRun() {
 				a.Printf("would stop tunnel %s\n", args[0])
 				return nil
 			}
-			if err := manager(a).Stop(args[0]); err != nil {
+			if err := m.Stop(a.Context(), args[0]); err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			a.Printf("tunnel %s is down\n", args[0])

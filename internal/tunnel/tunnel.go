@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -247,10 +248,16 @@ func (m *Manager) Status() []Status {
 	return out
 }
 
-// running reads the process id file and checks that the process is alive, so
-// that a stale file from a crash is not reported as a running tunnel.
+// running reads the process id file and checks that the process is this
+// profile's tunnel. The file outlives a crash, and the number in it can by
+// now belong to any other process of this user, so being alive is not
+// enough: the process has to be running with this very process id file.
+//
+// The process id is returned even when it is not the tunnel's, so that the
+// stale file can be removed.
 func (m *Manager) running(name string) (int, bool) {
-	data, err := os.ReadFile(m.PIDFile(name))
+	path := m.PIDFile(name)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0, false
 	}
@@ -265,20 +272,75 @@ func (m *Manager) running(name string) (int, bool) {
 	if err := process.Signal(syscall.Signal(0)); err != nil {
 		return pid, false
 	}
-	return pid, true
+	return pid, runsWith(pid, path)
+}
+
+// runsWith reports whether a process was started with --pidfile path, the
+// way Args starts every tunnel. sshuttle may be a wrapper the workstation
+// names, so its name is not checked; the process id file lives in this
+// user's private state directory, and nothing but the tunnel is started
+// with it.
+func runsWith(pid int, path string) bool {
+	if runtime.GOOS == "linux" {
+		data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+		if err != nil {
+			return false
+		}
+		args := strings.Split(strings.TrimRight(string(data), "\x00"), "\x00")
+		for i, arg := range args {
+			if arg == "--pidfile="+path || arg == "--pidfile" && i+1 < len(args) && args[i+1] == path {
+				return true
+			}
+		}
+		return false
+	}
+	// Elsewhere ps is what tells the command line, with the arguments
+	// joined by spaces.
+	out, err := exec.Command("ps", "-ww", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return false
+	}
+	line := " " + strings.TrimSpace(string(out)) + " "
+	return strings.Contains(line, " --pidfile "+path+" ") || strings.Contains(line, " --pidfile="+path+" ")
+}
+
+// lock takes the lock on a profile's process id file, so that two runs
+// cannot start the same tunnel, or stop it while it is being started.
+func (m *Manager) lock(ctx context.Context, name string) (func(), error) {
+	path := m.PIDFile(name)
+	if err := fileutil.EnsureDir(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+	return fileutil.Lock(ctx, path)
+}
+
+// removeStale removes a process id file that names no tunnel, so that the
+// next status is honest and sshuttle, which refuses to start while the
+// process a file names is alive, does not mistake another process for the
+// tunnel.
+func (m *Manager) removeStale(name string) error {
+	if err := os.Remove(m.PIDFile(name)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // Start brings a profile up. Starting one that is already running is
 // reported rather than producing a second tunnel for the same networks.
 func (m *Manager) Start(ctx context.Context, name string) error {
-	if _, running := m.running(name); running {
-		return fmt.Errorf("tunnel %q is already running", name)
-	}
 	args, err := m.Args(name)
 	if err != nil {
 		return err
 	}
-	if err := fileutil.EnsureDir(filepath.Dir(m.PIDFile(name))); err != nil {
+	unlock, err := m.lock(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if _, running := m.running(name); running {
+		return fmt.Errorf("tunnel %q is already running", name)
+	}
+	if err := m.removeStale(name); err != nil {
 		return err
 	}
 
@@ -293,14 +355,24 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 	return nil
 }
 
-// Stop brings a profile down.
-func (m *Manager) Stop(name string) error {
+// Stop brings a profile down. Only a configured profile is stopped, and only
+// a process that is its tunnel is signalled.
+func (m *Manager) Stop(ctx context.Context, name string) error {
+	if _, err := m.Profile(name); err != nil {
+		return err
+	}
+	unlock, err := m.lock(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	pid, running := m.running(name)
 	if !running {
+		if err := m.removeStale(name); err != nil {
+			return err
+		}
 		if pid > 0 {
-			// The process is gone but the file is not; clean it up so the
-			// next status is honest.
-			_ = os.Remove(m.PIDFile(name))
+			return fmt.Errorf("tunnel %q is not running: process %d is not its sshuttle; removed the stale process id file", name, pid)
 		}
 		return fmt.Errorf("tunnel %q is not running", name)
 	}
@@ -311,6 +383,7 @@ func (m *Manager) Stop(name string) error {
 	if err := process.Signal(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("stopping tunnel %q: %w", name, err)
 	}
-	_ = os.Remove(m.PIDFile(name))
-	return nil
+	// sshuttle removes the file itself when it ends; this covers one that
+	// is slow to.
+	return m.removeStale(name)
 }
