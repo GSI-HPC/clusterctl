@@ -147,7 +147,7 @@ func initDir(r *root, args []string) (string, error) {
 		if other == dir {
 			continue
 		}
-		files, err := config.ExpandEntries([]string{other})
+		files, err := config.ExpandSearchDirs([]string{other})
 		if err != nil {
 			return "", fmt.Errorf("cannot tell whether %s holds configuration (%w); name the directory to write to: clusterctl config init DIR", other, err)
 		}
