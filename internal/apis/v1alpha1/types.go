@@ -298,8 +298,6 @@ type SafetySpec struct {
 	// rack does not trip its breaker.
 	PowerOnBatch   int      `json:"powerOnBatch,omitempty" yaml:"powerOnBatch,omitempty"`
 	PowerOnStagger Duration `json:"powerOnStagger,omitempty" yaml:"powerOnStagger,omitempty"`
-	// RequireReason demands a reason for draining a node.
-	RequireReason *bool `json:"requireReason,omitempty" yaml:"requireReason,omitempty"`
 }
 
 // FanoutSpec bounds parallel execution across nodes.
@@ -488,12 +486,6 @@ type SlurmSpec struct {
 	Organization string `json:"organization,omitempty" yaml:"organization,omitempty"`
 	// DefaultAccount is the account a new user is associated with.
 	DefaultAccount string `json:"defaultAccount,omitempty" yaml:"defaultAccount,omitempty"`
-	// JSON asks the clients for JSON output where they support it. When it
-	// is off, or the client is too old, the parsable output is read instead.
-	JSON *bool `json:"json,omitempty" yaml:"json,omitempty"`
-	// Partitions are the partitions this cluster offers, used by the DNS
-	// alias report.
-	Partitions []string `json:"partitions,omitempty" yaml:"partitions,omitempty"`
 	// LookBack is the default accounting window for the job reports.
 	LookBack Duration `json:"lookBack,omitempty" yaml:"lookBack,omitempty"`
 }
