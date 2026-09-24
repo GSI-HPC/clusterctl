@@ -266,3 +266,44 @@ func TestNoShellSendsTheCommandAsItIs(t *testing.T) {
 		}
 	}
 }
+
+// TestRunBoundsTheOutput checks that a host cannot fill the memory of the
+// process with its output. Run captured all 300000000 bytes a fake ssh
+// wrote, with 1054 MiB of heap in use.
+func TestRunBoundsTheOutput(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		script string
+		limit  int
+		want   int
+	}{
+		{"standard output, the default bound", fmt.Sprintf("head -c %d /dev/zero", transport.DefaultMaxOutput+3<<20), 0, transport.DefaultMaxOutput},
+		{"standard output, the request's bound", "head -c 3000000 /dev/zero", 1 << 20, 1 << 20},
+		{"standard error", "head -c 3000000 /dev/zero >&2", 1 << 20, 1 << 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := fakeClient(t, tc.script).Run(context.Background(), target,
+				transport.Request{Argv: []string{"true"}, MaxOutput: tc.limit})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(result.Stdout) + len(result.Stderr); got != tc.want {
+				t.Errorf("kept %d bytes, want %d", got, tc.want)
+			}
+			if !result.Truncated || !result.Failed() {
+				t.Errorf("truncated = %v, failed = %v; output that was cut off is not the host's answer", result.Truncated, result.Failed())
+			}
+			if result.Err == nil || !strings.Contains(result.Err.Error(), "cut off") {
+				t.Errorf("error = %v, want it to say the output was cut off", result.Err)
+			}
+		})
+	}
+
+	result, err := fakeClient(t, "head -c 1000 /dev/zero").Run(context.Background(), target,
+		transport.Request{Argv: []string{"true"}, MaxOutput: 1000})
+	if err != nil || result.Failed() || result.Truncated || len(result.Stdout) != 1000 {
+		t.Errorf("output exactly at the bound: failed = %v, truncated = %v, kept %d, error %v",
+			result.Failed(), result.Truncated, len(result.Stdout), err)
+	}
+}

@@ -117,12 +117,21 @@ type Request struct {
 	// Stdout and Stderr receive the output when the command is run
 	// interactively. Run captures them instead.
 	Stdout, Stderr io.Writer
+	// MaxOutput bounds how much of each of standard output and standard
+	// error Run keeps; zero keeps up to DefaultMaxOutput.
+	MaxOutput int
 	// NoShell says the host's command line is not a POSIX shell, as on a
 	// power distribution unit, so the command is sent without the guard that
 	// tells its exit status 255 from ssh's, which it could not run. A 255
 	// from such a command reads as a connection failure.
 	NoShell bool
 }
+
+// DefaultMaxOutput is how much of each output stream Run keeps unless a
+// request says otherwise. A host controls its own output for as long as the
+// command runs, and without a bound it could fill the memory of the CLI or
+// the MCP server.
+const DefaultMaxOutput = 32 << 20
 
 // Result is the outcome of one remote command.
 type Result struct {
@@ -131,6 +140,10 @@ type Result struct {
 	Stdout   string        `json:"stdout,omitempty" yaml:"stdout,omitempty"`
 	Stderr   string        `json:"stderr,omitempty" yaml:"stderr,omitempty"`
 	Duration time.Duration `json:"-" yaml:"-"`
+	// Truncated says that the output was cut off at the request's
+	// MaxOutput. Such a result has failed: what was kept is not all the
+	// host said.
+	Truncated bool `json:"truncated,omitempty" yaml:"truncated,omitempty"`
 	// Err is set when the command could not be run or did not exit zero.
 	Err error `json:"-" yaml:"-"`
 }
@@ -409,10 +422,14 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 		return nil, err
 	}
 
-	var stdout, stderr bytes.Buffer
+	limit := req.MaxOutput
+	if limit <= 0 {
+		limit = DefaultMaxOutput
+	}
+	stdout, stderr := &capture{limit: limit}, &capture{limit: limit}
 	cmd := command(ctx, args)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	cmd.Stdin = req.Stdin
 	if cmd.Stdin == nil {
 		// Without this ssh inherits the terminal and a remote command may
@@ -429,8 +446,30 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 		Duration: time.Since(start),
 	}
 	result.ExitCode, result.Err = classify(ctx, target, runErr, result.Stderr)
+	result.Truncated = stdout.dropped > 0 || stderr.dropped > 0
+	if result.Truncated && result.Err == nil {
+		result.Err = fmt.Errorf("%s: the output was cut off at %d bytes, the most that is kept of one stream", target, limit)
+	}
 	return result, nil
 }
+
+// capture keeps the first limit bytes written to it and counts the rest,
+// which it accepts and drops, so that the command is not stopped by a write
+// that fails.
+type capture struct {
+	buf     bytes.Buffer
+	limit   int
+	dropped int64
+}
+
+func (c *capture) Write(p []byte) (int, error) {
+	keep := min(len(p), max(c.limit-c.buf.Len(), 0))
+	c.buf.Write(p[:keep])
+	c.dropped += int64(len(p) - keep)
+	return len(p), nil
+}
+
+func (c *capture) String() string { return c.buf.String() }
 
 // Interactive runs a request wired to the terminal, for a login shell or
 // anything that needs to talk to the user.
