@@ -42,6 +42,13 @@ exe[1-7])`, which is `exe[6-7]`. Write the order you mean.
 Whitespace unions, so the arguments of a command line can be joined with a
 space and parsed in one call.
 
+`!`, `&` and `^` need an operand on each side. `@rack:R02&`, `exe[1-10]!,exe5`,
+`exe[1-10]&&exe5` and `!exe5` are errors. The first is what
+`-n "@rack:R02&$(clusterctl slurm node nodeset idle)"` leaves behind when no
+node is idle, and reading it as `@rack:R02` would select the whole rack instead
+of nothing. A union tolerates an empty operand, because a union with nothing is
+what was meant: `exe1,` is `exe1`.
+
 ## Semantics chosen here
 
 These are the corners where an implementation has to decide something. They are

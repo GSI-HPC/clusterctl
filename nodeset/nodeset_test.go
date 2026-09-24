@@ -34,6 +34,8 @@ func TestParseExpand(t *testing.T) {
 		{"exe[1-5]&exe[4-8]", []string{"exe4", "exe5"}},
 		{"exe[1-3]^exe[2-4]", []string{"exe1", "exe4"}},
 		{"exe[1-3]!exe2,sub1", []string{"exe1", "exe3", "sub1"}},
+		{"exe1 & exe[1-2]", []string{"exe1"}},
+		{"exe[1-3],,exe5,", []string{"exe1", "exe2", "exe3", "exe5"}},
 		{"", nil},
 		// Padding is a display property, so these name one host, shown with
 		// the first non-zero width the expression asked for.
@@ -280,6 +282,12 @@ func TestParseErrors(t *testing.T) {
 		"exe[1-9/+2]", "exe[5-999999999999999999/9223372036854775807]",
 		// Adjacent numeric parts cannot be told apart once expanded.
 		"exe0[0,10]", "exe[1-2][3-4]", "[1-2]0",
+		// A set operator needs an operand on each side. A dangling one is
+		// what an empty command substitution leaves behind, and dropping it
+		// would select every host of the left operand.
+		"exe[1-3]&", "exe[1-3]!", "exe[1-3]^", "exe[1-3]! ",
+		"exe[1-3]!,exe2", "exe[1-3]&&exe2", "exe[1-3]&!exe2", "exe[1-3],&exe2",
+		"&exe1", "!exe1", " ^exe1",
 	}
 	for _, expr := range exprs {
 		t.Run(expr, func(t *testing.T) {

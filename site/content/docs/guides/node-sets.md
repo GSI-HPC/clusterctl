@@ -34,6 +34,15 @@ right, so `@a!@b&@c` is `((@a minus @b) intersect @c)`. Write the order you
 mean; there are no brackets for grouping.
 {{< /callout >}}
 
+`!`, `&` and `^` need something on both sides. When a command substitution
+prints nothing, `-n "@rack:R02&$(clusterctl slurm node nodeset idle)"` becomes
+`@rack:R02&`, which is an error rather than the whole rack:
+
+```console
+$ clusterctl node select '@rack:R02&'
+clusterctl: in "@rack:R02&": the & operator has no right operand
+```
+
 ## Folding and expanding
 
 ```console
