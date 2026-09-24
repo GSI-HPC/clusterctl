@@ -28,6 +28,7 @@ func group(use, short, long string, subs ...*cobra.Command) *cobra.Command {
 		Use:   use,
 		Short: short,
 		Long:  strings.TrimSpace(long),
+		Args:  noSubcommand,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return c.Help()
 		},
