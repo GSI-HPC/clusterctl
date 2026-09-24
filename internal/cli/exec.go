@@ -7,9 +7,9 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -53,8 +53,10 @@ not ask before it runs, unless --confirm is given. With --stdin the payload
 takes up standard input, so the confirmation cannot be read from it and
 --confirm needs -y.
 
-With --dedup the nodes that answered the same thing are collapsed into one
-block, which turns a thousand replies into the few worth reading.`,
+With --dedup the nodes that answered the same thing, and ended the same way,
+are collapsed into one block, which turns a thousand replies into the few
+worth reading. Control characters in what the nodes answered are shown as
+escapes rather than passed to the terminal.`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
 			// Only the words after -- are the command, so that none of its
@@ -200,38 +202,96 @@ func printExec(a *app.App, cmd *cobra.Command, results []*transport.Result, dedu
 		return failureError(results)
 	}
 
+	// A node controls its own output, so none of it reaches the terminal
+	// as a control sequence.
 	out := cmd.OutOrStdout()
 	if dedup {
 		for _, g := range fanout.GroupByOutput(results) {
-			if _, err := fmt.Fprintf(out, "%s (%d)\n", g.Nodes, g.Nodes.Len()); err != nil {
+			if _, err := fmt.Fprintf(out, "%s (%d): %s\n", g.Nodes, g.Nodes.Len(), g.Status); err != nil {
 				return err
 			}
-			for _, line := range strings.Split(g.Output, "\n") {
-				if _, err := fmt.Fprintf(out, "  %s\n", line); err != nil {
+			// Only the one newline that ends the output is dropped, so that
+			// groups that differ in blank lines at the end look different.
+			for _, line := range outputLines(strings.TrimSuffix(g.Output, "\n")) {
+				if _, err := fmt.Fprintf(out, "  %s\n", escapeControl(line)); err != nil {
 					return err
 				}
 			}
 		}
 	} else {
 		for _, res := range results {
-			for _, line := range strings.Split(strings.TrimRight(res.Stdout, "\n"), "\n") {
-				if line == "" && res.Stdout == "" {
-					continue
-				}
-				if _, err := fmt.Fprintf(out, "%s: %s\n", res.Target.Name, line); err != nil {
+			for _, line := range outputLines(strings.TrimRight(res.Stdout, "\n")) {
+				if _, err := fmt.Fprintf(out, "%s: %s\n", res.Target.Name, escapeControl(line)); err != nil {
 					return err
 				}
 			}
 		}
 	}
 	for _, res := range results {
-		if res.Failed() {
-			detail := strings.TrimSpace(lastNonEmpty(res.Stderr))
-			if res.Err != nil {
-				detail = res.Err.Error()
-			}
-			fmt.Fprintf(os.Stderr, "%s: %s\n", res.Target.Name, detail)
+		if !res.Failed() {
+			continue
+		}
+		line := fanout.Status(res)
+		if detail := failureDetail(res); detail != "" {
+			line += ": " + detail
+		}
+		if _, err := fmt.Fprintf(a.Err, "%s: %s\n", res.Target.Name, escapeControl(line)); err != nil {
+			return err
 		}
 	}
 	return failureError(results)
+}
+
+// outputLines splits output into the lines printed for it. A line that ends
+// in CR LF is still one line.
+func outputLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSuffix(line, "\r")
+	}
+	return lines
+}
+
+// escapeControl makes the control characters of one line of untrusted output
+// visible instead of letting the terminal act on them: a carriage return or
+// a cursor movement could overwrite what another node answered, and an OSC
+// sequence could write the clipboard. A tab only moves forward and is kept.
+// Bytes that are not UTF-8 are escaped too, because an 8-bit terminal reads
+// 0x9b as the start of a control sequence.
+func escapeControl(s string) string {
+	clean := true
+	for _, r := range s {
+		if (r < 0x20 && r != '\t') || (r >= 0x7f && r <= 0x9f) || r == utf8.RuneError {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return s
+	}
+	var b strings.Builder
+	for len(s) > 0 {
+		r, size := utf8.DecodeRuneInString(s)
+		switch {
+		case r == utf8.RuneError && size == 1:
+			fmt.Fprintf(&b, "\\x%02x", s[0])
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\t':
+			b.WriteRune(r)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, "\\x%02x", r)
+		case r >= 0x80 && r <= 0x9f:
+			fmt.Fprintf(&b, "\\u%04x", r)
+		default:
+			b.WriteString(s[:size])
+		}
+		s = s[size:]
+	}
+	return b.String()
 }

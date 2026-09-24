@@ -302,6 +302,22 @@ func TestExecExitCodeSaysWhatWentWrong(t *testing.T) {
 	}
 }
 
+func TestExecShowsTheNodesOwnError(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		if tg.Name == "exe0003" {
+			return exited(tg, 3, "Unit slurmd.service could not be found.\n"), nil
+		}
+		return &transport.Result{Target: tg, Stdout: "active\n"}, nil
+	}}
+	for _, format := range []string{"table", "wide"} {
+		h, err := run(t, harnessOptions{recorder: rec}, "exec", "-o", format, "-n", "exe[1-4]", "--", "systemctl", "is-active", "slurmd")
+		wantCode(t, err, exitcode.TargetFailed)
+		if want := "exe0003: exit 3: Unit slurmd.service could not be found."; !strings.Contains(h.errOut.String(), want) {
+			t.Errorf("-o %s: the failure lines do not show %q:\n%s", format, want, h.errOut)
+		}
+	}
+}
+
 func TestResultsTableShowsTheNodesOwnError(t *testing.T) {
 	tg := transport.Target{Name: "exe0003", Host: "exe0003.hpc.example.org"}
 	table := resultsTable([]*transport.Result{
@@ -320,5 +336,65 @@ func TestResultsTableShowsTheNodesOwnError(t *testing.T) {
 	}
 	if !strings.Contains(rows[1]["error"], "Connection refused") {
 		t.Errorf("ERROR = %q, want the connection failure", rows[1]["error"])
+	}
+}
+
+func TestExecEscapesControlCharacters(t *testing.T) {
+	// A node controls its own output; with CR, cursor movement and OSC 52
+	// it could overwrite another node's line or write the clipboard.
+	const evil = "ok\r\x1b[1Aexe0001: \x1b]52;c;Zm9v\x07evil\x9b2J\u009b\n"
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		if tg.Name == "exe0002" {
+			return &transport.Result{Target: tg, Stdout: evil, Stderr: "bad\x1b[2K\n", ExitCode: 1,
+				Err: fmt.Errorf("%s: command exited 1", tg)}, nil
+		}
+		return &transport.Result{Target: tg, Stdout: "fine\tcolumn\r\n"}, nil
+	}}
+	for _, extra := range [][]string{nil, {"--dedup"}} {
+		args := append(append([]string{"exec", "-n", "exe[1-2]"}, extra...), "--", "cat", "/etc/motd")
+		h, _ := run(t, harnessOptions{recorder: rec}, args...)
+		for _, stream := range []string{h.out.String(), h.errOut.String()} {
+			if strings.ContainsAny(stream, "\r\x1b\x07") || strings.Contains(stream, "\u009b") ||
+				strings.Contains(stream, "\x9b") {
+				t.Errorf("%v: control characters reached the terminal: %q", extra, stream)
+			}
+		}
+		if want := `ok\r\x1b[1Aexe0001: \x1b]52;c;Zm9v\x07evil\x9b2J\u009b`; !strings.Contains(h.out.String(), want) {
+			t.Errorf("%v: output = %q, want %q", extra, h.out, want)
+		}
+		// A tab cannot move the cursor back, and a line ending in CR LF
+		// is still a line.
+		if want := "fine\tcolumn\n"; !strings.Contains(h.out.String(), want) {
+			t.Errorf("%v: output = %q, want %q", extra, h.out, want)
+		}
+	}
+}
+
+func TestExecDedupShowsEachGroupsStatus(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		switch tg.Name {
+		case "exe0003":
+			// grep -q or test -e: the status is the whole answer.
+			return exited(tg, 1, ""), nil
+		case "exe0004":
+			return unreachable(tg), nil
+		case "exe0005":
+			// Differs from the others only in a trailing newline.
+			return &transport.Result{Target: tg, Stdout: "same\n\n"}, nil
+		}
+		return &transport.Result{Target: tg, Stdout: "same\n"}, nil
+	}}
+	h, err := run(t, harnessOptions{recorder: rec}, "exec", "-n", "exe[1-5]", "--dedup", "--", "test", "-e", "/x")
+	wantCode(t, err, exitcode.Transport)
+	out := h.out.String()
+	for _, want := range []string{
+		"exe[0001-0002] (2): ok\n",
+		"exe0003 (1): exit 1\n",
+		"exe0004 (1): unreachable\n",
+		"exe0005 (1): ok\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output does not contain %q:\n%s", want, out)
+		}
 	}
 }
