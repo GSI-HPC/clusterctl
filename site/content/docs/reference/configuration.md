@@ -80,6 +80,13 @@ contexts:
 referring to an unset domain is reported rather than producing a name that ends
 in a dot.
 
+A `pattern` must match the whole short name, and names are lowercased before
+any rule is tried. A node's service processor is named only by the `bmc`
+template of the first rule that matches it. A node whose rule has none, that
+no rule matches, or whose template gives the node's own short name or host name
+back, has no service processor name: the `bmc` commands refuse it unless its
+inventory entry sets `bmcAddress`.
+
 ### Password sources
 
 Exactly one per credential:

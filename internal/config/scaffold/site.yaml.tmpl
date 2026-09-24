@@ -22,8 +22,10 @@ spec:
     # every name, so it comes last.
     rules:
       - fqdn: "{name}.{domains.hpc}"
-        # The service processors keep the node's name unless this says
-        # otherwise, for example:
+        # The bmc commands need the name of a node's service processor.
+        # Without a template here they refuse a node unless its inventory
+        # entry sets bmcAddress; they never send the BMC password to the
+        # node itself. For example:
         # bmc: "{name}.mgmt.{domains.hpc}"
 
   hosts:

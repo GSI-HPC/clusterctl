@@ -87,14 +87,16 @@ type NamingRule struct {
 	// FQDN is the template for the host name, for example
 	// "{name}.{domains.hpc}".
 	FQDN string `json:"fqdn,omitempty" yaml:"fqdn,omitempty" jsonschema:"description=Host name template, e.g. {name}.{domains.hpc}"`
-	// BMC is the template for the BMC host name.
-	BMC string `json:"bmc,omitempty" yaml:"bmc,omitempty" jsonschema:"description=BMC host name template"`
+	// BMC is the template for the BMC host name. A node whose rule has
+	// none has no BMC name, and the bmc commands refuse it unless its
+	// inventory entry sets bmcAddress.
+	BMC string `json:"bmc,omitempty" yaml:"bmc,omitempty" jsonschema:"description=BMC host name template; without one the node needs a bmcAddress in the inventory"`
 }
 
 // NamingMatch selects node names by prefix or by regular expression.
 type NamingMatch struct {
 	Prefixes []string `json:"prefixes,omitempty" yaml:"prefixes,omitempty" jsonschema:"description=Short name prefixes this rule applies to"`
-	Pattern  string   `json:"pattern,omitempty" yaml:"pattern,omitempty" jsonschema:"description=Regular expression the short name must match"`
+	Pattern  string   `json:"pattern,omitempty" yaml:"pattern,omitempty" jsonschema:"description=Regular expression the whole short name must match"`
 }
 
 // HostRole is one infrastructure host commands reach by role name.
