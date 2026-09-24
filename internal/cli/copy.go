@@ -212,10 +212,3 @@ func checkRemotePath(path string) error {
 	}
 	return nil
 }
-
-func baseName(path string) string {
-	if i := strings.LastIndexByte(path, '/'); i >= 0 {
-		return path[i+1:]
-	}
-	return path
-}
