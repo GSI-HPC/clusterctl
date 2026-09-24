@@ -63,22 +63,23 @@ func (r *root) App() (*app.App, error) {
 		set[strings.TrimSpace(key)] = value
 	}
 
-	nodes, _, err := r.nodesFromFlagOrEnv()
+	nodes, fromFlag, err := r.nodesFromFlagOrEnv()
 	if err != nil {
 		return nil, err
 	}
 
 	a, err := app.New(r.context(), r.streams, app.Options{
-		ConfigFiles: r.configFiles,
-		Context:     r.contextName,
-		Nodes:       nodes,
-		Format:      r.format,
-		Set:         set,
-		DryRun:      r.dryRun,
-		AssumeYes:   r.assumeYes,
-		Force:       r.force,
-		Fanout:      r.fanout,
-		Runner:      r.runner,
+		ConfigFiles:   r.configFiles,
+		Context:       r.contextName,
+		Nodes:         nodes,
+		NodesFromFlag: fromFlag,
+		Format:        r.format,
+		Set:           set,
+		DryRun:        r.dryRun,
+		AssumeYes:     r.assumeYes,
+		Force:         r.force,
+		Fanout:        r.fanout,
+		Runner:        r.runner,
 	})
 	if err != nil {
 		return nil, err

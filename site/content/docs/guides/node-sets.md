@@ -145,9 +145,9 @@ $ clusterctl exec -- uptime
 `-n` or a node set argument always wins over it. Nothing else falls back to a
 set you set earlier: a command with no selection stops rather than guessing.
 
-Give a node set once. `-n` twice is refused with exit code 2 rather than all
-but the last being ignored; write the union into one expression instead, such
-as `-n exe0001,exe0002`.
+Give a node set once. `-n` together with a node set argument, or `-n` twice, is
+refused with exit code 2 rather than one of them being ignored; write the union
+into one expression instead, such as `-n exe0001,exe0002`.
 
 ## Passing a set to another tool
 
