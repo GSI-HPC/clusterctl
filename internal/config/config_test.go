@@ -265,6 +265,19 @@ spec: {}
 			want: "unknown kind",
 		},
 		{
+			// Nothing offloads a fan-out to clush, so a setting that asks
+			// for it would be accepted and do nothing.
+			name: "a fan-out offload is reported",
+			src: `apiVersion: clusterctl/v1alpha1
+kind: Site
+spec:
+  fanout:
+    offloadAbove: 512
+    offload: login
+`,
+			want: "offload",
+		},
+		{
 			name: "a required field is reported",
 			src: `apiVersion: clusterctl/v1alpha1
 kind: Cluster

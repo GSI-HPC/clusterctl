@@ -40,7 +40,7 @@ hardware, and **deferred** when it is deliberately not done.
 | R18 | Report every node, not just the first failure | `fanout` | met |
 | R19 | Collapse identical answers | `fanout.GroupByOutput` | met |
 | R20 | Copy files to and from many nodes | `cli/copy.go` | met |
-| R21 | Offload very large sets to clush on a hub | `fanout.offloadAbove` | deferred |
+| R21 | Offload very large sets to clush on a hub | nothing yet | deferred |
 
 ## Operate hardware
 
@@ -114,11 +114,12 @@ hardware, and **deferred** when it is deliberately not done.
 
 ## Deferred, and why
 
-**R21, offloading a very large fan-out to `clush` on a hub.** The
-configuration (`fanout.offloadAbove`, `fanout.offload`) is defined and
-documented, and the executor bounds concurrency, but the offload path itself is
-not implemented. It matters above a few hundred nodes, it needs a cluster of
-that size to test honestly, and the wrong implementation is worse than none.
+**R21, offloading a very large fan-out to `clush` on a hub.** The executor
+bounds concurrency, but nothing offloads a set, and the configuration has no
+setting for it: a setting that was accepted and did nothing would let a large
+fan-out run from the workstation while the site believed otherwise. It
+matters above a few hundred nodes, it needs a cluster of that size to test
+honestly, and the wrong implementation is worse than none.
 
 **Compatibility with the old command names.** No `cluster-*` shims and no
 importer for the old configuration formats. This was decided deliberately: the
