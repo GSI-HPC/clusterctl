@@ -378,6 +378,11 @@ func addLoseJobsFlag(cmd *cobra.Command, loseJobs *bool) {
 		"go ahead although Slurm reports jobs on the nodes, or cannot say")
 }
 
+// sinfoHostlistLimit is the longest host list handed to sinfo. A longer one
+// would come close to the limit on one argument, so sinfo is asked about
+// every node instead and the answer is narrowed here.
+const sinfoHostlistLimit = 16 << 10
+
 // checkSlurmIdle refuses a power action on nodes that may be running a job.
 //
 // It fails closed: a node counts as idle only when Slurm reports it in a
@@ -482,7 +487,10 @@ func slurmJobs(a *app.App, nodes *nodeset.NodeSet) (slurmJobState, error) {
 		return slurmJobState{}, err
 	}
 	// --all includes the nodes of hidden partitions, which run jobs too.
-	argv := []string{"sinfo", "--all", "-h", "-N", "-o", "%N %T", "-n", nodes.Hostlist()}
+	argv := []string{"sinfo", "--all", "-h", "-N", "-o", "%N %T"}
+	if hostlist := nodes.Hostlist(); len(hostlist) <= sinfoHostlistLimit {
+		argv = append(argv, "-n", hostlist)
+	}
 	result, err := a.ReadRunner.Run(a.Context(), target, transport.Request{
 		Argv:    argv,
 		Timeout: 30 * time.Second,
