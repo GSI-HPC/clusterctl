@@ -79,6 +79,10 @@ the variable:
 - protection rules on the `release` environment, which the publishing job
   runs in: a required reviewer, and deployment limited to `v*` tags.
 
+The release job holds the only token that can write to the repository. The
+verification and test jobs run with a read-only one, and no job keeps the
+token in its checkout.
+
 The workflow then builds, tests, and publishes:
 
 - `clusterctl_linux_amd64.tar.gz` — the binary asked for by the review,
