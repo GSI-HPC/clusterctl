@@ -197,6 +197,24 @@ func TestBMCOrderPrefersRedfish(t *testing.T) {
 	}
 }
 
+// Any first entry other than ipmi selected Redfish, so a misspelt impi sent
+// the BMC account over the transport the site had ruled out.
+func TestBMCTransportsRefusesAnUnknownEntry(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, &transport.Recorder{})
+
+	a.Spec.BMC.Order = []string{"IPMI", "redfish", "ipmi"}
+	got, err := a.BMCTransports("exe0001")
+	if err != nil || strings.Join(got, ",") != "ipmi,redfish" {
+		t.Errorf("BMCTransports = %v, %v; want ipmi,redfish", got, err)
+	}
+
+	a.Spec.BMC.Order = []string{"impi"}
+	if _, err := a.BMCTransports("exe0001"); exitcode.From(err) != exitcode.Usage {
+		t.Errorf("an unknown transport: err = %v, want a usage error", err)
+	}
+}
+
 func TestPathResolvesAgainstTheSiteDocument(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, &transport.Recorder{})

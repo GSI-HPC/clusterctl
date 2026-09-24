@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -129,13 +130,21 @@ func (a *App) VendorProfile(node string) v1alpha1.VendorProfile {
 	return a.Spec.BMC.Vendors[vendor]
 }
 
+// BMCCredentialName names the credential used for a node's service
+// processor: the one its vendor profile names, else the site's. Nodes with
+// the same name share one account, which is how a set is grouped for a
+// backend that takes one account for many processors.
+func (a *App) BMCCredentialName(node string) string {
+	if profile := a.VendorProfile(node); profile.Credential != "" {
+		return profile.Credential
+	}
+	return a.Spec.BMC.Credential
+}
+
 // BMCCredential resolves the account used for a node's service processor,
 // honouring a vendor profile that names its own.
 func (a *App) BMCCredential(ctx context.Context, node string) (credentials.Credential, error) {
-	name := a.Spec.BMC.Credential
-	if profile := a.VendorProfile(node); profile.Credential != "" {
-		name = profile.Credential
-	}
+	name := a.BMCCredentialName(node)
 	if name == "" {
 		return credentials.Credential{}, exitcode.Errorf(exitcode.Usage,
 			"no BMC credential is configured; set bmc.credential in the site document")
@@ -214,7 +223,8 @@ func (a *App) noteFirstContact(pins *redfish.PinStore, host string) {
 }
 
 // IPMIBackend builds the backend that runs the IPMI tools, on the host role
-// the configuration names or locally when it names none.
+// bmc.ipmi.via names, with the account of the given node. Nothing runs the
+// tools locally, so a site that names no role gets a usage error.
 func (a *App) IPMIBackend(ctx context.Context, node string) (*ipmi.Backend, error) {
 	cred, err := a.BMCCredential(ctx, node)
 	if err != nil {
@@ -238,7 +248,13 @@ func (a *App) IPMIBackend(ctx context.Context, node string) (*ipmi.Backend, erro
 	}, nil
 }
 
-// BMCOrder returns the transport preference for a node.
+// The transports a service processor can be reached over.
+const (
+	TransportRedfish = "redfish"
+	TransportIPMI    = "ipmi"
+)
+
+// BMCOrder returns the transport preference for a node, as configured.
 func (a *App) BMCOrder(node string) []string {
 	if profile := a.VendorProfile(node); len(profile.Order) > 0 {
 		return profile.Order
@@ -246,12 +262,40 @@ func (a *App) BMCOrder(node string) []string {
 	if len(a.Spec.BMC.Order) > 0 {
 		return a.Spec.BMC.Order
 	}
-	return []string{"redfish", "ipmi"}
+	return []string{TransportRedfish, TransportIPMI}
 }
 
-// PreferredBMCTransport returns the first transport of the order, which is
-// what a command uses unless the administrator names another.
+// BMCTransports returns the transports to try for a node, in order. An
+// entry that names no transport is refused rather than read as Redfish, so a
+// misspelt ipmi does not send the BMC account over another protocol.
+func (a *App) BMCTransports(node string) ([]string, error) {
+	setting := "bmc.order"
+	if entry, ok := a.InventoryNode(node); ok {
+		if vendor := entry.Attributes["vendor"]; len(a.Spec.BMC.Vendors[vendor].Order) > 0 {
+			setting = "bmc.vendors." + vendor + ".order"
+		}
+	}
+	var out []string
+	for _, entry := range a.BMCOrder(node) {
+		transport := strings.ToLower(strings.TrimSpace(entry))
+		if transport != TransportRedfish && transport != TransportIPMI {
+			return nil, exitcode.Errorf(exitcode.Usage,
+				"%s names the transport %q, which is not one of %s and %s",
+				setting, entry, TransportRedfish, TransportIPMI)
+		}
+		if !slices.Contains(out, transport) {
+			out = append(out, transport)
+		}
+	}
+	return out, nil
+}
+
+// PreferredBMCTransport returns the first transport of the order, or
+// Redfish when the order is not valid.
 func (a *App) PreferredBMCTransport(node string) string {
-	order := a.BMCOrder(node)
-	return strings.ToLower(order[0])
+	order, err := a.BMCTransports(node)
+	if err != nil || len(order) == 0 {
+		return TransportRedfish
+	}
+	return order[0]
 }
