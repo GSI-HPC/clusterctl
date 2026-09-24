@@ -191,12 +191,7 @@ func TestJSONPathRejectsBadExpressions(t *testing.T) {
 	t.Parallel()
 
 	for _, spec := range []string{"jsonpath={.a", "jsonpath={.a[}", "jsonpath={.a[x]}", "jsonpath={..}"} {
-		f, err := output.ParseFormat(spec)
-		if err != nil {
-			continue
-		}
-		var buf bytes.Buffer
-		if err := f.Write(&buf, output.Result{Object: map[string]any{}}); err == nil {
+		if _, err := output.ParseFormat(spec); err == nil {
 			t.Errorf("%s should fail", spec)
 		}
 	}
@@ -211,8 +206,7 @@ func TestJQ(t *testing.T) {
 		t.Errorf("jq output = %q, want %q", got, "exe0002\n")
 	}
 
-	f, _ := output.ParseFormat("jq=.[ |")
-	if err := f.Write(&bytes.Buffer{}, r); err == nil {
+	if _, err := output.ParseFormat("jq=.[ |"); err == nil {
 		t.Error("a malformed jq expression should be reported")
 	}
 }
