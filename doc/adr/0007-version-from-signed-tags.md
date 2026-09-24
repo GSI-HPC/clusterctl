@@ -32,9 +32,13 @@ and in the GitHub release built from it, and nowhere else.
 `internal/version` takes, in order:
 
 1. the value injected through `-ldflags` by the release build;
-2. otherwise the VCS stamps the Go toolchain embeds — revision, commit time,
-   and whether the tree was dirty;
-3. otherwise `devel`.
+2. otherwise, for a build from a checkout, `devel` with the VCS stamps the Go
+   toolchain embeds — revision, commit time, and whether the tree was dirty.
+   The version the toolchain derives from the checkout, a pseudo-version or a
+   local tag, is ignored;
+3. otherwise the module version `go install` built, which the Go checksum
+   database vouches for;
+4. otherwise `devel`.
 
 A build from a checkout therefore reports its revision honestly rather than
 claiming a version it is not:

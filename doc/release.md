@@ -17,13 +17,22 @@ whereas a signed tag is a statement by a person with a key.
 
 - the version injected by the release build through `-ldflags`, when there was
   one;
-- otherwise whatever the Go toolchain stamped into the binary from the VCS: the
-  revision, the commit time, and whether the tree was dirty;
+- otherwise, for a build from a checkout, `devel` and whatever the Go toolchain
+  stamped into the binary from the VCS: the revision, the commit time, and
+  whether the tree was dirty. The toolchain also derives a version from the
+  checkout, a pseudo-version or whichever tag the commit carries; that is
+  ignored, because a local tag is not a signed release;
+- otherwise the module version `go install` built, `v1.4.0` from
+  `go install ...@v1.4.0`, which the Go checksum database vouches for;
 - otherwise `devel`.
 
 ```
 $ clusterctl version
 v1.4.0 (a1b2c3d4e5f6) built 2026-09-22T14:42:30Z go1.26.8 linux/amd64
+$ go build ./cmd/clusterctl && ./clusterctl version
+devel (a1b2c3d4e5f6-dirty) built 2026-09-22T14:42:30Z go1.26.8 linux/amd64
+$ go install github.com/GSI-HPC/clusterctl/cmd/clusterctl@v1.4.0 && clusterctl version
+v1.4.0 go1.26.8 linux/amd64
 ```
 
 ## Cutting a release
@@ -128,9 +137,7 @@ says why the notes live there.
 ## The Go toolchain
 
 `go.mod` says `go 1.26.0`: the oldest Go that compiles the module, which is
-what someone running `go install` needs to know. A local toolchain older than
-that switches to exactly 1.26.0, without the patch releases after it; install
-the newest 1.26 with `mise install` rather than rely on the switch. The workflows build with the
+what someone running `go install` needs to know. The workflows build with the
 newest patch of the 1.26 line instead — `GO_VERSION` in each workflow, resolved
 with `check-latest` — because Go ships security fixes to the standard library
 as patch releases, and a binary is only as patched as the toolchain that linked
