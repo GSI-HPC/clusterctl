@@ -44,7 +44,7 @@ arrives exactly as it was typed. A timeout is enforced on the node with
 timeout(1), because killing the local ssh would leave the remote process
 running.
 
-  clusterctl exec -n @idle -- uptime
+  clusterctl exec -n @slurm:main -- uptime
   clusterctl exec exe[1-10] --dedup -- uname -r
   clusterctl exec -n exe[1-4] --script 'systemctl is-active slurmd || journalctl -u slurmd -n 5'
 

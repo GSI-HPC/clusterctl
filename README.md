@@ -10,10 +10,10 @@ nodes and administers Slurm, and asks before it changes anything.
 ### [Read the manual →](https://gsi-hpc.github.io/clusterctl/)
 
 ```console
-$ clusterctl node select '@idle&@rack:R02'
+$ clusterctl node select '@slurm:main&@rack:R02'
 exe[0004-0009]
 
-$ clusterctl exec -n '@idle' --dedup -- uname -r
+$ clusterctl exec -n '@slurm:main' --dedup -- uname -r
 exe[0001-0009] (9): ok
   5.14.0-570.el9.x86_64
 exe0010 (1): ok

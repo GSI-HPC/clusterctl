@@ -73,7 +73,7 @@ password, to a host and port of the agent's choosing. See
 A change is two calls.
 
 **`plan_change`** resolves the node set **once**. The plan keeps the result,
-because `@idle` may name different nodes by the time the plan is applied than
+because `@slurm:main` may name different nodes by the time the plan is applied than
 when it was read. It then runs `safety.Gate.Preview`, which applies the same
 checks as the prompt (protected hosts, an empty selection) and describes the
 question without asking it. Finally it runs the action against a

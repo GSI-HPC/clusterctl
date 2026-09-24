@@ -159,7 +159,7 @@ are about to do and ask before doing it.`),
 	// An array, not a single string, so that a repeated -n can be told
 	// apart from one given once, and an empty -n from none.
 	flags.StringArrayVarP(&r.nodes, "nodes", "n", nil,
-		"node set to act on, for example 'exe[1-10],@idle' (default: "+config.EnvNodes+")")
+		"node set to act on, for example 'exe[1-10],@rack:R02' (default: "+config.EnvNodes+")")
 	flags.StringVarP(&r.format, "output", "o", "table",
 		"output format: "+strings.Join(output.Formats(), ", "))
 	flags.StringArrayVar(&r.setValues, "set", nil, "override one configuration value as PATH=VALUE, repeatable")
