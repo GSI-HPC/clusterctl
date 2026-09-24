@@ -178,8 +178,11 @@ The profile's `options` come before the options clusterctl sets, which
 sshuttle then keeps. An option that would set one of those itself,
 `--ssh-cmd`, `--remote`, `--pidfile` or `--daemon`, is refused.
 
-A process id file left behind by a crash is not reported as a running
-tunnel — the process is checked too.
+A tunnel is found by its process id file, and a process counts as the tunnel
+only while it runs with that very file: a file left behind by a crash, even
+one whose number now belongs to another of your processes, is not reported as
+a running tunnel, and `tunnel stop` signals nothing and removes the file.
+`tunnel stop` takes only the name of a configured profile.
 
 A subnet that is neither a configured network name nor an address is refused,
 because sshuttle would otherwise route something else entirely.

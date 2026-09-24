@@ -4,12 +4,16 @@
 package tunnel_test
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/tunnel"
@@ -127,40 +131,141 @@ func TestStatusIgnoresAStalePIDFile(t *testing.T) {
 	t.Parallel()
 	m := manager(t)
 
-	path := m.PIDFile("ipmi")
+	// A process id left behind by a crash must not be reported as a running
+	// tunnel.
+	writePIDFile(t, m.PIDFile("ipmi"), 2147483646)
+	if running(m, "ipmi") {
+		t.Error("a stale process id file was reported as running")
+	}
+
+	// Nor may the process that has since been given the same number: this
+	// test's own process answers, but it is not the tunnel.
+	writePIDFile(t, m.PIDFile("ipmi"), os.Getpid())
+	if running(m, "ipmi") {
+		t.Error("a process that is not the tunnel was reported as running")
+	}
+}
+
+func running(m *tunnel.Manager, name string) bool {
+	for _, s := range m.Status() {
+		if s.Name == name {
+			return s.Running
+		}
+	}
+	return false
+}
+
+func writePIDFile(t *testing.T, path string, pid int) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// A process id left behind by a crash must not be reported as a running
-	// tunnel. 0 never names a process that can be signalled.
-	if err := os.WriteFile(path, []byte("2147483646\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range m.Status() {
-		if s.Name == "ipmi" && s.Running {
-			t.Error("a stale process id file was reported as running")
+}
+
+// fakeSshuttle writes a program that behaves as sshuttle --daemon does for
+// the process id file: it refuses to start while the file exists, and
+// leaves a process behind, still carrying its arguments, whose id it writes
+// there.
+func fakeSshuttle(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("the fake relies on /proc to be found")
+	}
+	path := filepath.Join(t.TempDir(), "sshuttle")
+	script := `#!/bin/sh
+for a; do [ "$prev" = --pidfile ] && pidfile=$a; prev=$a; done
+[ -e "$pidfile" ] && { echo "$pidfile: sshuttle is already running" >&2; exit 1; }
+( trap 'exit 0' TERM; while :; do sleep 0.1; done ) </dev/null >/dev/null 2>&1 &
+echo $! >"$pidfile"
+`
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// gone waits for a process to end, or to be a zombie nobody reaps yet.
+func gone(pid int) bool {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+		if err != nil || len(data) == 0 {
+			return true
 		}
+	}
+	return false
+}
+
+// A tunnel whose process id file now names another process is not running,
+// and starting it replaces the file rather than leaving sshuttle to refuse.
+// Stopping it then ends the tunnel and nothing else.
+func TestStartStopFindTheTunnelByItsProcessIDFile(t *testing.T) {
+	t.Parallel()
+	m := manager(t)
+	m.Binary = fakeSshuttle(t)
+
+	other := exec.Command("sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Skipf("cannot start sleep: %v", err)
+	}
+	done := make(chan struct{})
+	go func() { _ = other.Wait(); close(done) }()
+	t.Cleanup(func() { _ = other.Process.Kill(); <-done })
+	writePIDFile(t, m.PIDFile("ipmi"), other.Process.Pid)
+
+	if err := m.Start(context.Background(), "ipmi"); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	data, err := os.ReadFile(m.PIDFile("ipmi"))
+	if err != nil {
+		t.Fatalf("the tunnel wrote no process id file: %v", err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	t.Cleanup(func() {
+		if p, err := os.FindProcess(pid); err == nil {
+			_ = p.Kill()
+		}
+	})
+	if pid == other.Process.Pid || !running(m, "ipmi") {
+		t.Fatalf("the started tunnel, process %d, is not reported as running", pid)
+	}
+	if err := m.Start(context.Background(), "ipmi"); err == nil {
+		t.Error("a tunnel that is running was started again")
 	}
 
-	// The running process of this test does answer.
-	if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	if err := m.Stop(context.Background(), "ipmi"); err != nil {
+		t.Fatalf("Stop failed: %v", err)
 	}
-	found := false
-	for _, s := range m.Status() {
-		if s.Name == "ipmi" {
-			found = s.Running
-		}
+	if !gone(pid) {
+		t.Error("Stop left the tunnel running")
 	}
-	if !found {
-		t.Error("a live process was not reported as running")
+	select {
+	case <-done:
+		t.Error("Start or Stop ended a process that is not the tunnel")
+	default:
+	}
+}
+
+func TestStopRefusesAnUnknownName(t *testing.T) {
+	t.Parallel()
+	m := manager(t)
+
+	outside := filepath.Join(m.StateDir, "victim.pid")
+	writePIDFile(t, outside, os.Getpid())
+	if err := m.Stop(context.Background(), "../victim"); err == nil || !strings.Contains(err.Error(), "unknown tunnel") {
+		t.Errorf("Stop(../victim) = %v, want it refused as an unknown tunnel", err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Errorf("Stop removed a file outside the tunnels directory: %v", err)
 	}
 }
 
 func TestStopReportsATunnelThatIsNotRunning(t *testing.T) {
 	t.Parallel()
 
-	if err := manager(t).Stop("ipmi"); err == nil {
+	if err := manager(t).Stop(context.Background(), "ipmi"); err == nil {
 		t.Error("stopping a tunnel that is not running should be reported")
 	}
 }
