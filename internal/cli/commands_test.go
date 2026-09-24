@@ -34,7 +34,7 @@ func TestConfigUseContextExplainsWhatToChange(t *testing.T) {
 		t.Fatalf("config use-context failed: %v", err)
 	}
 	out := h.out.String()
-	for _, want := range []string{"CLUSTERCTL_CONTEXT=cluster2", "--context cluster2", "currentContext: cluster2"} {
+	for _, want := range []string{"CLUSTERCTL_CONTEXT=cluster2", "--context cluster2", `currentContext: "cluster2"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output is missing %q:\n%s", want, out)
 		}
