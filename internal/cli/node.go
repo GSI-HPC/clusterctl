@@ -379,7 +379,9 @@ func newNodeHardwareCommand(r *root) *cobra.Command {
 Ask each node what hardware it is: system and board vendor, BIOS version and
 date, and the InfiniBand adapters it carries.
 
-One script per node answers everything, so a node is contacted once.`,
+One script per node answers everything, so a node is contacted once. A node
+that fails is listed with its status and the error it failed with, in -o json
+and -o yaml too.`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
