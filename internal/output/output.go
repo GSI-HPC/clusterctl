@@ -17,8 +17,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/goccy/go-yaml"
-
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -158,25 +156,6 @@ func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
-}
-
-func writeYAML(w io.Writer, v any) error {
-	// The value goes through JSON so that the json struct tags, which every
-	// type in this program carries, decide the field names.
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	var generic any
-	if err := json.Unmarshal(raw, &generic); err != nil {
-		return err
-	}
-	out, err := yaml.Marshal(generic)
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(out)
-	return err
 }
 
 func writeNodeset(w io.Writer, r Result) error {
