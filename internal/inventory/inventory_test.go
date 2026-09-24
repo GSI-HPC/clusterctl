@@ -212,3 +212,98 @@ func TestBootPath(t *testing.T) {
 		t.Error("a node with no boot path should be reported")
 	}
 }
+
+// Report 4.3: exe1 and exe0001 are one host, so an entry spelling a host
+// another entry already named with other padding would either make a second,
+// phantom record or silently merge into the first. Which one the author meant
+// cannot be told, so the inventory is refused.
+func TestNamesDifferingOnlyInPaddingAreRejected(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string][]v1alpha1.NodeEntry{
+		"a short refinement of a padded range": {
+			{Nodes: "exe[0001-0010]", Attributes: map[string]string{"class": "exe"}},
+			{Nodes: "exe1", Attributes: map[string]string{"class": "spare"}},
+			{Nodes: "exe2", Address: "10.0.2.2"},
+		},
+		"a padded refinement of a short range": {
+			{Nodes: "exe[1-10]"},
+			{Nodes: "exe0001", Address: "10.0.2.1"},
+		},
+		"a range written again with other padding": {
+			{Nodes: "exe[01-02]"},
+			{Nodes: "exe[1-2]"},
+		},
+		// Host names are not case sensitive, so WLM01 is wlm01 too.
+		"names differing only in case": {
+			{Nodes: "wlm01"},
+			{Nodes: "WLM01", Address: "10.0.1.1"},
+		},
+	}
+	for name, entries := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: entries})
+			if err == nil {
+				t.Fatal("two spellings of one host should be rejected")
+			}
+			if !strings.Contains(err.Error(), "entry 1") || !strings.Contains(err.Error(), "entry 2") {
+				t.Errorf("error = %v, want it to name both entries", err)
+			}
+		})
+	}
+}
+
+// A refinement written the way the host was first written is still a
+// refinement, and hosts whose names differ in more than padding are distinct
+// even when their widths differ.
+func TestMixedWidthsOfDistinctHostsAreAccepted(t *testing.T) {
+	t.Parallel()
+
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe[0001-0010]", Attributes: map[string]string{"class": "exe"}},
+		{Nodes: "exe11", Attributes: map[string]string{"class": "exe"}},
+		{Nodes: "exe0001", Attributes: map[string]string{"class": "spare"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := inv.Len(), 11; got != want {
+		t.Errorf("Len = %d, want %d", got, want)
+	}
+	if got, want := inv.WithAttribute("class", "spare").String(), "exe0001"; got != want {
+		t.Errorf("@spare = %q, want %q", got, want)
+	}
+	if got, want := inv.WithAttribute("class", "exe").String(), "exe[0002-0010,11]"; got != want {
+		t.Errorf("@exe = %q, want %q", got, want)
+	}
+}
+
+// Report 4.6: with exe11 next to exe[0001-0010], selecting any of them must
+// return real nodes, never a nil one for the caller to dereference.
+func TestSelectNeverReturnsANilNode(t *testing.T) {
+	t.Parallel()
+
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe[0001-0010]"},
+		{Nodes: "exe11"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expr := range []string{"exe11", "exe[1-11]", "exe[0001-0011]", "exe[01-11]"} {
+		known, unknown := inv.Select(nodeset.MustParse(expr))
+		for _, n := range known {
+			if n == nil {
+				t.Fatalf("Select(%s) returned a nil node", expr)
+			}
+		}
+		if len(known)+len(unknown) != nodeset.MustParse(expr).Len() {
+			t.Errorf("Select(%s) lost a name: %d known, %v unknown", expr, len(known), unknown)
+		}
+	}
+	known, _ := inv.Select(nodeset.MustParse("exe11"))
+	if len(known) != 1 || known[0].Name != "exe11" {
+		t.Errorf("Select(exe11) = %v, want exe11", known)
+	}
+}

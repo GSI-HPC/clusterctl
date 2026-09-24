@@ -385,7 +385,7 @@ func (a *App) loadInventory(bundle *config.Bundle) (*inventory.Inventory, error)
 		sort.Strings(names)
 	}
 
-	specs := make([]v1alpha1.NodeInventorySpec, 0, len(names))
+	docs := make([]inventory.Document, 0, len(names))
 	for _, name := range names {
 		doc, ok := bundle.Inventories[name]
 		if !ok {
@@ -396,9 +396,12 @@ func (a *App) loadInventory(bundle *config.Bundle) (*inventory.Inventory, error)
 		if err := decode(doc.Data, &inv); err != nil {
 			return nil, fmt.Errorf("%s: %w", doc.File, err)
 		}
-		specs = append(specs, inv.Spec)
+		// An error names the file and line of the entries it is about.
+		docs = append(docs, inventory.Document{Spec: inv.Spec, Where: func(i int) string {
+			return doc.Position(fmt.Sprintf("spec.nodes[%d].nodes", i)).String()
+		}})
 	}
-	return inventory.New(specs...)
+	return inventory.FromDocuments(docs...)
 }
 
 // Path resolves a configured path against the directory of the site
