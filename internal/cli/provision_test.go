@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -533,4 +534,35 @@ func TestReinstallPreviewListsEveryBootPath(t *testing.T) {
 		}
 	}
 	h.untouched(t)
+}
+
+// Section 10.7: provision status showed a processor that failed as power
+// unknown and exited 0.
+func TestProvisionStatusReportsEveryNode(t *testing.T) {
+	h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
+	h.link(t, "10.0.2.1", h.exePath())
+	h.bmcs.down["exe0002"] = true
+	out, err := h.run(t, harnessOptions{}, "-o", "json", "provision", "status", "-n", "exe[0001-0003]")
+	if err == nil {
+		t.Fatal("status succeeded although a processor could not be reached")
+	}
+	if got, want := exitcode.From(err), exitcode.Transport; got != want {
+		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
+	}
+	var states []provisionState
+	if err := json.Unmarshal(out.out.Bytes(), &states); err != nil {
+		t.Fatalf("output is not a list of nodes: %v\n%s", err, out.out)
+	}
+	if len(states) != 3 {
+		t.Fatalf("got %d nodes, want 3: %s", len(states), out.out)
+	}
+	if s := states[0]; s.BootPath != h.exePath() || s.Power != "On" || !s.SSH || s.Error != "" {
+		t.Errorf("exe0001 = %+v", s)
+	}
+	if s := states[1]; s.Power != "" || s.Error == "" {
+		t.Errorf("exe0002 = %+v, want an error and no power state", s)
+	}
+	if s := states[2]; s.BootPath != "none" {
+		t.Errorf("exe0003 = %+v, want no boot path", s)
+	}
 }
