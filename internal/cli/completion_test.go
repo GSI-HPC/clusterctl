@@ -17,6 +17,10 @@ func TestCompletionContactsNothing(t *testing.T) {
 	for _, args := range [][]string{
 		{"__complete", "node", "list", "-n", ""},
 		{"__complete", "node", "select", ""},
+		// Cobra parses these flags twice while completing, which read the
+		// configuration twice and made -n look repeated.
+		{"__complete", "-n", "exe0001", "node", "select", ""},
+		{"__complete", "--set", "fanout.max=2", "node", "select", ""},
 	} {
 		t.Run(strings.Join(args[1:], " "), func(t *testing.T) {
 			rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
