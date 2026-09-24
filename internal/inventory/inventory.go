@@ -258,17 +258,24 @@ func identifierKey(id identifier) string {
 func checkIdentifiers(e v1alpha1.NodeEntry) error {
 	if e.Address != "" {
 		if _, err := ipAddress(e.Address); err != nil {
-			return fmt.Errorf("address %q is not an IP address", e.Address)
+			return fmt.Errorf("address %q is not an IP address: %w", e.Address, err)
 		}
 	}
 	if e.BMCAddress != "" {
-		if _, err := ipAddress(e.BMCAddress); err != nil && hostname.Check(e.BMCAddress) != nil {
-			return fmt.Errorf("bmcAddress %q is neither an IP address nor a host name", e.BMCAddress)
+		if _, ipErr := ipAddress(e.BMCAddress); ipErr != nil {
+			if nameErr := hostname.Check(e.BMCAddress); nameErr != nil {
+				return fmt.Errorf("bmcAddress %q is neither an IP address nor a host name: %w; %w",
+					e.BMCAddress, ipErr, nameErr)
+			}
 		}
 	}
 	for _, mac := range e.MACs {
-		if hw, err := net.ParseMAC(mac); err != nil || len(hw) != 6 {
-			return fmt.Errorf("%q in macs is not a 48-bit MAC address", mac)
+		hw, err := net.ParseMAC(mac)
+		if err == nil && len(hw) != 6 {
+			err = fmt.Errorf("it has %d bytes", len(hw))
+		}
+		if err != nil {
+			return fmt.Errorf("%q in macs is not a 48-bit MAC address: %w", mac, err)
 		}
 	}
 	return nil
