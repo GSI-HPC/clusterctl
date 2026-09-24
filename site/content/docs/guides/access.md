@@ -47,16 +47,28 @@ refreshing at once cannot lose an entry and the diff is readable.
 ## The generated ssh configuration
 
 Every connection is made with a configuration clusterctl writes into
-`$XDG_STATE_HOME/clusterctl/ssh_config`. Read it when something surprises you:
+`$XDG_STATE_HOME/clusterctl`. Each configuration gets a file of its own, named
+by a digest of its content, so two contexts or two runs with different
+settings never share one. `login --dry-run` names the file; read it when
+something surprises you:
 
 ```console
-$ cat ~/.local/state/clusterctl/ssh_config
+$ clusterctl login --dry-run login
+ssh -F ~/.local/state/clusterctl/ssh_config-3f9c2a1b7d4e5f60 -- alice_adm@login.hpc.example.org
+$ cat ~/.local/state/clusterctl/ssh_config-3f9c2a1b7d4e5f60
 ```
 
 It puts what clusterctl needs first — ssh keeps the first value it obtains —
-and includes the system configuration afterwards, so distribution crypto
-policies, GSSAPI and your own `Host` blocks keep applying to everything it does
-not set.
+and includes your own `~/.ssh/config` and the system configuration afterwards,
+so distribution crypto policies, GSSAPI and your own `Host` blocks keep
+applying to everything it does not set. `ssh.include` lists the files; a
+relative entry is read from the site's directory.
+
+Two things no included file can change. Host keys are checked against the
+site's file alone: the global known hosts files, a `KnownHostsCommand` such as
+the one a FreeIPA client installs, and DNS records are all switched off. And no
+connection goes through a multiplexing master unless its role asks for one, so
+a `ControlMaster` in your own configuration does not reach the compute nodes.
 
 Per-role settings come from the `Site` document:
 
@@ -82,6 +94,21 @@ multiplexed connection per node runs into sshd's `MaxStartups` at scale.
 
 Jump hosts are configuration, not a flag. A role that needs one says so, and
 every command then uses it — which is why `clusterctl login -J` is refused.
+`proxyJump` takes a role name, optionally with an account as in `admin@mgmt`,
+or a fully qualified host, and a comma separated list of either. A bare word
+that is not a role is refused as a likely misspelling, and so is a chain that
+comes back to where it started.
+
+A role's account is passed on the command line, not written into its block, so
+a node whose host name is also a role's host still logs in with your own
+account.
+
+`options` takes extra ssh_config keywords. The ones that decide which host keys
+are trusted, `Host`, `Match` and `Include`, and the ones clusterctl already
+writes, are refused with a message naming the setting to use instead: ssh
+would otherwise obey them over the site's trust settings, or silently ignore
+them. `config validate` reports all of this, and every command refuses to run
+until it is fixed.
 
 ## Tunnels
 

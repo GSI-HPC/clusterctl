@@ -27,7 +27,7 @@ the tests: every vector that goes in comes back out unchanged.
 
 ```
 $ clusterctl login --dry-run install -- ls '/srv/*.log'
-ssh -F ~/.local/state/clusterctl/ssh_config -A -- root@installer.hpc.example.org ls '/srv/*.log'
+ssh -F ~/.local/state/clusterctl/ssh_config-3f9c2a1b7d4e5f60 -A -- root@installer.hpc.example.org ls '/srv/*.log'
 ```
 
 A script is sent as one `bash -c '<script>'` argument for the same reason, and
@@ -60,32 +60,79 @@ state directory. Its shape is load-bearing:
 
 # role mgmt: Management network gateway
 Host mgmt-gw.example.org
-  User alice_adm
   ForwardAgent yes
   ControlMaster auto
-  ControlPath  ~/.local/state/clusterctl/cm-%C
+  ControlPath "/home/alice/.local/state/clusterctl/cm-1c709a21-%C"
   ControlPersist 300
 
 Host *
-  UserKnownHostsFile /etc/clusterctl/ssh-known-hosts
+  UserKnownHostsFile "/etc/clusterctl/ssh-known-hosts"
+  GlobalKnownHostsFile /dev/null
+  KnownHostsCommand none
   StrictHostKeyChecking yes
+  VerifyHostKeyDNS no
+  NoHostAuthenticationForLocalhost no
+  UpdateHostKeys no
   CheckHostIP no
   HashKnownHosts no
+  ControlMaster no
+  ControlPath none
   ConnectTimeout 10
   ...
 
-Include /etc/ssh/ssh_config
+Include "/home/alice/.ssh/config"
+
+Include "/etc/ssh/ssh_config"
 ```
 
 **The settings come first and the includes last.** ssh keeps the first value it
 obtains for a keyword, so what clusterctl needs wins and everything it does not
-set still comes from the system and user configuration. Leaving the include out
-would drop RHEL crypto policies, `GSSAPIAuthentication yes` and FreeIPA host
-certificates on the floor.
+set still comes from the administrator's and the system's configuration. With
+`-F`, ssh reads neither of those on its own, so `ssh.include` names both by
+default, in the order ssh itself reads them. Leaving the system file out would
+drop RHEL crypto policies, `GSSAPIAuthentication yes` and FreeIPA host
+certificates on the floor; leaving the user's out would drop their `User`,
+`IdentityFile` and `ProxyJump` for the hosts clusterctl does not configure.
+
+**One file vouches for a host.** ssh accepts a host when any source it reads
+holds a matching key, and an included file can add sources: a FreeIPA or sssd
+client adds a `GlobalKnownHostsFile` and a `KnownHostsCommand`. So every source
+other than the site's file is switched off in `Host *`, before any include can
+switch it on: the global files, the command, DNS records and the key updates
+ssh would otherwise write into the site file. `KnownHostsCommand` is written
+only for an ssh that knows it (8.5 and later); an older one cannot read it from
+an include either. It is not hidden behind `IgnoreUnknown`, because ssh keeps
+the first `IgnoreUnknown` it reads and would then ignore the administrator's
+own. Without `ssh.knownHostsFile`, ssh would fall back to `~/.ssh/known_hosts`,
+so no configuration is generated and no connection is made.
+
+**Multiplexing is off unless a role asks for it.** A connection through an
+existing master checks no host key, so `ControlMaster no` and `ControlPath
+none` come first in `Host *`, and a `ControlMaster` from an included file
+reaches no host. A gateway or a hub is worth a shared connection and its role
+says so; its block comes before `Host *`. The socket name carries a digest of
+the host key file and the strictness, so a master opened by a context that
+does not check host keys strictly, or by another site, is never reused by one
+that does. A master per compute node would run into sshd's `MaxStartups` at
+scale. `ssh.controlPath` replaces the default socket name, for a state
+directory whose path is too long for a socket; it is then the site's to keep
+apart from other sites.
+
+**Each configuration has a file of its own.** ssh reads the file again for
+every connection, and a hop of a `ProxyJump` reads it too, so a file two
+processes shared would let one connect with the trust settings the other had
+just written. The file is named by a digest of its content, `ssh_config-` and
+sixteen hexadecimal digits, and written atomically. Once written it never
+changes: runs with the same configuration share it, a different context,
+`--config` or `--set` gets another, and a long running process such as a tunnel
+can keep using it after the command that wrote it ends.
 
 **A host block matches the real host name**, never an invented alias. An alias
 with a `HostName` would stop the administrator's own blocks for that host from
-matching.
+matching. For the same reason the block carries no `User`: it would also apply
+to a node whose name is that host, so a command meant for the node would log in
+with the role's account. The role's account goes on the command line, and into
+every `ProxyJump` that names the role.
 
 **Trust settings live in the file, not in `-o` options**, because `-o` does not
 reach the hops of a `ProxyJump`.
@@ -96,13 +143,45 @@ lock, which corrupts a file the team keeps in version control.
 
 **`PubkeyAcceptedKeyTypes`, not `PubkeyAcceptedAlgorithms`.** OpenSSH 8.0,
 which RHEL 8 ships, aborts on the newer keyword even inside a `Host` block that
-does not match. The old spelling is understood everywhere.
+does not match. The old spelling is understood everywhere. `ssh.legacyKeyTypes`
+writes it into `Host *`, so it reaches every host; a role's `legacyAlgorithms`
+writes it into that role's block.
 
-**Multiplexing is opt-in per role.** A gateway or a hub is worth a shared
-connection; a master per compute node runs into sshd's `MaxStartups` at scale.
+**Nothing written into the file can become a directive.** Every value is
+checked when the configuration is loaded, so `config validate` reports a
+problem and every command refuses to run with it:
+
+- no value holds a control character, and a description that spans lines
+  becomes one comment line per line;
+- a role's `host` is a host name or an address, never a pattern;
+- a user name is one word and does not start with a dash;
+- an option key is one keyword. `Host`, `Match`, `Include` and the trust
+  keywords above are refused in `options`, and so is a keyword the generated
+  block already sets, which ssh would silently ignore. A role's `options` may
+  not set what the role has a field for, such as `User` or `ProxyJump`;
+- paths are absolute and written in double quotes, so a space in them, as in
+  `~/Library/Application Support`, does not split them; a path holding a
+  double quote or a backslash is refused;
+- each element of a `proxyJump` list is a role, optionally with an account as
+  in `admin@mgmt`, or a fully qualified host or an address, optionally with a
+  port. A bare word that is not a role is refused as a likely misspelling. A
+  chain that comes back to where it started, through role names or through
+  their hosts, is refused: ssh would start hops without end;
+- roles that connect to the same host have one block between them, so they
+  must agree on everything that goes into it.
+
+A misspelt keyword is found only by ssh itself, which then refuses every
+connection. `transport.Client.CheckConfig` has ssh read the file and its
+includes with `ssh -G` and reports everything ssh said.
 
 An include for a file that does not exist is left out, so ssh never fails over
-a path a site does not use.
+a path a site does not use. An include with a pattern is passed to ssh as it
+is. A relative include is resolved against the Site document's directory, like
+every other configured path.
+
+Durations are written in whole seconds, rounded up, because ssh reads
+`ConnectTimeout 0` as no timeout at all. `controlPersist: 0s` writes
+`ControlPersist no`: the master ends with the connection that opened it.
 
 ## Timeouts
 
