@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -27,8 +28,9 @@ const maxCommandOutput = 64 << 10
 
 // pinnedFlags are the global options the server sets itself. An agent that
 // could pass them could point a command at another configuration or cluster,
-// or answer a confirmation.
-var pinnedFlags = []string{"config", "context", "set", "yes", "force"}
+// answer a confirmation, or open more connections at once than fanout.max
+// allows.
+var pinnedFlags = []string{"config", "context", "set", "yes", "force", "fanout"}
 
 func (s *Server) addCommandTool() {
 	mcp.AddTool(s.sdk, &mcp.Tool{
@@ -218,6 +220,19 @@ func (s *Server) resolveReadCommand(ctx context.Context, args []string) (string,
 		if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
 			return "", exitcode.Errorf(exitcode.Usage,
 				"--%s is set by the server and cannot be given to a command", name)
+		}
+	}
+	// A timeout may shorten the wait for a host, not lengthen it: an agent
+	// that could would hold connections open for as long as it liked.
+	if f := cmd.Flags().Lookup("timeout"); f != nil && f.Changed && f.Value.Type() == "duration" {
+		given, err := time.ParseDuration(f.Value.String())
+		if err != nil {
+			return "", exitcode.Wrap(exitcode.Usage, err)
+		}
+		limit, err := time.ParseDuration(f.DefValue)
+		if err != nil || limit <= 0 || given > limit {
+			return "", exitcode.Errorf(exitcode.Usage,
+				"--timeout may shorten the wait for a host, not lengthen it beyond %s", f.DefValue)
 		}
 	}
 	return path, nil
