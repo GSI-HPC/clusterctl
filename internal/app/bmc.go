@@ -18,17 +18,20 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 )
 
-// Credentials returns the credential resolver of the site.
+// Credentials returns the credential resolver of the site. It is safe for
+// concurrent use, which the BMC commands need: they build one client per
+// node in parallel.
 func (a *App) Credentials() *credentials.Resolver {
-	if a.credentials == nil {
+	a.credentialsOnce.Do(func() {
 		a.credentials = &credentials.Resolver{
 			Credentials: a.Spec.Credentials,
 			BaseDir:     a.Resolved.BaseDir,
+			Env:         a.opts.Env,
 			Identities:  a.Spec.Workstation.Identities,
 			Prompt:      a.promptPassword,
 			Secret:      a.SecretValue,
 		}
-	}
+	})
 	return a.credentials
 }
 

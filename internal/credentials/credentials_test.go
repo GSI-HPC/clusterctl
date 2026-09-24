@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/credentials"
@@ -221,5 +223,47 @@ func TestFromSecretRef(t *testing.T) {
 	r.Credentials["late"] = r.Credentials["bmc"]
 	if _, err := r.Get(context.Background(), "late"); err == nil {
 		t.Error("a secretRef without a Secret reader should be reported")
+	}
+}
+
+// Get promises one read per process, and that has to hold when the BMC
+// commands fan out: eight concurrent prompts saved and restored each other's
+// terminal modes, and a helper ran eight times.
+func TestConcurrentLookupsReadOnce(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu    sync.Mutex
+		asked int
+	)
+	r := &credentials.Resolver{
+		Credentials: map[string]v1alpha1.Credential{
+			"bmc": {Username: "admin", Password: v1alpha1.PasswordSource{Prompt: true}},
+		},
+		Env: func(string) string { return "" },
+		Prompt: func(string) (string, error) {
+			mu.Lock()
+			asked++
+			mu.Unlock()
+			// Long enough for every other lookup to arrive meanwhile.
+			time.Sleep(20 * time.Millisecond)
+			return "typed", nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cred, err := r.Get(context.Background(), "bmc")
+			if err != nil || cred.Password() != "typed" {
+				t.Errorf("Get = %v, %v", cred, err)
+			}
+		}()
+	}
+	wg.Wait()
+	if asked != 1 {
+		t.Errorf("prompted %d times for 8 concurrent lookups, want once", asked)
 	}
 }
