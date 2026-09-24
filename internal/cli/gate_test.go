@@ -319,3 +319,36 @@ func TestAccountingChangeIsNotANodeTheInventoryLacks(t *testing.T) {
 		t.Errorf("sent %v, want the sacctmgr call", h.recorder.Commands())
 	}
 }
+
+// A role host or user that ssh would read as something else is refused when
+// connecting; the schema says so before then, so that config validate
+// reports it.
+func TestHostRoleMustBeAHostAndAUserName(t *testing.T) {
+	tests := []struct {
+		from, to string
+		valid    bool
+	}{
+		{"host: login.hpc.example.org", "host: login.hpc.example.org.", true},
+		{"host: login.hpc.example.org", "host: 10.0.0.5", true},
+		{"host: login.hpc.example.org", "host: \"fd00::5\"", true},
+		{"host: login.hpc.example.org", "host: root@login.hpc.example.org", false},
+		{"host: login.hpc.example.org", "host: login.hpc.example.org:2222", false},
+		{"host: login.hpc.example.org", "host: -oProxyCommand=sh", false},
+		{"host: login.hpc.example.org", "host: login_1.example.org", false},
+		{"user: root", "user: alice_adm", true},
+		{"user: root", "user: -oProxyCommand=sh", false},
+		{"user: root", "user: alice@EXAMPLE.ORG", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.to, func(t *testing.T) {
+			dir := exampleCopy(t, tc.from, tc.to)
+			_, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "validate")
+			if tc.valid && err != nil {
+				t.Errorf("config validate refused %s: %v", tc.to, err)
+			}
+			if !tc.valid && err == nil {
+				t.Errorf("config validate accepted %s", tc.to)
+			}
+		})
+	}
+}
