@@ -38,7 +38,12 @@ is read from:
 When `--config` or `CLUSTERCTL_CONFIG` names several places, the command
 refuses and asks for `DIR`: the places are read together, most general first,
 and a complete configuration written into one of them changes what the others
-resolve to. Directories that are missing, parents included, are created.
+resolve to. The default search path is several places too. The command
+refuses in the same way when it would write into the user's configuration
+directory and another directory of the search path, `/etc/clusterctl`, holds
+configuration: the scaffold would replace a team's documents of the same name
+or move the current context to its own site, and with either the team's
+protected hosts would stop applying. Directories that are missing, parents included, are created.
 
 **Into what.** A directory that does not exist yet or is empty. Any entry, a
 hidden file or a subdirectory included, makes the command refuse before it
@@ -63,7 +68,8 @@ the real run.
   holds `.git`, and often a README. Write the scaffold into an empty
   subdirectory of it, or run `config init` first and `git init` afterwards.
 - Someone whose `CLUSTERCTL_CONFIG` layers several directories names the one
-  to write to on every `config init`.
+  to write to on every `config init`, and so does someone on a host whose
+  `/etc/clusterctl` holds a configuration.
 - On macOS the user's configuration directory is
   `~/Library/Application Support/clusterctl`, because that is what Go's
   `os.UserConfigDir` returns and what the search path already reads.

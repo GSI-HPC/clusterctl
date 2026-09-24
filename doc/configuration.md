@@ -13,6 +13,15 @@ fixed order and remembers the line every value was written on.
 Each document carries an `apiVersion` and a `kind`, so several of them may
 share a file and a file may be read in any order.
 
+A document other than a `Config` is defined once. A second `Site`, `Cluster`,
+`NodeInventory`, `Workstation` or `Secret` of the same name is an error that
+names both, rather than the later one replacing the earlier: the files of a
+directory are read in name order, so a stale `site_old.yaml` would otherwise
+take the place of `site.yaml`, protected hosts and all. Contexts are the
+exception: a context of a later `Config` document replaces the one of the same
+name, so that a personal file can adjust a shared one. One document that names
+a context twice is an error.
+
 | Kind | Scope | Replaces |
 | --- | --- | --- |
 | `Config` | One administrator | `source_me.sh` and the shell's environment |
@@ -46,7 +55,11 @@ same entries.
 empty `NodeInventory`, one document to a file. Without `DIR` it writes where
 configuration is read from: the directory `--config` or `CLUSTERCTL_CONFIG`
 names, or else the user's configuration directory. When either names several
-places it asks for `DIR`. Directories that are missing are created. Flags fill in the names, the
+places it asks for `DIR`. So it does when it would write into the user's
+configuration directory and another directory of the search path,
+`/etc/clusterctl`, holds configuration already: the two are read together, and
+a second complete configuration would replace the documents of the same name
+or move the current context, and with either the protected hosts of the first. Directories that are missing are created. Flags fill in the names, the
 domain, the login node and the remote account; the comments in each file say
 what is left to fill in.
 
@@ -54,8 +67,13 @@ what is left to fill in.
   resolved in memory the way files read from disk are, so a value that would
   not resolve is refused before anything is written. A name with a space in
   it or a domain with a trailing dot is refused as well, although the schema
-  would take it. A name that YAML would read as something else, a cluster
-  called `0600` or a site called `yes`, is quoted.
+  would take it. Every name is written double quoted, so that a cluster
+  called `1e3` or a site called `08` or `yes` reads back as the same string
+  with every YAML reader.
+- **The cluster is pinned to its site's nodes.** Its `Cluster` lists the
+  site's `NodeInventory` under `inventories`. A cluster that lists none takes
+  every inventory that is loaded, those of another site read with it
+  included.
 - **Only into an empty directory.** A directory that holds anything, a hidden
   file or a `.git` directory included, is refused, with `--dry-run` as well.
   To start a site repository, write into an empty subdirectory of it, or run
@@ -97,7 +115,10 @@ clusterctl: site.yaml is not valid:
 
 ## Provenance
 
-Every merged value keeps the layer, file, line and column it came from.
+Every merged value keeps the layer, file, line and column it came from. A
+value of a context, its `user` and its overrides, keeps the line of the
+`Config` document that defined it; one from the environment names the
+variable, and one from the command line names `--set` or `--fanout`.
 
 ```
 $ clusterctl config explain fanout.max
@@ -134,6 +155,30 @@ An override table is applied by path and is deliberately **not** merged into
 the tree as data as well, so `config view --show-sources` shows each override
 once, under the path it affects.
 
+The tables are typed as plain maps, so the schema of the kind they are written
+in cannot check them. Every override is checked instead against the schema of
+the merged configuration, in every context and not only the current one, and
+so is every `--set` and environment variable:
+
+- **Paths are matched with their case.** `safety.protectedhosts` is refused
+  with a suggestion, and is not taken for `safety.protectedHosts` by the case
+  insensitive JSON decoder.
+- **Values have the type the path expects.** `safety: null` or
+  `safety: [wlm01]` is refused rather than erasing the section.
+- **A mapping merges key by key**, as it does in a document. `safety:
+  {confirmAbove: 4}` and `safety.confirmAbove: 4` mean the same, and neither
+  touches `safety.protectedHosts`.
+
+```
+$ clusterctl config validate
+clusterctl: config.yaml is not valid:
+  config.yaml:21:7: safety.protectedhosts: unknown field "protectedhosts"; did you mean "protectedHosts"?
+```
+
+A key with a dot in it, such as a static group `rack.R01`, stays one key when
+the layers merge. An override cannot address it by path, because the dot
+separates the keys of a path.
+
 ## Numbers written with a leading zero
 
 `mode: 0600` is read as the **string** `"0600"`.
@@ -146,7 +191,10 @@ the node. Fields that take a mode are declared as strings for the same reason.
 
 A path in a document is resolved against the directory of the `Site` document,
 so a site can keep its configuration in version control and check it out
-anywhere. A leading `~` is expanded. Absolute paths are left alone.
+anywhere. A path given in the environment, `CLUSTERCTL_KNOWN_HOSTS`, or with
+`--set` is resolved against the working directory instead, the way the shell
+it was typed in reads it. A leading `~` is expanded. Absolute paths are left
+alone.
 
 ## Environment variables
 
