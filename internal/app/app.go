@@ -556,9 +556,10 @@ func (a *App) Timeout() v1alpha1.Duration { return a.Spec.Fanout.CommandTimeout 
 // DryRun reports whether nothing may actually be changed.
 func (a *App) DryRun() bool { return a.opts.DryRun }
 
-// Print renders a result in the selected format.
+// Print renders a result in the selected format. A jq program stops with the
+// command's context, when the command is interrupted or cancelled.
 func (a *App) Print(r output.Result) error {
-	return a.Format.Write(a.Out, r)
+	return a.Format.WriteContext(a.Context(), a.Out, r)
 }
 
 // Printf writes a message to the error stream, which is where progress and

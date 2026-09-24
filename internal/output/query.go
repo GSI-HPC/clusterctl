@@ -4,32 +4,54 @@
 package output
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/itchyny/gojq"
 )
 
-// writeJQ filters the result with a jq program. The jq language is embedded,
-// so no jq binary has to be installed.
-func writeJQ(w io.Writer, program string, v any) error {
+// compileJQ parses and compiles a jq program.
+//
+// The program cannot read the environment: -o is chosen by whoever runs the
+// command, which through the MCP server is an agent, and $ENV and env would
+// hand it every variable of the process.
+func compileJQ(program string) (code *gojq.Code, err error) {
+	defer recoverQuery("jq", &err)
 	query, err := gojq.Parse(program)
 	if err != nil {
-		return fmt.Errorf("invalid jq expression %q: %w", program, err)
+		return nil, fmt.Errorf("invalid jq expression %q: %w", program, err)
 	}
-	code, err := gojq.Compile(query)
+	code, err = gojq.Compile(query, gojq.WithEnvironLoader(func() []string { return nil }))
 	if err != nil {
-		return fmt.Errorf("invalid jq expression %q: %w", program, err)
+		return nil, fmt.Errorf("invalid jq expression %q: %w", program, err)
+	}
+	return code, nil
+}
+
+// writeJQ filters the result with a jq program. The jq language is embedded,
+// so no jq binary has to be installed. The program stops when ctx ends, since
+// nothing else bounds one such as repeat(1).
+func writeJQ(ctx context.Context, w io.Writer, program string, v any) (err error) {
+	code, err := compileJQ(program)
+	if err != nil {
+		return err
 	}
 	input, err := toGeneric(v)
 	if err != nil {
 		return err
 	}
-	iter := code.Run(input)
+	defer recoverQuery("jq", &err)
+	iter := code.RunWithContext(ctx, input)
 	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("jq: %w", err)
+		}
 		out, ok := iter.Next()
 		if !ok {
 			return nil
@@ -43,41 +65,84 @@ func writeJQ(w io.Writer, program string, v any) error {
 	}
 }
 
-// writeJSONPath filters the result with a JSONPath template.
+// recoverQuery turns a panic in the query code into an error, so that a bad
+// expression fails the one command rather than the process, which may be
+// the MCP server.
+func recoverQuery(what string, err *error) {
+	if p := recover(); p != nil {
+		*err = fmt.Errorf("%s: the expression could not be evaluated: %v", what, p)
+	}
+}
+
+// templatePart is a piece of a JSONPath template: literal text, or a path
+// whose values are printed in its place.
+type templatePart struct {
+	literal string
+	path    []pathStep
+	isPath  bool
+}
+
+// compileJSONPath parses a JSONPath template.
 //
 // The supported grammar is the part of the kubectl syntax that a command line
 // actually uses: text outside braces is literal, and inside braces a path is
 // written as $.a.b, .a.b, ['a']["b"], [0], [*] or [1:3]. Filters, recursive
-// descent and functions are deliberately left out; use -o jq for those.
-func writeJSONPath(w io.Writer, template string, v any) error {
-	input, err := toGeneric(v)
-	if err != nil {
-		return err
-	}
-	var out strings.Builder
+// descent, functions, range and quoted literals are deliberately left out and
+// rejected, rather than read as field names that match nothing; use -o jq
+// for those.
+func compileJSONPath(template string) (parts []templatePart, err error) {
+	defer recoverQuery("jsonpath", &err)
 	rest := template
 	for {
 		open := strings.IndexByte(rest, '{')
 		if open < 0 {
-			out.WriteString(rest)
-			break
+			if rest != "" {
+				parts = append(parts, templatePart{literal: rest})
+			}
+			return parts, nil
 		}
-		out.WriteString(rest[:open])
+		if open > 0 {
+			parts = append(parts, templatePart{literal: rest[:open]})
+		}
 		close := strings.IndexByte(rest[open:], '}')
 		if close < 0 {
-			return fmt.Errorf("invalid jsonpath %q: a { is not closed", template)
+			return nil, fmt.Errorf("invalid jsonpath %q: a { is not closed", template)
 		}
-		expr := rest[open+1 : open+close]
-		values, err := evalPath(expr, input)
+		steps, err := parsePath(rest[open+1 : open+close])
+		if err != nil {
+			return nil, fmt.Errorf("invalid jsonpath %q: %w", template, err)
+		}
+		parts = append(parts, templatePart{path: steps, isPath: true})
+		rest = rest[open+close+1:]
+	}
+}
+
+// writeJSONPath filters the result with a JSONPath template.
+func writeJSONPath(w io.Writer, template string, v any) (err error) {
+	parts, err := compileJSONPath(template)
+	if err != nil {
+		return err
+	}
+	input, err := toGeneric(v)
+	if err != nil {
+		return err
+	}
+	defer recoverQuery("jsonpath", &err)
+	var out strings.Builder
+	for _, part := range parts {
+		if !part.isPath {
+			out.WriteString(part.literal)
+			continue
+		}
+		values, err := evalPath(part.path, input)
 		if err != nil {
 			return fmt.Errorf("invalid jsonpath %q: %w", template, err)
 		}
-		parts := make([]string, len(values))
+		texts := make([]string, len(values))
 		for i, value := range values {
-			parts[i] = scalarString(value)
+			texts[i] = scalarString(value)
 		}
-		out.WriteString(strings.Join(parts, " "))
-		rest = rest[open+close+1:]
+		out.WriteString(strings.Join(texts, " "))
 	}
 	text := out.String()
 	if !strings.HasSuffix(text, "\n") {
@@ -87,12 +152,8 @@ func writeJSONPath(w io.Writer, template string, v any) error {
 	return err
 }
 
-// evalPath walks a JSONPath expression over a generic value.
-func evalPath(expr string, root any) ([]any, error) {
-	steps, err := parsePath(expr)
-	if err != nil {
-		return nil, err
-	}
+// evalPath walks a parsed JSONPath expression over a generic value.
+func evalPath(steps []pathStep, root any) ([]any, error) {
 	current := []any{root}
 	for _, step := range steps {
 		var next []any
@@ -123,6 +184,9 @@ type pathStep struct {
 
 func parsePath(expr string) ([]pathStep, error) {
 	s := strings.TrimSpace(expr)
+	if err := unsupported(s); err != nil {
+		return nil, err
+	}
 	s = strings.TrimPrefix(s, "$")
 	var steps []pathStep
 	for s != "" {
@@ -139,15 +203,12 @@ func parsePath(expr string) ([]pathStep, error) {
 			if strings.HasPrefix(s, "[") {
 				continue
 			}
-			end := strings.IndexAny(s, ".[")
-			if end < 0 {
-				end = len(s)
+			step, rest, err := parseField(s)
+			if err != nil {
+				return nil, err
 			}
-			if end == 0 {
-				return nil, fmt.Errorf("empty field name")
-			}
-			steps = append(steps, pathStep{field: s[:end]})
-			s = s[end:]
+			steps = append(steps, step)
+			s = rest
 		case strings.HasPrefix(s, "["):
 			end := strings.IndexByte(s, ']')
 			if end < 0 {
@@ -160,15 +221,51 @@ func parsePath(expr string) ([]pathStep, error) {
 			steps = append(steps, step)
 			s = s[end+1:]
 		default:
-			end := strings.IndexAny(s, ".[")
-			if end < 0 {
-				end = len(s)
+			step, rest, err := parseField(s)
+			if err != nil {
+				return nil, err
 			}
-			steps = append(steps, pathStep{field: s[:end]})
-			s = s[end:]
+			steps = append(steps, step)
+			s = rest
 		}
 	}
 	return steps, nil
+}
+
+// unsupported names the kubectl constructs this grammar leaves out and that
+// would otherwise parse as field names, which match nothing and print an
+// empty line, as if nothing had matched. Recursive descent, filters, unions
+// and functions fail the grammar on their own.
+func unsupported(expr string) error {
+	word, _, _ := strings.Cut(expr, " ")
+	switch {
+	case word == "range" || word == "end":
+		return fmt.Errorf("{%s} is not supported; use -o jq, as -o jq='.[] | .name'", expr)
+	case strings.HasPrefix(expr, `"`) || strings.HasPrefix(expr, "'"):
+		return fmt.Errorf("the quoted literal {%s} is not supported; write the text outside the braces, or use -o jq", expr)
+	default:
+		return nil
+	}
+}
+
+// parseField reads a field name written after a dot, up to the next dot or
+// bracket. A name that holds anything but letters, digits, _ and - has to be
+// written in brackets and quotes, as ['@odata.id'].
+func parseField(s string) (pathStep, string, error) {
+	end := strings.IndexAny(s, ".[")
+	if end < 0 {
+		end = len(s)
+	}
+	name := s[:end]
+	if name == "" {
+		return pathStep{}, "", fmt.Errorf("empty field name; recursive descent is not supported, use -o jq")
+	}
+	for _, r := range name {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' {
+			return pathStep{}, "", fmt.Errorf("invalid field name %q; quote it in brackets, as ['%s']", name, name)
+		}
+	}
+	return pathStep{field: name}, s[end:], nil
 }
 
 func parseBracket(inner string) (pathStep, error) {
@@ -176,8 +273,15 @@ func parseBracket(inner string) (pathStep, error) {
 	switch {
 	case inner == "*":
 		return pathStep{wildcard: true}, nil
-	case strings.HasPrefix(inner, "'") && strings.HasSuffix(inner, "'"),
-		strings.HasPrefix(inner, `"`) && strings.HasSuffix(inner, `"`):
+	case strings.HasPrefix(inner, "'") || strings.HasPrefix(inner, `"`):
+		// A lone quote is both the first and the last character, so the
+		// length is checked before the quotes are stripped.
+		if len(inner) < 2 || inner[len(inner)-1] != inner[0] {
+			return pathStep{}, fmt.Errorf("a quote in %q is not closed", "["+inner+"]")
+		}
+		if len(inner) == 2 {
+			return pathStep{}, fmt.Errorf("empty field name")
+		}
 		return pathStep{field: inner[1 : len(inner)-1]}, nil
 	case strings.Contains(inner, ":"):
 		lo, hi, _ := strings.Cut(inner, ":")
@@ -200,7 +304,7 @@ func parseBracket(inner string) (pathStep, error) {
 	default:
 		n, err := strconv.Atoi(inner)
 		if err != nil {
-			return pathStep{}, fmt.Errorf("invalid index %q", inner)
+			return pathStep{}, fmt.Errorf("invalid index %q; filters and unions are not supported, use -o jq", inner)
 		}
 		return pathStep{index: &n}, nil
 	}
@@ -279,8 +383,12 @@ func toGeneric(v any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Numbers are kept as their JSON text: decoded into a float64, a PID
+	// above 2^53 or an exit code of 0 would not print as it was.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := dec.Decode(&out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -308,6 +416,8 @@ func scalarString(v any) string {
 		return ""
 	case string:
 		return t
+	case json.Number:
+		return t.String()
 	case float64:
 		return strconv.FormatFloat(t, 'f', -1, 64)
 	case bool:

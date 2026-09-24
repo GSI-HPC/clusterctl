@@ -10,6 +10,7 @@
 package output
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,7 +49,9 @@ func Formats() []string {
 		FormatNodeset, FormatName, FormatJSONPath + "=", FormatJQ + "="}
 }
 
-// ParseFormat reads a -o value.
+// ParseFormat reads a -o value. A jsonpath or jq expression is compiled here,
+// so that a mistake in it is reported before a command has acted rather than
+// when its result is printed.
 func ParseFormat(s string) (Format, error) {
 	if s == "" {
 		return Format{Kind: FormatTable}, nil
@@ -63,6 +66,15 @@ func ParseFormat(s string) (Format, error) {
 	case FormatJSONPath, FormatJQ:
 		if !hasArg || arg == "" {
 			return Format{}, fmt.Errorf("the %s output format needs an expression, as -o %s='...'", kind, kind)
+		}
+		var err error
+		if kind == FormatJQ {
+			_, err = compileJQ(arg)
+		} else {
+			_, err = compileJSONPath(arg)
+		}
+		if err != nil {
+			return Format{}, err
 		}
 		return Format{Kind: kind, Arg: arg}, nil
 	default:
@@ -103,6 +115,12 @@ type Result struct {
 
 // Write renders a result.
 func (f Format) Write(w io.Writer, r Result) error {
+	return f.WriteContext(context.Background(), w, r)
+}
+
+// WriteContext renders a result, giving up when ctx ends. Only a jq program
+// can run for long enough to need it.
+func (f Format) WriteContext(ctx context.Context, w io.Writer, r Result) error {
 	switch f.Kind {
 	case FormatTable:
 		return writeTable(w, r.Table, false)
@@ -119,7 +137,7 @@ func (f Format) Write(w io.Writer, r Result) error {
 	case FormatJSONPath:
 		return writeJSONPath(w, f.Arg, r.object())
 	case FormatJQ:
-		return writeJQ(w, f.Arg, r.object())
+		return writeJQ(ctx, w, f.Arg, r.object())
 	default:
 		return fmt.Errorf("unknown output format %q", f.Kind)
 	}
