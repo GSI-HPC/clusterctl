@@ -8,8 +8,10 @@ package fileutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,14 +19,46 @@ import (
 	"github.com/gofrs/flock"
 )
 
+// ErrUntrusted is matched by errors.Is for every file or directory refused
+// because someone other than this user or root could have written it.
+var ErrUntrusted = errors.New("untrusted")
+
+// maxLinks bounds how many symbolic links a write follows, the way the
+// kernel bounds a path lookup.
+const maxLinks = 40
+
 // WriteAtomic writes data to path through a temporary file in the same
 // directory, so a reader never sees a half written file and a failure leaves
 // the previous content in place.
+//
+// A file that exists already keeps its mode and group, and its owner when
+// root writes it, so that a file several administrators share stays
+// writable by all of them; perm applies only to a new file. Write
+// permission for anyone is never kept. A symbolic link is written through
+// rather than replaced, as long as this user or root made it.
 func WriteAtomic(path string, data []byte, perm os.FileMode) error {
+	path, err := resolve(path)
+	if err != nil {
+		return err
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	uid, gid := -1, -1
+	switch info, err := os.Stat(path); {
+	case err == nil:
+		perm = info.Mode().Perm() &^ 0o002
+		if u, g, ok := owner(info); ok {
+			gid = g
+			if os.Geteuid() == 0 {
+				uid = u
+			}
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return err
+	}
+
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
 	if err != nil {
 		return err
@@ -37,6 +71,12 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 		_ = os.Remove(name)
 	}()
 
+	if gid >= 0 {
+		if err := keepOwner(tmp, uid, gid); err != nil {
+			return fmt.Errorf("keeping the owner of %s: %w", path, err)
+		}
+	}
+	// After the change of owner, which may clear the setgid bit.
 	if err := tmp.Chmod(perm); err != nil {
 		return err
 	}
@@ -50,7 +90,69 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(name, path)
+	if err := os.Rename(name, path); err != nil {
+		return err
+	}
+	// And the rename itself only once the directory has.
+	return syncDir(dir)
+}
+
+// keepOwner gives a new file the group, and the owner when uid is not -1, of
+// the file it is going to replace, unless it has them already.
+func keepOwner(f *os.File, uid, gid int) error {
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	u, g, ok := owner(info)
+	if !ok || (g == gid && (uid < 0 || u == uid)) {
+		return nil
+	}
+	return f.Chown(uid, gid)
+}
+
+// syncDir makes a change to the entries of a directory durable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// resolve follows the symbolic links path is, so that a write through a link
+// changes the file it points at. A link that neither this user nor root owns
+// is refused: whoever put it there would otherwise choose which file is
+// written.
+func resolve(path string) (string, error) {
+	for range maxLinks {
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			return path, nil
+		}
+		if err := trustedOwner(path, info); err != nil {
+			return "", err
+		}
+		link, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(filepath.Dir(path), link)
+		}
+		path = link
+	}
+	return "", fmt.Errorf("%s: too many levels of symbolic links", path)
 }
 
 // WriteNew writes data to a file that does not exist yet, and never to one
@@ -84,6 +186,12 @@ func WriteNew(path string, data []byte, perm os.FileMode) (err error) {
 // The known_hosts file is shared and versioned, and ssh appends to it without
 // locking, so every write clusterctl makes to it goes through here.
 func Update(ctx context.Context, path string, perm os.FileMode, change func([]byte) ([]byte, error)) error {
+	// The lock belongs to the file a link points at, so that writers
+	// going through the link and around it take the same one.
+	path, err := resolve(path)
+	if err != nil {
+		return err
+	}
 	unlock, err := Lock(ctx, path)
 	if err != nil {
 		return err
@@ -104,12 +212,19 @@ func Update(ctx context.Context, path string, perm os.FileMode, change func([]by
 // Lock takes an exclusive lock for a path and returns the function that
 // releases it. The lock lives in a sibling file, so that the locked file can
 // still be replaced atomically.
+//
+// The lock file is readable, which is all taking the lock needs, by whoever
+// can write the file: its group when the file, or while there is none yet
+// its directory, is writable by the group. A lock only its first user could
+// open would lock every other administrator out of a shared file for good.
 func Lock(ctx context.Context, path string) (func(), error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	lock := flock.New(filepath.Join(dir, "."+filepath.Base(path)+".lock"))
+	perm, gid := lockMode(path)
+	name := filepath.Join(dir, "."+filepath.Base(path)+".lock")
+	lock := flock.New(name, flock.SetPermissions(perm))
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -120,13 +235,66 @@ func Lock(ctx context.Context, path string) (func(), error) {
 	if !ok {
 		return nil, fmt.Errorf("another clusterctl is holding the lock on %s", path)
 	}
+	shareLock(name, perm, gid)
 	return func() { _ = lock.Unlock() }, nil
+}
+
+// lockMode returns the mode and group a lock for path is created with: the
+// group's read and write permission is that of the file, or of its directory
+// when there is no file yet.
+func lockMode(path string) (os.FileMode, int) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if info, err = os.Stat(filepath.Dir(path)); err != nil {
+			return 0o600, -1
+		}
+	}
+	gid := -1
+	if _, g, ok := owner(info); ok {
+		gid = g
+	}
+	perm := os.FileMode(0o600)
+	if info.Mode().Perm()&0o020 != 0 {
+		perm |= 0o060
+	}
+	return perm, gid
+}
+
+// shareLock gives a lock file this user created the mode and group it was
+// meant to have, which the umask and a directory without the setgid bit
+// take away. It is best effort: the lock is held either way, and only
+// another administrator's next run can be stopped by it.
+func shareLock(name string, perm os.FileMode, gid int) {
+	info, err := os.Stat(name)
+	if err != nil {
+		return
+	}
+	u, g, ok := owner(info)
+	if !ok || u != os.Geteuid() {
+		return
+	}
+	if gid >= 0 && g != gid {
+		_ = os.Chown(name, -1, gid)
+	}
+	if info.Mode().Perm() != perm {
+		_ = os.Chmod(name, perm)
+	}
 }
 
 // EnsureDir creates a directory that only its owner can read, for state that
 // holds host keys, control sockets and certificate pins.
 func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0o700)
+}
+
+// trustedOwner refuses a file neither this user nor root owns.
+func trustedOwner(path string, info fs.FileInfo) error {
+	uid, _, ok := owner(info)
+	if !ok || uid == 0 || uid == os.Geteuid() {
+		return nil
+	}
+	return fmt.Errorf("%s is owned by uid %d, neither this user (uid %d) nor root: %w",
+		path, uid, os.Geteuid(), ErrUntrusted)
 }
 
 // CopyTo copies a reader into a new file with the given permission.
