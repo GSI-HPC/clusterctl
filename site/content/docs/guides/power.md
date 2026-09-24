@@ -239,4 +239,7 @@ exe0004.mgmt.hpc.example.org  no answer
 9 of 10 answered
 ```
 
-One sweep from the gateway, not one connection per processor.
+One sweep from the gateway, not one connection per processor. A processor that
+does not answer exits `1`; a sweep that could not run, because `fping` is
+missing or the gateway cannot be reached, exits `3` rather than reporting every
+processor as down.
