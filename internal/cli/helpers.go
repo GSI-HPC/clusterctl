@@ -175,6 +175,35 @@ func lastNonEmpty(s string) string {
 	return ""
 }
 
+// completionApp builds the command context for a completion.
+//
+// Cobra parses the flags of the command line being completed twice, and a
+// flag that collects its values, such as --config, -n or --set, then holds
+// each of them twice. The configuration would be read twice, which is
+// refused, and -n would look repeated, so completion offered nothing whenever
+// the command line carried --config or -n. A value given twice means the same
+// as once for completion, so the repeats are dropped first.
+func completionApp(r *root) (*app.App, error) {
+	r.configFiles = uniqueWords(r.configFiles)
+	r.nodes = uniqueWords(r.nodes)
+	r.setValues = uniqueWords(r.setValues)
+	return r.App()
+}
+
+// uniqueWords drops the repeats of a list, keeping the first of each in its
+// place.
+func uniqueWords(words []string) []string {
+	seen := make(map[string]bool, len(words))
+	out := words[:0:0]
+	for _, w := range words {
+		if !seen[w] {
+			seen[w] = true
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
 // registerCompletions wires shell completion for the flags whose values come
 // from the configuration.
 func registerCompletions(cmd *cobra.Command, r *root) {
@@ -184,7 +213,7 @@ func registerCompletions(cmd *cobra.Command, r *root) {
 		})
 	_ = cmd.RegisterFlagCompletionFunc("context",
 		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-			a, err := r.App()
+			a, err := completionApp(r)
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
@@ -196,7 +225,7 @@ func registerCompletions(cmd *cobra.Command, r *root) {
 // completeRoles offers the configured host roles.
 func completeRoles(r *root) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		a, err := r.App()
+		a, err := completionApp(r)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -215,7 +244,7 @@ func completeRoles(r *root) func(*cobra.Command, []string, string) ([]string, co
 // groups are left out and have to be typed.
 func completeGroups(r *root) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		a, err := r.App()
+		a, err := completionApp(r)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
