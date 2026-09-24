@@ -81,8 +81,15 @@ Almost every `CLUSTER_*` variable becomes a configuration field:
 | `cluster-slurm-accounts *` | `clusterctl slurm account *` |
 | `cluster-slurm-users *` | `clusterctl slurm user *` |
 | `cluster-dns-aliases` | `clusterctl dns aliases` |
-| `cluster-reboot-node` | `clusterctl bmc power soft`, or `exec -- shutdown -r` |
+| `cluster-reboot-node` | `clusterctl exec -- shutdown -r now`, or `clusterctl bmc power reset` for a node that no longer answers |
 | `expect-ssh`, `expect-scp`, `expect-ssh-sudo` | nothing; use keys, or `bmc redfish` |
+
+`bmc power soft` is not a reboot: it asks the operating system to shut down,
+and the node stays off. `exec` does not ask Slurm whether a node is running a
+job, so drain the nodes with `clusterctl slurm node drain` before rebooting
+them. `bmc power reset` cuts the node off without asking the operating
+system, and it refuses a node that Slurm reports running a job, or cannot say
+about, unless `--lose-jobs` is given.
 
 ## Flags that changed meaning
 
