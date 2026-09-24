@@ -135,6 +135,12 @@ and which nothing noticed.
 addresses for the whole set are worked out first, so a set with one unknown
 node stops before the first machine is touched rather than halfway through.
 
+**A boot address comes from the node's own DHCP declaration.** An address not
+in the inventory is taken only from the declaration named after the node or
+its fully qualified name. Another interface, the BMC, or a neighbour whose
+comment names the node never supplies it, and two candidates are refused
+rather than one picked, so a reinstall cannot arm a machine nobody selected.
+
 ## Exit codes
 
 Scripts branch on these, so they may be added to but never renumbered.

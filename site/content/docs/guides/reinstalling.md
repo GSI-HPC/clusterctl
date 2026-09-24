@@ -12,17 +12,28 @@ command of its own so anything that goes wrong can be picked up by hand.
 
 ```console
 $ clusterctl dhcp hosts -n exe0007
-NODE     DECLARATION  ADDRESS   MAC                BOOT FILE
-exe0007  exe0007      10.0.2.7  aa:bb:cc:11:22:33  /srv/pxesrv/boot/exe/ipxe.net2
-exe0007  exe0007-ib   10.1.2.7  aa:bb:cc:11:22:44  /srv/pxesrv/boot/exe/ipxe.ib0
+NODE     DECLARATION  MATCH      ADDRESS   MAC                BOOT FILE
+exe0007  exe0007      name       10.0.2.7  aa:bb:cc:11:22:33  /srv/pxesrv/boot/exe/ipxe.net2
+exe0007  exe0007-ib   interface  10.1.2.7  aa:bb:cc:11:22:44  /srv/pxesrv/boot/exe/ipxe.ib0
 
 $ clusterctl boot status -n exe0007
 NODE     ADDRESS   BOOT PATH
 exe0007  10.0.2.7  none
 ```
 
-The DHCP configuration is parsed, not grepped, so a declaration whose options
-are in an unusual order reports its own values.
+The DHCP configuration is parsed, not grepped: a declaration whose options are
+in an unusual order, or whose closing brace shares a line with a statement,
+reports its own values, and `include` statements are followed. A construct the
+parser does not understand stops the command instead of being guessed at.
+
+A node without an address in the inventory boots with the address of the one
+declaration named after it or its fully qualified name, the row whose `MATCH`
+is `name`. A declaration for another interface (`interface`), such as
+`exe0007-ib` or the BMC, never gives the boot address, and neither does one
+whose comment names the node (`comment`), which is only shown. When several
+declarations named after the node carry an address, or one hands out several,
+`boot set` and `provision reinstall` refuse the node rather than pick one; set
+its address in the inventory to settle it.
 
 ## Reinstalling
 

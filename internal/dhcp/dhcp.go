@@ -9,10 +9,16 @@
 // in another order. Reading line by line breaks as soon as a brace shares a
 // line with a statement. Either silently reports a neighbour's address. A
 // construct the parser does not understand is an error rather than a guess.
+//
+// A node's boot address is taken only from the one declaration named after
+// it. A second interface and a comment that names the node are shown, but
+// never give the node an address.
 package dhcp
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"path"
 	"sort"
 	"strings"
@@ -516,44 +522,137 @@ func describe(words []token) string {
 	return fmt.Sprintf("%q", join(words))
 }
 
-// Lookup finds the declarations belonging to a node.
+// MatchKind says how a declaration belongs to a node.
+type MatchKind string
+
+const (
+	// ByName is a declaration named after the node, or after a fully
+	// qualified name whose first label is the node.
+	ByName MatchKind = "name"
+	// ByInterface is a declaration whose name is the node name followed by
+	// "-" or "_", which is how a second interface or the BMC is usually
+	// written.
+	ByInterface MatchKind = "interface"
+	// ByComment is a declaration that a comment directly above it
+	// associates with the node. It is shown, never used.
+	ByComment MatchKind = "comment"
+)
+
+// Match is a declaration found for a node.
+type Match struct {
+	Host
+	// By is how the declaration was found.
+	By MatchKind `json:"match" yaml:"match"`
+}
+
+// Lookup finds the declarations that belong to a node by their name: the
+// node's own and those of its other interfaces.
 //
-// A declaration matches when its name is the node name, when its name starts
-// with the node name followed by a separator, which is how a second interface
-// is usually written, or when a comment above it names the node.
-func (c *Config) Lookup(node string) []Host {
-	var out []Host
+// A comment that names the node is not enough; Mentions finds those.
+func (c *Config) Lookup(node string) []Match {
+	var out []Match
 	for _, h := range c.Hosts {
-		if matchesNode(h, node) {
-			out = append(out, h)
+		if kind, ok := matchName(h.Name, node); ok {
+			out = append(out, Match{Host: h, By: kind})
 		}
 	}
 	return out
 }
 
-func matchesNode(h Host, node string) bool {
-	name := h.Name
-	if name == node {
-		return true
-	}
-	if strings.HasPrefix(name, node) {
-		rest := name[len(node):]
-		if rest != "" && (rest[0] == '-' || rest[0] == '.' || rest[0] == '_') {
-			return true
+// Mentions finds the declarations that do not belong to a node by name but
+// that a comment directly above them names it in. A comment such as
+// "# chassis C07: exe0003 exe0004" names several nodes, so these are for
+// display only.
+func (c *Config) Mentions(node string) []Match {
+	var out []Match
+	for _, h := range c.Hosts {
+		if _, ok := matchName(h.Name, node); ok {
+			continue
+		}
+		if mentions(h.Comments, node) {
+			out = append(out, Match{Host: h, By: ByComment})
 		}
 	}
-	// The short name of a declaration written as a fully qualified name.
-	if short, _, ok := strings.Cut(name, "."); ok && short == node {
-		return true
+	return out
+}
+
+func matchName(name, node string) (MatchKind, bool) {
+	if node == "" {
+		return "", false
 	}
-	for _, comment := range h.Comments {
-		for _, word := range strings.Fields(comment) {
+	if name == node || strings.HasPrefix(name, node+".") {
+		return ByName, true
+	}
+	if strings.HasPrefix(name, node) {
+		if rest := name[len(node):]; rest[0] == '-' || rest[0] == '_' {
+			return ByInterface, true
+		}
+	}
+	return "", false
+}
+
+func mentions(comments []string, node string) bool {
+	for _, comment := range comments {
+		for _, word := range strings.FieldsFunc(comment, func(r rune) bool {
+			return r == ' ' || r == '\t' || r == ',' || r == ':' || r == ';' || r == '(' || r == ')'
+		}) {
 			if word == node {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+var (
+	// ErrNoAddress is returned when no declaration named after a node
+	// carries an address.
+	ErrNoAddress = errors.New("no DHCP declaration named after the node carries an address")
+	// ErrAmbiguous is returned when a node's address is not decided by one
+	// declaration, or the one declaration hands out several addresses.
+	ErrAmbiguous = errors.New("the DHCP address is ambiguous")
+	// ErrInvalidAddress is returned when the fixed address of a node's
+	// declaration is not an IP address.
+	ErrInvalidAddress = errors.New("the DHCP fixed-address is not an IP address")
+)
+
+// BootAddress returns the address a node boots with: the fixed address of the
+// one declaration named after the node or its fully qualified name.
+//
+// Another interface of the node, such as its BMC, and a declaration that a
+// comment associates with the node never give the address. When more than one
+// declaration named after the node carries an address, or the one hands out
+// several, which of them the node boots with cannot be told, and the answer is
+// an error rather than a guess.
+func (c *Config) BootAddress(node string) (string, error) {
+	var found []Host
+	for _, m := range c.Lookup(node) {
+		if m.By == ByName && m.Address != "" {
+			found = append(found, m.Host)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return "", fmt.Errorf("%s: %w", node, ErrNoAddress)
+	case 1:
+	default:
+		described := make([]string, 0, len(found))
+		for _, h := range found {
+			described = append(described, fmt.Sprintf("%s at %s", h.Name, h.Address))
+		}
+		return "", fmt.Errorf("%s: %w: several declarations are named after it (%s)",
+			node, ErrAmbiguous, strings.Join(described, ", "))
+	}
+
+	h := found[0]
+	if strings.Contains(h.Address, ",") {
+		return "", fmt.Errorf("%s: %w: the declaration %s hands out several addresses (%s)",
+			node, ErrAmbiguous, h.Name, h.Address)
+	}
+	if net.ParseIP(h.Address) == nil {
+		return "", fmt.Errorf("%s: %w: the declaration %s has %q", node, ErrInvalidAddress, h.Name, h.Address)
+	}
+	return h.Address, nil
 }
 
 // GUIDFromMAC derives the InfiniBand port GUID of a Mellanox adapter from its
