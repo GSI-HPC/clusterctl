@@ -216,6 +216,32 @@ func TestContextNamedTwiceInOneDocumentIsRefused(t *testing.T) {
 	}
 }
 
+// Review 9.10: config explain reports the value the commands use and the
+// line a context wrote it on.
+func TestConfigExplainCoversFlagsAndContexts(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "--fanout", "4", "config", "explain", "fanout.max")
+	if err != nil {
+		t.Fatalf("config explain failed: %v", err)
+	}
+	for _, want := range []string{"4", "flags", "--fanout"} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("config explain does not mention %q:\n%s", want, h.out)
+		}
+	}
+
+	for _, path := range []string{"fanout.max", "defaultUser"} {
+		h, err = run(t, harnessOptions{}, "--context", "cluster2", "config", "explain", path)
+		if err != nil {
+			t.Fatalf("config explain %s failed: %v", path, err)
+		}
+		for _, want := range []string{"context", "config.yaml:"} {
+			if !strings.Contains(h.out.String(), want) {
+				t.Errorf("config explain %s does not mention %q:\n%s", path, want, h.out)
+			}
+		}
+	}
+}
+
 // Review 9.11: a key with a dot in it, such as a static group rack.R01,
 // stays one key when the layers are merged.
 func TestDottedKeysStayOneKey(t *testing.T) {
