@@ -113,16 +113,32 @@ func writeTable(w io.Writer, t *Table, wide bool) error {
 		return nil
 	}
 
-	widths := make([]int, len(keep))
+	// Cells are escaped before they are measured: a value from a node or a
+	// BMC may hold a newline that would start a forged row, or a control
+	// sequence that would rewrite what is already on the screen.
+	headings := make([]string, len(keep))
 	for j, i := range keep {
-		widths[j] = utf8.RuneCountInString(t.Columns[i].Name)
+		headings[j] = EscapeCell(t.Columns[i].Name)
 	}
-	for _, row := range t.Rows {
+	rows := make([][]string, len(t.Rows))
+	for r, row := range t.Rows {
+		cells := make([]string, len(keep))
 		for j, i := range keep {
 			if i < len(row) {
-				if n := utf8.RuneCountInString(row[i]); n > widths[j] {
-					widths[j] = n
-				}
+				cells[j] = EscapeCell(row[i])
+			}
+		}
+		rows[r] = cells
+	}
+
+	widths := make([]int, len(keep))
+	for j, heading := range headings {
+		widths[j] = utf8.RuneCountInString(heading)
+	}
+	for _, cells := range rows {
+		for j, value := range cells {
+			if n := utf8.RuneCountInString(value); n > widths[j] {
+				widths[j] = n
 			}
 		}
 	}
@@ -155,25 +171,12 @@ func writeTable(w io.Writer, t *Table, wide bool) error {
 		b.WriteByte('\n')
 	}
 
-	headings := make([]string, len(keep))
-	for j, i := range keep {
-		headings[j] = t.Columns[i].Name
-	}
 	writeRow(headings)
-
-	cells := make([]string, len(keep))
-	for _, row := range t.Rows {
-		for j, i := range keep {
-			if i < len(row) {
-				cells[j] = row[i]
-			} else {
-				cells[j] = ""
-			}
-		}
+	for _, cells := range rows {
 		writeRow(cells)
 	}
 	if t.Caption != "" {
-		fmt.Fprintf(&b, "\n%s\n", t.Caption)
+		fmt.Fprintf(&b, "\n%s\n", EscapeText(t.Caption))
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
