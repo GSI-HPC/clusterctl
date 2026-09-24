@@ -7,11 +7,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -23,8 +25,15 @@ import (
 // A configuration such as dhcpd.conf is read once per command and often
 // several times in a row, and fetching it again for each node turned a node
 // set query into one connection per node.
+//
+// The file is read through ReadRunner, so a dry run sees the same file the real
+// run would.
 func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Duration) ([]byte, error) {
-	cache := a.remoteCachePath(role, path)
+	target, err := a.Role(role)
+	if err != nil {
+		return nil, err
+	}
+	cache := a.remoteCachePath(target, path)
 	if ttl > 0 {
 		if info, err := os.Stat(cache); err == nil && time.Since(info.ModTime()) < ttl {
 			if data, err := os.ReadFile(cache); err == nil && len(data) > 0 {
@@ -33,11 +42,7 @@ func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Durati
 		}
 	}
 
-	target, err := a.Role(role)
-	if err != nil {
-		return nil, err
-	}
-	result, err := a.Runner.Run(ctx, target, transport.Request{
+	result, err := a.ReadRunner.Run(ctx, target, transport.Request{
 		Argv:    []string{"cat", path},
 		Timeout: a.Timeout().Get(),
 		TTY:     transport.TTYNone,
@@ -46,11 +51,17 @@ func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Durati
 		return nil, exitcode.Wrap(exitcode.Transport, err)
 	}
 	if result.Failed() {
-		if result.Err != nil {
-			return nil, exitcode.Wrap(exitcode.Transport, result.Err)
+		// ssh's own failure arrives coded as a transport failure. Anything
+		// else happened on a host that answered, and what it said is the
+		// reason.
+		var coded *exitcode.Error
+		if errors.As(result.Err, &coded) {
+			return nil, result.Err
 		}
-		return nil, exitcode.Errorf(exitcode.TargetFailed,
-			"reading %s on %s: %s", path, target, result.Stderr)
+		// The message came from the host, so it is quoted: a control
+		// character in it cannot rewrite the terminal it is printed on.
+		return nil, exitcode.Errorf(exitcode.TargetFailed, "reading %s on %s: %q",
+			path, target, firstNonEmptyLine(result.Stderr, result.Stdout))
 	}
 
 	data := []byte(result.Stdout)
@@ -62,9 +73,30 @@ func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Durati
 	return data, nil
 }
 
-func (a *App) remoteCachePath(role, path string) string {
-	sum := sha256.Sum256([]byte(role + ":" + path))
-	return filepath.Join(a.CacheDir, "remote", fmt.Sprintf("%s-%s", role, hex.EncodeToString(sum[:8])))
+// remoteCachePath names the cached copy of one file on one host.
+//
+// The cache directory is shared by every configuration, context and the MCP
+// server of one user, so the key holds everything that decides which file
+// is read: the site, cluster and context, the host with its account and the
+// way it is reached, and the path.
+func (a *App) remoteCachePath(target transport.Target, path string) string {
+	key, _ := json.Marshal(struct {
+		Scope  string            `json:"scope"`
+		Target transport.Target  `json:"target"`
+		Host   v1alpha1.HostRole `json:"host"`
+		Path   string            `json:"path"`
+	}{a.cacheScope(), target, a.Spec.Hosts[target.Role], path})
+	sum := sha256.Sum256(key)
+	return filepath.Join(a.CacheDir, "remote", hex.EncodeToString(sum[:]))
+}
+
+// cacheScope names the site, cluster and context a command runs against,
+// which is what keeps one cluster's cached answers from another's.
+func (a *App) cacheScope() string {
+	scope, _ := json.Marshal([]string{
+		a.Resolved.SiteName, a.Resolved.ClusterName, a.Resolved.Context.Name,
+	})
+	return string(scope)
 }
 
 // RunOnRole runs one command on an infrastructure host and returns the
