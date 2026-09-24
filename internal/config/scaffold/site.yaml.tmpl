@@ -46,3 +46,6 @@ spec:
     # Node sets that no destructive command touches unless --force is given
     # as well, such as the Slurm controller and the file servers.
     protectedHosts: []
+    # Refuse to power off a node that Slurm reports running a job. This is
+    # the default; set it to false only on a site without Slurm.
+    slurmAware: true

@@ -50,6 +50,10 @@ ssh:
 
 safety:
   confirmAbove: 8
+  # Power actions ask Slurm whether a node runs a job, on every site that
+  # names a host role for slurm.role. Turning this off is said before every
+  # power question.
+  slurmAware: true
   powerOnBatch: 8
   powerOnStagger: 5s
 
