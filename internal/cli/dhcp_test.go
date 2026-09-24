@@ -239,3 +239,64 @@ host exe0004 {
 		t.Errorf("error = %v, want it to name the nested declaration", err)
 	}
 }
+
+// The log path was spliced into sh -c unquoted (report 1.7).
+func TestDHCPLogQuotesTheLogPath(t *testing.T) {
+	rec := &transport.Recorder{}
+	_, err := run(t, harnessOptions{recorder: rec},
+		"--set", "services.dhcp.logPath=/var/log/dhcp;touch /tmp/pwned", "dhcp", "log")
+	if err != nil {
+		t.Fatalf("dhcp log failed: %v", err)
+	}
+	calls := rec.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	script := strings.Join(calls[0].Request.Argv, " ")
+	if !strings.Contains(script, "'/var/log/dhcp;touch /tmp/pwned'") {
+		t.Errorf("the log path is not quoted: %s", script)
+	}
+}
+
+// --lines is bounded, so the server cannot be asked for an unbounded log
+// (report 10.3), and --seconds below one no longer drops the time limit
+// (report 1.7).
+func TestDHCPLogAndCaptureRejectUnboundedArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"dhcp", "log", "--lines", "0"},
+		{"dhcp", "log", "--lines", "-5"},
+		{"dhcp", "log", "--lines", "100000000"},
+		{"dhcp", "capture", "--seconds", "0"},
+		{"dhcp", "capture", "--seconds", "-1"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			rec := &transport.Recorder{}
+			_, err := run(t, harnessOptions{recorder: rec}, append([]string{"--dry-run"}, args...)...)
+			if got := exitcode.From(err); got != exitcode.Usage {
+				t.Errorf("exit code = %d, want %d (%v)", got, exitcode.Usage, err)
+			}
+			if calls := rec.Calls(); len(calls) != 0 {
+				t.Errorf("sent %d requests, want none", len(calls))
+			}
+		})
+	}
+}
+
+// The log holds what the nodes sent, so a terminal escape in it is shown
+// rather than obeyed.
+func TestDHCPLogEscapesControlCharacters(t *testing.T) {
+	rec := &transport.Recorder{Responses: []*transport.Result{{
+		Stdout: "dhcpd: DHCPREQUEST from aa:bb (evil\x1b[2J)\ndhcpd: DHCPACK\ton eth0",
+	}}}
+	h, err := run(t, harnessOptions{recorder: rec}, "dhcp", "log")
+	if err != nil {
+		t.Fatalf("dhcp log failed: %v", err)
+	}
+	out := h.out.String()
+	if strings.Contains(out, "\x1b") || !strings.Contains(out, `evil\x1b[2J`) {
+		t.Errorf("the escape is not escaped:\n%q", out)
+	}
+	if !strings.Contains(out, "\n") || !strings.Contains(out, "\t") {
+		t.Errorf("newlines and tabs should be kept:\n%q", out)
+	}
+}
