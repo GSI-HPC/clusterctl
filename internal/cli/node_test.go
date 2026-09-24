@@ -56,3 +56,44 @@ func TestNodeListWithMixedWidths(t *testing.T) {
 		}
 	}
 }
+
+// Report 4.14: an address copied from exe0001 onto exe0002 made a reinstall of
+// exe0002 point exe0001's PXE link at another boot image.
+func TestInventoryRefusesACopiedAddress(t *testing.T) {
+	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
+		return s + "    - nodes: exe0002\n      address: 10.0.2.1\n"
+	})
+	_, err := run(t, harnessOptions{config: []string{inventory}}, "config", "validate")
+	if err == nil {
+		t.Fatal("config validate accepted two nodes with one address")
+	}
+	if !strings.Contains(err.Error(), "10.0.2.1") {
+		t.Errorf("error = %v, want it to name the address", err)
+	}
+	if got := inventoryPositions.FindAllString(err.Error(), -1); len(got) != 2 || got[0] == got[1] {
+		t.Errorf("error = %v, want the file and line of both entries", err)
+	}
+
+	h, err := run(t, harnessOptions{config: []string{inventory}}, "provision", "reinstall", "-y", "-n", "exe0002")
+	if err == nil {
+		t.Fatal("a reinstall went ahead on an inventory with a copied address")
+	}
+	if n := len(h.recorder.Calls()); n != 0 {
+		t.Errorf("%d commands were sent", n)
+	}
+}
+
+// An address that is not an IP address went straight into the name of a
+// link on the PXE server.
+func TestInventoryRefusesAnAddressThatIsNotAnIPAddress(t *testing.T) {
+	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
+		return strings.Replace(s, "address: 10.0.2.1", "address: ../../etc/x", 1)
+	})
+	_, err := run(t, harnessOptions{config: []string{inventory}}, "config", "validate")
+	if err == nil {
+		t.Fatal("config validate accepted a path as an address")
+	}
+	if !strings.Contains(err.Error(), "../../etc/x") || len(inventoryPositions.FindAllString(err.Error(), -1)) != 1 {
+		t.Errorf("error = %v, want the value and where it was written", err)
+	}
+}

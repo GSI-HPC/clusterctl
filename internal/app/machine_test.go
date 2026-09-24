@@ -46,8 +46,9 @@ func TestSelectNamesMachinesNotSpellings(t *testing.T) {
 	}
 }
 
-// An address two inventory entries share names neither machine, and one
-// node's alias never takes over another node's name.
+// One node's alias never takes over another node's name. An address two
+// inventory entries share cannot be written at all: the inventory refuses it,
+// which internal/inventory tests.
 func TestSelectKeepsAnAmbiguousNameAsWritten(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -68,10 +69,6 @@ spec:
   nodes:
     # The protected hosts of the example.
     - nodes: wlm01,dbm01
-    - nodes: exe0001
-      address: 10.0.2.1
-    - nodes: exe0002
-      address: 10.0.2.1
     - nodes: exe0003
       bmcAddress: exe0004
     - nodes: exe0004
@@ -86,7 +83,7 @@ spec:
 	if err != nil {
 		t.Fatalf("building the app: %v", err)
 	}
-	for expr, want := range map[string]string{"10.0.2.1": "10.0.2.1", "exe0004": "exe0004"} {
+	for expr, want := range map[string]string{"exe0004": "exe0004"} {
 		ns, err := a.Select(expr)
 		if err != nil {
 			t.Fatalf("Select(%q) failed: %v", expr, err)

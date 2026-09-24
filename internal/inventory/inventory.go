@@ -10,10 +10,13 @@ package inventory
 
 import (
 	"fmt"
+	"net"
+	"net/netip"
 	"sort"
 	"strings"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
+	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -72,6 +75,12 @@ func New(specs ...v1alpha1.NodeInventorySpec) (*Inventory, error) {
 // FromDocuments is New for documents that know where their entries were
 // written.
 //
+// Addresses, service processor addresses, cids and MACs identify one machine,
+// so two nodes sharing one are refused: a copied entry would otherwise send
+// an action meant for one machine to another. An address must be an IP
+// address and a MAC a MAC address, because both end up in the names of files
+// on the PXE server and in DHCP.
+//
 // A host is named the same way in every entry. Padding and case are not part
 // of a host's identity, so exe1, exe0001 and EXE1 are one machine; an entry
 // spelling a host differently from the entry that first named it would either
@@ -84,6 +93,7 @@ func FromDocuments(docs ...Document) (*Inventory, error) {
 		folded:   nodeset.New(),
 		spelling: map[string]string{},
 		named:    map[string]string{},
+		setBy:    map[string]map[string]string{},
 	}
 	for d, doc := range docs {
 		for i, entry := range doc.Spec.Nodes {
@@ -102,13 +112,20 @@ func FromDocuments(docs ...Document) (*Inventory, error) {
 						label, field, ns.Len())
 				}
 			}
+			if err := checkIdentifiers(entry); err != nil {
+				return nil, fmt.Errorf("%s: %w", label, err)
+			}
 			for _, name := range ns.Expand() {
 				if err := b.claim(name, label); err != nil {
 					return nil, err
 				}
 				inv.apply(name, doc.Spec.Defaults, entry)
+				b.record(name, label, entry)
 			}
 		}
+	}
+	if err := b.checkUnique(); err != nil {
+		return nil, err
 	}
 	sort.Strings(inv.order)
 	inv.all = nodeset.New()
@@ -144,6 +161,127 @@ type builder struct {
 	spelling map[string]string
 	// named records the entry that first named each host.
 	named map[string]string
+	// setBy records, for each host and field, the entry that last set it.
+	setBy map[string]map[string]string
+}
+
+// record notes which fields identifying a machine an entry set for a host.
+func (b *builder) record(name, label string, e v1alpha1.NodeEntry) {
+	fields := b.setBy[name]
+	if fields == nil {
+		fields = map[string]string{}
+		b.setBy[name] = fields
+	}
+	for field, set := range map[string]bool{
+		"address": e.Address != "", "bmcAddress": e.BMCAddress != "", "cid": e.CID != "", "macs": len(e.MACs) > 0,
+	} {
+		if set {
+			fields[field] = label
+		}
+	}
+}
+
+// identifier is a value that belongs to one machine, and the node and field
+// it was given in.
+type identifier struct {
+	node, field, value string
+}
+
+// checkUnique refuses two nodes sharing an identifier, judged on what the
+// inventory ends up holding, so that a refinement moving an address away
+// frees it. An address and a service processor address share one space: a
+// node's address given to another node's service processor is as wrong.
+func (b *builder) checkUnique() error {
+	seen := map[string]identifier{}
+	for _, name := range b.inv.order {
+		n := b.inv.nodes[name]
+		var ids []identifier
+		if n.Address != "" {
+			ids = append(ids, identifier{name, "address", n.Address})
+		}
+		if n.BMCAddress != "" {
+			ids = append(ids, identifier{name, "bmcAddress", n.BMCAddress})
+		}
+		if n.CID != "" {
+			ids = append(ids, identifier{name, "cid", n.CID})
+		}
+		for _, mac := range n.MACs {
+			ids = append(ids, identifier{name, "macs", mac})
+		}
+		for _, id := range ids {
+			key := identifierKey(id)
+			first, ok := seen[key]
+			if !ok {
+				seen[key] = id
+				continue
+			}
+			if first.node == name {
+				continue
+			}
+			return fmt.Errorf("%s gives %s %s %s, which is %s %s of %s, given by %s; "+
+				"each machine needs its own",
+				b.setBy[name][id.field], name, fieldNames[id.field], id.value,
+				fieldNames[first.field], first.value, first.node, b.setBy[first.node][first.field])
+		}
+	}
+	return nil
+}
+
+// fieldNames names the fields identifying a machine the way an error does.
+var fieldNames = map[string]string{
+	"address": "address", "bmcAddress": "bmcAddress", "cid": "cid", "macs": "MAC",
+}
+
+// identifierKey is what two identifiers must share to name one machine,
+// whatever way each was written.
+func identifierKey(id identifier) string {
+	switch id.field {
+	case "cid":
+		return "cid\x00" + id.value
+	case "macs":
+		if hw, err := net.ParseMAC(id.value); err == nil {
+			return "mac\x00" + hw.String()
+		}
+	default:
+		if addr, err := ipAddress(id.value); err == nil {
+			return "address\x00" + addr.String()
+		}
+	}
+	return "address\x00" + strings.TrimSuffix(strings.ToLower(id.value), ".")
+}
+
+// checkIdentifiers refuses an entry whose identifiers are not what their
+// field holds.
+func checkIdentifiers(e v1alpha1.NodeEntry) error {
+	if e.Address != "" {
+		if _, err := ipAddress(e.Address); err != nil {
+			return fmt.Errorf("address %q is not an IP address", e.Address)
+		}
+	}
+	if e.BMCAddress != "" {
+		if _, err := ipAddress(e.BMCAddress); err != nil && hostname.Check(e.BMCAddress) != nil {
+			return fmt.Errorf("bmcAddress %q is neither an IP address nor a host name", e.BMCAddress)
+		}
+	}
+	for _, mac := range e.MACs {
+		if hw, err := net.ParseMAC(mac); err != nil || len(hw) != 6 {
+			return fmt.Errorf("%q in macs is not a 48-bit MAC address", mac)
+		}
+	}
+	return nil
+}
+
+// ipAddress parses an IP address, refusing a prefix length or a zone, which
+// no machine's address has and which would end up in a file name.
+func ipAddress(s string) (netip.Addr, error) {
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if addr.Zone() != "" {
+		return netip.Addr{}, fmt.Errorf("%q has a zone", s)
+	}
+	return addr.Unmap(), nil
 }
 
 // claim records that an entry names a host, and refuses a name that spells a
