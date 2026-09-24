@@ -163,4 +163,7 @@ Results are bounded so that a thousand nodes do not flood the agent's
 context: `select_nodes` lists names up to 256, `describe_nodes` describes
 64, `query_slurm` returns 200 rows by default and 2000 at most, and
 `read_command` cuts output at 64 KiB. Every bound is reported (`truncated`),
-and `read_command` accepts `-o jq=EXPR` to filter on the server.
+and `read_command` accepts `-o jq=EXPR` to filter on the server. The program
+is compiled before the command runs, runs with the call's context, so it stops
+when the call is cancelled, and cannot read the server's environment through
+`$ENV` or `env`.
