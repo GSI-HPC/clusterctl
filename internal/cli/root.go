@@ -245,7 +245,7 @@ takes it from the signed git tag.`),
 			if format.Kind == output.FormatTable || format.Kind == output.FormatWide {
 				return say(cmd, "%s\n", info)
 			}
-			return format.Write(cmd.OutOrStdout(), output.Result{Object: info})
+			return format.WriteContext(cmd.Context(), cmd.OutOrStdout(), output.Result{Object: info})
 		},
 	}
 }

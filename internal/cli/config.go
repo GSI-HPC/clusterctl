@@ -86,7 +86,7 @@ to files it did not write, and overwrites nothing.
 			}
 			if r.dryRun {
 				t.Caption = fmt.Sprintf("%d files would be written; nothing was", len(files))
-				return format.Write(cmd.OutOrStdout(), output.Result{Table: t})
+				return format.WriteContext(cmd.Context(), cmd.OutOrStdout(), output.Result{Table: t})
 			}
 			// Nothing was sent anywhere: a directory that cannot be
 			// written is a mistake in what was asked, not a failed target.
@@ -94,7 +94,7 @@ to files it did not write, and overwrites nothing.
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			t.Caption = initNextSteps(r, dir, len(files))
-			return format.Write(cmd.OutOrStdout(), output.Result{Table: t})
+			return format.WriteContext(cmd.Context(), cmd.OutOrStdout(), output.Result{Table: t})
 		})
 
 	flags := cmd.Flags()

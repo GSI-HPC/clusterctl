@@ -4,9 +4,15 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -64,5 +70,41 @@ func TestExecJQSelectsFailingTargets(t *testing.T) {
 	h, _ = run(t, harnessOptions{recorder: rec}, "exec", "-n", "exe[1-2]", "-o", "yaml", "--", "true")
 	if out := h.out.String(); !strings.Contains(out, "exitCode: 0\n") || strings.Contains(out, "0.0") {
 		t.Errorf("-o yaml does not print integers as integers:\n%s", out)
+	}
+}
+
+// TestJQStopsWithTheCommand covers review finding 10.2 the way the MCP
+// server met it: read_command runs version with the call's context, and a
+// jq program that never ends kept running after the client gave up.
+func TestJQStopsWithTheCommand(t *testing.T) {
+	for _, args := range [][]string{
+		{"version", "-o", "jq=last(repeat(1))"},
+		{"config", "init", "--dry-run", "-o", "jq=last(repeat(1))", "--site", "lab"},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		dir := t.TempDir()
+		var out bytes.Buffer
+		streams := app.Streams{
+			In: strings.NewReader(""), Out: &out, Err: &out,
+			StateDir: filepath.Join(dir, "state"), CacheDir: filepath.Join(dir, "cache"),
+		}
+		cmd := NewRootCommand(ctx, streams)
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(append([]string{"--config", exampleDir}, args...))
+		if args[0] == "config" {
+			cmd.SetArgs(append([]string{"--config", exampleDir}, append(args, filepath.Join(dir, "new"))...))
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.ExecuteContext(ctx) }()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("%q returned %v, want the deadline", args, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%q kept running after its context ended", args)
+		}
+		cancel()
 	}
 }
