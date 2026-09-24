@@ -105,6 +105,18 @@ A bare `@group` searches the default source first and then the others, so
 `@exe` works without a prefix. `@source:group` names one explicitly, which is
 what to write when two sources could both answer.
 
+The search only moves on when a source answers that it has no such group. If
+a source cannot be asked, because its host does not answer or its command
+fails, the command stops with that source's error rather than taking a group of
+the same name from another source:
+
+```console
+$ clusterctl node select '@compute'
+clusterctl: group @compute: source "slurm": login (login.hpc.example.org): ssh: connect to host login.hpc.example.org port 22: Connection timed out; the search for @compute stops at a source that cannot answer (before it: source "inventory": no node has class=compute; source "rack": no node has rack=compute)
+$ echo $?
+3
+```
+
 ```console
 $ clusterctl node groups exe0007
 SOURCE     GROUPS
@@ -146,6 +158,12 @@ groups:
 
 An `exec` source is given an argument vector, and `$GROUP` and `$NODE` are
 substituted as whole arguments. A group name is never interpreted by a shell.
+The commands run on the host role the source names, which is required, and are
+bounded by `fanout.commandTimeout` like every remote command.
+
+A cached answer is kept per site, cluster and context, per host and per exact
+command, so two clusters that both have a partition `main` never answer for
+each other.
 
 ## A selection for a whole session
 

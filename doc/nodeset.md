@@ -161,6 +161,26 @@ groups:
 A bare `@group` searches the default source first and then the others, so a
 single-source installation never needs a prefix. `@source:group` names one.
 
+The search moves on only when a source answers that it has no such group: a
+table or an attribute that does not have it, or an `exec` source whose `list`
+command succeeds and does not name it. A source that cannot be asked, whose
+command fails, or that returns no nodes for a group it lists stops the search
+with its own error, and the command fails with that error's exit code, 3 for
+a host that could not be reached. Another source's group of the same name is
+never used in its place. An `exec` source without a `list` command cannot say
+that a group is not its own, so a bare name that reaches it stops there; name
+the source of a group that lives further down the search order.
+
+An `exec` source runs on the host role it names, which is required, and each
+command is bounded by `fanout.commandTimeout` on that host. A cached answer is
+stored under a key made of the site, the cluster and the context, the host
+the command ran on and the exact argument vector, so no two clusters, and no
+two group names, ever share an entry.
+
+A source that fails does not hide what the others found: `node groups` and
+`node describe` print the memberships and groups that could be read, name the
+failed source on the error stream and exit non-zero.
+
 An `exec` source is given an **argument vector**, not a command line, and
 `$GROUP` and `$NODE` are substituted as whole arguments. A group name holding a
 semicolon stays a group name.
