@@ -47,6 +47,11 @@ const (
 	// sshConnectionFailed is the exit status ssh itself reports when it
 	// could not reach or authenticate with the host.
 	sshConnectionFailed = 255
+	// statusGuard runs a remote command and exits with its status, except
+	// that 255 becomes 254: a command's own 255 would otherwise read as
+	// ssh's, and a host that answered as one that could not be reached. It
+	// is run by sh, whichever shell the account logs in with.
+	statusGuard = `"$@"; s=$?; [ "$s" -ne 255 ] || s=254; exit "$s"`
 )
 
 // TTY says whether a pseudo terminal is allocated for a remote command.
@@ -112,6 +117,11 @@ type Request struct {
 	// Stdout and Stderr receive the output when the command is run
 	// interactively. Run captures them instead.
 	Stdout, Stderr io.Writer
+	// NoShell says the host's command line is not a POSIX shell, as on a
+	// power distribution unit, so the command is sent without the guard that
+	// tells its exit status 255 from ssh's, which it could not run. A 255
+	// from such a command reads as a connection failure.
+	NoShell bool
 }
 
 // Result is the outcome of one remote command.
@@ -273,6 +283,16 @@ func (c *Client) Args(target Target, req Request) ([]string, error) {
 	command, err := RemoteCommand(req)
 	if err != nil {
 		return nil, err
+	}
+	if command != "" && !req.NoShell {
+		// The command's words follow the guard's, so sh hands them to it
+		// as "$@", exactly as they were quoted.
+		command = shellquote.Join([]string{"sh", "-c", statusGuard, "sh"}) + " " + command
+		if len(command) > maxArgBytes {
+			return nil, fmt.Errorf(
+				"the remote command is %d bytes, over the %d byte limit on one argument; send it over stdin instead",
+				len(command), maxArgBytes)
+		}
 	}
 	if command != "" {
 		args = append(args, command)

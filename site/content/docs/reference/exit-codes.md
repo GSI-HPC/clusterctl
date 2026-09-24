@@ -28,6 +28,10 @@ case $? in
 esac
 ```
 
+ssh itself exits 255 when it cannot reach a host, so a remote command that
+exits 255 is reported as `exit 254`, a failure on a host that answered, rather
+than as an unreachable host.
+
 When a command that works on many hosts sees several of these, it exits with
 the first that applies of `130` (a host was not tried because of an
 interrupt), `3` (a host could not be reached) and `1` (a host answered with a
