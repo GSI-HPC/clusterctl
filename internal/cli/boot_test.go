@@ -466,6 +466,23 @@ func TestBootSetRefusesAMissingBootPath(t *testing.T) {
 	}
 }
 
+// 10.3: the log is read into memory whole, so the count is bounded.
+func TestBootLogBoundsTheLines(t *testing.T) {
+	for _, lines := range []string{"0", "-5", "100000000"} {
+		h, err := run(t, harnessOptions{}, "boot", "log", "--lines", lines)
+		if err == nil {
+			t.Errorf("--lines %s should be refused", lines)
+			continue
+		}
+		if got, want := exitcode.From(err), exitcode.Usage; got != want {
+			t.Errorf("--lines %s: exit code = %d, want %d", lines, got, want)
+		}
+		if len(h.recorder.Calls()) != 0 {
+			t.Errorf("--lines %s sent %q", lines, h.recorder.Commands())
+		}
+	}
+}
+
 // 10.7: a node the status cannot be read for is an error, in every format.
 func TestBootStatusReportsUnknownNodes(t *testing.T) {
 	p := newPXEHost(t, pxeOptions{})
