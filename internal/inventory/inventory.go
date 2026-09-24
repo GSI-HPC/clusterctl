@@ -42,36 +42,118 @@ type Inventory struct {
 	order []string
 }
 
+// Document is one NodeInventory together with a way to say where each of its
+// entries was written, so that an error can point at the lines to fix.
+type Document struct {
+	Spec v1alpha1.NodeInventorySpec
+	// Where returns where entry i, counted from zero, was written, such as
+	// "inventory.yaml:31:7". It may be nil, or return "" when that is not
+	// known.
+	Where func(entry int) string
+}
+
 // New builds an inventory from the NodeInventory documents of a site.
 //
 // Entries are applied in order, so a general entry may be written first and
 // refined by a later one naming fewer nodes. Fields that describe a single
 // machine may only be set by an entry that names exactly one node.
 func New(specs ...v1alpha1.NodeInventorySpec) (*Inventory, error) {
+	docs := make([]Document, len(specs))
+	for i, spec := range specs {
+		docs[i] = Document{Spec: spec}
+	}
+	return FromDocuments(docs...)
+}
+
+// FromDocuments is New for documents that know where their entries were
+// written.
+//
+// A host is named the same way in every entry. Padding and case are not part
+// of a host's identity, so exe1, exe0001 and EXE1 are one machine; an entry
+// spelling a host differently from the entry that first named it would either
+// make a second record for the same machine or silently merge into the first,
+// and which one the author meant cannot be told, so it is refused.
+func FromDocuments(docs ...Document) (*Inventory, error) {
 	inv := &Inventory{nodes: map[string]*Node{}}
-	for _, spec := range specs {
-		for i, entry := range spec.Nodes {
+	b := &builder{
+		inv:      inv,
+		folded:   nodeset.New(),
+		spelling: map[string]string{},
+		named:    map[string]string{},
+	}
+	for d, doc := range docs {
+		for i, entry := range doc.Spec.Nodes {
+			label := entryLabel(docs, d, i)
 			ns, err := nodeset.Parse(entry.Nodes)
 			if err != nil {
-				return nil, fmt.Errorf("inventory entry %d: %w", i+1, err)
+				return nil, fmt.Errorf("%s: %w", label, err)
 			}
 			if ns.IsEmpty() {
-				return nil, fmt.Errorf("inventory entry %d names no node", i+1)
+				return nil, fmt.Errorf("%s names no node", label)
 			}
 			if ns.Len() > 1 {
 				if field := singleNodeField(entry); field != "" {
 					return nil, fmt.Errorf(
-						"inventory entry %d sets %s for %d nodes; that field describes one machine",
-						i+1, field, ns.Len())
+						"%s sets %s for %d nodes; that field describes one machine",
+						label, field, ns.Len())
 				}
 			}
 			for _, name := range ns.Expand() {
-				inv.apply(name, spec.Defaults, entry)
+				if err := b.claim(name, label); err != nil {
+					return nil, err
+				}
+				inv.apply(name, doc.Spec.Defaults, entry)
 			}
 		}
 	}
 	sort.Strings(inv.order)
 	return inv, nil
+}
+
+// entryLabel names an entry the way an error shows it.
+func entryLabel(docs []Document, d, i int) string {
+	label := fmt.Sprintf("inventory entry %d", i+1)
+	if len(docs) > 1 {
+		label = fmt.Sprintf("inventory %d entry %d", d+1, i+1)
+	}
+	if where := docs[d].Where; where != nil {
+		if w := where(i); w != "" {
+			label += " (" + w + ")"
+		}
+	}
+	return label
+}
+
+// builder holds what building an inventory needs to know besides the nodes.
+type builder struct {
+	inv *Inventory
+	// folded holds every name given so far, lowercased, so that a name
+	// written with other padding or case finds the host it refers to.
+	folded *nodeset.NodeSet
+	// spelling maps a name of folded back to the name it was given as.
+	spelling map[string]string
+	// named records the entry that first named each host.
+	named map[string]string
+}
+
+// claim records that an entry names a host, and refuses a name that spells a
+// host already named differently.
+func (b *builder) claim(name, label string) error {
+	lower := strings.ToLower(name)
+	if held, ok := b.folded.Canonical(lower); ok {
+		if first := b.spelling[held]; first != name {
+			return fmt.Errorf("%s names %s, which %s wrote as %s; "+
+				"names differing only in padding or case are one host, so write it %s in both",
+				label, name, b.named[first], first, first)
+		}
+		return nil
+	}
+	if err := b.folded.Add(lower); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	b.spelling[lower] = name
+	b.named[name] = label
+	return nil
 }
 
 // singleNodeField names the first field of an entry that only makes sense for
@@ -189,7 +271,14 @@ func (inv *Inventory) Select(ns *nodeset.NodeSet) (known []*Node, unknown []stri
 			unknown = append(unknown, name)
 			continue
 		}
-		known = append(known, inv.nodes[canonical])
+		// Every name of the set is a key, but a miss is still reported as
+		// unknown rather than returned as a nil node.
+		n, ok := inv.nodes[canonical]
+		if !ok {
+			unknown = append(unknown, name)
+			continue
+		}
+		known = append(known, n)
 	}
 	return known, unknown
 }
