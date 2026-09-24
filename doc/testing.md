@@ -42,7 +42,11 @@ override default are covered without hardware.
 
 **A recording transport** stands in for ssh. `transport.Recorder` records what
 would have been sent and replies with prepared output, so the subsystems and
-the whole command tree can be driven without a cluster. The command tests use
+the whole command tree can be driven without a cluster. A reply is handed the
+payload a command streamed on standard input, so a test can run the script a
+command sends in a real shell, in a temporary directory, and look at what it
+left behind: that is how `cinc config` is shown to write a file that is safe
+to source and never truncated. The command tests use
 the example configuration that ships with the documentation, which keeps the
 example honest.
 
