@@ -133,7 +133,12 @@ clusterctl: exe0001.mgmt...: does not accept the reset type "GracefulShutdown";
   it accepts ForceOff, ForceRestart, GracefulRestart, On, PowerCycle
 ```
 
-The machine is asked what it accepts rather than guessed at.
+The machine is asked what it accepts rather than guessed at. Firmware that
+lists its reset types in a separate `@Redfish.ActionInfo` resource is followed
+there, and when that resource cannot be read the reset is not sent. A vendor
+profile's `resetTypes` (see [Firmware that differs](#firmware-that-differs))
+takes the place of what the machine says, for firmware that advertises a type
+it then rejects.
 
 ## What a machine boots next
 
@@ -223,6 +228,8 @@ bmc:
 
 Keyed by the node's `vendor` attribute in the inventory. This is how a
 generation of hardware with unusual firmware is handled without a code change.
+When `resetTypes` is set, a reset is checked against it instead of against
+what the machine advertises.
 
 ## Rack power
 

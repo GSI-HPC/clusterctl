@@ -205,8 +205,10 @@ than followed: Go would send a POST again to the new location, and keep the
 credentials for plain HTTP on the same host.
 
 **A reset type is checked before it is sent.** The machine is asked what it
-accepts, so unsupported firmware is reported by name instead of rejecting an
-opaque request. The shell tool sent `GracefullShutdown`, which no BMC accepts
+accepts, following its `@Redfish.ActionInfo` when the list is not inline, so
+unsupported firmware is reported by name instead of rejecting an opaque
+request. A vendor profile's `resetTypes` replaces the machine's answer, and a
+reset whose ActionInfo cannot be read is not sent. The shell tool sent `GracefullShutdown`, which no BMC accepts
 and which nothing noticed.
 
 **A reinstall resolves everything before it changes anything.** For the whole
