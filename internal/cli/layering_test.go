@@ -373,3 +373,14 @@ func TestConfigInitFailsWithUsageLocally(t *testing.T) {
 		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
 	}
 }
+
+// Review 9.12: a field that no code reads is not accepted, so that setting
+// it is not mistaken for having an effect.
+func TestFieldsNothingReadsAreRefused(t *testing.T) {
+	for _, set := range []string{"safety.requireReason=false", "slurm.json=true", "slurm.partitions=[main]"} {
+		_, err := run(t, harnessOptions{}, "--set", set, "config", "validate")
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Errorf("--set %s: err = %v, want an unknown field", set, err)
+		}
+	}
+}

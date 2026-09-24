@@ -113,7 +113,6 @@ spec:
     role: login
     organization: example
     defaultAccount: default
-    partitions: [main, debug]
     lookBack: 1h
   groups:
     defaultSource: inventory
