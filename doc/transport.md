@@ -238,7 +238,13 @@ One file is the site's trust anchor, kept in version control, and every
 connection is checked against it.
 
 Keys are collected by starting an SSH handshake and abandoning it the moment
-the server presents its key, so no credentials are involved. The file is always
+the server presents its key, so no credentials are involved. All algorithms
+are offered in one handshake, best first, with `ssh-rsa` last for servers that
+sign with nothing else; it is the same RSA key. A host serving a role with a
+`proxyJump` is reached through `ssh -F <generated config> -o BatchMode=yes -W
+host:22 <jump>`, so the jump is made, and its key checked, exactly as for any
+other connection. Hosts are scanned in parallel up to `fanout.max`, and an
+unreachable host costs one `--timeout`. The file is always
 rewritten completely, under a lock, and sorted, so two administrators
 refreshing at once cannot lose an entry and a diff stays readable.
 

@@ -46,3 +46,8 @@ Collecting a host key needs a handshake but not a session, so it uses
 `x/crypto/ssh` with a callback that captures the key and abandons the
 handshake. No credentials are involved, which is the point: the alternative is
 `ssh-keyscan`, another process with its own defaults.
+
+A host behind a jump host is the one case where the handshake does not start
+on a local socket: the connection is carried by `ssh -W` through the jump,
+using the generated configuration, and `x/crypto/ssh` speaks over its standard
+input and output. OpenSSH still makes, and checks, every hop.
