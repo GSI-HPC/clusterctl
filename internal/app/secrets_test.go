@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,16 +19,17 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
-// withSecret builds the app over the example configuration and a second
-// directory holding a Secret named example, encrypted to a fresh key, and a
-// Workstation whose identities open it. Both replace the example's own.
+// withSecret builds the app over a copy of the example configuration whose
+// Secret named example is encrypted to a fresh key instead, and whose
+// Workstation has identities that open it. They take the place of the
+// example's own, which a second document of the same name may not.
 func withSecret(t *testing.T, env map[string]string, identities bool) (*app.App, string) {
 	t.Helper()
 	id, err := age.GenerateX25519Identity()
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
+	dir := copyExample(t, "secrets.sops.yaml", "workstation.yaml")
 	keyFile := filepath.Join(dir, ".identity")
 	if err := os.WriteFile(keyFile, []byte(id.String()+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -56,7 +58,7 @@ binaryData:
 		In: strings.NewReader(""), Out: &strings.Builder{}, Err: &strings.Builder{}, IsTTY: true,
 		StateDir: filepath.Join(dir, "state"), CacheDir: filepath.Join(dir, "cache"),
 	}, app.Options{
-		ConfigFiles: []string{exampleDir, dir},
+		ConfigFiles: []string{dir},
 		Env:         func(k string) string { return env[k] },
 		Runner:      &transport.Recorder{},
 	})
@@ -116,4 +118,28 @@ func TestSecretValueSaysWhatWasTried(t *testing.T) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
 	}
+}
+
+// copyExample copies the example configuration into a new directory, leaving
+// out the files named, and returns it.
+func copyExample(t *testing.T, leaveOut ...string) string {
+	t.Helper()
+	items, err := os.ReadDir(exampleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, item := range items {
+		if item.IsDir() || slices.Contains(leaveOut, item.Name()) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(exampleDir, item.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, item.Name()), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
 }
