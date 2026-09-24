@@ -286,17 +286,19 @@ type TunnelSpec struct {
 // twice.
 type SafetySpec struct {
 	// ProtectedHosts are node set expressions that no destructive command
-	// touches unless --force is given as well.
+	// touches unless --force is given as well. An entry may name a node by
+	// any of its names or addresses, or name a group, and must name only
+	// nodes the inventory knows.
 	ProtectedHosts []string `json:"protectedHosts,omitempty" yaml:"protectedHosts,omitempty" jsonschema:"description=Node sets that destructive commands refuse to touch"`
 	// ConfirmAbove asks for the host count to be typed back when a
-	// destructive command targets more than this many hosts. Zero disables
-	// the typed confirmation but not the yes/no prompt.
-	ConfirmAbove int `json:"confirmAbove,omitempty" yaml:"confirmAbove,omitempty" jsonschema:"description=Ask for the count to be typed above this many hosts"`
+	// destructive command targets more than this many hosts. At zero the
+	// count is always typed.
+	ConfirmAbove int `json:"confirmAbove,omitempty" yaml:"confirmAbove,omitempty" jsonschema:"minimum=0,description=Ask for the count to be typed above this many hosts; 0 asks every time"`
 	// SlurmAware refuses to power off a node that is running a job.
 	SlurmAware *bool `json:"slurmAware,omitempty" yaml:"slurmAware,omitempty" jsonschema:"description=Check Slurm before power actions"`
 	// PowerOnBatch and PowerOnStagger spread a power-on over time so that a
 	// rack does not trip its breaker.
-	PowerOnBatch   int      `json:"powerOnBatch,omitempty" yaml:"powerOnBatch,omitempty"`
+	PowerOnBatch   int      `json:"powerOnBatch,omitempty" yaml:"powerOnBatch,omitempty" jsonschema:"minimum=1,description=How many nodes to power on at once"`
 	PowerOnStagger Duration `json:"powerOnStagger,omitempty" yaml:"powerOnStagger,omitempty"`
 }
 

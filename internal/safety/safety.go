@@ -40,7 +40,7 @@ type Gate struct {
 	// not know may be another spelling of a protected machine.
 	Known *nodeset.NodeSet
 	// ConfirmAbove asks for the host count to be typed back when an action
-	// targets more than this many hosts.
+	// targets more than this many hosts. At zero it is always typed.
 	ConfirmAbove int
 	// AssumeYes answers every prompt with yes, for -y and for scripts.
 	AssumeYes bool
@@ -66,7 +66,19 @@ type Gate struct {
 // NewGate builds a gate from the safety configuration of a site. resolve
 // turns a protected host entry into the machines it names; nil parses it as
 // a plain node set.
+//
+// A limit that would switch a safeguard off is refused here, because it is
+// the one place every setting of the site has passed through, --set
+// included.
 func NewGate(spec v1alpha1.SafetySpec, resolve func(expr string) (*nodeset.NodeSet, error)) (*Gate, error) {
+	if spec.ConfirmAbove < 0 {
+		return nil, fmt.Errorf("safety.confirmAbove is %d; it must be 0 or more, and 0 asks for the count every time",
+			spec.ConfirmAbove)
+	}
+	if spec.PowerOnBatch < 1 {
+		return nil, fmt.Errorf("safety.powerOnBatch is %d; it must be at least 1, or a whole rack powers on at once",
+			spec.PowerOnBatch)
+	}
 	if resolve == nil {
 		resolve = func(expr string) (*nodeset.NodeSet, error) { return nodeset.Parse(expr) }
 	}
@@ -271,8 +283,10 @@ func (g *Gate) Preview(a Action) (Preview, error) {
 		Targets: a.Targets.String(),
 		Count:   count,
 		Detail:  a.Detail,
-		// Above the threshold a yes is too easy to give by reflex.
-		CountRequired: g.ConfirmAbove > 0 && count > g.ConfirmAbove,
+		// Above the threshold a yes is too easy to give by reflex. At zero
+		// the count is always typed, which is what a cautious site means by
+		// it.
+		CountRequired: count > g.ConfirmAbove,
 		ConfirmAbove:  g.ConfirmAbove,
 	}, nil
 }
@@ -285,6 +299,9 @@ func (p Preview) Summary() string {
 
 // Question is what the administrator is asked.
 func (p Preview) Question() string {
+	if p.CountRequired && p.ConfirmAbove == 0 {
+		return "Type the number of hosts to continue:"
+	}
 	if p.CountRequired {
 		return fmt.Sprintf("This is more than %d hosts. Type the number of hosts to continue:", p.ConfirmAbove)
 	}

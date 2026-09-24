@@ -212,4 +212,4 @@ gate cannot tell whether it is another name for a protected host. Pass
 `--force` when you mean it.
 
 `confirmAbove` is the host count above which the number has to be typed back
-rather than confirmed with a `y`.
+rather than confirmed with a `y`. At `0` the number is asked for every time.

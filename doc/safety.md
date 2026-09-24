@@ -51,9 +51,10 @@ Everything that changes or destroys something goes through
 4. **The action is previewed.** What will happen, to how many hosts, and which
    ones — before anything is sent.
 
-5. **It is confirmed.** Below `safety.confirmAbove` hosts, a yes is enough.
+5. **It is confirmed.** Up to `safety.confirmAbove` hosts, a yes is enough.
    Above it, the host count has to be read off the preview and typed back,
-   because a `y` is too easy to type by reflex:
+   because a `y` is too easy to type by reflex. At `0` the count is typed
+   for every action, and a negative value is refused:
 
    ```
    About to power off 40 hosts: exe[0001-0040]
@@ -143,7 +144,8 @@ the set.
 
 **A power-on is spread over batches.** `safety.powerOnBatch` nodes at a time
 with `safety.powerOnStagger` between them, because a rack powering on at once
-trips its breaker.
+trips its breaker. A batch of less than one node is refused rather than read
+as "no batches".
 
 **A boot source override applies once by default.** A persistent override is
 what leaves a machine reinstalling every time it reboots, so `--persistent` has

@@ -253,6 +253,47 @@ func TestUnknownHostsNeedForce(t *testing.T) {
 	}
 }
 
+// The configuration schema, safety.md and the manual all read 0 as "always
+// ask for the count", and the gate did the opposite.
+func TestConfirmAboveZeroAlwaysAsksForTheCount(t *testing.T) {
+	t.Parallel()
+
+	g, err := safety.NewGate(v1alpha1.SafetySpec{ConfirmAbove: 0, PowerOnBatch: 8}, nil)
+	if err != nil {
+		t.Fatalf("NewGate failed: %v", err)
+	}
+	p, err := g.Preview(action("drain", "exe1"))
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
+	if !p.CountRequired {
+		t.Error("at confirmAbove 0 a yes was enough")
+	}
+	if got, want := p.Question(), "Type the number of hosts to continue:"; got != want {
+		t.Errorf("Question() = %q, want %q", got, want)
+	}
+	if err := p.Accept("y"); err == nil {
+		t.Error("a yes was accepted where the count had to be typed")
+	}
+	if err := p.Accept("1"); err != nil {
+		t.Errorf("the count was not accepted: %v", err)
+	}
+}
+
+func TestNewGateRefusesLimitsThatTurnASafeguardOff(t *testing.T) {
+	t.Parallel()
+
+	for _, spec := range []v1alpha1.SafetySpec{
+		{ConfirmAbove: -1, PowerOnBatch: 8},
+		{ConfirmAbove: 8, PowerOnBatch: 0},
+		{ConfirmAbove: 8, PowerOnBatch: -1},
+	} {
+		if _, err := safety.NewGate(spec, nil); err == nil {
+			t.Errorf("NewGate(%+v) was accepted", spec)
+		}
+	}
+}
+
 func TestPreviewAsksWithoutPrompting(t *testing.T) {
 	t.Parallel()
 
