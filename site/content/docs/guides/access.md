@@ -162,13 +162,24 @@ $ clusterctl tunnel stop ipmi
 ```
 
 sshuttle changes the local firewall, so starting one may ask for your local
-password. A process id file left behind by a crash is not reported as a running
-tunnel — the process is checked too.
+password.
+
+A tunnel connects the way every other connection does: sshuttle is handed
+`ssh -F` and the generated configuration, so the gateway's host key is checked
+against the site's file alone, and the role's `proxyJump` and `options` apply.
+The account is the profile's `user`, else the role's, else the context's.
 
 ```console
 $ clusterctl tunnel start ipmi --dry-run
-sshuttle --daemon --pidfile … --remote mgmt-gw.example.org --exclude desk01.example.org 10.0.0.0/8
+sshuttle --exclude desk01.example.org --daemon --pidfile … --ssh-cmd 'ssh -F …/ssh_config-3f9c2a1b7d4e5f60' --remote alice_adm@mgmt-gw.example.org 10.0.0.0/8
 ```
+
+The profile's `options` come before the options clusterctl sets, which
+sshuttle then keeps. An option that would set one of those itself,
+`--ssh-cmd`, `--remote`, `--pidfile` or `--daemon`, is refused.
+
+A process id file left behind by a crash is not reported as a running
+tunnel — the process is checked too.
 
 A subnet that is neither a configured network name nor an address is refused,
 because sshuttle would otherwise route something else entirely.

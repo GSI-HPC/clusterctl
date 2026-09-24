@@ -222,14 +222,31 @@ func (c *Client) ScpBinary() string {
 	return "scp"
 }
 
-// Args builds the full argument vector, ssh included, that a request runs as.
-// Commands use it for --dry-run and for reporting what they would do.
-func (c *Client) Args(target Target, req Request) ([]string, error) {
+// Command returns ssh with the generated configuration, the part of every
+// argument vector that decides how a host is reached and which host key it
+// must present. A program that runs ssh itself, such as sshuttle, is given
+// this command, so that it connects the way every other connection does.
+func (c *Client) Command() ([]string, error) {
 	config, err := c.ConfigPath()
 	if err != nil {
 		return nil, err
 	}
-	args := []string{c.Binary(), "-F", config}
+	return []string{c.Binary(), "-F", config}, nil
+}
+
+// Destination renders the [user@]host a target is reached as, with the
+// account resolved and checked as it is for a command.
+func (c *Client) Destination(target Target) (string, error) {
+	return c.destination(target)
+}
+
+// Args builds the full argument vector, ssh included, that a request runs as.
+// Commands use it for --dry-run and for reporting what they would do.
+func (c *Client) Args(target Target, req Request) ([]string, error) {
+	args, err := c.Command()
+	if err != nil {
+		return nil, err
+	}
 
 	switch req.TTY {
 	case TTYForce:

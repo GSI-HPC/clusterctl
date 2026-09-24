@@ -5,13 +5,14 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/shellquote"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/internal/tunnel"
 )
 
@@ -40,17 +41,19 @@ func manager(a *app.App) *tunnel.Manager {
 		StateDir: a.StateDir,
 		Binary:   a.Spec.Workstation.SshuttleBinary,
 		Vars:     vars,
-		Host: func(role string) (string, string, error) {
+		SSH:      a.SSH.Command,
+		Destination: func(remote, user string) (string, error) {
 			// A profile may name a host directly rather than a role, so a
 			// name that is not a role is used as it is.
-			if _, ok := a.Spec.Hosts[role]; !ok {
-				return role, "", nil
+			target := transport.Target{Name: remote, Host: remote, User: user}
+			if _, ok := a.Spec.Hosts[remote]; ok {
+				role, err := a.Role(remote)
+				if err != nil {
+					return "", err
+				}
+				target.Host, target.Role = role.Host, role.Name
 			}
-			target, err := a.Role(role)
-			if err != nil {
-				return "", "", err
-			}
-			return target.Host, target.User, nil
+			return a.SSH.Destination(target)
 		},
 	}
 }
@@ -112,7 +115,11 @@ the process is checked as well.`,
 func newTunnelStartCommand(r *root) *cobra.Command {
 	cmd := leaf("start NAME", "Bring a tunnel up", `
 Start a tunnel profile. sshuttle changes the local firewall, so it may ask
-for the local password.`,
+for the local password.
+
+sshuttle connects with the generated ssh configuration, like every other
+connection: the host key is checked against the site's file, and the role's
+jump hosts and account apply.`,
 		cobra.ExactArgs(1),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -125,7 +132,9 @@ for the local password.`,
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			if a.DryRun() {
-				return say(cmd, "%s\n", strings.Join(argv, " "))
+				// The ssh command is one argument with spaces in it, so
+				// the preview is quoted to be pasted into a shell.
+				return say(cmd, "%s\n", shellquote.Join(argv))
 			}
 			if err := m.Start(a.Context(), args[0]); err != nil {
 				return exitcode.Wrap(exitcode.Transport, err)
