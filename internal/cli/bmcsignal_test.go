@@ -68,7 +68,7 @@ func TestBMCInterruptHelperProcess(t *testing.T) {
 	cmd.SetArgs(args)
 	code := exitcode.OK
 	if err := cmd.ExecuteContext(ctx); err != nil {
-		code = report(streams, err)
+		code = report(ctx, streams, err)
 	}
 	os.Exit(code)
 }

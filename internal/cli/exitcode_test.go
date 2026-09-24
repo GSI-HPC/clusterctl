@@ -18,7 +18,11 @@ import (
 func exitCodeOf(t *testing.T, opts harnessOptions, args ...string) (*harness, int) {
 	t.Helper()
 	h, cmd := build(t, opts, args...)
-	return h, execute(context.Background(), cmd, h.streams)
+	ctx := opts.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return h, execute(ctx, cmd, h.streams)
 }
 
 // TestUsageErrorsExitTwo checks that what cobra and pflag reject is a usage
@@ -120,5 +124,27 @@ func TestUnreachableRoleIsUnreachable(t *testing.T) {
 	h, code := exitCodeOf(t, harnessOptions{recorder: rec}, "fabric", "counters", "exe0001")
 	if code != exitcode.Transport {
 		t.Errorf("exit code = %d, want %d; stderr:\n%s", code, exitcode.Transport, h.errOut)
+	}
+}
+
+// TestInterruptedCommandExits130 checks that a command which fails after the
+// process was interrupted exits 130, however the failure was worded. Paths
+// that flatten an error to its text, or a request that failed because the
+// interrupt stopped it, would otherwise report the administrator's own Ctrl-C
+// as a failed or unreachable host.
+func TestInterruptedCommandExits130(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		// The interrupt arrives while the command runs.
+		cancel()
+		return transport.ExitResult(tg, 255, "", "Killed by signal 2.\n"), nil
+	}}
+	h, code := exitCodeOf(t, harnessOptions{recorder: rec, ctx: ctx},
+		"slurm", "node", "drain", "ticket 1", "-n", "exe[0001-0003]", "-y")
+	if code != exitcode.Interrupted {
+		t.Errorf("exit code = %d, want %d; stderr:\n%s", code, exitcode.Interrupted, h.errOut)
+	}
+	if !strings.Contains(h.errOut.String(), "interrupted") {
+		t.Errorf("stderr does not say the command was interrupted:\n%s", h.errOut)
 	}
 }

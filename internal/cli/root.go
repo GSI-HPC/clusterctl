@@ -265,19 +265,28 @@ func Execute(ctx context.Context) int {
 // execute runs a built command tree and returns the process exit code.
 func execute(ctx context.Context, cmd *cobra.Command, streams app.Streams) int {
 	if err := cmd.ExecuteContext(ctx); err != nil {
-		return report(streams, err)
+		return report(ctx, streams, err)
 	}
 	return exitcode.OK
 }
 
 // report prints an error and returns the exit code it asks for. A dry run
 // that stopped on purpose is not an error.
-func report(streams app.Streams, err error) int {
+//
+// A command that failed once ctx, the context a signal cancels, had ended
+// was interrupted, whatever its error says: a request the interrupt stopped
+// fails as it happens to, and some paths keep only an error's text, so the
+// cancellation cannot always be found in the chain.
+func report(ctx context.Context, streams app.Streams, err error) int {
 	if safety.IsDryRun(err) {
 		return exitcode.OK
 	}
 	if errors.Is(err, context.Canceled) {
 		_, _ = fmt.Fprintln(streams.Err, "clusterctl: interrupted")
+		return exitcode.Interrupted
+	}
+	if ctx.Err() != nil {
+		_, _ = fmt.Fprintf(streams.Err, "clusterctl: interrupted: %v\n", err)
 		return exitcode.Interrupted
 	}
 	// The exit code is what a caller acts on; a message that cannot be

@@ -5,10 +5,12 @@ package transport_test
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -24,7 +26,10 @@ func fakeClient(t *testing.T, script string) *transport.Client {
 	}
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "fake-ssh")
-	writeScript(t, binary, "#!/bin/sh\n"+script+"\n")
+	// ssh -V is asked for the version before the configuration is written,
+	// and is answered at once, whatever the script does otherwise.
+	version := "[ \"$1\" = -V ] && { echo OpenSSH_9.6p1 >&2; exit 0; }\n"
+	writeScript(t, binary, "#!/bin/sh\n"+version+script+"\n")
 	return transport.New(transport.Options{
 		SSH:            v1alpha1.SSHSpec{Binary: binary, ScpBinary: binary},
 		StateDir:       dir,
@@ -46,6 +51,61 @@ func writeScript(t *testing.T, path, content string) {
 }
 
 var target = transport.Target{Name: "exe0001", Host: "exe0001.example.org"}
+
+// cancelSoon returns a context that is cancelled shortly after the command
+// has started, the way the first Ctrl-C cancels the process's context.
+func cancelSoon(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	time.AfterFunc(200*time.Millisecond, cancel)
+	return ctx
+}
+
+// TestRunReportsAnInterruptAsInterrupted checks that a command stopped by its
+// context says so. The killed ssh used to be reported as "command exited -1",
+// an error without a code, so an interrupted slurm node drain exited 1 and an
+// interrupted boot set 3.
+func TestRunReportsAnInterruptAsInterrupted(t *testing.T) {
+	c := fakeClient(t, "exec sleep 30")
+	start := time.Now()
+	result, err := c.Run(cancelSoon(t), target, transport.Request{Argv: []string{"true"}, TTY: transport.TTYNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(result.Err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled", result.Err)
+	}
+	if got := exitcode.From(result.Err); got != exitcode.Interrupted {
+		t.Errorf("exit code = %d, want %d", got, exitcode.Interrupted)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("Run took %v to return after the interrupt", elapsed)
+	}
+}
+
+func TestInteractiveReportsAnInterruptAsInterrupted(t *testing.T) {
+	c := fakeClient(t, "exec sleep 30")
+	err := c.Interactive(cancelSoon(t), target, transport.Request{
+		Argv: []string{"true"}, Stdin: strings.NewReader(""), Stdout: &strings.Builder{}, Stderr: &strings.Builder{},
+	})
+	if !errors.Is(err, context.Canceled) || exitcode.From(err) != exitcode.Interrupted {
+		t.Errorf("error = %v (exit code %d), want an interrupt", err, exitcode.From(err))
+	}
+}
+
+func TestCopyReportsAnInterruptAsInterrupted(t *testing.T) {
+	c := fakeClient(t, "exec sleep 30")
+	result, err := c.Copy(cancelSoon(t), target, transport.CopyRequest{
+		Sources: []string{"/etc/hosts"}, Destination: "/tmp/hosts", Upload: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(result.Err, context.Canceled) || exitcode.From(result.Err) != exitcode.Interrupted {
+		t.Errorf("error = %v (exit code %d), want an interrupt", result.Err, exitcode.From(result.Err))
+	}
+}
 
 // TestRunClassifiesTheExitStatus checks the three ways a command can end: the
 // host answered with a failure, ssh could not reach it, or it succeeded.
