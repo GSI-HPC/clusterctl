@@ -150,8 +150,6 @@ spec:
 
   fanout:
     max: 24
-    offloadAbove: 512
-    offload: login
 
   services:
     dhcp:

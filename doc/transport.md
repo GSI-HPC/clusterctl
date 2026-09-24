@@ -205,9 +205,10 @@ flight. Two properties are deliberate:
 `--dedup` collapses the nodes that answered the same thing, which turns a
 thousand replies into the few worth reading.
 
-For sets larger than `fanout.offloadAbove`, the configuration can name a host
-role to run `clush` on instead, which keeps sshd's connection limits out of the
-picture entirely.
+Every node is reached with its own ssh connection from the workstation, however
+large the set. `fanout.max` bounds how many are open at once; nothing hands a
+large set to `clush` on another host (R21 in [requirements.md](requirements.md)
+is deferred).
 
 ## Secrets
 

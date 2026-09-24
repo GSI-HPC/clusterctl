@@ -310,10 +310,6 @@ type FanoutSpec struct {
 	// killing the local ssh does not stop the remote process.
 	ConnectTimeout Duration `json:"connectTimeout,omitempty" yaml:"connectTimeout,omitempty"`
 	CommandTimeout Duration `json:"commandTimeout,omitempty" yaml:"commandTimeout,omitempty"`
-	// OffloadAbove hands sets larger than this to clush on the host role
-	// named by Offload, which keeps sshd's MaxStartups out of the picture.
-	OffloadAbove int    `json:"offloadAbove,omitempty" yaml:"offloadAbove,omitempty"`
-	Offload      string `json:"offload,omitempty" yaml:"offload,omitempty"`
 }
 
 // ServicesSpec describes the site services the commands read and drive.
