@@ -4,7 +4,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -34,9 +36,12 @@ refreshing at the same time cannot lose an entry.`,
 	)
 }
 
+// scanDial replaces the scanner's direct connection; only the tests set it.
+var scanDial func(ctx context.Context, network, address string) (net.Conn, error)
+
 // scanTargets collects the current key of every host of a node set.
 func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duration) (map[string][]hostkeys.Entry, map[string]error) {
-	scanner := &hostkeys.Scanner{Timeout: timeout}
+	scanner := &hostkeys.Scanner{Timeout: timeout, Dial: scanDial}
 	found := map[string][]hostkeys.Entry{}
 	failed := map[string]error{}
 
@@ -150,10 +155,16 @@ for this command to decide which.`,
 			found, failed := scanTargets(a, ns, bmc, timeout)
 
 			t := output.NewTable(output.Cols("HOST", "STATUS", "DETAIL")...)
-			changed, missing := 0, 0
+			changed, missing, revoked := 0, 0, 0
 			for _, host := range sortedMapKeys(found) {
 				known := file.Find(host)
 				switch {
+				case anyRevoked(file, host, found[host]):
+					// ssh refuses a revoked key whatever else the file
+					// says, so a match beside it is no match.
+					revoked++
+					t.Add(host, "REVOKED", fmt.Sprintf("host offers %s, which the file revokes",
+						abbreviate(found[host][0].Key)))
 				case len(known) == 0:
 					missing++
 					t.Add(host, "not in the file", found[host][0].Type)
@@ -172,6 +183,9 @@ for this command to decide which.`,
 				return err
 			}
 			switch {
+			case revoked > 0:
+				return exitcode.Errorf(exitcode.TargetFailed,
+					"%d host%s offer a revoked key; investigate before trusting them", revoked, plural(revoked))
 			case changed > 0:
 				return exitcode.Errorf(exitcode.TargetFailed,
 					"%d host key%s changed; check before refreshing", changed, plural(changed))
@@ -227,13 +241,17 @@ changed without a reinstall is worth understanding before it is trusted.`,
 
 			found, failed := scanTargets(a, ns, bmc, timeout)
 			written := 0
+			refused := map[string]bool{}
 			err = hostkeys.Modify(a.Context(), path, func(f *hostkeys.File) error {
 				for _, host := range sortedMapKeys(found) {
-					f.Remove(host)
-					for _, e := range found[host] {
-						f.Add(e)
-						written++
+					// A revoked key is never written back as trusted, and
+					// the entry already there stays as it is.
+					if anyRevoked(f, host, found[host]) {
+						refused[host] = true
+						continue
 					}
+					f.Replace(host, found[host])
+					written += len(found[host])
 				}
 				return nil
 			})
@@ -243,6 +261,10 @@ changed without a reinstall is worth understanding before it is trusted.`,
 
 			t := output.NewTable(output.Cols("HOST", "STATUS", "TYPE")...)
 			for _, host := range sortedMapKeys(found) {
+				if refused[host] {
+					t.Add(host, "REVOKED", found[host][0].Type)
+					continue
+				}
 				t.Add(host, "written", found[host][0].Type)
 			}
 			for _, host := range sortedMapKeys(failed) {
@@ -251,6 +273,10 @@ changed without a reinstall is worth understanding before it is trusted.`,
 			t.Caption = fmt.Sprintf("%d keys written to %s", written, path)
 			if err := a.Print(output.Result{Table: t}); err != nil {
 				return err
+			}
+			if len(refused) > 0 {
+				return exitcode.Errorf(exitcode.TargetFailed,
+					"%d host%s offer a revoked key, which was not written", len(refused), plural(len(refused)))
 			}
 			if len(failed) > 0 {
 				return exitcode.Errorf(exitcode.Transport, "%d hosts did not answer", len(failed))
@@ -348,6 +374,16 @@ Print the entries of the host key file.`,
 			t.Caption = fmt.Sprintf("%d entries in %s", len(file.Entries), path)
 			return a.Print(output.Result{Table: t, Object: file.Entries})
 		})
+}
+
+// anyRevoked reports whether the file revokes a key a host offers.
+func anyRevoked(f *hostkeys.File, host string, found []hostkeys.Entry) bool {
+	for _, e := range found {
+		if f.Revoked(host, e) {
+			return true
+		}
+	}
+	return false
 }
 
 // matches reports whether every collected key is already in the file.

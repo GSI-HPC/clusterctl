@@ -52,6 +52,19 @@ rewrites it, and its lock readable by the group, so every administrator in the
 group can refresh it. A symbolic link to the file stays a link, unless someone
 other than you or root made it, in which case the write is refused.
 
+The rewrite keeps what people wrote into the file. A comment above an entry
+stays with that entry when the file is sorted, and `refresh` carries it over
+to the key that replaces it; the comment block at the top stays on top. Lines
+ssh itself understands are read the way ssh reads them:
+
+- A hashed name (`|1|…`) or a wildcard (`*.mgmt.example.org`, `!exe0009…`)
+  covers the hosts ssh would match it with, so `verify` does not report them
+  as missing. `remove` and `refresh` only drop a line that names the host
+  itself, literally or hashed; a wildcard speaks for other hosts too and stays.
+- `@revoked` and `@cert-authority` lines are never removed or replaced. A host
+  offering a revoked key is reported as `REVOKED` by `verify`, and `refresh`
+  refuses to write that key; both exit non-zero.
+
 ## The generated ssh configuration
 
 Every connection is made with a configuration clusterctl writes into
