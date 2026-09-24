@@ -6,6 +6,7 @@ package transport_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -186,5 +187,82 @@ wait`)
 	}
 	if !strings.Contains(result.Stderr, "stopped gently") {
 		t.Errorf("ssh was not given the chance to stop; stderr = %q", result.Stderr)
+	}
+}
+
+// loopback is an ssh that runs the remote command with the local shell, the
+// way sshd hands it to the account's shell on the host.
+const loopback = `while [ "$1" != "--" ]; do shift; done
+shift 2
+exec sh -c "$1"`
+
+// TestRemoteStatus255IsNotAConnectionFailure checks that a command exiting
+// 255 on a host that answered is not reported as unreachable. ssh reports its
+// own failure as 255 too, so "login install -- sh -c 'exit 255'" printed "ssh
+// reported a connection failure" and exited 3.
+func TestRemoteStatus255IsNotAConnectionFailure(t *testing.T) {
+	t.Parallel()
+	c := fakeClient(t, loopback)
+	for _, req := range []transport.Request{
+		{Argv: []string{"sh", "-c", "exit 255"}},
+		{Script: "exit 255", Shell: "sh"},
+		{Argv: []string{"sh", "-c", "exit 255"}, Env: map[string]string{"A": "b"}},
+	} {
+		result, err := c.Run(context.Background(), target, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := exitcode.From(result.Err); got != exitcode.TargetFailed {
+			t.Errorf("%+v: exit code = %d (%v), want %d", req, got, result.Err, exitcode.TargetFailed)
+		}
+		if result.ExitCode != 254 {
+			t.Errorf("%+v: exit status = %d, want 255 reported as 254", req, result.ExitCode)
+		}
+	}
+}
+
+// TestRemoteStatusIsKept checks that every other status comes back as the
+// command gave it, and that the arguments arrive unchanged.
+func TestRemoteStatusIsKept(t *testing.T) {
+	t.Parallel()
+	c := fakeClient(t, loopback)
+	for _, code := range []string{"0", "1", "3", "124", "254"} {
+		result, err := c.Run(context.Background(), target, transport.Request{Argv: []string{"sh", "-c", "exit " + code}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprint(result.ExitCode); got != code {
+			t.Errorf("exit %s came back as %s", code, got)
+		}
+	}
+	result, err := c.Run(context.Background(), target, transport.Request{Argv: []string{"printf", "%s|", "*.log", "it's", "a  b"}})
+	if err != nil || result.Failed() {
+		t.Fatalf("printf failed: %v %v", err, result.Err)
+	}
+	if got, want := result.Stdout, "*.log|it's|a  b|"; got != want {
+		t.Errorf("the arguments arrived as %q, want %q", got, want)
+	}
+}
+
+// TestNoShellSendsTheCommandAsItIs checks that a host whose command line is
+// not sh, such as a power distribution unit, is not sent the guard it could
+// not run.
+func TestNoShellSendsTheCommandAsItIs(t *testing.T) {
+	t.Parallel()
+	c := fakeClient(t, "true")
+	for _, tc := range []struct {
+		noShell bool
+		want    string
+	}{
+		{true, "show outlets"},
+		{false, `sh -c '"$@"; s=$?; [ "$s" -ne 255 ] || s=254; exit "$s"' sh show outlets`},
+	} {
+		args, err := c.Args(target, transport.Request{Argv: []string{"show", "outlets"}, NoShell: tc.noShell})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := args[len(args)-1]; got != tc.want {
+			t.Errorf("NoShell %v: the command is sent as %q, want %q", tc.noShell, got, tc.want)
+		}
 	}
 }

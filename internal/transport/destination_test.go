@@ -6,6 +6,7 @@ package transport_test
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -30,7 +31,7 @@ func TestArgsEndOptionsBeforeTheDestination(t *testing.T) {
 		if end < 0 || dest != end+1 {
 			t.Errorf("Args = %q, want the destination straight after --", args)
 		}
-		if len(req.Argv) > 0 && args[len(args)-1] != "uptime" {
+		if len(req.Argv) > 0 && !strings.HasSuffix(args[len(args)-1], " sh uptime") {
 			t.Errorf("Args = %q, want the command last", args)
 		}
 	}

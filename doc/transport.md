@@ -27,8 +27,17 @@ the tests: every vector that goes in comes back out unchanged.
 
 ```
 $ clusterctl login --dry-run install -- ls '/srv/*.log'
-ssh -F ~/.local/state/clusterctl/ssh_config-3f9c2a1b7d4e5f60 -A -- root@installer.hpc.example.org ls '/srv/*.log'
+ssh -F ~/.local/state/clusterctl/ssh_config-3f9c2a1b7d4e5f60 -A -- root@installer.hpc.example.org sh -c '"$@"; s=$?; [ "$s" -ne 255 ] || s=254; exit "$s"' sh ls '/srv/*.log'
 ```
+
+The command runs under a small `sh` guard, whichever shell the account logs
+in with. ssh reports its own failure, a host it could not reach or
+authenticate with, as exit status 255, so a remote command that exits 255
+would read as an unreachable host. The guard passes every other status
+through and turns 255 into 254. An interactive login has no command and no
+guard, so a login shell that exits 255 is still reported as a connection
+failure, and neither has `pdu shell`, since a power distribution unit's
+command line is not `sh`.
 
 A script is sent as one `bash -c '<script>'` argument for the same reason, and
 standard input is left free for payloads. Sharing one stream between a script
