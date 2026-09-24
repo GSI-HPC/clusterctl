@@ -57,16 +57,26 @@ type Resolver struct {
 	// Secret reads a key of a Secret document for a secretRef source.
 	Secret func(ref v1alpha1.SecretKeyRef) ([]byte, error)
 
-	mu     sync.Mutex
-	cache  map[string]Credential
-	ageIDs []age.Identity
+	// reading is held across a whole lookup, so that concurrent callers
+	// wait for the one read instead of each prompting or running the
+	// helper. Reads are rare and two prompts must not share a terminal, so
+	// one lock for every name is enough.
+	reading sync.Mutex
+	mu      sync.Mutex
+	cache   map[string]Credential
+	ageIDs  []age.Identity
 }
 
 // Get resolves a credential by name, reading its password once per process.
+// It is safe for concurrent use: a caller that arrives while the password is
+// being read waits for that read.
 func (r *Resolver) Get(ctx context.Context, name string) (Credential, error) {
 	if name == "" {
 		return Credential{}, fmt.Errorf("no credential was named")
 	}
+	r.reading.Lock()
+	defer r.reading.Unlock()
+
 	r.mu.Lock()
 	if cached, ok := r.cache[name]; ok {
 		r.mu.Unlock()

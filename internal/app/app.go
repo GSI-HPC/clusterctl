@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"golang.org/x/term"
 
@@ -118,10 +119,11 @@ type App struct {
 	// Format is the output format.
 	Format output.Format
 
-	opts        Options
-	ctx         context.Context
-	credentials *credentials.Resolver
-	secrets     secretStore
+	opts            Options
+	ctx             context.Context
+	credentials     *credentials.Resolver
+	credentialsOnce sync.Once
+	secrets         secretStore
 }
 
 // New resolves the configuration and builds the command context.
