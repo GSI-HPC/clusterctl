@@ -189,6 +189,10 @@ it. Forgetting goes through the same confirmation as any other change, and
 replacing a certificate on purpose. If it changed and nobody replaced it, find
 out why first: the next connection trusts whatever it is shown.
 
+A redirect is never followed. Following one would send an action a second
+time, and could send the credentials to the same host over plain HTTP, so the
+command stops and names where the service processor pointed.
+
 ## Talking to Redfish directly
 
 ```console

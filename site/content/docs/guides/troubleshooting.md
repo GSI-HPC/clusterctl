@@ -122,6 +122,18 @@ bmc:
       resetTypes: [On, ForceOff, ForceRestart, GracefulRestart, PowerCycle]
 ```
 
+## A service processor answers with a redirect
+
+```console
+clusterctl: exe0001.mgmt…: /redfish/v1/Systems/1 answered with a redirect to
+  "http://exe0001.mgmt…:8080/redfish/v1/Systems/1", which is not followed
+```
+
+Redirects are refused: following one could send an action twice, or the
+credentials over plain HTTP. Point `bmc.redfish.systemPath` or the vendor's
+`systemPath` at the resource the service processor serves, or fix its
+configuration.
+
 ## A command times out on the node
 
 The timeout is enforced on the node with `timeout`, so the remote process is

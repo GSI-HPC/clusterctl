@@ -121,8 +121,17 @@ func (c *Client) httpClient(ctx context.Context) (*http.Client, error) {
 			DisableKeepAlives: false,
 		}
 	}
-	c.client = &http.Client{Transport: rt, Timeout: timeout}
+	c.client = &http.Client{Transport: rt, Timeout: timeout, CheckRedirect: refuseRedirect}
 	return c.client, nil
+}
+
+// refuseRedirect refuses every redirect. Following one would send an action
+// a second time, and Go keeps the credentials for another port or plain HTTP
+// on the same host, where neither TLS nor the pin protects them. A Redfish
+// service has no reason to redirect, so the answer is reported instead.
+func refuseRedirect(req *http.Request, via []*http.Request) error {
+	return fmt.Errorf("%s answered with a redirect to %q, which is not followed",
+		via[len(via)-1].URL.Path, req.URL.Redacted())
 }
 
 func minVersion(v string) uint16 {
