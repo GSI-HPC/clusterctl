@@ -21,15 +21,21 @@ $ clusterctl slurm node list --state idle -o wide
 $ clusterctl slurm node list '@rack:R02'
 ```
 
-State groups: `alloc`, `idle`, `drain`, `down`, `defect`. Anything else is
-passed to Slurm as it is written, so `--state mixed,completing` works too.
+State groups: `alloc`, `idle`, `drain`, `down`, `defect`. A group means the
+state Slurm reports for the node: `idle` leaves out a drained node, although
+Slurm counts its base state as idle, and `down` leaves out a node that only
+stopped responding or waits to be powered down. Anything else is passed to
+Slurm as it is written, so `--state mixed,completing` works too.
+
+A node without a reason shows an empty `REASON`, although `sinfo` prints
+`none` for it.
 
 ## Taking a node out of production
 
 ```console
 $ clusterctl slurm node drain 'ticket 4711: failing DIMM' -n exe0007
 About to drain 1 host: exe0007
-  reason: ticket 4711: failing DIMM
+  reason: "ticket 4711: failing DIMM"
 Continue? [y/N] y
 drained exe0007
 ```
@@ -40,9 +46,31 @@ node with no reason is a node nobody dares resume. Say what is wrong and where
 it is tracked.
 {{< /callout >}}
 
+The reason is checked before anything is shown, and a bad one exits `2`: it
+may not be blank, longer than 200 characters, hold a line break or another
+control character, or hold `|`, which Slurm's parsable output puts between
+fields. A reason that reads as nodes, such as `exe0007` or `@rack:R02`, is
+refused, because that is what a forgotten reason looks like. Name the nodes
+either after the reason or with `-n`, not both.
+
 ```console
 $ clusterctl slurm node resume -n exe0007
 ```
+
+Before drain or resume shows anything, the nodes are checked against Slurm.
+`scontrol` does not read its node list as plain host names: `ALL` means every
+node, and a `NodeSet` name from `slurm.conf` means its members. So `ALL`, in any
+case, is refused, and so is a set that Slurm does not read as exactly the
+nodes named, or that holds a node Slurm does not know:
+
+```console
+$ clusterctl slurm node drain 'rack maintenance' -n gpunodes
+clusterctl: Slurm reads gpunodes as more nodes than were named, among them gpu[01-08]; name the nodes themselves
+```
+
+This check reads the cluster even under `--dry-run`, which still changes
+nothing. `scontrol update` is not atomic: when it fails part way, Slurm's own
+message is shown, and the nodes are read back to say which of them changed.
 
 ## Node sets by state
 
@@ -73,6 +101,9 @@ bob    proj     main          7
 
 ## What finished
 
+The window is sent as `now-SECONDS`, so it is counted on the clock of the
+login node and does not move with the time zone of your workstation.
+
 ```console
 $ clusterctl slurm job history --state failed --since 24h
 JOB   USER   ACCOUNT  STATE   EXIT  ELAPSED
@@ -95,6 +126,13 @@ $ clusterctl slurm partition main -o wide
 
 ## Accounts
 
+Changes to the accounting database name the cluster, read from the
+`ClusterName` of `slurm.conf` on the login node, because one `slurmdbd` can serve
+several clusters and `sacctmgr` applies a change that names none to all of
+them. The confirmation says which cluster. Account and user names are letters,
+digits and `. _ @ -` only: `sacctmgr` reads a comma as a list and brackets as a
+range, so `proj[1-100]` would create a hundred accounts.
+
 ```console
 $ clusterctl slurm account list
 ACCOUNT  DESCRIPTION  COORDINATORS
@@ -115,13 +153,25 @@ USER   ACCOUNT  DEFAULT  FAIRSHARE
 alice  proj     proj     1
 
 $ clusterctl slurm user add alice proj
+About to create the Slurm user alice with the account proj in the Slurm cluster hpc on 1 host: accounting
+Continue? [y/N] y
+user alice associated
+
+$ clusterctl slurm user add alice proj proj
 $ clusterctl slurm user default alice proj
 ```
 
+`ACCOUNT` defaults to `slurm.defaultAccount`. `DEFAULT_ACCOUNT` becomes the
+user's default account, for a user who exists already too, and a default
+account the user is not associated with is associated as well. The
+confirmation says what the defaults resolved to.
+
 {{< callout type="info" >}}
-Before a user is added, the cluster is asked whether it knows that account at
-all — with `getent`, not `id`, so a local account on the login node is not
-mistaken for a directory user.
+Before a user is added, the login node is asked whether it knows that account
+at all, with `getent passwd`. `getent` reads the name service switch, local
+files included, so a local account on the login node passes this check;
+check the directory yourself when that matters. A number is refused, because
+`getent` would read it as a user ID. The check runs under `--dry-run` too.
 {{< /callout >}}
 
 ```console

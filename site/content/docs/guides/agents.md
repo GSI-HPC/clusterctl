@@ -38,7 +38,7 @@ Ask the agent to drain a node, and it plans the change first:
 
 ```text
 drain 3 hosts: exe[0001-0003]
-  reason: ticket 4712: fans
+  reason: "ticket 4712: fans"
 current state: drained exe0001, mixed exe0002, idle exe0003
 warnings: exe0002 run jobs; they keep running and the nodes stay draining until the jobs end
 commands: login (login.hpc.example.org): scontrol update 'nodename=exe[0001-0003]' state=drain 'reason=ticket 4712: fans'
