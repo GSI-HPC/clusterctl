@@ -4,7 +4,9 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -30,8 +32,12 @@ func newExecCommand(r *root) *cobra.Command {
 		confirm bool
 	)
 
-	cmd := leaf("exec [-n NODESET] -- COMMAND...", "Run one command on many nodes at once", `
+	cmd := leaf("exec [NODESET] -- COMMAND...", "Run one command on many nodes at once", `
 Run a command on every node of a set, in parallel.
+
+The command follows --, so that none of its options is read as one of
+clusterctl's: without it, a -r or -n meant for the node would change what
+clusterctl does. The node set goes before --, or in -n, but not in both.
 
 The argument vector is quoted once and reassembled by the remote shell, so it
 arrives exactly as it was typed. A timeout is enforced on the node with
@@ -39,21 +45,30 @@ timeout(1), because killing the local ssh would leave the remote process
 running.
 
   clusterctl exec -n @idle -- uptime
-  clusterctl exec -n exe[1-10] --dedup -- uname -r
+  clusterctl exec exe[1-10] --dedup -- uname -r
   clusterctl exec -n exe[1-4] --script 'systemctl is-active slurmd || journalctl -u slurmd -n 5'
+
+A protected host is refused unless --force is given, on every run. exec does
+not ask before it runs, unless --confirm is given. With --stdin the payload
+takes up standard input, so the confirmation cannot be read from it and
+--confirm needs -y.
 
 With --dedup the nodes that answered the same thing are collapsed into one
 block, which turns a thousand replies into the few worth reading.`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-
-			argv := args
+			// Only the words after -- are the command, so that none of its
+			// options can be read as clusterctl's own. The words before it
+			// are the node set, as for every other node command. The shape
+			// of the command line is checked before anything else, so that
+			// a -n meant for the node is reported as a missing --.
+			nodes, argv := args, []string(nil)
 			if at := cmd.ArgsLenAtDash(); at >= 0 {
-				argv = args[at:]
+				nodes, argv = args[:at], args[at:]
+			} else if len(args) > 0 && script == "" {
+				return exitcode.Errorf(exitcode.Usage,
+					"the command has to follow --, so that its options are not read as clusterctl's: "+
+						"clusterctl exec [-n NODESET] -- COMMAND...")
 			}
 			if len(argv) == 0 && script == "" {
 				return exitcode.Errorf(exitcode.Usage,
@@ -62,8 +77,23 @@ block, which turns a thousand replies into the few worth reading.`,
 			if len(argv) > 0 && script != "" {
 				return exitcode.Errorf(exitcode.Usage, "--script and a command after -- contradict each other")
 			}
+			if len(nodes) > 0 && cmd.Flags().Changed("nodes") {
+				return exitcode.Errorf(exitcode.Usage,
+					"%q is a node set, and -n already names one; give the nodes once, and the command after --",
+					strings.Join(nodes, " "))
+			}
 
-			ns, err := a.Select("")
+			a, err := r.App()
+			if err != nil {
+				return err
+			}
+			if stdin && confirm && !a.Gate.AssumeYes && !a.DryRun() {
+				return exitcode.Errorf(exitcode.Usage,
+					"--stdin carries the payload, so the confirmation --confirm asks for cannot be read from it; "+
+						"pass -y to confirm in advance")
+			}
+
+			ns, err := selection(a, nodes)
 			if err != nil {
 				return err
 			}
@@ -85,29 +115,40 @@ block, which turns a thousand replies into the few worth reading.`,
 				limit = a.Timeout().Get()
 			}
 			req := transport.Request{Argv: argv, Script: script, Timeout: limit, TTY: transport.TTYNone}
+
+			action := safety.Action{Verb: "run a command on", Targets: ns, Detail: req.Script}
+			if action.Detail == "" {
+				action.Detail = strings.Join(argv, " ")
+			}
+			// The protected hosts are refused on every run. Only the
+			// question depends on --confirm, so that a dry run and a real
+			// run make the same decision.
+			if err := a.Gate.Check(action); err != nil {
+				return err
+			}
+
+			var payload []byte
 			if stdin {
 				// One stdin cannot be shared by many nodes, so it is read
 				// once and replayed to each of them.
-				payload, err := readAll(a)
-				if err != nil {
+				if payload, err = readAll(a); err != nil {
 					return err
 				}
-				req.Stdin = nil
-				return runWithPayload(a, cmd, targets, req, payload, dedup)
+				action.Detail += fmt.Sprintf("  (with %d bytes on standard input)", len(payload))
 			}
 
 			if confirm || a.DryRun() {
-				detail := req.Script
-				if detail == "" {
-					detail = strings.Join(argv, " ")
-				}
-				err := a.Gate.Confirm(safety.Action{Verb: "run a command on", Targets: ns, Detail: detail})
-				if err != nil {
+				if err := a.Gate.Confirm(action); err != nil {
 					return err
 				}
 			}
 
-			results := a.Executor().Run(a.Context(), targets, req)
+			var results []*transport.Result
+			if stdin {
+				results = runWithPayload(a, targets, req, payload)
+			} else {
+				results = a.Executor().Run(a.Context(), targets, req)
+			}
 			return printExec(a, cmd, results, dedup)
 		})
 
@@ -118,42 +159,32 @@ block, which turns a thousand replies into the few worth reading.`,
 	flags.StringVar(&script, "script", "", "shell program to run instead of a command")
 	flags.BoolVar(&stdin, "stdin", false, "read standard input once and send it to every node")
 	flags.DurationVar(&timeout, "timeout", 0, "how long the command may run on a node (default: from the configuration)")
-	flags.BoolVar(&confirm, "confirm", false, "ask before running, as the destructive commands do")
+	flags.BoolVar(&confirm, "confirm", false, "ask before running, as the destructive commands do; with --stdin, give -y as well")
 	return cmd
 }
 
 // runWithPayload sends the same standard input to every node.
-func runWithPayload(a *app.App, cmd *cobra.Command, targets []transport.Target, req transport.Request, payload []byte, dedup bool) error {
-	results := a.Executor().RunEach(a.Context(), targets, func(transport.Target) transport.Request {
+func runWithPayload(a *app.App, targets []transport.Target, req transport.Request, payload []byte) []*transport.Result {
+	return a.Executor().RunEach(a.Context(), targets, func(transport.Target) transport.Request {
 		out := req
-		out.Stdin = strings.NewReader(string(payload))
+		out.Stdin = bytes.NewReader(payload)
 		return out
 	})
-	return printExec(a, cmd, results, dedup)
 }
 
+// readAll reads the payload of --stdin. A read that fails, even part way
+// through, stops the command: a truncated file replayed to every node is
+// worse than none.
 func readAll(a *app.App) ([]byte, error) {
 	if a.In == nil {
 		return nil, exitcode.Errorf(exitcode.Usage, "--stdin was given but there is nothing to read")
 	}
-	var b strings.Builder
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := a.In.Read(buf)
-		b.Write(buf[:n])
-		if err != nil {
-			if err.Error() == "EOF" {
-				break
-			}
-			if n == 0 {
-				break
-			}
-		}
-		if n == 0 {
-			break
-		}
+	payload, err := io.ReadAll(a.In)
+	if err != nil {
+		return nil, exitcode.Wrap(exitcode.Usage,
+			fmt.Errorf("reading standard input for --stdin, nothing was sent: %w", err))
 	}
-	return []byte(b.String()), nil
+	return payload, nil
 }
 
 // printExec renders what the nodes answered.

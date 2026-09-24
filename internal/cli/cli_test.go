@@ -6,6 +6,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,8 +40,12 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 	}
 
 	dir := t.TempDir()
+	var in io.Reader = strings.NewReader(opts.stdin)
+	if opts.in != nil {
+		in = opts.in
+	}
 	streams := app.Streams{
-		In:       strings.NewReader(opts.stdin),
+		In:       in,
 		Out:      h.out,
 		Err:      h.errOut,
 		IsTTY:    opts.tty,
@@ -70,7 +75,9 @@ func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 type harnessOptions struct {
 	recorder *transport.Recorder
 	stdin    string
-	tty      bool
+	// in replaces stdin, for an input that fails to be read.
+	in  io.Reader
+	tty bool
 	// config are read after the example configuration, so their documents
 	// replace the example's of the same kind and name.
 	config []string
