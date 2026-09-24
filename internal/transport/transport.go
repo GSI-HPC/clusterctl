@@ -35,7 +35,6 @@ import (
 // Defaults used when the configuration leaves a value unset.
 const (
 	defaultConnectTimeout = 10 * time.Second
-	defaultControlPersist = 5 * time.Minute
 	defaultShell          = "bash"
 	// killGrace is how long a command gets after its timeout before it is
 	// killed outright.

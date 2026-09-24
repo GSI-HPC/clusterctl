@@ -203,13 +203,26 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 
-	a.SSH = transport.New(transport.Options{
-		SSH:            a.Spec.SSH,
+	// The generated ssh configuration outlives this process and is read
+	// again by every ssh started from anywhere, so every path in it is
+	// absolute. Includes are resolved against the Site directory like every
+	// other configured path; a pattern is left for ssh to expand.
+	sshSpec := a.Spec.SSH
+	sshSpec.Include = make([]string, 0, len(a.Spec.SSH.Include))
+	for _, include := range a.Spec.SSH.Include {
+		sshSpec.Include = append(sshSpec.Include, absolute(a.Path(include)))
+	}
+	sshOpts := transport.Options{
+		SSH:            sshSpec,
 		Roles:          a.Spec.Hosts,
-		StateDir:       streams.StateDir,
-		KnownHostsFile: a.Path(a.Spec.SSH.KnownHostsFile),
+		StateDir:       absolute(streams.StateDir),
+		KnownHostsFile: absolute(a.Path(a.Spec.SSH.KnownHostsFile)),
 		DefaultUser:    a.Spec.DefaultUser,
-	})
+	}
+	if err := sshOpts.Validate(); err != nil {
+		return nil, exitcode.Wrap(exitcode.Usage, err)
+	}
+	a.SSH = transport.New(sshOpts)
 	a.Runner = a.SSH
 	if opts.Runner != nil {
 		a.Runner = opts.Runner
@@ -289,6 +302,18 @@ func (a *App) Path(path string) string {
 		return ""
 	}
 	return config.ExpandPath(path, a.Resolved.BaseDir)
+}
+
+// absolute makes a path absolute against the working directory, which is
+// what a relative --config or CLUSTERCTL_CONFIG was given relative to.
+func absolute(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 // Role returns the target of an infrastructure role.
