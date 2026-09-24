@@ -45,6 +45,15 @@ func sinfoCalls(rec *transport.Recorder) (sinfo, other int) {
 	return sinfo, other
 }
 
+// powerOffIPMI runs a confirmed IPMI power-off, which reaches the recorder
+// when it goes ahead, so that the test sees whether it was sent.
+func powerOffIPMI(t *testing.T, rec *transport.Recorder, extra ...string) (*harness, error) {
+	t.Helper()
+	t.Setenv("BMC_PASSWORD", "secret")
+	args := append([]string{"bmc", "power", "off", "--ipmi", "-y"}, extra...)
+	return run(t, harnessOptions{recorder: rec}, args...)
+}
+
 // Section 3.1 of the September 2026 review: the check was off on every site
 // written by config init, because only the example set safety.slurmAware.
 func TestSlurmCheckIsOnForAFreshConfiguration(t *testing.T) {
@@ -89,5 +98,52 @@ func TestSlurmCheckIsOnForAFreshConfiguration(t *testing.T) {
 	}
 	if sinfo, _ := sinfoCalls(rec); sinfo != 1 {
 		t.Errorf("sinfo was sent %d times, want once", sinfo)
+	}
+}
+
+// Section 2.10: --force lifts host protection, not the job check, and the
+// protected host is named before the job check runs.
+func TestForceDoesNotLoseJobs(t *testing.T) {
+	answer := "exe0001 allocated\nwlm01 idle\n"
+
+	rec := sinfoAnswers(answer, 0)
+	_, err := powerOffIPMI(t, rec, "-n", "exe0001,wlm01")
+	if err == nil || !strings.Contains(err.Error(), "wlm01") || !strings.Contains(err.Error(), "protected") {
+		t.Fatalf("error = %v, want the protected host named", err)
+	}
+
+	rec = sinfoAnswers(answer, 0)
+	_, err = powerOffIPMI(t, rec, "-n", "exe0001,wlm01", "--force")
+	if err == nil {
+		t.Fatal("--force powered off a node running a job")
+	}
+	if !strings.Contains(err.Error(), "exe0001") || !strings.Contains(err.Error(), "--lose-jobs") {
+		t.Errorf("error = %v, want it to name the node and --lose-jobs", err)
+	}
+	if strings.Contains(err.Error(), "--force") {
+		t.Errorf("error = %v, it should not offer --force for the jobs", err)
+	}
+	if _, other := sinfoCalls(rec); other != 0 {
+		t.Error("the power action was sent")
+	}
+
+	rec = sinfoAnswers(answer, 0)
+	h, err := powerOffIPMI(t, rec, "-n", "exe0001,wlm01", "--force", "--lose-jobs")
+	if err != nil {
+		t.Fatalf("--force --lose-jobs was refused: %v", err)
+	}
+	if !strings.Contains(h.errOut.String(), "exe0001") {
+		t.Errorf("the jobs about to be lost are not named:\n%s", h.errOut)
+	}
+
+	// The help says which flag gets past which check.
+	h, err = run(t, harnessOptions{}, "bmc", "power", "--help")
+	if err != nil {
+		t.Fatalf("bmc power --help failed: %v", err)
+	}
+	for _, want := range []string{"--lose-jobs is given", "--force gets past a protected host, not this check"} {
+		if !strings.Contains(strings.Join(strings.Fields(h.out.String()), " "), want) {
+			t.Errorf("the help does not say %q:\n%s", want, h.out)
+		}
 	}
 }

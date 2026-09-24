@@ -92,9 +92,10 @@ Read the power state of each node's service processor.
 
 func newBMCPowerCommand(r *root) *cobra.Command {
 	var (
-		useIPMI bool
-		batch   int
-		stagger time.Duration
+		useIPMI  bool
+		batch    int
+		stagger  time.Duration
+		loseJobs bool
 	)
 
 	cmd := leaf("power ACTION [NODESET]", "Change the power state of nodes", `
@@ -110,8 +111,9 @@ Change the power state of the nodes through their service processors.
 Powering many nodes on at once trips rack breakers, so a power-on is sent in
 batches with a pause between them; both come from the configuration.
 
-A node running a Slurm job is refused unless the workload manager check is
-turned off, because powering off a running job loses it.`,
+Slurm is asked first, because powering off a running job loses it. A node
+that Slurm reports running a job is refused unless --lose-jobs is given;
+--force gets past a protected host, not this check.`,
 		cobra.MinimumNArgs(1),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -130,14 +132,20 @@ turned off, because powering off a running job loses it.`,
 				return redfishStatus(a, nodes)
 			}
 
-			if err := checkSlurmIdle(a, nodes, action); err != nil {
-				return err
-			}
-			if err := a.Gate.Confirm(safety.Action{
+			gated := safety.Action{
 				Verb:    "power " + action,
 				Targets: nodes,
 				Detail:  "through " + transportName(a, useIPMI, firstNode(nodes)),
-			}); err != nil {
+			}
+			// A protected host is named before Slurm is asked, so that a
+			// refusal never leaves it out.
+			if err := a.Gate.Check(gated); err != nil {
+				return err
+			}
+			if err := checkSlurmIdle(a, nodes, action, loseJobs); err != nil {
+				return err
+			}
+			if err := a.Gate.Confirm(gated); err != nil {
 				return dryRunOrError(err)
 			}
 
@@ -153,6 +161,7 @@ turned off, because powering off a running job loses it.`,
 	cmd.Flags().BoolVar(&useIPMI, "ipmi", false, "act over IPMI instead of Redfish")
 	cmd.Flags().IntVar(&batch, "batch", 0, "how many nodes to power on at once (default: from the configuration)")
 	cmd.Flags().DurationVar(&stagger, "stagger", 0, "pause between power-on batches (default: from the configuration)")
+	addLoseJobsFlag(cmd, &loseJobs)
 	cmd.ValidArgsFunction = fixed(ipmi.Actions()...)
 	return cmd
 }
@@ -359,8 +368,17 @@ func printBMCResults(a *app.App, results []bmcResult) error {
 	return nil
 }
 
-// checkSlurmIdle refuses a power action on a node that is running a job.
-func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string) error {
+// addLoseJobsFlag declares the override of the Slurm job check. It is a flag
+// of its own, not --force, so that getting past a protected host does not
+// also lose the jobs of every node in the set.
+func addLoseJobsFlag(cmd *cobra.Command, loseJobs *bool) {
+	cmd.Flags().BoolVar(loseJobs, "lose-jobs", false,
+		"go ahead although Slurm reports jobs on the nodes")
+}
+
+// checkSlurmIdle refuses a power action on a node that is running a job,
+// unless loseJobs is set.
+func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs bool) error {
 	if action == ipmi.ActionStatus || action == ipmi.ActionOn {
 		return nil
 	}
@@ -402,12 +420,12 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string) error {
 	if busy.IsEmpty() {
 		return nil
 	}
-	if a.Gate.Force {
-		a.Printf("%s are running jobs; continuing because --force was given\n", busy)
+	if loseJobs {
+		a.Printf("%s %s running Slurm jobs; going ahead because --lose-jobs was given\n", busy, plural2(busy.Len()))
 		return nil
 	}
 	return exitcode.Errorf(exitcode.Usage,
-		"%s %s running Slurm jobs; drain them first, or pass --force to lose the jobs",
+		"%s %s running Slurm jobs; drain them and wait for their jobs to end, or pass --lose-jobs to lose the jobs",
 		busy, plural2(busy.Len()))
 }
 
