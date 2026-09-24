@@ -135,12 +135,23 @@ sshd refuse connections under `MaxStartups`.
 ```console
 $ clusterctl copy -n '@compute' /etc/hosts /etc/hosts
 $ clusterctl copy -n '@compute' -R ./config /etc/myapp/
-$ clusterctl copy -n 'exe[1-4]' --download /var/log/slurmd.log ./logs/
+$ clusterctl copy -n 'exe[1-4]' --download /var/log/slurmd.log /var/log/messages ./logs/
 ```
 
-Downloading from several nodes needs a directory, ending in a slash: each file
-lands in it under the node's name, because otherwise every node would write to
-the same path.
+Downloading from several nodes needs a directory, ending in a slash: each
+node's files land in a directory of its own under it, `./logs/exe0001/` and so
+on, because otherwise every node would write to the same path.
+
+The nodes are copied in parallel, as many at once as `fanout.max` or
+`--fanout` allow. Each transfer is bounded by `--timeout`, which defaults to
+`fanout.commandTimeout` and, when that is unset too, to 30 minutes; a transfer
+that runs over is reported as failed and the other nodes carry on.
+
+A remote path must not hold whitespace, quotes or shell syntax such as `$`,
+`;` or `(`. The legacy scp protocol, which OpenSSH used by default before 9.0
+and RHEL 8 still does, hands the path to the remote shell, while SFTP takes it
+literally, so such a path is refused rather than read one of two ways. Globs
+and a leading `~` mean the same to both and work.
 
 ## Reading the result
 
