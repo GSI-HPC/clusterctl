@@ -190,25 +190,7 @@ func registerCompletions(cmd *cobra.Command, r *root) {
 			}
 			return a.Resolved.Bundle.ContextNames(), cobra.ShellCompDirectiveNoFileComp
 		})
-	_ = cmd.RegisterFlagCompletionFunc("nodes",
-		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-			a, err := r.App()
-			if err != nil {
-				return nil, cobra.ShellCompDirectiveNoFileComp
-			}
-			var out []string
-			for _, source := range a.Groups.Sources() {
-				names, err := a.Groups.List(source)
-				if err != nil {
-					continue
-				}
-				for _, name := range names {
-					out = append(out, "@"+source+":"+name)
-				}
-			}
-			sort.Strings(out)
-			return out, cobra.ShellCompDirectiveNoFileComp
-		})
+	_ = cmd.RegisterFlagCompletionFunc("nodes", completeGroups(r))
 }
 
 // completeRoles offers the configured host roles.
@@ -224,6 +206,13 @@ func completeRoles(r *root) func(*cobra.Command, []string, string) ([]string, co
 
 // completeGroups offers the configured groups, which is what a node set
 // expression most often starts with.
+//
+// Only the groups that can be listed without running anything are offered:
+// the tables of the configuration and the attributes of the inventory. A
+// source that runs a command, such as sinfo on the Slurm host, would open an
+// ssh connection on every Tab, freeze the shell while a slow host answers and
+// could prompt for a passphrase in the middle of the command line, so its
+// groups are left out and have to be typed.
 func completeGroups(r *root) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		a, err := r.App()
@@ -232,6 +221,9 @@ func completeGroups(r *root) func(*cobra.Command, []string, string) ([]string, c
 		}
 		var out []string
 		for _, source := range a.Groups.Sources() {
+			if a.Spec.Groups.Sources[source].Exec != nil {
+				continue
+			}
 			names, err := a.Groups.List(source)
 			if err != nil {
 				continue
