@@ -112,7 +112,12 @@ are forgotten when the server stops, which is the safe direction.
 
 ### What plan_change offers
 
-`drain` (with a mandatory reason) and `resume`. Each entry in the `changes`
+`drain` (with a mandatory reason) and `resume`. The agent writes the reason,
+so it is held to the rules of `slurm node drain` before anything else happens:
+no control characters or `|`, at most 200 characters, and quoted wherever the
+user reads it. `resume` refuses a reason, since nothing would use it. The node
+set has to be one Slurm reads as exactly those nodes, as for the command line,
+so `ALL`, `NodeSet` names and nodes Slurm does not know are refused. Each entry in the `changes`
 table in `internal/mcpserver/plan.go` names the gate verb, runs the action
 through the same client the command line uses, gives the equivalent command
 line, and says what to warn about. Adding power actions, boot overrides or

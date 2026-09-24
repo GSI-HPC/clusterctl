@@ -119,7 +119,16 @@ PXE host and says what it left unchecked. Every node is tried and reported, so
 a link that cannot be written neither stops the rest nor goes unnoticed.
 
 **Draining a node needs a reason.** The reason is the first argument, not an
-option, because a drained node with no reason is one nobody dares resume.
+option, because a drained node with no reason is one nobody dares resume. It is checked before the preview: no control characters, which could
+rewrite what the confirmation shows, no `|`, which Slurm's parsable output
+uses between fields, at most 200 characters, and nothing that reads as nodes,
+which is what a forgotten reason looks like. The preview quotes it.
+
+**Slurm has to read a node set as itself.** `scontrol update` expands `ALL`
+to every node and a `NodeSet` name to its members, which the gate would count
+as one host. Before a drain or a resume is previewed, `sinfo` is asked for the
+set and has to return exactly the nodes named; `ALL` is refused outright. The
+check reads the cluster under `--dry-run` too.
 
 **A Redfish action is never retried.** A reset that timed out may well have
 been carried out; sending it again would power cycle a running machine. The
