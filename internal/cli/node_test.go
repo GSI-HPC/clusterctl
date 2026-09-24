@@ -97,3 +97,26 @@ func TestInventoryRefusesAnAddressThatIsNotAnIPAddress(t *testing.T) {
 		t.Errorf("error = %v, want the value and where it was written", err)
 	}
 }
+
+// Report 4.15: a refinement moving exe0001 to another rack as an attribute was
+// reverted to the rack it inherited, so a power action on the old rack still
+// reached it.
+func TestRackAttributeIsNotOverwritten(t *testing.T) {
+	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
+		return s + "    - nodes: exe0001\n      attributes: {rack: R05}\n"
+	})
+	h, err := run(t, harnessOptions{config: []string{inventory}}, "node", "select", "@rack:R02")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(h.out.String()), "exe[0002-0010]"; got != want {
+		t.Errorf("@rack:R02 = %q, want %q", got, want)
+	}
+	h, err = run(t, harnessOptions{config: []string{inventory}}, "node", "rack", "R05")
+	if err != nil {
+		t.Fatalf("node rack R05: %v", err)
+	}
+	if !strings.Contains(h.out.String(), "exe0001") {
+		t.Errorf("node rack R05 does not list exe0001:\n%s", h.out)
+	}
+}
