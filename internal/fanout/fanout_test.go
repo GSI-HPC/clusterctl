@@ -137,6 +137,46 @@ func TestRunHonoursCancellation(t *testing.T) {
 	}
 }
 
+// TestRunStartsNothingOnceCancelled checks that no target is handed to the
+// runner after the context has ended. With a free slot and a cancelled
+// context both ready, select picked either at random, so about half the
+// remaining targets were still started.
+func TestRunStartsNothingOnceCancelled(t *testing.T) {
+	t.Parallel()
+
+	names := make([]string, 200)
+	for i := range names {
+		names[i] = fmt.Sprintf("exe%d", i+1)
+	}
+
+	t.Run("before the run", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		rec := &transport.Recorder{}
+		results := (&fanout.Executor{Runner: rec, Max: 4}).Run(ctx, targets(names...), transport.Request{Argv: []string{"true"}})
+		if got := len(rec.Calls()); got != 0 {
+			t.Errorf("%d targets were started on a cancelled context", got)
+		}
+		for i, r := range results {
+			if r == nil || !errors.Is(r.Err, context.Canceled) {
+				t.Fatalf("result %d = %+v, want it reported as cancelled", i, r)
+			}
+		}
+	})
+
+	t.Run("during the run", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+			cancel()
+			return &transport.Result{Target: tg}, nil
+		}}
+		(&fanout.Executor{Runner: rec, Max: 1}).Run(ctx, targets(names...), transport.Request{Argv: []string{"true"}})
+		if got := len(rec.Calls()); got != 1 {
+			t.Errorf("%d targets were started, want only the one running when the context was cancelled", got)
+		}
+	})
+}
+
 func TestOnResultIsCalledForEveryTarget(t *testing.T) {
 	t.Parallel()
 

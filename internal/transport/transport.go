@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -389,7 +390,7 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 	}
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd := command(ctx, args)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Stdin = req.Stdin
@@ -418,7 +419,7 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd := command(ctx, args)
 	cmd.Stdin = req.Stdin
 	if cmd.Stdin == nil {
 		cmd.Stdin = os.Stdin
@@ -433,6 +434,24 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 	}
 	_, err = classify(ctx, target, cmd.Run(), "")
 	return err
+}
+
+// command prepares ssh or scp to run until ctx ends.
+//
+// When ctx ends, the client is sent SIGTERM rather than killed, so that it
+// closes the session and puts the terminal back as it found it; it is killed
+// only if it has not gone killGrace later. Wait gives up on the output at the
+// same point, since a process the client started, such as a ProxyCommand,
+// can hold it open after the client has gone.
+//
+// Stopping the client does not stop the remote command: without a terminal
+// on the host nothing tells it, and it runs until its own timeout ends it or
+// it fails to write.
+func command(ctx context.Context, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = killGrace
+	return cmd
 }
 
 // classify turns the outcome of running ssh into an exit code and an error

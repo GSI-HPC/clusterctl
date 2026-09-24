@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -90,7 +89,7 @@ func (c *Client) Copy(ctx context.Context, target Target, req CopyRequest) (*Res
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd := command(ctx, args)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	cmd.Stdout = os.Stderr
