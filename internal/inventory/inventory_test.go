@@ -329,3 +329,81 @@ func TestLookupDoesNotScaleWithTheInventory(t *testing.T) {
 		}
 	}
 }
+
+// Report 4.14: a copied address, MAC, cid or service processor address sends
+// an action meant for one machine to another, and an address that is not an
+// IP address ends up in the name of a file on the PXE server.
+func TestMachineIdentifiersMustBeUniqueAndWellFormed(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		entries []v1alpha1.NodeEntry
+		want    string
+	}{
+		"a shared address": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", Address: "10.0.2.1"},
+			{Nodes: "exe2", Address: "10.0.2.1"},
+		}, "10.0.2.1"},
+		"a shared MAC, written differently": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", MACs: []string{"00:11:22:33:44:55"}},
+			{Nodes: "exe2", MACs: []string{"00:11:22:33:44:66", "00-11-22-33-44-55"}},
+		}, "00:11:22:33:44:55"},
+		"a shared cid": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", CID: "123"},
+			{Nodes: "exe2", CID: "123"},
+		}, "123"},
+		"a shared service processor": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", BMCAddress: "10.9.0.1"},
+			{Nodes: "exe2", BMCAddress: "10.9.0.1"},
+		}, "10.9.0.1"},
+		"a service processor at a node's address": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", Address: "10.0.2.1"},
+			{Nodes: "exe2", BMCAddress: "10.0.2.1"},
+		}, "10.0.2.1"},
+		"an address with a prefix length": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", Address: "10.0.2.1/24"},
+		}, "10.0.2.1/24"},
+		"an address that is a path": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", Address: "../../etc/x"},
+		}, "../../etc/x"},
+		"an address with a zone": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", Address: "fe80::1%eth0"},
+		}, "fe80::1%eth0"},
+		"a malformed MAC": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", MACs: []string{"00:11:22:33:44"}},
+		}, "00:11:22:33:44"},
+		"a service processor name that is not a host name": {[]v1alpha1.NodeEntry{
+			{Nodes: "exe1", BMCAddress: "bmc/../x"},
+		}, "bmc/../x"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: tc.entries})
+			if err == nil {
+				t.Fatal("the inventory should be rejected")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %v, want it to name %q", err, tc.want)
+			}
+			if len(tc.entries) > 1 && (!strings.Contains(err.Error(), "entry 1") || !strings.Contains(err.Error(), "entry 2")) {
+				t.Errorf("error = %v, want it to name both entries", err)
+			}
+		})
+	}
+}
+
+// Uniqueness is judged on what the inventory ends up holding: a refinement
+// that moves an address away frees it for another node.
+func TestARefinedAddressIsFreeAgain(t *testing.T) {
+	t.Parallel()
+
+	_, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe1", Address: "10.0.2.1", BMCAddress: "exe1-bmc.example.org"},
+		{Nodes: "exe1", Address: "10.0.2.11"},
+		{Nodes: "exe2", Address: "10.0.2.1", BMCAddress: "2001:db8::2"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
