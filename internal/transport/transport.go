@@ -431,7 +431,7 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 	if cmd.Stderr == nil {
 		cmd.Stderr = os.Stderr
 	}
-	_, err = func() (int, error) { return classify(target, cmd.Run(), "") }()
+	_, err = classify(target, cmd.Run(), "")
 	return err
 }
 
@@ -447,14 +447,38 @@ func classify(target Target, err error, stderr string) (int, error) {
 			fmt.Errorf("running ssh for %s: %w", target, err))
 	}
 	code := exitErr.ExitCode()
-	if code == sshConnectionFailed {
+	return code, exited(target, code, stderr)
+}
+
+// exited is the error of a command that ran and exited with a status. ssh's
+// own status 255 means it could not reach or authenticate with the host;
+// anything else came from the host, which answered.
+func exited(target Target, code int, stderr string) error {
+	switch code {
+	case 0:
+		return nil
+	case sshConnectionFailed:
 		detail := strings.TrimSpace(lastLine(stderr))
 		if detail == "" {
 			detail = "ssh reported a connection failure"
 		}
-		return code, exitcode.Wrap(exitcode.Transport, fmt.Errorf("%s: %s", target, detail))
+		return exitcode.Wrap(exitcode.Transport, fmt.Errorf("%s: %s", target, detail))
+	default:
+		return fmt.Errorf("%s: command exited %d", target, code)
 	}
-	return code, fmt.Errorf("%s: command exited %d", target, code)
+}
+
+// ExitResult is the result Run reports for a command that ran and exited
+// with a status, with its error set the same way. A stand-in for the client,
+// such as a test's, uses it so that a failure looks as it would over ssh.
+func ExitResult(target Target, code int, stdout, stderr string) *Result {
+	return &Result{
+		Target:   target,
+		ExitCode: code,
+		Stdout:   stdout,
+		Stderr:   stderr,
+		Err:      exited(target, code, stderr),
+	}
 }
 
 func lastLine(s string) string {

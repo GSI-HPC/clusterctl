@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
 // exitCodeOf runs a command line the way the process does, through report,
@@ -80,5 +81,44 @@ func TestGroupWithoutArgumentsPrintsHelp(t *testing.T) {
 		if !strings.Contains(h.out.String(), "Available Commands") {
 			t.Errorf("%q: no help was printed:\n%s", args, h.out)
 		}
+	}
+}
+
+// TestFailedCommandOnARoleIsNotUnreachable checks that a tool failing on an
+// infrastructure host is reported as a failure with what it said, not as a
+// host that could not be reached. The host answered; exit 3 sent the
+// administrator to check the network, and the tool's message was dropped.
+func TestFailedCommandOnARoleIsNotUnreachable(t *testing.T) {
+	const complaint = "ibwarn: mad_rpc_open_port: can't open UMAD port"
+	failing := func() *transport.Recorder {
+		return &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+			return transport.ExitResult(tg, 1, "", complaint+"\n"), nil
+		}}
+	}
+	for _, args := range [][]string{
+		{"fabric", "counters", "exe0001"},
+		{"boot", "status", "-n", "exe0001"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			h, code := exitCodeOf(t, harnessOptions{recorder: failing()}, args...)
+			if code != exitcode.TargetFailed {
+				t.Errorf("exit code = %d, want %d; stderr:\n%s", code, exitcode.TargetFailed, h.errOut)
+			}
+			if !strings.Contains(h.errOut.String(), complaint) {
+				t.Errorf("stderr does not carry what the host said:\n%s", h.errOut)
+			}
+		})
+	}
+}
+
+// TestUnreachableRoleIsUnreachable checks the other side: ssh's own failure
+// on a role still exits 3.
+func TestUnreachableRoleIsUnreachable(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		return transport.ExitResult(tg, 255, "", "ssh: connect to host ibgw01 port 22: Connection refused\n"), nil
+	}}
+	h, code := exitCodeOf(t, harnessOptions{recorder: rec}, "fabric", "counters", "exe0001")
+	if code != exitcode.Transport {
+		t.Errorf("exit code = %d, want %d; stderr:\n%s", code, exitcode.Transport, h.errOut)
 	}
 }
