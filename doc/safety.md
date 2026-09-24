@@ -186,9 +186,22 @@ accepts, so unsupported firmware is reported by name instead of rejecting an
 opaque request. The shell tool sent `GracefullShutdown`, which no BMC accepts
 and which nothing noticed.
 
-**A reinstall resolves everything before it changes anything.** Boot paths and
-addresses for the whole set are worked out first, so a set with one unknown
-node stops before the first machine is touched rather than halfway through.
+**A reinstall resolves everything before it changes anything.** For the whole
+set, the address, boot path, service processor and BMC credential of every
+node are worked out first, the DHCP configuration read once, the boot paths
+checked on the PXE host and Slurm asked, all before the question, which lists
+each boot path with its nodes. A set with one node that cannot be reinstalled
+stops before the first machine is touched rather than halfway through. The
+boot override is set over Redfish, so a node whose `bmc.order` starts with
+another transport is refused. The host keys, which cannot be put back, are
+forgotten only once every machine is armed, just before the reset.
+
+**A failed reinstall disarms what it armed.** When a step fails, the boot
+override and the boot link of every node that was not reset are removed again,
+and the error names what is reinstalling, what was disarmed and what could not
+be, with the `bmc boot unset` and `boot unset` commands that disarm it. The
+table lists every node with what became of each step. `--no-reset` leaves the
+set armed on purpose and says so.
 
 **A boot address comes from the node's own DHCP declaration.** An address not
 in the inventory is taken only from the declaration named after the node or
