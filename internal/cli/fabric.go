@@ -550,14 +550,61 @@ mlxcables -q 2>/dev/null | awk -F': *' '
 }
 
 func newHCAConfigCommand(r *root) *cobra.Command {
-	return leaf("config KEY [VALUE] [NODESET]", "Read or set an adapter firmware setting", `
-Read a firmware setting from each node's adapter, or set it.
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Read or set an adapter firmware setting",
+		Long: strings.TrimSpace(`
+Read a firmware setting from the adapters of each node, or set it on every
+adapter of each node.
 
-Setting a firmware value changes hardware behaviour across a reboot, so it
-goes through the confirmation gate.
+Reading and writing are separate commands, so that a node set can never be
+taken for the value to write.`),
+		// The form this command used to take, hca config KEY [VALUE], would
+		// otherwise print the help and exit 0 as if it had done something.
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return exitcode.Errorf(exitcode.Usage,
+					"unknown command %q: read a setting with \"hca config get KEY\" and set one with \"hca config set KEY VALUE\"",
+					args[0])
+			}
+			return nil
+		},
+		RunE: func(c *cobra.Command, _ []string) error {
+			return c.Help()
+		},
+	}
+	cmd.AddCommand(newHCAConfigGetCommand(r), newHCAConfigSetCommand(r))
+	return cmd
+}
 
-  clusterctl hca config KEEP_LINK_UP_ON_BOOT_P1 -n exe[1-4]
-  clusterctl hca config KEEP_LINK_UP_ON_BOOT_P1 1 -n exe[1-4]`,
+var (
+	// mlxconfigKey is the shape of an mlxconfig parameter name, with the
+	// optional index some parameters take, such as MODULE_SPLIT_M0[1..3].
+	mlxconfigKey = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\[[0-9]+(\.\.[0-9]+)?\])?$`)
+	// mlxconfigValue is the shape of an mlxconfig value: a number, a
+	// hexadecimal number or a symbolic name such as True or ETH.
+	mlxconfigValue = regexp.MustCompile(`^[A-Za-z0-9_.:+-]+$`)
+)
+
+// checkMlxconfig refuses a key or value mlxconfig would not take, before
+// anything is sent. Both are quoted all the same.
+func checkMlxconfig(key, value string, withValue bool) error {
+	if !mlxconfigKey.MatchString(key) {
+		return exitcode.Errorf(exitcode.Usage,
+			"%q is not an adapter firmware setting; it has letters, digits and underscores, and an optional [N] or [N..M]", key)
+	}
+	if withValue && !mlxconfigValue.MatchString(value) {
+		return exitcode.Errorf(exitcode.Usage,
+			"%q is not an adapter firmware value; it has letters, digits and . : _ + -", value)
+	}
+	return nil
+}
+
+func newHCAConfigGetCommand(r *root) *cobra.Command {
+	return leaf("get KEY [NODESET]", "Read an adapter firmware setting", `
+Read a firmware setting from the adapters of each node.
+
+  clusterctl hca config get KEEP_LINK_UP_ON_BOOT_P1 -n exe[1-4]`,
 		cobra.MinimumNArgs(1),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -565,44 +612,16 @@ goes through the confirmation gate.
 				return err
 			}
 			key := args[0]
-			value := ""
-			rest := args[1:]
-			if len(rest) > 0 && !strings.ContainsAny(rest[0], "[@,") {
-				value, rest = rest[0], rest[1:]
+			if err := checkMlxconfig(key, "", false); err != nil {
+				return err
 			}
-			ns, err := selection(a, rest)
+			ns, err := selection(a, args[1:])
 			if err != nil {
 				return err
 			}
-
-			if value == "" {
-				results, err := runOnNodes(a, ns, func(string) transport.Request {
-					return transport.Request{
-						Argv:    []string{"sh", "-c", "mlxconfig -e query 2>/dev/null | grep -- " + shellQuote(key)},
-						Timeout: a.Timeout().Get(),
-						TTY:     transport.TTYNone,
-					}
-				})
-				if err != nil {
-					return err
-				}
-				t := output.NewTable(output.Cols("NODE", key)...)
-				for _, res := range results {
-					t.Add(res.Target.Name, strings.Join(strings.Fields(res.Output()), " "))
-				}
-				if err := a.Print(output.Result{Table: t}); err != nil {
-					return err
-				}
-				return failureError(results)
-			}
-
-			if err := a.Gate.Confirm(safetyAction("change the adapter firmware setting of", ns,
-				fmt.Sprintf("%s=%s", key, value))); err != nil {
-				return dryRunOrError(err)
-			}
 			results, err := runOnNodes(a, ns, func(string) transport.Request {
 				return transport.Request{
-					Script:  fmt.Sprintf("set -eu\ndev=$(ibstat -l | head -n1)\nmlxconfig --yes --dev \"$dev\" set %s=%s\n", key, value),
+					Argv:    []string{"sh", "-c", "mlxconfig -e query 2>/dev/null | grep -F -- " + shellQuote(key)},
 					Timeout: a.Timeout().Get(),
 					TTY:     transport.TTYNone,
 				}
@@ -610,7 +629,104 @@ goes through the confirmation gate.
 			if err != nil {
 				return err
 			}
-			if err := a.Print(output.Result{Table: resultsTable(results), Object: results}); err != nil {
+			t := output.NewTable(output.Cols("NODE", key)...)
+			for _, res := range results {
+				t.Add(res.Target.Name, strings.Join(strings.Fields(res.Output()), " "))
+			}
+			if err := a.Print(output.Result{Table: t}); err != nil {
+				return err
+			}
+			return failureError(results)
+		})
+}
+
+// hcaSetScript sets one firmware value on every adapter of a node and prints
+// one line per adapter, so that a node with two adapters is not reported
+// done when only the first was changed.
+func hcaSetScript(key, value string) string {
+	return fmt.Sprintf(`set -u
+devs=$(ibstat -l 2>/dev/null) || devs=
+if [ -z "$devs" ]; then
+  echo "no adapter found" >&2
+  exit 1
+fi
+rc=0
+for dev in $devs; do
+  if out=$(mlxconfig --yes --dev "$dev" set %s 2>&1); then
+    printf '%%s|ok|\n' "$dev"
+  else
+    printf '%%s|failed|%%s\n' "$dev" "$(printf '%%s\n' "$out" | tail -n 1)"
+    rc=1
+  fi
+done
+exit $rc
+`, shellQuote(key+"="+value))
+}
+
+func newHCAConfigSetCommand(r *root) *cobra.Command {
+	return leaf("set KEY VALUE [NODESET]", "Set an adapter firmware setting", `
+Set a firmware setting on every adapter of each node, and report each
+adapter. A node where any adapter was not changed fails the command.
+
+Setting a firmware value changes hardware behaviour across a reboot, so it
+goes through the confirmation gate.
+
+  clusterctl hca config set KEEP_LINK_UP_ON_BOOT_P1 1 -n exe[1-4]`,
+		cobra.MinimumNArgs(2),
+		func(cmd *cobra.Command, args []string) error {
+			a, err := r.App()
+			if err != nil {
+				return err
+			}
+			key, value := args[0], args[1]
+			if err := checkMlxconfig(key, value, true); err != nil {
+				return err
+			}
+			ns, err := selection(a, args[2:])
+			if err != nil {
+				return err
+			}
+
+			if err := a.Gate.Confirm(safetyAction("change the adapter firmware setting of", ns,
+				fmt.Sprintf("%s=%s on every adapter", key, value))); err != nil {
+				return dryRunOrError(err)
+			}
+			results, err := runOnNodes(a, ns, func(string) transport.Request {
+				return transport.Request{
+					Script:  hcaSetScript(key, value),
+					Timeout: a.Timeout().Get(),
+					TTY:     transport.TTYNone,
+				}
+			})
+			if err != nil {
+				return err
+			}
+			t := output.NewTable(
+				output.Column{Name: "NODE"},
+				output.Column{Name: "DEVICE"},
+				output.Column{Name: "STATUS"},
+				output.Column{Name: "ERROR", Wide: true},
+			)
+			for _, res := range results {
+				lines := res.Lines()
+				if res.Err != nil || len(lines) == 0 {
+					status := "failed"
+					detail := strings.TrimSpace(lastNonEmpty(res.Stderr))
+					if res.Err != nil {
+						status, detail = "unreachable", res.Err.Error()
+					}
+					t.Add(res.Target.Name, "", status, detail)
+					continue
+				}
+				for _, line := range lines {
+					f := strings.SplitN(line, "|", 3)
+					for len(f) < 3 {
+						f = append(f, "")
+					}
+					t.Add(res.Target.Name, f[0], f[1], f[2])
+				}
+			}
+			if err := a.Print(output.Result{Table: t, Object: results}); err != nil {
 				return err
 			}
 			return failureError(results)

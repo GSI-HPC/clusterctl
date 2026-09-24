@@ -36,15 +36,16 @@ func fakeTool(t *testing.T, dir, name, body string) {
 	}
 }
 
-// shellRunner runs each script sent to the fabric host in a real sh, in a
-// scratch directory, with the fake tools of bin first on PATH. That is as
-// close to the fabric host as a test gets: what is asserted is what the
-// script does, not how it is spelt. Every other host answers with nothing.
-func shellRunner(t *testing.T, bin string) (*transport.Recorder, string) {
+// shellRunner runs each script sent to the hosts of one role, "" for the
+// nodes, in a real sh, in a scratch directory, with the fake tools of bin
+// first on PATH. That is as close to the host as a test gets: what is
+// asserted is what the script does, not how it is spelt. Every other host
+// answers with nothing.
+func shellRunner(t *testing.T, bin, role string) (*transport.Recorder, string) {
 	t.Helper()
 	work := t.TempDir()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
-		if tg.Role != "fabric" {
+		if tg.Role != role {
 			return &transport.Result{Target: tg}, nil
 		}
 		script := req.Script
@@ -89,7 +90,7 @@ spec:
       macs: ["00:11:22:33:44:77"]
 `)
 	bin := t.TempDir()
-	rec, work := shellRunner(t, bin)
+	rec, work := shellRunner(t, bin, "fabric")
 
 	_, err := run(t, harnessOptions{recorder: rec, config: []string{inventory}}, "fabric", "state", "-n", "@gpu")
 	calls := rec.Calls()
@@ -151,7 +152,7 @@ func TestFabricStateIsUpOnlyForAnActiveLink(t *testing.T) {
 cat <<'EOF'
 `+ibportstateOutput(tc.state, tc.phys)+`EOF
 `)
-			rec, _ := shellRunner(t, bin)
+			rec, _ := shellRunner(t, bin, "fabric")
 			h, err := run(t, harnessOptions{recorder: rec}, "fabric", "state", "-n", "exe0001", "-o", "json")
 			if tc.up && err != nil {
 				t.Fatalf("an active port failed the command: %v\n%s", err, h.out)
@@ -186,7 +187,7 @@ cat <<'EOF'
 func TestFabricStateReportsAPortWithoutAnswer(t *testing.T) {
 	bin := t.TempDir()
 	fakeTool(t, bin, "ibportstate", "exit 1\n")
-	rec, _ := shellRunner(t, bin)
+	rec, _ := shellRunner(t, bin, "fabric")
 	h, err := run(t, harnessOptions{recorder: rec}, "fabric", "state", "-n", "exe0001")
 	if err == nil {
 		t.Fatalf("a port without an answer was accepted:\n%s", h.out)
@@ -300,5 +301,102 @@ func TestFabricGUIDPrefersDHCP(t *testing.T) {
 	}
 	if strings.Contains(h.out.String(), "0x0011220300334455") {
 		t.Errorf("the inventory address was used although DHCP knows the node:\n%s", h.out)
+	}
+}
+
+// TestHCAConfigSetRefusesWhatIsNotASetting is the report's 1.6: the key and
+// value were written bare into the script, so a value of "1; reboot" ran
+// reboot on every selected node.
+func TestHCAConfigSetRefusesWhatIsNotASetting(t *testing.T) {
+	for _, args := range [][]string{
+		{"KEEP_LINK_UP_ON_BOOT_P1", "1; reboot"},
+		{"KEEP_LINK_UP_ON_BOOT_P1=1;reboot", "1"},
+		{"$(reboot)", "1"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			h, err := run(t, harnessOptions{}, append(append([]string{"hca", "config", "set"}, args...), "-n", "exe0001", "-y")...)
+			if err == nil {
+				t.Fatalf("%q was accepted", args)
+			}
+			if got, want := exitcode.From(err), exitcode.Usage; got != want {
+				t.Errorf("exit code = %d, want %d", got, want)
+			}
+			if n := len(h.recorder.Calls()); n != 0 {
+				t.Errorf("%d requests were sent", n)
+			}
+		})
+	}
+}
+
+func TestHCAConfigSetQuotesTheSetting(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "hca", "config", "set", "MODULE_SPLIT_M0[1..3]", "1", "-n", "exe0001", "-y")
+	if err != nil {
+		t.Fatalf("hca config set failed: %v", err)
+	}
+	calls := h.recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	if !strings.Contains(calls[0].Request.Script, "set 'MODULE_SPLIT_M0[1..3]=1'") {
+		t.Errorf("the setting is not quoted:\n%s", calls[0].Request.Script)
+	}
+}
+
+// TestHCAConfigNeverTakesANodeForTheValue is the report's 12.10: with
+// CLUSTERCTL_NODES set, "hca config KEY exe0001" prepared a write of
+// KEY=exe0001 to the whole session set.
+func TestHCAConfigNeverTakesANodeForTheValue(t *testing.T) {
+	t.Setenv("CLUSTERCTL_NODES", "exe[1-4]")
+	h, err := run(t, harnessOptions{}, "hca", "config", "KEEP_LINK_UP_ON_BOOT_P1", "exe0001", "-y")
+	if err == nil {
+		t.Fatal("the old form was accepted")
+	}
+	if got, want := exitcode.From(err), exitcode.Usage; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	if n := len(h.recorder.Calls()); n != 0 {
+		t.Errorf("%d requests were sent", n)
+	}
+
+	h, err = run(t, harnessOptions{}, "hca", "config", "get", "KEEP_LINK_UP_ON_BOOT_P1", "exe0001")
+	if err != nil {
+		t.Fatalf("hca config get failed: %v", err)
+	}
+	calls := h.recorder.Calls()
+	if len(calls) != 1 || calls[0].Target.Name != "exe0001" {
+		t.Fatalf("the read went to %v, want exe0001 only", calls)
+	}
+	if strings.Contains(calls[0].Command, "set") {
+		t.Errorf("a read sent a write: %s", calls[0].Command)
+	}
+}
+
+// TestHCAConfigSetChangesEveryAdapter is the report's 12.10: only the first
+// adapter ibstat listed was changed, and the node was reported ok.
+func TestHCAConfigSetChangesEveryAdapter(t *testing.T) {
+	bin := t.TempDir()
+	fakeTool(t, bin, "ibstat", `[ "$1" = -l ] && printf 'mlx5_0\nmlx5_1\n'`+"\n")
+	fakeTool(t, bin, "mlxconfig", `
+echo "$*" >> mlxconfig.log
+[ "$3" = mlx5_1 ] && { echo "-E- Failed to set configuration" >&2; exit 1; }
+exit 0
+`)
+	rec, work := shellRunner(t, bin, "")
+	h, err := run(t, harnessOptions{recorder: rec}, "hca", "config", "set", "KEEP_LINK_UP_ON_BOOT_P1", "1", "-n", "exe0001", "-y")
+	if err == nil {
+		t.Fatalf("a node with an adapter left unchanged was reported ok:\n%s", h.out)
+	}
+	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	log, _ := os.ReadFile(filepath.Join(work, "mlxconfig.log"))
+	for _, dev := range []string{"mlx5_0", "mlx5_1"} {
+		if !strings.Contains(string(log), dev) {
+			t.Errorf("%s was not changed; mlxconfig ran with:\n%s", dev, log)
+		}
+	}
+	out := h.out.String()
+	if !strings.Contains(out, "mlx5_0") || !strings.Contains(out, "mlx5_1") || !strings.Contains(out, "failed") {
+		t.Errorf("the adapters are not reported one by one:\n%s", out)
 	}
 }
