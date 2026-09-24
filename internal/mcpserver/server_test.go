@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/cli"
@@ -89,6 +90,13 @@ type setup struct {
 	confirm  mcpserver.ConfirmMode
 	answer   func(*mcp.ElicitRequest) *mcp.ElicitResult
 	protocol string
+	// config replaces the example configuration, for a test that edits it.
+	config string
+	// command replaces the command tree read_command runs.
+	command func(context.Context, app.Streams) *cobra.Command
+	// runner wraps the fake cluster, for a test that needs to see or delay
+	// what is sent.
+	runner func(transport.Runner) transport.Runner
 }
 
 type fixture struct {
@@ -103,15 +111,27 @@ func start(t *testing.T, s setup) *fixture {
 	ctx := context.Background()
 	f := &fixture{cluster: &cluster{}, stateDir: filepath.Join(t.TempDir(), "state")}
 	recorder := &transport.Recorder{Reply: f.cluster.reply}
+	var runner transport.Runner = recorder
+	if s.runner != nil {
+		runner = s.runner(recorder)
+	}
+	config := s.config
+	if config == "" {
+		config = exampleDir
+	}
+	command := s.command
+	if command == nil {
+		command = cli.CommandTree(runner)
+	}
 
 	server, err := mcpserver.New(ctx, mcpserver.Options{
 		App: app.Options{
-			ConfigFiles: []string{exampleDir},
-			Runner:      recorder,
+			ConfigFiles: []string{config},
+			Runner:      runner,
 		},
 		StateDir: f.stateDir,
 		CacheDir: filepath.Join(t.TempDir(), "cache"),
-		Command:  cli.CommandTree(recorder),
+		Command:  command,
 		Confirm:  s.confirm,
 		Version:  "test",
 	})

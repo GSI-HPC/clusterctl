@@ -1,0 +1,104 @@
+// SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+// SPDX-License-Identifier: LGPL-3.0-or-later
+
+package mcpserver_test
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/GSI-HPC/clusterctl/internal/app"
+	"github.com/GSI-HPC/clusterctl/internal/safety"
+)
+
+type commandResult struct {
+	Command   string `json:"command"`
+	ExitCode  int    `json:"exitCode"`
+	Error     string `json:"error"`
+	Output    any    `json:"output"`
+	Notes     string `json:"notes"`
+	Truncated bool   `json:"truncated"`
+}
+
+// tree builds a command tree with one read command that runs fn.
+func tree(fn func(cmd *cobra.Command) error) func(context.Context, app.Streams) *cobra.Command {
+	return func(_ context.Context, streams app.Streams) *cobra.Command {
+		root := &cobra.Command{Use: "clusterctl", SilenceUsage: true, SilenceErrors: true}
+		flags := root.PersistentFlags()
+		flags.StringSlice("config", nil, "")
+		flags.String("context", "", "")
+		flags.StringArray("set", nil, "")
+		flags.StringP("output", "o", "", "")
+		root.AddCommand(&cobra.Command{
+			Use:         "probe",
+			Annotations: map[string]string{safety.EffectAnnotation: string(safety.EffectRead)},
+			RunE:        func(cmd *cobra.Command, _ []string) error { return fn(cmd) },
+		})
+		root.SetOut(streams.Out)
+		root.SetErr(streams.Err)
+		return root
+	}
+}
+
+// 10.2: a panic in a tool is a failed call, not the end of the server and of
+// every plan waiting in it.
+func TestAPanicInAToolFailsOnlyThatCall(t *testing.T) {
+	f := start(t, setup{
+		answer: accept(map[string]any{"confirm": true}),
+		command: tree(func(*cobra.Command) error {
+			panic("slice bounds out of range [1:0]")
+		}),
+	})
+	p := f.plan(t, map[string]any{"action": "resume", "nodes": "exe1"})
+	msg := f.refused(t, "read_command", map[string]any{"args": []string{"probe"}})
+	if !strings.HasPrefix(msg, "failed:") || !strings.Contains(msg, "panic") {
+		t.Errorf("message = %q, want the panic reported as a failure", msg)
+	}
+	var out applyResult
+	f.call(t, "apply_plan", applyArgs(p), &out)
+	if !out.Applied {
+		t.Errorf("the plan made before the panic = %+v, want it applied", out)
+	}
+}
+
+// 10.2: a command that keeps printing is stopped once its output passes the
+// bound, instead of being buffered until the workstation runs out of memory.
+func TestReadCommandStopsACommandThatKeepsPrinting(t *testing.T) {
+	written := 0
+	f := start(t, setup{command: tree(func(cmd *cobra.Command) error {
+		chunk := []byte(strings.Repeat("x", 4096))
+		for written < 256<<20 {
+			if err := cmd.Context().Err(); err != nil {
+				return err
+			}
+			n, err := cmd.OutOrStdout().Write(chunk)
+			written += n
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})})
+	var out commandResult
+	f.call(t, "read_command", map[string]any{"args": []string{"probe"}}, &out)
+	if !out.Truncated {
+		t.Errorf("result = %+v, want it cut", out)
+	}
+	if written > 1<<20 {
+		t.Errorf("the command wrote %d bytes before it was stopped", written)
+	}
+}
+
+// 10.2: the same through the real command tree, with a jq program that
+// never ends.
+func TestReadCommandStopsAnEndlessJQProgram(t *testing.T) {
+	f := start(t, setup{})
+	var out commandResult
+	f.call(t, "read_command", map[string]any{"args": []string{"version", "-o", `jq=repeat("xxxxxxxx")`}}, &out)
+	if !out.Truncated {
+		t.Errorf("result = %+v, want it cut", out)
+	}
+}
