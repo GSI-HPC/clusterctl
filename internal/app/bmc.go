@@ -8,14 +8,18 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"golang.org/x/term"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/credentials"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
+	"github.com/GSI-HPC/clusterctl/internal/naming"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
+	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // Credentials returns the credential resolver of the site. It is safe for
@@ -51,9 +55,70 @@ func (a *App) promptPassword(prompt string) (string, error) {
 	return string(secret), nil
 }
 
+// InventoryNode returns the inventory entry of the machine a name refers to.
+//
+// Host names are not case sensitive and a trailing dot only makes a name
+// absolute, so EXE0001 and exe0001. are exe0001, and so is exe1 when the
+// inventory pads it. A name with a domain is the node only when it is the
+// host name the naming rules give the node's short name; any other domain is
+// another machine. Everything looked up per node goes through here, so that
+// every spelling of a machine gets its own settings rather than the site's.
+func (a *App) InventoryNode(name string) (*inventory.Node, bool) {
+	if a.Inventory == nil {
+		return nil, false
+	}
+	name = strings.TrimSuffix(strings.ToLower(name), ".")
+	if short := naming.Short(name); short != name {
+		fqdn, err := a.Namer.FQDN(short)
+		if err != nil || !strings.EqualFold(fqdn, name) {
+			return nil, false
+		}
+		name = short
+	}
+	return a.Inventory.Lookup(name)
+}
+
+// BMCHost returns the host name or address of a node's service processor:
+// the bmcAddress the inventory records for it, else the name the naming
+// rules give it. The inventory wins because it names the one machine the
+// site wrote down, where a derived name is only as good as its DNS record.
+//
+// A node whose service processor has neither is refused; nothing falls back
+// to the node's own name, where the BMC password would be sent to the node.
+func (a *App) BMCHost(node string) (string, error) {
+	if entry, ok := a.InventoryNode(node); ok {
+		if entry.BMCAddress != "" {
+			return entry.BMCAddress, nil
+		}
+		node = entry.Name
+	}
+	host, err := a.Namer.BMC(node)
+	if err != nil {
+		return "", exitcode.Wrap(exitcode.Usage, err)
+	}
+	return host, nil
+}
+
+// BMCHosts maps every node of a set to its service processor, the way
+// BMCHost does.
+func (a *App) BMCHosts(nodes *nodeset.NodeSet) (*nodeset.NodeSet, error) {
+	out := nodeset.New()
+	for _, node := range nodes.Expand() {
+		host, err := a.BMCHost(node)
+		if err != nil {
+			return nil, err
+		}
+		if err := out.Add(host); err != nil {
+			return nil, exitcode.Errorf(exitcode.Usage,
+				"the service processor %q of node %q is not a valid host name: %w", host, node, err)
+		}
+	}
+	return out, nil
+}
+
 // VendorProfile returns the BMC overrides for a node's hardware vendor.
 func (a *App) VendorProfile(node string) v1alpha1.VendorProfile {
-	entry, ok := a.Inventory.Lookup(node)
+	entry, ok := a.InventoryNode(node)
 	if !ok {
 		return v1alpha1.VendorProfile{}
 	}
@@ -84,9 +149,9 @@ func (a *App) BMCCredential(ctx context.Context, node string) (credentials.Crede
 
 // RedfishClient builds a client for a node's service processor.
 func (a *App) RedfishClient(ctx context.Context, node string) (*redfish.Client, error) {
-	host, err := a.Namer.BMC(node)
+	host, err := a.BMCHost(node)
 	if err != nil {
-		return nil, exitcode.Wrap(exitcode.Usage, err)
+		return nil, err
 	}
 	cred, err := a.BMCCredential(ctx, node)
 	if err != nil {
@@ -116,6 +181,10 @@ func (a *App) RedfishClient(ctx context.Context, node string) (*redfish.Client, 
 	if pinPath == "" {
 		pinPath = a.StatePath("bmc-pins")
 	}
+	pins := &redfish.PinStore{Path: pinPath}
+	if !verify {
+		a.noteFirstContact(pins, host)
+	}
 	return &redfish.Client{
 		Host:          host,
 		Username:      cred.Username,
@@ -124,8 +193,24 @@ func (a *App) RedfishClient(ctx context.Context, node string) (*redfish.Client, 
 		Timeout:       spec.Timeout.Get(),
 		Verify:        verify,
 		MinTLSVersion: minTLS,
-		Pins:          &redfish.PinStore{Path: pinPath},
+		Pins:          pins,
 	}, nil
+}
+
+// noteMu keeps the notes of clients built in parallel from interleaving.
+var noteMu sync.Mutex
+
+// noteFirstContact says so when no certificate is recorded for a service
+// processor yet. The client records whatever the host presents, and sends
+// the BMC account to it, so the administrator should know it trusted a
+// certificate nobody vouched for, and which host it came from.
+func (a *App) noteFirstContact(pins *redfish.PinStore, host string) {
+	if _, ok, err := pins.Get(host); err != nil || ok {
+		return
+	}
+	noteMu.Lock()
+	defer noteMu.Unlock()
+	a.Printf("no certificate is recorded for %s yet; the one it presents now will be recorded and trusted from then on\n", host)
 }
 
 // IPMIBackend builds the backend that runs the IPMI tools, on the host role

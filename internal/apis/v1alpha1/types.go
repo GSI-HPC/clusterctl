@@ -581,9 +581,9 @@ type NodeEntry struct {
 	Level string `json:"level,omitempty" yaml:"level,omitempty"`
 	// Address is the node's IP address.
 	Address string `json:"address,omitempty" yaml:"address,omitempty"`
-	// BMCAddress is the address of its service processor, when it cannot be
-	// resolved from the name.
-	BMCAddress string `json:"bmcAddress,omitempty" yaml:"bmcAddress,omitempty"`
+	// BMCAddress is the address of its service processor. It wins over the
+	// name the naming rules derive.
+	BMCAddress string `json:"bmcAddress,omitempty" yaml:"bmcAddress,omitempty" jsonschema:"description=Host name or address of the service processor; wins over the name the naming rules derive"`
 	// CID is the site asset identifier.
 	CID string `json:"cid,omitempty" yaml:"cid,omitempty"`
 	// MACs are the hardware addresses, used to derive the fabric GUID when

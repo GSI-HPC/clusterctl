@@ -115,8 +115,9 @@ exe0004  On
 ```
 
 If this is the first time clusterctl has spoken to those service processors,
-it records the certificate each one presents. A later change is refused until
-you say the replacement was intentional with `clusterctl bmc forget`.
+it says so and records the certificate each one presents. A later change is
+refused until you say the replacement was intentional with `clusterctl bmc
+forget`.
 
 ## Next
 

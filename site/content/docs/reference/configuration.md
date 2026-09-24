@@ -162,6 +162,9 @@ attribute can build one group per rack.
 Fields describing a single machine — `address`, `bmcAddress`, `cid`, `macs` —
 may only be set by an entry naming exactly one node.
 
+`bmcAddress` wins over the name the naming rules derive: the `bmc` commands,
+`provision` and the recorded certificate all use it.
+
 ## Workstation
 
 ```yaml
