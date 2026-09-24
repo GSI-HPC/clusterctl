@@ -6,6 +6,7 @@ package redfish_test
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -94,15 +95,28 @@ func toAny(in []string) []any {
 	return out
 }
 
+// client reaches the fake under the name its certificate carries. A host
+// with a port is refused, so the port is supplied by the dialer instead.
 func (f *fakeBMC) client(t *testing.T) *redfish.Client {
 	t.Helper()
-	host := strings.TrimPrefix(f.server.URL, "https://")
 	return &redfish.Client{
-		Host:      host,
+		Host:      "example.com",
 		Username:  "admin",
 		Password:  "secret",
-		Transport: f.server.Client().Transport,
+		Transport: dialOnly(f.server),
 	}
+}
+
+// dialOnly returns a transport that trusts the test server and connects to
+// it whatever host a request names.
+func dialOnly(server *httptest.Server) http.RoundTripper {
+	rt := server.Client().Transport.(*http.Transport).Clone()
+	addr := server.Listener.Addr().String()
+	rt.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, addr)
+	}
+	return rt
 }
 
 func TestSystem(t *testing.T) {

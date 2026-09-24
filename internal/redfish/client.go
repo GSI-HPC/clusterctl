@@ -25,6 +25,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/GSI-HPC/clusterctl/internal/hostname"
 )
 
 // DefaultSystemPath is where most firmware puts the computer system.
@@ -55,7 +57,28 @@ type Client struct {
 }
 
 // BaseURL is the root of the Redfish service on this host.
-func (c *Client) BaseURL() string { return "https://" + c.Host }
+//
+// The host has to be a host name or an address and nothing more. A port,
+// an account or a URL delimiter in it would send the request, and the
+// password with it, somewhere other than the service processor.
+func (c *Client) BaseURL() (string, error) {
+	u, err := c.base()
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
+}
+
+func (c *Client) base() (*url.URL, error) {
+	if err := hostname.CheckHost(c.Host); err != nil {
+		return nil, fmt.Errorf("refusing to send a Redfish request: the service processor %w", err)
+	}
+	host := c.Host
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return &url.URL{Scheme: "https", Host: host}, nil
+}
 
 func (c *Client) system() string {
 	if c.SystemPath != "" {
@@ -170,11 +193,18 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, body any) ([]by
 		payload = bytes.NewReader(encoded)
 	}
 
-	target, err := url.JoinPath(c.BaseURL(), path)
+	base, err := c.base()
 	if err != nil {
-		return nil, 0, fmt.Errorf("invalid Redfish path %q: %w", path, err)
+		return nil, 0, err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, target, payload)
+	target := base.JoinPath(path)
+	// JoinPath only ever changes the path, so this holds by construction.
+	// It is checked anyway, because the password goes wherever the URL
+	// points.
+	if target.Host != base.Host || target.User != nil {
+		return nil, 0, fmt.Errorf("the Redfish path %q leaves the service processor %s", path, c.Host)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target.String(), payload)
 	if err != nil {
 		return nil, 0, err
 	}
