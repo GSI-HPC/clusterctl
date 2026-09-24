@@ -115,6 +115,11 @@ type App struct {
 	// which is a recorder during a dry run.
 	SSH    *transport.Client
 	Runner transport.Runner
+	// ReadRunner runs the read-only lookups a command makes before it
+	// changes anything, such as asking Slurm whether a node runs a job. It
+	// is the real transport even in a dry run, so that the dry run reaches
+	// the same decision the real run would.
+	ReadRunner transport.Runner
 	// DryRunRecorder holds what a dry run would have sent.
 	DryRunRecorder *transport.Recorder
 	// Gate guards the destructive commands.
@@ -214,14 +219,14 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		a.Runner = a.DryRunRecorder
 	}
 
-	groupRunner := transport.Runner(a.SSH)
+	a.ReadRunner = transport.Runner(a.SSH)
 	if opts.Runner != nil {
-		groupRunner = opts.Runner
+		a.ReadRunner = opts.Runner
 	}
 	a.Groups = groups.New(groups.Options{
 		Spec:      a.Spec.Groups,
 		Inventory: a.Inventory,
-		Runner:    groupRunner, // group lookups only read, so a dry run still resolves them
+		Runner:    a.ReadRunner, // group lookups only read, so a dry run still resolves them
 		Target:    a.Role,
 		CacheDir:  streams.CacheDir,
 		Context:   ctx,
