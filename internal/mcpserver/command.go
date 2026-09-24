@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -64,14 +66,19 @@ func (s *Server) readCommand(ctx context.Context, _ *mcp.CallToolRequest, in com
 		return nil, nil, callError(err)
 	}
 
-	var stdout, stderr bytes.Buffer
-	streams := s.streams(&stderr)
-	streams.Out = &stdout
+	// A command that says more than the bound is stopped rather than
+	// buffered: a jq program can print without end.
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	stdout := &boundedWriter{limit: maxCommandOutput, stop: stop}
+	stderr := &boundedWriter{limit: maxCommandOutput, stop: stop}
+	streams := s.streams(stderr)
+	streams.Out = stdout
 	root := s.opts.Command(ctx, streams)
 	// A command prints its result through the streams it was built with, and
 	// its help through the command's own; both are captured.
-	root.SetOut(&stdout)
-	root.SetErr(&stderr)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
 	root.SetIn(strings.NewReader(""))
 	root.SetArgs(append(s.globalArgs(), in.Args...))
 	runErr := root.ExecuteContext(ctx)
@@ -80,31 +87,78 @@ func (s *Server) readCommand(ctx context.Context, _ *mcp.CallToolRequest, in com
 	}
 
 	out := &commandOutput{Context: s.context, Command: cmd, ExitCode: exitcode.From(runErr)}
+	out.Truncated = stdout.cut() || stderr.cut()
 	if runErr != nil {
 		out.Error = runErr.Error()
-		if out.ExitCode == exitcode.Usage && stdout.Len() == 0 {
+		if out.Truncated {
+			out.Error = fmt.Sprintf("stopped once it had printed %d KiB", maxCommandOutput>>10)
+		}
+		if out.ExitCode == exitcode.Usage && stdout.size() == 0 {
 			return nil, nil, callError(runErr)
 		}
 	}
-	text := stdout.Bytes()
-	if len(text) > maxCommandOutput {
-		text, out.Truncated = text[:maxCommandOutput], true
-	}
+	text := stdout.contents()
 	var parsed any
 	if !out.Truncated && json.Valid(text) && json.Unmarshal(text, &parsed) == nil {
 		out.Output = parsed
 	} else if len(text) > 0 {
 		out.Output = string(text)
 	}
-	notes := stderr.String()
-	if len(notes) > maxCommandOutput {
-		notes = notes[:maxCommandOutput]
-	}
-	out.Notes = strings.TrimSpace(notes)
+	out.Notes = strings.TrimSpace(string(stderr.contents()))
 	if out.Truncated {
 		out.Notes = strings.TrimSpace(out.Notes + "\nthe output was cut; narrow the node set or filter it with -o jq=EXPR")
 	}
 	return nil, out, nil
+}
+
+// errOutputFull is what a command's write gets once its output reached the
+// bound.
+var errOutputFull = errors.New("the output passed the bound of read_command")
+
+// boundedWriter keeps what a command prints up to a limit. The write that
+// would pass it fails and stops the command, so that output without end
+// costs no more than the limit.
+type boundedWriter struct {
+	limit int
+	stop  func()
+
+	mu   sync.Mutex
+	buf  bytes.Buffer
+	full bool
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.full {
+		return 0, errOutputFull
+	}
+	if room := w.limit - w.buf.Len(); len(p) > room {
+		w.buf.Write(p[:room])
+		w.full = true
+		w.stop()
+		return room, errOutputFull
+	}
+	return w.buf.Write(p)
+}
+
+// cut reports whether the output was cut.
+func (w *boundedWriter) cut() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.full
+}
+
+func (w *boundedWriter) size() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Len()
+}
+
+func (w *boundedWriter) contents() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]byte(nil), w.buf.Bytes()...)
 }
 
 // globalArgs are the options every command runs with: the server's

@@ -26,6 +26,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -138,6 +139,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		Instructions: s.instructions(),
 		Capabilities: &mcp.ServerCapabilities{},
 	})
+	s.sdk.AddReceivingMiddleware(s.recoverPanics)
 	s.addReadTools()
 	s.addPlanTools()
 	s.addCommandTool()
@@ -197,6 +199,32 @@ func (s *Server) streams(out io.Writer) app.Streams {
 func (s *Server) logf(format string, args ...any) {
 	// The log is a courtesy; a write that fails changes nothing.
 	_, _ = fmt.Fprintf(s.opts.Log, "clusterctl mcp: "+format+"\n", args...)
+}
+
+// recoverPanics turns a panic in a handler into a failed call. The server
+// holds every plan waiting to be applied, and one bad call must not end it
+// and them with it.
+func (s *Server) recoverPanics(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			panicked := fmt.Sprint(v)
+			s.logf("%s panicked: %q\n%s", method, panicked, debug.Stack())
+			failure := fmt.Errorf("failed: clusterctl panicked; this is a bug, please report it: %q", panicked)
+			if method == "tools/call" {
+				result, err = &mcp.CallToolResult{
+					IsError: true,
+					Content: []mcp.Content{&mcp.TextContent{Text: failure.Error()}},
+				}, nil
+				return
+			}
+			result, err = nil, failure
+		}()
+		return next(ctx, method, req)
+	}
 }
 
 // callError renders an error for the agent, led by the kind of failure so
