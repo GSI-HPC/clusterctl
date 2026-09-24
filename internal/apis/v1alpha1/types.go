@@ -516,8 +516,9 @@ type GroupSource struct {
 // commands are given as argument vectors, never as a shell string, and $GROUP
 // and $NODE are substituted as arguments rather than expanded by a shell.
 type ExecGroupSource struct {
-	// Role names the host role the commands run on. Empty runs them locally.
-	Role string `json:"role,omitempty" yaml:"role,omitempty"`
+	// Role names the host role the commands run on. Nothing runs on the
+	// workstation, so it is required.
+	Role string `json:"role" yaml:"role" jsonschema:"required"`
 	// Map prints the nodes of the group named by $GROUP.
 	Map []string `json:"map" yaml:"map" jsonschema:"required"`
 	// All prints every node the source knows.

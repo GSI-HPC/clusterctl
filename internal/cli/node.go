@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/groups"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -98,7 +100,9 @@ processor name and the groups it belongs to.`,
 			if err != nil {
 				a.Printf("%v\n", err)
 			}
-			memberships, _ := a.Groups.GroupsOf(name)
+			// A group source that cannot be asked does not hide the rest:
+			// what was found is printed and the failure decides the exit.
+			memberships, groupErr := a.Groups.GroupsOf(name)
 
 			t := output.NewTable(output.Cols("FIELD", "VALUE")...)
 			t.Add("name", node.Name)
@@ -118,9 +122,12 @@ processor name and the groups it belongs to.`,
 				t.Add("groups."+source, strings.Join(memberships[source], ", "))
 			}
 
-			return a.Print(output.Result{Table: t, Object: map[string]any{
+			if err := a.Print(output.Result{Table: t, Object: map[string]any{
 				"node": node, "host": fqdn, "bmc": bmc, "groups": memberships,
-			}})
+			}}); err != nil {
+				return err
+			}
+			return groupsError(name, groupErr)
 		})
 }
 
@@ -207,7 +214,10 @@ what the out-of-band commands connect to.`,
 func newNodeGroupsCommand(r *root) *cobra.Command {
 	return leaf("groups [NODE]", "List the node groups, or the groups of one node", `
 Without an argument, list every group source and the groups it offers. With a
-node name, list the groups that node belongs to.`,
+node name, list the groups that node belongs to.
+
+A source that cannot be asked is named on the error stream and makes the
+command fail, after what the other sources answered has been printed.`,
 		cobra.MaximumNArgs(1),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -215,15 +225,15 @@ node name, list the groups that node belongs to.`,
 				return err
 			}
 			if len(args) == 1 {
-				memberships, err := a.Groups.GroupsOf(args[0])
-				if err != nil {
-					return err
-				}
+				memberships, groupErr := a.Groups.GroupsOf(args[0])
 				t := output.NewTable(output.Cols("SOURCE", "GROUPS")...)
 				for _, source := range sortedMapKeys(memberships) {
 					t.Add(source, strings.Join(memberships[source], ", "))
 				}
-				return a.Print(output.Result{Table: t, Object: memberships})
+				if err := a.Print(output.Result{Table: t, Object: memberships}); err != nil {
+					return err
+				}
+				return groupsError(args[0], groupErr)
 			}
 
 			t := output.NewTable(
@@ -232,10 +242,14 @@ node name, list the groups that node belongs to.`,
 				output.Column{Name: "NODES", Wide: true},
 			)
 			listing := map[string][]string{}
+			var failed []error
 			for _, source := range a.Groups.Sources() {
 				names, err := a.Groups.List(source)
 				if err != nil {
 					t.Add(source, "", "cannot be listed: "+err.Error())
+					if !errors.Is(err, groups.ErrCannotList) {
+						failed = append(failed, err)
+					}
 					continue
 				}
 				listing[source] = names
@@ -243,12 +257,19 @@ node name, list the groups that node belongs to.`,
 					expr, err := a.Groups.Resolve(source, name)
 					if err != nil {
 						t.Add(source, name, "error: "+err.Error())
+						failed = append(failed, err)
 						continue
 					}
 					t.Add(source, name, expr)
 				}
 			}
-			return a.Print(output.Result{Table: t, Object: listing})
+			if err := a.Print(output.Result{Table: t, Object: listing}); err != nil {
+				return err
+			}
+			if err := errors.Join(failed...); err != nil {
+				return fmt.Errorf("some groups could not be read: %w", err)
+			}
+			return nil
 		})
 }
 
@@ -407,6 +428,14 @@ One script per node answers everything, so a node is contacted once.`,
 			}
 			return failureError(results)
 		})
+}
+
+// groupsError names the node whose group memberships are incomplete.
+func groupsError(node string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("the groups of %s are incomplete: %w", node, err)
 }
 
 func addIf(t *output.Table, field, value string) {

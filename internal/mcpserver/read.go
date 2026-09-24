@@ -200,12 +200,13 @@ func (s *Server) describeNodes(ctx context.Context, _ *mcp.CallToolRequest, in d
 			out.Errors["groups"] = fmt.Sprintf("asked for %d nodes; the groups facet answers for at most %d", len(names), maxGroupsOf)
 		} else {
 			for _, name := range names {
+				// A failing source does not hide what the others found.
 				memberships, err := a.Groups.GroupsOf(name)
+				byName[name].Groups = memberships
 				if err != nil {
 					out.Errors["groups"] = err.Error()
 					break
 				}
-				byName[name].Groups = memberships
 			}
 		}
 	}

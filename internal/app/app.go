@@ -282,6 +282,8 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		Runner:    a.ReadRunner, // group lookups only read, so a dry run still resolves them
 		Target:    a.Role,
 		CacheDir:  streams.CacheDir,
+		Scope:     a.cacheScope(),
+		Timeout:   a.Timeout().Get(),
 		Context:   ctx,
 	})
 
@@ -476,6 +478,13 @@ func (a *App) Select(expr string) (*nodeset.NodeSet, error) {
 	}
 	ns, err := nodeset.ParseWith(expr, a.Groups)
 	if err != nil {
+		// A group source that could not be asked has already said so with
+		// an exit code of its own; only what carries none is the
+		// expression's fault.
+		var coded *exitcode.Error
+		if errors.As(err, &coded) {
+			return nil, err
+		}
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 	if ns.IsEmpty() {

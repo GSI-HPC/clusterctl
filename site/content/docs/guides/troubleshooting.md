@@ -77,6 +77,11 @@ $ clusterctl node groups
 $ clusterctl node groups exe0007
 ```
 
+A group source that cannot be asked is named on the error stream, and the
+command exits non-zero after printing what the other sources answered. A bare
+`@group` does not fall back to another source when one fails: the error names
+the source that stopped the search.
+
 Remember that operators are evaluated strictly left to right with no
 precedence, so `@a!@b&@c` is `((@a minus @b) intersect @c)`.
 
