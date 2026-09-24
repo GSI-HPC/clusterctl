@@ -5,6 +5,8 @@ package cli
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -14,6 +16,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
+	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func newFabricCommand(r *root) *cobra.Command {
@@ -30,25 +33,60 @@ machine did.`,
 	)
 }
 
-// nodeGUIDs derives the adapter identifiers of a node from the hardware
-// addresses the inventory or DHCP knows.
-func nodeGUIDs(a *app.App, node string) ([]string, error) {
-	var macs []string
-	if entry, ok := a.Inventory.Lookup(node); ok {
-		macs = append(macs, entry.MACs...)
+// guidLookup derives the adapter identifiers of nodes from the hardware
+// addresses DHCP or the inventory knows.
+//
+// DHCP comes first, because it is what the node boots with and what the
+// documentation promises; the inventory answers only for a node DHCP does
+// not know, or when no host role runs the DHCP server. The DHCP
+// configuration is read once, and a failure to read it fails the lookup
+// rather than quietly falling back to an inventory address that may be stale.
+type guidLookup struct {
+	a      *app.App
+	loaded bool
+	dhcp   *dhcp.Config
+	err    error
+}
+
+func newGUIDLookup(a *app.App) *guidLookup { return &guidLookup{a: a} }
+
+// load reads the DHCP configuration, once.
+func (l *guidLookup) load() error {
+	if l.loaded {
+		return l.err
 	}
-	if len(macs) == 0 {
-		cfg, err := dhcpConfig(a)
-		if err != nil {
-			return nil, err
-		}
-		for _, host := range cfg.Lookup(node) {
+	l.loaded = true
+	if l.a.Spec.Services.DHCP.Role == "" {
+		return nil
+	}
+	cfg, err := dhcpConfig(l.a)
+	if err != nil {
+		l.err = fmt.Errorf("reading the DHCP configuration: %w", err)
+		return l.err
+	}
+	l.dhcp = cfg
+	return nil
+}
+
+// guids returns the adapter identifiers of one node.
+func (l *guidLookup) guids(node string) ([]string, error) {
+	if err := l.load(); err != nil {
+		return nil, err
+	}
+	var macs []string
+	if l.dhcp != nil {
+		for _, host := range l.dhcp.Lookup(node) {
 			macs = append(macs, host.MACs...)
 		}
 	}
 	if len(macs) == 0 {
+		if entry, ok := l.a.Inventory.Lookup(node); ok {
+			macs = append(macs, entry.MACs...)
+		}
+	}
+	if len(macs) == 0 {
 		return nil, exitcode.Errorf(exitcode.Usage,
-			"no hardware address is known for %s; set it in the inventory or in DHCP", node)
+			"no hardware address is known for %s; set it in DHCP or in the inventory", node)
 	}
 
 	out := make([]string, 0, len(macs))
@@ -73,7 +111,11 @@ func fabricRole(a *app.App) (string, error) {
 
 func newFabricGUIDCommand(r *root) *cobra.Command {
 	return leaf("guid [NODESET]", "Show the fabric identifiers of a node set", `
-Print the adapter identifier of each node, derived from its hardware address.`,
+Print the adapter identifier of each node, derived from its hardware address.
+
+The hardware address comes from DHCP, and from the inventory for a node DHCP
+does not know. A node whose identifier cannot be derived is named on standard
+error and makes the command fail; it is left out of the table and of -o json.`,
 		cobra.ArbitraryArgs,
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -84,12 +126,20 @@ Print the adapter identifier of each node, derived from its hardware address.`,
 			if err != nil {
 				return err
 			}
+			lookup := newGUIDLookup(a)
+			// A DHCP server that cannot be read fails every node the same
+			// way, so it fails the command rather than each row.
+			if err := lookup.load(); err != nil {
+				return err
+			}
 			t := output.NewTable(output.Cols("NODE", "GUID")...)
 			object := map[string][]string{}
+			failed := nodeset.New()
 			for _, node := range ns.Expand() {
-				guids, err := nodeGUIDs(a, node)
+				guids, err := lookup.guids(node)
 				if err != nil {
-					t.Add(node, err.Error())
+					a.Printf("clusterctl: %s: %v\n", node, err)
+					_ = failed.Add(node)
 					continue
 				}
 				object[node] = guids
@@ -97,13 +147,108 @@ Print the adapter identifier of each node, derived from its hardware address.`,
 					t.Add(node, guid)
 				}
 			}
-			return a.Print(output.Result{Table: t, Object: object})
+			if err := a.Print(output.Result{Table: t, Object: object}); err != nil {
+				return err
+			}
+			if !failed.IsEmpty() {
+				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d nodes have no fabric identifier: %s",
+					failed.Len(), ns.Len(), failed)
+			}
+			return nil
 		})
+}
+
+// portState is what the fabric says about one port.
+type portState struct {
+	Node string `json:"node" yaml:"node"`
+	GUID string `json:"guid" yaml:"guid"`
+	// State is up only when the logical link state is Active.
+	State         string `json:"state" yaml:"state"`
+	LinkState     string `json:"linkState" yaml:"linkState"`
+	PhysicalState string `json:"physicalState" yaml:"physicalState"`
+	Width         string `json:"width,omitempty" yaml:"width,omitempty"`
+	Speed         string `json:"speed,omitempty" yaml:"speed,omitempty"`
+}
+
+// The states fabric state reports.
+const (
+	portUp       = "up"
+	portDown     = "down"
+	portNoAnswer = "no answer"
+)
+
+// portStateScript builds the one script that asks about every port, rather
+// than opening one connection to the fabric host per node.
+//
+// Each answer line starts with the index of its port instead of the node
+// name: a node name comes from the inventory or from dhcpd.conf, and nothing
+// from there belongs in a script that runs as root on the fabric host. The
+// identifiers are hexadecimal by construction and quoted all the same.
+//
+// ibportstate takes the port number after the destination; 1 is the port of
+// an adapter function, which is what a port identifier derived from a
+// hardware address names.
+func portStateScript(guids []string) string {
+	var script strings.Builder
+	script.WriteString(`set -u
+query() {
+  ibportstate -G "$1" 1 query 2>/dev/null | awk '
+    { key = $0; sub(/:.*/, "", key)
+      value = $0; sub(/^[^:]*:\.*/, "", value)
+      if (!(key in seen)) seen[key] = value }
+    END { printf "%s|%s|%s|%s", seen["LinkState"], seen["PhysLinkState"], seen["LinkWidthActive"], seen["LinkSpeedActive"] }'
+}
+`)
+	for i, guid := range guids {
+		fmt.Fprintf(&script, "printf '%d|'; query %s; echo\n", i, shellQuote(guid))
+	}
+	return script.String()
+}
+
+// linkStateValue strips the numeric prefix some versions of ibportstate put
+// before the state name.
+var linkStateValue = regexp.MustCompile(`^\d+:\s*`)
+
+// parsePortStates reads the answers of portStateScript into the entries
+// they belong to. A port the fabric did not answer for is reported as such.
+func parsePortStates(entries []portState, out string) {
+	for i := range entries {
+		entries[i].State = portNoAnswer
+	}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Split(strings.TrimRight(line, "\r"), "|")
+		if len(f) != 5 {
+			continue
+		}
+		i, err := strconv.Atoi(f[0])
+		if err != nil || i < 0 || i >= len(entries) {
+			continue
+		}
+		e := &entries[i]
+		e.LinkState = linkStateValue.ReplaceAllString(strings.TrimSpace(f[1]), "")
+		e.PhysicalState = linkStateValue.ReplaceAllString(strings.TrimSpace(f[2]), "")
+		e.Width = strings.TrimSpace(f[3])
+		e.Speed = strings.TrimSpace(f[4])
+		switch {
+		case e.LinkState == "" && e.PhysicalState == "":
+			e.State = portNoAnswer
+		case e.LinkState == "Active":
+			e.State = portUp
+		default:
+			e.State = portDown
+		}
+	}
 }
 
 func newFabricStateCommand(r *root) *cobra.Command {
 	return leaf("state [NODESET]", "Check whether the fabric ports of a node set are up", `
 Ask the fabric about each node's port.
+
+A port is up only when its logical link state is Active. A port that is
+physically linked but still Initialize or Armed has no subnet manager
+configuration yet and carries no traffic, so it is reported down, with both
+states shown. A port the fabric does not answer for is reported as such. Any
+port that is not up makes the command fail.
 
   clusterctl fabric state -n exe[1-10]`,
 		cobra.ArbitraryArgs,
@@ -121,73 +266,134 @@ Ask the fabric about each node's port.
 				return err
 			}
 
-			type entry struct{ node, guid string }
-			var entries []entry
+			lookup := newGUIDLookup(a)
+			var entries []portState
+			var guids []string
 			for _, node := range ns.Expand() {
-				guids, err := nodeGUIDs(a, node)
+				nodeGUIDs, err := lookup.guids(node)
 				if err != nil {
 					return err
 				}
-				for _, guid := range guids {
-					entries = append(entries, entry{node: node, guid: guid})
+				for _, guid := range nodeGUIDs {
+					entries = append(entries, portState{Node: node, GUID: guid})
+					guids = append(guids, guid)
 				}
 			}
 
-			// One script asks about every port, rather than one connection
-			// to the fabric host per node.
-			var script strings.Builder
-			script.WriteString("set -u\n")
-			for _, e := range entries {
-				fmt.Fprintf(&script,
-					"printf '%%s %%s ' %s %s; ibportstate -G %s query 2>/dev/null | "+
-						"awk '/PhysLinkState|LinkState|LinkWidth|LinkSpeed/{printf \"%%s \", $0}' || true; echo\n",
-					e.node, e.guid, e.guid)
-			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Script:  script.String(),
+				Script:  portStateScript(guids),
 				Timeout: a.Timeout().Get(),
 				TTY:     transport.TTYNone,
 			})
 			if err != nil {
 				return err
 			}
+			parsePortStates(entries, result.Stdout)
 
 			t := output.NewTable(
 				output.Column{Name: "NODE"},
 				output.Column{Name: "GUID"},
 				output.Column{Name: "STATE"},
-				output.Column{Name: "DETAIL", Wide: true},
+				output.Column{Name: "LINK"},
+				output.Column{Name: "PHYSICAL"},
+				output.Column{Name: "WIDTH", Wide: true},
+				output.Column{Name: "SPEED", Wide: true},
 			)
-			down := 0
-			for _, line := range result.Lines() {
-				fields := strings.Fields(line)
-				if len(fields) < 2 {
-					continue
+			notUp := 0
+			for _, e := range entries {
+				if e.State != portUp {
+					notUp++
 				}
-				detail := strings.Join(fields[2:], " ")
-				state := "down"
-				if strings.Contains(detail, "Active") || strings.Contains(detail, "LinkUp") {
-					state = "up"
-				} else {
-					down++
-				}
-				t.Add(fields[0], fields[1], state, detail)
+				t.Add(e.Node, e.GUID, e.State, e.LinkState, e.PhysicalState, e.Width, e.Speed)
 			}
-			if err := a.Print(output.Result{Table: t}); err != nil {
+			if err := a.Print(output.Result{Table: t, Object: entries}); err != nil {
 				return err
 			}
-			if down > 0 {
-				return exitcode.Errorf(exitcode.TargetFailed, "%d ports are not up", down)
+			if notUp > 0 {
+				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d ports are not up", notUp, len(entries))
 			}
 			return nil
 		})
+}
+
+// switchPort is the switch port a node's port is cabled to.
+type switchPort struct {
+	GUID string
+	LID  int
+	Port int
+}
+
+var (
+	// ibaddr prints "GID fe80::... LID start 0x5 end 0x5".
+	ibaddrLID = regexp.MustCompile(`LID start (0x[0-9a-fA-F]+|[0-9]+)`)
+	// iblinkinfo --line prints one link per line, the switch port first:
+	//   0x0002c90200404ad8 "switch name"  4   17[  ] ==( 4X 25.78 Gbps Active/  LinkUp)==>  0x0002c903000e0b72  5  1[  ] "node HCA-1" ( )
+	iblinkinfoLine = regexp.MustCompile(
+		`^\s*(0x[0-9a-fA-F]+)\s+"[^"]*"\s+([0-9]+)\s+([0-9]+)\[[^\]]*\]\s+==\(.*\)==>\s+(0x[0-9a-fA-F]+)\s+([0-9]+)\s+([0-9]+)\[`)
+)
+
+// portLID asks the subnet manager for the LID of a port.
+func portLID(a *app.App, role, guid string) (int, error) {
+	result, err := a.RunOnRole(a.Context(), role, transport.Request{
+		Argv:    []string{"ibaddr", "-G", guid},
+		Timeout: a.Timeout().Get(),
+		TTY:     transport.TTYNone,
+	})
+	if err != nil {
+		return 0, err
+	}
+	m := ibaddrLID.FindStringSubmatch(result.Stdout)
+	if m == nil {
+		return 0, exitcode.Errorf(exitcode.TargetFailed,
+			"the fabric has no LID for port %s; is its link up?", guid)
+	}
+	lid, err := strconv.ParseInt(m[1], 0, 32)
+	if err != nil || lid <= 0 {
+		return 0, exitcode.Errorf(exitcode.TargetFailed, "ibaddr reported LID %q for port %s", m[1], guid)
+	}
+	return int(lid), nil
+}
+
+// findUplink picks the one switch port whose peer is the port with the given
+// LID out of what iblinkinfo --line printed.
+func findUplink(out string, lid int) (switchPort, error) {
+	var found []switchPort
+	for _, line := range strings.Split(out, "\n") {
+		m := iblinkinfoLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		if peer, err := strconv.Atoi(m[5]); err != nil || peer != lid {
+			continue
+		}
+		swLID, err1 := strconv.Atoi(m[2])
+		port, err2 := strconv.Atoi(m[3])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		found = append(found, switchPort{GUID: m[1], LID: swLID, Port: port})
+	}
+	switch len(found) {
+	case 0:
+		return switchPort{}, exitcode.Errorf(exitcode.TargetFailed,
+			"no switch port is linked to LID %d; is the link up?", lid)
+	case 1:
+		return found[0], nil
+	default:
+		return switchPort{}, exitcode.Errorf(exitcode.TargetFailed,
+			"%d switch ports claim to be linked to LID %d; refusing to guess", len(found), lid)
+	}
 }
 
 func newFabricCountersCommand(r *root) *cobra.Command {
 	var uplink bool
 	cmd := leaf("counters NODE", "Show the fabric error counters of a node", `
 Read the error counters of a node's port, or of the switch port it is
-connected to.`,
+connected to.
+
+With --uplink the switch port is found by asking the subnet manager for the
+LID of the node's port and looking for the one switch port linked to it, and
+only that port is read. The switch and port are named on standard error.`,
 		cobra.ExactArgs(1),
 		func(cmd *cobra.Command, args []string) error {
 			a, err := r.App()
@@ -198,13 +404,30 @@ connected to.`,
 			if err != nil {
 				return err
 			}
-			guids, err := nodeGUIDs(a, args[0])
+			guids, err := newGUIDLookup(a).guids(args[0])
 			if err != nil {
 				return err
 			}
 			argv := []string{"ibqueryerrors", "-G", guids[0], "--data"}
 			if uplink {
-				argv = []string{"ibqueryerrors", "--switch", "--verbose", "--data", "--details", "--report-port"}
+				lid, err := portLID(a, role, guids[0])
+				if err != nil {
+					return err
+				}
+				links, err := a.RunOnRole(a.Context(), role, transport.Request{
+					Argv:    []string{"iblinkinfo", "--line"},
+					Timeout: a.Timeout().Get(),
+					TTY:     transport.TTYNone,
+				})
+				if err != nil {
+					return err
+				}
+				sw, err := findUplink(links.Stdout, lid)
+				if err != nil {
+					return fmt.Errorf("%s: %w", args[0], err)
+				}
+				a.Printf("%s is linked to port %d of switch %s (LID %d)\n", args[0], sw.Port, sw.GUID, sw.LID)
+				argv = []string{"perfquery", strconv.Itoa(sw.LID), strconv.Itoa(sw.Port)}
 			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
 				Argv:    argv,
