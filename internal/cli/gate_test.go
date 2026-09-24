@@ -254,6 +254,55 @@ func TestOneMachineNamedTwiceIsOneTarget(t *testing.T) {
 	}
 }
 
+// safety.confirmAbove: 0 read as "always type the count" everywhere but in a
+// Go comment, and did the opposite.
+func TestConfirmAboveZeroAlwaysAsksForTheCount(t *testing.T) {
+	h, err := run(t, harnessOptions{tty: true, stdin: "y\n"},
+		"--set", "safety.confirmAbove=0", "exec", "-n", "exe[0001-0002]", "--confirm", "--", "systemctl", "poweroff")
+	if err == nil {
+		t.Fatal("a y was accepted where the count had to be typed")
+	}
+	if !strings.Contains(h.errOut.String(), "Type the number of hosts") {
+		t.Errorf("the count was not asked for:\n%s", h.errOut)
+	}
+	if calls := h.recorder.Calls(); len(calls) != 0 {
+		t.Errorf("sent %d commands without the count", len(calls))
+	}
+
+	h, err = run(t, harnessOptions{tty: true, stdin: "1\n"},
+		"--set", "safety.confirmAbove=0", "exec", "-n", "exe0001", "--confirm", "--", "true")
+	if err != nil {
+		t.Fatalf("typing the count of one host should confirm: %v\n%s", err, h.errOut)
+	}
+}
+
+func TestSafetyLimitsOutOfRangeAreRefused(t *testing.T) {
+	tests := []struct{ from, to string }{
+		{"confirmAbove: 8", "confirmAbove: -5"},
+		{"powerOnBatch: 8", "powerOnBatch: 0"},
+		{"powerOnBatch: 8", "powerOnBatch: -1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.to, func(t *testing.T) {
+			dir := exampleCopy(t, tc.from, tc.to)
+			_, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "validate")
+			if err == nil {
+				t.Fatalf("config validate accepted %s", tc.to)
+			}
+			if got, want := exitcode.From(err), exitcode.Usage; got != want {
+				t.Errorf("exit code = %d, want %d", got, want)
+			}
+		})
+	}
+	for _, set := range []string{"safety.confirmAbove=-5", "safety.powerOnBatch=0"} {
+		t.Run(set, func(t *testing.T) {
+			if _, err := run(t, harnessOptions{}, "--set", set, "config", "validate"); err == nil {
+				t.Errorf("--set %s was accepted", set)
+			}
+		})
+	}
+}
+
 // A change to the accounting database names no node, so the inventory has
 // nothing to say about it.
 func TestAccountingChangeIsNotANodeTheInventoryLacks(t *testing.T) {
