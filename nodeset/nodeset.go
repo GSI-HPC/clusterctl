@@ -10,12 +10,13 @@ import (
 
 // NodeSet is an unordered set of host names that renders in folded form.
 // The zero value is not usable; call New or Parse.
+//
+// Padding is not part of a host's identity: exe1 and exe01 are one host. Each
+// host keeps the spelling it was first given, and when sets are combined the
+// spelling already held wins, so a set never shows a host under a name it was
+// not given.
 type NodeSet struct {
-	nodes map[string]node
-	// pads records the display width of each dimension of a pattern. When
-	// sets are combined the padding already recorded wins, so exe[01-02]
-	// keeps its width when exe3 is added to it.
-	pads     map[string][]int
+	nodes    map[string]node
 	autostep int
 }
 
@@ -31,7 +32,7 @@ func WithAutostep(n int) Option {
 
 // New returns an empty set.
 func New(opts ...Option) *NodeSet {
-	ns := &NodeSet{nodes: make(map[string]node), pads: make(map[string][]int)}
+	ns := &NodeSet{nodes: make(map[string]node)}
 	for _, o := range opts {
 		o(ns)
 	}
@@ -75,16 +76,9 @@ func (ns *NodeSet) IsEmpty() bool { return len(ns.nodes) == 0 }
 
 // Clone returns an independent copy.
 func (ns *NodeSet) Clone() *NodeSet {
-	out := &NodeSet{
-		nodes:    make(map[string]node, len(ns.nodes)),
-		pads:     make(map[string][]int, len(ns.pads)),
-		autostep: ns.autostep,
-	}
+	out := &NodeSet{nodes: make(map[string]node, len(ns.nodes)), autostep: ns.autostep}
 	for k, v := range ns.nodes {
 		out.nodes[k] = v
-	}
-	for k, v := range ns.pads {
-		out.pads[k] = append([]int(nil), v...)
 	}
 	return out
 }
@@ -102,49 +96,57 @@ func (ns *NodeSet) Add(expr string) error {
 // Contains reports whether name is a member. Padding is ignored, so "exe01"
 // and "exe1" name the same host.
 func (ns *NodeSet) Contains(name string) bool {
-	other, err := parsePattern(name)
-	if err != nil || len(other.nodes) != 1 {
-		return false
-	}
-	for k := range other.nodes {
-		if _, ok := ns.nodes[k]; ok {
-			return true
-		}
-	}
-	return false
+	_, ok := ns.lookup(name)
+	return ok
 }
 
-// Canonical returns the name this set uses for a host.
+// Canonical returns the name this set holds for a host, which is always a name
+// the set was given.
 //
-// It differs from the name given when the two were written with different
-// padding: a set holding exe0001 answers "exe0001" when asked about "exe1",
-// because padding is a display property and both name one host.
+// It differs from the name asked about when the two were written with
+// different padding: a set holding exe0001 answers "exe0001" when asked about
+// "exe1", because padding is not part of a host's identity and both name one
+// host. A set holding exe0001 and exe11 answers "exe11" for exe11.
 func (ns *NodeSet) Canonical(name string) (string, bool) {
-	other, err := parsePattern(name)
-	if err != nil || len(other.nodes) != 1 {
+	n, ok := ns.lookup(name)
+	if !ok {
 		return "", false
 	}
-	for k := range other.nodes {
-		if n, ok := ns.nodes[k]; ok {
-			return n.name(ns.pads[n.pattern]), true
-		}
+	return n.name(), true
+}
+
+// lookup finds the member a single host name refers to.
+func (ns *NodeSet) lookup(name string) (node, bool) {
+	other, err := parsePattern(name)
+	if err != nil || len(other.nodes) != 1 {
+		return node{}, false
 	}
-	return "", false
+	for k := range other.nodes {
+		n, ok := ns.nodes[k]
+		return n, ok
+	}
+	return node{}, false
 }
 
 // Expand returns the host names in ascending order: by pattern first, then by
 // each numeric dimension from left to right.
 func (ns *NodeSet) Expand() []string {
+	nodes := ns.sorted()
+	out := make([]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.name()
+	}
+	return out
+}
+
+// sorted returns the members in expansion order.
+func (ns *NodeSet) sorted() []node {
 	nodes := make([]node, 0, len(ns.nodes))
 	for _, n := range ns.nodes {
 		nodes = append(nodes, n)
 	}
 	sort.Slice(nodes, func(i, j int) bool { return lessNode(nodes[i], nodes[j]) })
-	out := make([]string, len(nodes))
-	for i, n := range nodes {
-		out[i] = n.name(ns.pads[n.pattern])
-	}
-	return out
+	return nodes
 }
 
 // String renders the set in folded form, the representation clusterctl prints
@@ -185,59 +187,36 @@ func (ns *NodeSet) Split(n int) []*NodeSet {
 	if n < 1 {
 		return nil
 	}
-	names := ns.Expand()
-	if len(names) == 0 {
+	nodes := ns.sorted()
+	if len(nodes) == 0 {
 		return nil
 	}
-	if n > len(names) {
-		n = len(names)
+	if n > len(nodes) {
+		n = len(nodes)
 	}
 	out := make([]*NodeSet, 0, n)
-	size, rest := len(names)/n, len(names)%n
+	size, rest := len(nodes)/n, len(nodes)%n
 	for i := 0; i < n; i++ {
 		take := size
 		if i < rest {
 			take++
 		}
-		chunk := &NodeSet{
-			nodes:    make(map[string]node, take),
-			pads:     make(map[string][]int, len(ns.pads)),
-			autostep: ns.autostep,
+		chunk := &NodeSet{nodes: make(map[string]node, take), autostep: ns.autostep}
+		for _, m := range nodes[:take] {
+			chunk.nodes[m.key()] = m
 		}
-		for pattern, pads := range ns.pads {
-			chunk.pads[pattern] = append([]int(nil), pads...)
-		}
-		for _, name := range names[:take] {
-			if err := chunk.Add(name); err != nil {
-				panic("nodeset: re-parsing an expanded host failed: " + err.Error())
-			}
-		}
-		names = names[take:]
+		nodes = nodes[take:]
 		out = append(out, chunk)
 	}
 	return out
 }
 
+// merge adds the members of other. A host this set already holds keeps the
+// spelling it has.
 func (ns *NodeSet) merge(other *NodeSet) {
 	for k, v := range other.nodes {
-		ns.nodes[k] = v
-	}
-	ns.adoptPads(other)
-}
-
-// adoptPads takes over the display widths of patterns this set does not
-// already show, and of dimensions it shows without padding.
-func (ns *NodeSet) adoptPads(other *NodeSet) {
-	for pattern, pads := range other.pads {
-		mine, ok := ns.pads[pattern]
-		if !ok {
-			ns.pads[pattern] = append([]int(nil), pads...)
-			continue
-		}
-		for i := range mine {
-			if mine[i] == 0 && i < len(pads) {
-				mine[i] = pads[i]
-			}
+		if _, ok := ns.nodes[k]; !ok {
+			ns.nodes[k] = v
 		}
 	}
 }
@@ -264,11 +243,10 @@ func (ns *NodeSet) symmetricDifference(other *NodeSet) {
 			ns.nodes[k] = v
 		}
 	}
-	ns.adoptPads(other)
 }
 
 // lessNode orders hosts by pattern, then numerically by dimension, so that
-// exe2 sorts before exe10 and exe1 before exe01.
+// exe2 sorts before exe10.
 func lessNode(a, b node) bool {
 	if a.pattern != b.pattern {
 		return a.pattern < b.pattern

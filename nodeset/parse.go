@@ -20,12 +20,13 @@ var (
 	maxSetElements = 1 << 20
 )
 
-// node is one host: a pattern with a %s for each numeric dimension, plus the
-// value of each dimension. Padding is not part of a host's identity, so it is
-// held per pattern by the NodeSet rather than here.
+// node is one host: a pattern with a %s for each numeric dimension, the value
+// of each dimension, and the width each value was written with. The widths
+// are not part of the host's identity: exe1 and exe01 have one key.
 type node struct {
 	pattern string
 	vals    []int
+	pads    []int
 }
 
 // key identifies the host inside a NodeSet.
@@ -39,18 +40,14 @@ func (n node) key() string {
 	return b.String()
 }
 
-// name renders the host name with the given per dimension padding.
-func (n node) name(pads []int) string {
+// name renders the host name as it was written.
+func (n node) name() string {
 	if len(n.vals) == 0 {
 		return strings.ReplaceAll(n.pattern, "%%", "%")
 	}
 	args := make([]any, len(n.vals))
 	for i, v := range n.vals {
-		pad := 0
-		if i < len(pads) {
-			pad = pads[i]
-		}
-		args[i] = format(v, pad)
+		args[i] = format(v, n.pads[i])
 	}
 	return fmt.Sprintf(n.pattern, args...)
 }
@@ -204,11 +201,11 @@ func parsePattern(term string) (*NodeSet, error) {
 			if end < 0 {
 				return nil, fmt.Errorf("unbalanced [ in %q", term)
 			}
-			rs, err := parseRangeSet(term[i+1 : i+end])
+			spans, count, err := parseSpans(term[i+1 : i+end])
 			if err != nil {
 				return nil, fmt.Errorf("in %q: %w", term, err)
 			}
-			dims = append(dims, rs)
+			dims = append(dims, expandSpans(spans, count))
 			pattern.WriteString("%s")
 			i += end + 1
 		case c >= '0' && c <= '9':
@@ -221,7 +218,9 @@ func parsePattern(term string) (*NodeSet, error) {
 			if err != nil {
 				return nil, fmt.Errorf("in %q: %w", term, err)
 			}
-			dims = append(dims, &rangeSet{values: []int{n}, pad: padOf(lit)})
+			rs := &rangeSet{}
+			rs.add(n, padOf(lit))
+			dims = append(dims, rs)
 			pattern.WriteString("%s")
 			i = j
 		case c == ']':
@@ -248,24 +247,17 @@ func parsePattern(term string) (*NodeSet, error) {
 
 	ns := New()
 	pat := pattern.String()
-	pads := make([]int, len(dims))
-	for i, d := range dims {
-		pads[i] = d.pad
-	}
-	if len(dims) > 0 {
-		ns.pads[pat] = pads
-	}
-
 	vals := make([]int, len(dims))
+	pads := make([]int, len(dims))
 	var walk func(int)
 	walk = func(d int) {
 		if d == len(dims) {
-			n := node{pattern: pat, vals: append([]int(nil), vals...)}
+			n := node{pattern: pat, vals: append([]int(nil), vals...), pads: append([]int(nil), pads...)}
 			ns.nodes[n.key()] = n
 			return
 		}
-		for _, v := range dims[d].values {
-			vals[d] = v
+		for i, v := range dims[d].values {
+			vals[d], pads[d] = v, dims[d].pads[i]
 			walk(d + 1)
 		}
 	}

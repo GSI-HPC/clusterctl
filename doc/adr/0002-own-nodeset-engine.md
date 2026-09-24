@@ -31,16 +31,18 @@ Implement the engine here, in `nodeset/` at the module root.
 
 ## What was decided about the semantics
 
-Three things an implementation has to pick, picked the way ClusterShell picks
-them and written down in [../nodeset.md](../nodeset.md):
+Three things an implementation has to pick, written down in
+[../nodeset.md](../nodeset.md). The first agrees with ClusterShell; the other
+two do not:
 
 - Every run of digits is a dimension, and a dimension with one value renders
   without brackets. This makes folding idempotent, which is checked by a fuzz
   test.
-- Padding is a display property of a dimension, not part of a host's identity:
-  `exe1` and `exe01` are one host. This is why a selection is canonicalised
-  against the inventory, so typing `exe1` reaches the machine written down as
-  `exe0001`.
+- Padding is not part of a host's identity: `exe1` and `exe01` are one host.
+  This is why a selection is canonicalised against the inventory, so typing
+  `exe1` reaches the machine written down as `exe0001`. ClusterShell keeps
+  the two apart. Each host still keeps the spelling it was given, so a set
+  never shows a host under a name it was not given.
 - A name whose numeric parts are adjacent, such as `exe0[0,10]`, is rejected.
   It expands to names that cannot be split back the same way, so folding would
   lose a host silently. The fuzz test found this.

@@ -52,27 +52,44 @@ what was meant: `exe1,` is `exe1`.
 ## Semantics chosen here
 
 These are the corners where an implementation has to decide something. They are
-decided the way ClusterShell decides them, and written down because the
-behaviour is observable.
+written down because the behaviour is observable.
 
 ### Every run of digits is a dimension
 
 `x1y1` has two numeric dimensions, `10.0.1.7` has four, and `exe0001` has one,
 whether or not brackets were written. A dimension holding a single value is
 rendered without brackets, so folding is idempotent: the printed form of a set
-parses back into the same set and prints the same way again. This property is
-checked by a fuzz test.
+parses back into the same set, every host spelled as before, and prints the
+same way again. This property is checked by a fuzz test.
 
-### Padding is a display property
+### Padding is not part of a host's identity
 
-`exe1` and `exe01` name the **same host**, shown with a width of one or two
-digits. A set remembers the first non-zero width it was given for a dimension
-and shows every member with it, so `exe[01-02]` plus `exe3` prints
-`exe[01-03]`.
+**Decision:** names that differ only in zero padding, such as `exe1`, `exe01`
+and `exe0001`, are **one host**. `exe1,exe01` names one host, `exe[1-3]!exe02`
+is `exe[1,3]`, and a set holding `exe0001` contains `exe1`.
 
-This matters beyond printing. An administrator who types `exe1` reaches the
-machine an inventory wrote as `exe0001`, and sees it under the name the site
-gave it, because a selection is canonicalised against the inventory.
+This is what lets an administrator type `exe1` and reach the machine an
+inventory wrote as `exe0001`, and see it under the name the site gave it,
+because a selection is canonicalised against the inventory. The price is that
+a site cannot have two machines whose names differ only in padding: they would
+be one host to every command, so an inventory holding such a pair has to be
+rejected rather than one of them picked.
+
+Padding is still never thrown away. Each host keeps the spelling it was first
+given, and a set never shows a host under a name it was not given:
+
+- `exe1,exe01` prints `exe1`, and `exe01,exe1` prints `exe01`.
+- `exe[01-02]` plus `exe3` prints `exe[01-02,3]`, not `exe[01-03]`.
+- A set holding `exe[0001-0010]` and `exe11` prints `exe[0001-0010,11]`, and
+  `Canonical("exe11")` answers `exe11`.
+- A value only joins a range when it reads the same at the range's width, so
+  `exe08,exe09,exe10` prints `exe[08-10]` but `exe7,exe08,exe9` prints
+  `exe[7,08,9]`.
+
+In a range the width of the first bound applies to the whole range:
+`exe[01-100]` is `exe01` to `exe99` and `exe100`. A last bound padded to
+another width, as in `exe[1-010]` or `exe[001-10]`, is an error, because one of
+the two bounds would be shown under a name it was not written as.
 
 ### Adjacent numeric parts are rejected
 

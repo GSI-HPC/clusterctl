@@ -61,8 +61,10 @@ $ clusterctl node select '@compute' --count
 {{< callout type="info" >}}
 Note the padding. The inventory wrote these machines as `exe0001`, so a set
 comes back under the names the site gave them even when you typed `exe1`.
-`exe1` and `exe0001` are the same host: padding is how a name is displayed,
-not part of what it identifies.
+`exe1` and `exe0001` are the same host: padding is not part of what a name
+identifies. Every host keeps the name the inventory gave it, so a stray `exe11`
+next to `exe[0001-0010]` prints as `exe[0001-0010,11]`, never as `exe0011`.
+ClusterShell would treat `exe1` and `exe0001` as two hosts.
 {{< /callout >}}
 
 ## What a name may contain

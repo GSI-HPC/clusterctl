@@ -16,43 +16,56 @@ type vector struct {
 	dims    []*rangeSet
 }
 
+// patternNodes is the members of a set that share one pattern.
+type patternNodes struct {
+	pattern string
+	nodes   []node
+}
+
+// byPattern groups the members by pattern, in pattern order.
+func (ns *NodeSet) byPattern() []patternNodes {
+	groups := make(map[string][]node)
+	for _, n := range ns.nodes {
+		groups[n.pattern] = append(groups[n.pattern], n)
+	}
+	out := make([]patternNodes, 0, len(groups))
+	for p, nodes := range groups {
+		out = append(out, patternNodes{pattern: p, nodes: nodes})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].pattern < out[j].pattern })
+	return out
+}
+
 // fold renders the set, merging hosts into bracketed ranges.
 func (ns *NodeSet) fold() string {
-	byPattern := make(map[string][]node)
-	for _, n := range ns.nodes {
-		byPattern[n.pattern] = append(byPattern[n.pattern], n)
-	}
-	patterns := make([]string, 0, len(byPattern))
-	for p := range byPattern {
-		patterns = append(patterns, p)
-	}
-	sort.Strings(patterns)
-
 	var parts []string
-	for _, p := range patterns {
-		for _, v := range foldPattern(p, byPattern[p], ns.pads[p], ns.autostep) {
+	for _, p := range ns.byPattern() {
+		for _, v := range foldPattern(p.pattern, p.nodes, ns.autostep) {
 			parts = append(parts, v.render(ns.autostep))
 		}
 	}
 	return strings.Join(parts, ",")
 }
 
-// foldPattern merges the hosts of one pattern into as few vectors as it can.
-// Each pass picks one dimension and unions it across vectors whose other
-// dimensions are identical, which is repeated until nothing merges any more.
-func foldPattern(pattern string, nodes []node, pads []int, autostep int) []vector {
+// unitVectors makes one vector per host, each dimension holding the host's
+// value with the width it was written with.
+func unitVectors(pattern string, nodes []node) []vector {
 	vectors := make([]vector, 0, len(nodes))
 	for _, n := range nodes {
 		dims := make([]*rangeSet, len(n.vals))
 		for i, v := range n.vals {
-			pad := 0
-			if i < len(pads) {
-				pad = pads[i]
-			}
-			dims[i] = &rangeSet{values: []int{v}, pad: pad}
+			dims[i] = &rangeSet{values: []int{v}, pads: []int{n.pads[i]}}
 		}
 		vectors = append(vectors, vector{pattern: pattern, dims: dims})
 	}
+	return vectors
+}
+
+// foldPattern merges the hosts of one pattern into as few vectors as it can.
+// Each pass picks one dimension and unions it across vectors whose other
+// dimensions are identical, which is repeated until nothing merges any more.
+func foldPattern(pattern string, nodes []node, autostep int) []vector {
+	vectors := unitVectors(pattern, nodes)
 	if len(vectors) < 2 || len(vectors[0].dims) == 0 {
 		sortVectors(vectors)
 		return vectors
@@ -86,6 +99,7 @@ func foldAxis(vectors []vector, axis, autostep int) ([]vector, bool) {
 		if idx, ok := groups[key]; ok {
 			target := out[idx].dims[axis]
 			target.values = append(target.values, v.dims[axis].values...)
+			target.pads = append(target.pads, v.dims[axis].pads...)
 			grown[idx] = true
 			changed = true
 			continue

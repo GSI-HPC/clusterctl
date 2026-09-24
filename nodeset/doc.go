@@ -29,7 +29,12 @@
 // rendered without brackets, so folding is stable: parsing the output of
 // String and folding it again yields the same string.
 //
-// Zero padding is part of a node's identity: "exe1" and "exe01" are two
-// different hosts, and each element remembers the width it was written with.
-// In a range the padding of the first bound applies to the whole range.
+// Zero padding is not part of a node's identity: "exe1" and "exe01" are the
+// same host, so Parse("exe1,exe01") holds one host and Contains("exe01") is
+// true for a set holding exe1. Each host keeps the spelling it was first
+// given, and a set never shows a host under a name it was not given:
+// "exe[01-02],exe3" prints as exe[01-02,3], and Canonical("exe1") on a set
+// holding exe0001 answers "exe0001". In a range the padding of the first bound
+// applies to the whole range, and a last bound padded to another width, such
+// as exe[1-010], is an error.
 package nodeset
