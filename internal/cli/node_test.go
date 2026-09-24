@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -118,5 +119,30 @@ func TestRackAttributeIsNotOverwritten(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "exe0001") {
 		t.Errorf("node rack R05 does not list exe0001:\n%s", h.out)
+	}
+}
+
+// Report 4.17: node describe exe1 found exe0001 but showed host and service
+// processor names built from exe1, names no acting command uses.
+func TestNodeDescribeUsesTheInventoryName(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "node", "describe", "exe1", "-o", "json")
+	if err != nil {
+		t.Fatalf("node describe failed: %v", err)
+	}
+	var got struct {
+		Node struct{ Name string } `json:"node"`
+		Host string                `json:"host"`
+		BMC  string                `json:"bmc"`
+	}
+	if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+		t.Fatalf("decoding %s: %v", h.out, err)
+	}
+	if got.Node.Name != "exe0001" || got.Host != "exe0001.hpc.example.org" || got.BMC != "exe0001.mgmt.hpc.example.org" {
+		t.Errorf("node describe exe1 = %+v, want every name built from exe0001", got)
+	}
+	for _, call := range h.recorder.Calls() {
+		if strings.Contains(call.Command, "exe1") && !strings.Contains(call.Command, "exe0001") {
+			t.Errorf("a group source was asked about exe1: %q", call.Command)
+		}
 	}
 }
