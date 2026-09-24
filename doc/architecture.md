@@ -38,6 +38,7 @@ every command rather than in the ones that remembered to implement them.
 | `internal/config` | Finding, validating, merging and resolving configuration, and remembering where every value came from. |
 | `internal/inventory` | What is known about the nodes: attributes, racks, addresses, boot paths. |
 | `internal/naming` | Turning a short node name into a host name and a service processor name. |
+| `internal/hostname` | Deciding whether a name may be handed to ssh or put into a URL as a host. |
 | `internal/groups` | Resolving `@group` references from tables, node attributes or commands. |
 
 ### Getting things done
