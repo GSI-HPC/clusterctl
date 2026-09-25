@@ -236,6 +236,7 @@ type Client struct {
 	knownHosts  string
 	defaultUser string
 	noTerminal  bool
+	ctx         context.Context
 
 	once       sync.Once
 	configPath string
@@ -260,6 +261,11 @@ type Options struct {
 	// of its own, so that it fails instead of asking for a password or a
 	// passphrase on whatever terminal the process was started from.
 	NoTerminal bool
+	// Context bounds what the client runs on its own account, such as
+	// asking ssh for its version before the configuration is written; nil
+	// is context.Background(). A request runs under the context it is
+	// given.
+	Context context.Context
 }
 
 // New returns a client. The ssh configuration is written on first use.
@@ -271,7 +277,16 @@ func New(opts Options) *Client {
 		knownHosts:  opts.KnownHostsFile,
 		defaultUser: opts.DefaultUser,
 		noTerminal:  opts.NoTerminal,
+		ctx:         opts.Context,
 	}
+}
+
+// context returns the context the client's own work runs under.
+func (c *Client) context() context.Context {
+	if c.ctx == nil {
+		return context.Background()
+	}
+	return c.ctx
 }
 
 // ConfigPath returns the generated ssh configuration, writing it once.
@@ -551,7 +566,7 @@ func classify(ctx context.Context, target Target, err error, stderr string) (int
 		if isExit {
 			code = exitErr.ExitCode()
 		}
-		return code, cancelled(target, ctxErr)
+		return code, cancelled(target.String(), ctxErr)
 	}
 	if !isExit {
 		return -1, exitcode.Wrap(exitcode.Transport,
@@ -562,13 +577,14 @@ func classify(ctx context.Context, target Target, err error, stderr string) (int
 }
 
 // cancelled is the error of a command that was stopped because its context
-// ended. An interrupt exits 130; a deadline is the command's failure.
-func cancelled(target Target, err error) error {
+// ended, what naming it. An interrupt exits 130; a deadline is the command's
+// failure.
+func cancelled(what string, err error) error {
 	code := exitcode.TargetFailed
 	if errors.Is(err, context.Canceled) {
 		code = exitcode.Interrupted
 	}
-	return exitcode.Wrap(code, fmt.Errorf("%s: %w", target, err))
+	return exitcode.Wrap(code, fmt.Errorf("%s: %w", what, err))
 }
 
 // exited is the error of a command that ran and exited with a status. ssh's

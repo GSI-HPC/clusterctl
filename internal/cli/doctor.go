@@ -91,7 +91,7 @@ func localChecks(a *app.App) []check {
 	if path, err := exec.LookPath(a.SSH.Binary()); err != nil {
 		checks = append(checks, check{"ssh client", statusFail, a.SSH.Binary() + " is not in PATH"})
 	} else {
-		checks = append(checks, check{"ssh client", statusOK, path + " " + sshVersion(path)})
+		checks = append(checks, check{"ssh client", statusOK, path + " " + sshVersion(a.Context(), path)})
 	}
 	if _, err := exec.LookPath(a.SSH.ScpBinary()); err != nil {
 		checks = append(checks, check{"scp client", statusWarn, a.SSH.ScpBinary() + " is not in PATH; copy will not work"})
@@ -379,9 +379,13 @@ func printChecks(a *app.App, format output.Format, streams app.Streams, checks [
 }
 
 // sshVersion reads the version the ssh client reports, which it prints to
-// standard error.
-func sshVersion(path string) string {
-	out, err := exec.Command(path, "-V").CombinedOutput()
+// standard error. It stops when ctx ends, as everything a command runs does.
+func sshVersion(ctx context.Context, path string) string {
+	cmd := exec.CommandContext(ctx, path, "-V")
+	// A wrapper that forks keeps the output open after it is killed; its
+	// children are not waited for past a second.
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
 	if err != nil && len(out) == 0 {
 		return ""
 	}

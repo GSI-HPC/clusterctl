@@ -77,7 +77,11 @@ func (c *Client) generateConfig() ([]byte, error) {
 		fmt.Fprintf(&b, "Host %s\n%s\n", role.Host, bodies[name])
 	}
 
-	global, err := c.globalBody(c.knowsKnownHostsCommand())
+	known, err := c.knowsKnownHostsCommand()
+	if err != nil {
+		return nil, err
+	}
+	global, err := c.globalBody(known)
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
@@ -318,20 +322,31 @@ func canonicalKeyword(key string) string {
 // include either, so leaving it out there loses nothing. When the version
 // cannot be told, the keyword is written, and a client that does not know it
 // refuses the file rather than trusting a command's keys.
-func (c *Client) knowsKnownHostsCommand() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//
+// ssh is asked under the client's context, so that an interrupt stops the
+// question as it stops a command. An interrupted question has no answer to
+// write a configuration from, so it is an error rather than a guess.
+func (c *Client) knowsKnownHostsCommand() (bool, error) {
+	ctx, cancel := context.WithTimeout(c.context(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, c.Binary(), "-V").CombinedOutput()
+	cmd := exec.CommandContext(ctx, c.Binary(), "-V")
+	// A wrapper that forks keeps the output open after it is killed; its
+	// children are not waited for past a second.
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if cause := c.context().Err(); cause != nil {
+		return false, cancelled(c.Binary()+" -V", cause)
+	}
 	if err != nil {
-		return true
+		return true, nil
 	}
 	m := opensshVersion.FindSubmatch(out)
 	if m == nil {
-		return true
+		return true, nil
 	}
 	major, _ := strconv.Atoi(string(m[1]))
 	minor, _ := strconv.Atoi(string(m[2]))
-	return major > 8 || major == 8 && minor >= 5
+	return major > 8 || major == 8 && minor >= 5, nil
 }
 
 var opensshVersion = regexp.MustCompile(`OpenSSH_(?:for_Windows_)?(\d+)\.(\d+)`)

@@ -109,11 +109,13 @@ client adds a `GlobalKnownHostsFile` and a `KnownHostsCommand`. So every source
 other than the site's file is switched off in `Host *`, before any include can
 switch it on: the global files, the command, DNS records and the key updates
 ssh would otherwise write into the site file. `KnownHostsCommand` is written
-only for an ssh that knows it (8.5 and later); an older one cannot read it from
-an include either. It is not hidden behind `IgnoreUnknown`, because ssh keeps
-the first `IgnoreUnknown` it reads and would then ignore the administrator's
-own. Without `ssh.knownHostsFile`, ssh would fall back to `~/.ssh/known_hosts`,
-so no configuration is generated and no connection is made.
+only for an ssh that knows it (8.5 and later), which `ssh -V` tells before the
+file is written; an interrupt stops that question like any other, and nothing
+is written. An older ssh cannot read the keyword from an include either. It is
+not hidden behind `IgnoreUnknown`, because ssh keeps the first `IgnoreUnknown`
+it reads and would then ignore the administrator's own. Without
+`ssh.knownHostsFile`, ssh would fall back to `~/.ssh/known_hosts`, so no
+configuration is generated and no connection is made.
 
 **Multiplexing is off unless a role asks for it.** A connection through an
 existing master checks no host key, so `ControlMaster no` and `ControlPath

@@ -117,6 +117,37 @@ func TestCopyReportsAnInterruptAsInterrupted(t *testing.T) {
 	}
 }
 
+// ssh is asked for its version before the configuration is written, and it
+// was asked under a context of its own, so an interrupt did not reach it: a
+// client that hung there held the command for five seconds, and the
+// configuration was then written from a guess. The question stops with the
+// command now, and an interrupted one writes nothing.
+func TestTheVersionQuestionStopsWithTheCommand(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "hanging-ssh")
+	writeScript(t, binary, "#!/bin/sh\nexec sleep 30\n")
+	stateDir := filepath.Join(dir, "state")
+	c := transport.New(transport.Options{
+		SSH:            v1alpha1.SSHSpec{Binary: binary},
+		StateDir:       stateDir,
+		KnownHostsFile: filepath.Join(dir, "ssh-known-hosts"),
+		Context:        cancelSoon(t),
+	})
+
+	start := time.Now()
+	_, err := c.ConfigPath()
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("the configuration took %v to give up after the interrupt", elapsed)
+	}
+	if !errors.Is(err, context.Canceled) || exitcode.From(err) != exitcode.Interrupted {
+		t.Errorf("error = %v (exit code %d), want an interrupt", err, exitcode.From(err))
+	}
+	if written, _ := filepath.Glob(filepath.Join(stateDir, "ssh_config-*")); len(written) > 0 {
+		t.Errorf("a configuration was written although the version was never told: %v", written)
+	}
+}
+
 // TestRunClassifiesTheExitStatus checks the three ways a command can end: the
 // host answered with a failure, ssh could not reach it, or it succeeded.
 // ExitResult has to agree, since the tests of every command rely on it to
