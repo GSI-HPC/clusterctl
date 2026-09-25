@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -145,4 +147,64 @@ func echoes(t *testing.T, tty *os.File) bool {
 		t.Fatalf("reading the terminal state: %v", errno)
 	}
 	return state.Lflag&syscall.ECHO != 0
+}
+
+// A Ctrl-C at the password prompt of provision status stopped nothing: the
+// command went on to the next node, which put the prompt up again, and so
+// on for every node, each leaving a read of the terminal behind that could
+// turn echo off after the command had put it back. The prompt comes once
+// now, and the command ends at the interrupt.
+func TestCtrlCAtAPromptAsksNoMore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("starts the process on a pseudo terminal")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no shell available")
+	}
+	// provision status reads the boot links before it asks for the
+	// password; this ssh answers that, and everything else, with nothing.
+	ssh := filepath.Join(t.TempDir(), "ssh")
+	writeScript(t, ssh, "#!/bin/sh\nexit 0\n")
+	master, tty := openPTY(t)
+	cmd := child(t, "main", "--config", "../../examples/site", "--set", "ssh.binary="+ssh,
+		"--set", "bmc.credential=bmc-prompt", "provision", "status", "-n", "exe[0001-0003]")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var out screen
+	go func() { _, _ = out.ReadFrom(master) }()
+
+	const prompt = "Password for admin@bmc-prompt:"
+	shows := func(text string, d time.Duration) bool {
+		for deadline := time.Now().Add(d); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if strings.Contains(out.String(), text) {
+				return true
+			}
+		}
+		return false
+	}
+	if !shows(prompt, 10*time.Second) {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatalf("the prompt %q never came; the terminal shows:\n%s", prompt, out.String())
+	}
+	if _, err := master.Write([]byte{0x03}); err != nil {
+		t.Fatal(err)
+	}
+	_ = waitFor(t, cmd, 5*time.Second)
+	// The table comes after anything the other nodes would have asked.
+	if !shows("NODE", 2*time.Second) {
+		t.Fatalf("no table was printed; the terminal shows:\n%s", out.String())
+	}
+	if code := cmd.ProcessState.ExitCode(); code != 130 {
+		t.Errorf("exit code = %d, want 130; the terminal shows:\n%s", code, out.String())
+	}
+	if n := strings.Count(out.String(), prompt); n != 1 {
+		t.Errorf("the prompt came %d times, want once; the terminal shows:\n%s", n, out.String())
+	}
+	if !echoes(t, tty) {
+		t.Error("the terminal was left without echo")
+	}
 }

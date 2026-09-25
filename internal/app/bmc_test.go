@@ -5,6 +5,7 @@ package app_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,5 +236,45 @@ func TestAPasswordHelperSpeaksToTheDiagnostics(t *testing.T) {
 				t.Errorf("the helper's message is in the diagnostics = %t, want %t:\n%s", got, want, diag)
 			}
 		})
+	}
+}
+
+// The password prompt put its question on the terminal and started a read
+// of it even when the command had already been interrupted, and the read
+// could not be stopped: it could turn echo off after the terminal had been
+// put back. Nothing is asked once the context has ended, and a lookup that
+// read nothing for that reason is an interrupt rather than a problem with
+// the configuration.
+func TestThePromptAsksNothingOnceInterrupted(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dir := t.TempDir()
+	errOut := &strings.Builder{}
+	a, err := app.New(ctx, app.Streams{
+		In:       strings.NewReader(""),
+		Out:      &strings.Builder{},
+		Err:      errOut,
+		IsTTY:    true,
+		StateDir: filepath.Join(dir, "state"),
+		CacheDir: filepath.Join(dir, "cache"),
+	}, app.Options{
+		ConfigFiles: []string{exampleDir},
+		Env:         func(string) string { return "" },
+		Runner:      &transport.Recorder{},
+	})
+	if err != nil {
+		t.Fatalf("building the app: %v", err)
+	}
+	_, err = a.Credentials().Prompt("Password for admin@pdu: ")
+	if !errors.Is(err, context.Canceled) || exitcode.From(err) != exitcode.Interrupted {
+		t.Errorf("error = %v (exit code %d), want an interrupt", err, exitcode.From(err))
+	}
+	if errOut.Len() > 0 {
+		t.Errorf("the prompt was shown after the interrupt:\n%s", errOut)
+	}
+	_, err = a.BMCCredential(ctx, "exe0001")
+	if !errors.Is(err, context.Canceled) || exitcode.From(err) != exitcode.Interrupted {
+		t.Errorf("BMCCredential = %v (exit code %d), want an interrupt", err, exitcode.From(err))
 	}
 }

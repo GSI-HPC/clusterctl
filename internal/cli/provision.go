@@ -1387,6 +1387,14 @@ credential, and 1 when a host refused.`,
 
 			clients := make([]*redfish.Client, len(nodes))
 			for i, s := range states {
+				// A node whose client fails is reported and the rest go
+				// on, but once the command is interrupted no credential
+				// is looked up for the others: at a prompt, each would
+				// ask again.
+				if a.Context().Err() != nil {
+					s.fail(errNotSent())
+					continue
+				}
 				c, err := provisionClient(a, a.Context(), s.Node)
 				if err != nil {
 					s.fail(err)

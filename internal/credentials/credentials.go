@@ -13,6 +13,7 @@ package credentials
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 )
 
 // Credential is a resolved account.
@@ -75,25 +77,45 @@ type Resolver struct {
 	// one lock for every name is enough.
 	reading sync.Mutex
 	mu      sync.Mutex
-	cache   map[string]Credential
+	// cache holds the credentials that were read, and failed the reads that
+	// failed, by name.
+	cache  map[string]Credential
+	failed map[string]error
 }
 
 // Get resolves a credential by name, reading its password once per process.
 // It is safe for concurrent use: a caller that arrives while the password is
 // being read waits for that read.
+//
+// A read that failed is remembered as well, so that a helper that fails or
+// a prompt left empty is not tried again for every node the credential is
+// needed for. A read the context stopped is not remembered, since it says
+// nothing about the source; once ctx has ended nothing is read at all.
 func (r *Resolver) Get(ctx context.Context, name string) (Credential, error) {
 	if name == "" {
 		return Credential{}, fmt.Errorf("no credential was named")
+	}
+	if err := ctx.Err(); err != nil {
+		return Credential{}, notRead(name, err)
 	}
 	r.reading.Lock()
 	defer r.reading.Unlock()
 
 	r.mu.Lock()
-	if cached, ok := r.cache[name]; ok {
-		r.mu.Unlock()
+	cached, ok := r.cache[name]
+	failed := r.failed[name]
+	r.mu.Unlock()
+	if ok {
 		return cached, nil
 	}
-	r.mu.Unlock()
+	if failed != nil {
+		return Credential{}, failed
+	}
+	// A caller that waited for another's read may have been interrupted
+	// meanwhile.
+	if err := ctx.Err(); err != nil {
+		return Credential{}, notRead(name, err)
+	}
 
 	spec, ok := r.Credentials[name]
 	if !ok {
@@ -102,6 +124,14 @@ func (r *Resolver) Get(ctx context.Context, name string) (Credential, error) {
 	}
 	password, err := r.read(ctx, name, spec.Password)
 	if err != nil {
+		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			r.mu.Lock()
+			if r.failed == nil {
+				r.failed = map[string]error{}
+			}
+			r.failed[name] = err
+			r.mu.Unlock()
+		}
 		return Credential{}, err
 	}
 	out := Credential{Name: name, Username: spec.Username, password: password}
@@ -113,6 +143,16 @@ func (r *Resolver) Get(ctx context.Context, name string) (Credential, error) {
 	r.cache[name] = out
 	r.mu.Unlock()
 	return out, nil
+}
+
+// notRead is the error of a lookup that read nothing because its context
+// had ended. An interrupt exits 130; a deadline is the command's failure.
+func notRead(name string, err error) error {
+	code := exitcode.TargetFailed
+	if errors.Is(err, context.Canceled) {
+		code = exitcode.Interrupted
+	}
+	return exitcode.Wrap(code, fmt.Errorf("credential %q was not read: %w", name, err))
 }
 
 func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordSource) (string, error) {
