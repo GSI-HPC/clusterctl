@@ -293,10 +293,14 @@ func (r *Resolver) List(source string) ([]string, error) {
 		}
 		return r.inventory.AttributeValues(src.Attribute), nil
 	case src.Exec != nil && len(src.Exec.List) > 0:
-		out, err := r.exec(src.Exec, src.Exec.List, nil)
+		if out, ok := r.cached(source, "list", ""); ok {
+			return fields(out), nil
+		}
+		out, err := r.execCached(source, src, src.Exec.List, nil)
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", source, err)
 		}
+		r.store(source, "list", "", out)
 		return fields(out), nil
 	default:
 		return nil, &sentinelError{sentinel: ErrCannotList,
@@ -315,8 +319,11 @@ func (r *Resolver) execFailed(name, group string, err error) error {
 	if exitcode.From(err) == exitcode.Transport || len(r.sources[name].Exec.List) == 0 {
 		return err
 	}
-	names, listErr := r.List(name)
-	if listErr != nil || slices.Contains(names, group) {
+	// A cached listing may predate the group, and passing the search on to
+	// another source's group of the same name is worse than asking again.
+	src := r.sources[name]
+	out, listErr := r.exec(src.Exec, src.Exec.List, nil)
+	if listErr != nil || slices.Contains(fields(out), group) {
 		return err
 	}
 	return notDefined("source %q has no group %q", name, group)
