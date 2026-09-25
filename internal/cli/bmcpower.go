@@ -19,6 +19,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
@@ -91,13 +92,20 @@ type redfishCall[T any] struct {
 }
 
 // redfishEach sends one request to every processor in parallel, bounded by
-// the configured concurrency.
+// the configured concurrency. It is the one Redfish fan-out: bmc and
+// provision both go through it, so a failure is classified the same way
+// whichever command met it.
 //
 // The context is checked before each request starts: once the command is
 // interrupted, nothing more is sent, and the rest is reported as not sent.
 // A request that was already under way when the interrupt came may or may
 // not have been carried out, so when it changes something (changes) it is
 // reported as an unknown outcome rather than as a failure to retry.
+//
+// A nil client is skipped: nothing is sent, and neither a value nor an
+// error is recorded, since the caller has said why already. A panic while
+// a request is under way becomes that node's failure, and the others are
+// still sent.
 func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, changes bool,
 	do func(context.Context, string, *redfish.Client) (T, error)) []redfishCall[T] {
 	ctx := a.Context()
@@ -111,6 +119,9 @@ func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, c
 	calls := make([]redfishCall[T], len(names))
 	for i, node := range names {
 		calls[i] = redfishCall[T]{node: node, client: clients[i]}
+		if clients[i] == nil {
+			continue
+		}
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
@@ -123,15 +134,27 @@ func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, c
 		wg.Add(1)
 		go func(call *redfishCall[T]) {
 			defer func() { <-sem; wg.Done() }()
-			value, err := do(ctx, call.node, call.client)
-			call.value = value
-			if err != nil {
-				call.err = bmcError(ctx, err, changes)
-			}
+			call.send(ctx, changes, do)
 		}(&calls[i])
 	}
 	wg.Wait()
 	return calls
+}
+
+// send sends the request of one call. A panic in it is the call's failure:
+// the request may have been carried out, as after any other failure that
+// does not prove it never reached the processor.
+func (call *redfishCall[T]) send(ctx context.Context, changes bool, do func(context.Context, string, *redfish.Client) (T, error)) {
+	defer func() {
+		if err := fanout.Recovered(call.node, recover()); err != nil {
+			call.err = err
+		}
+	}()
+	value, err := do(ctx, call.node, call.client)
+	call.value = value
+	if err != nil {
+		call.err = bmcError(ctx, err, changes)
+	}
 }
 
 // interruptedState is the state of a request the interrupt came during. An
@@ -143,9 +166,12 @@ func interruptedState(changes bool) string {
 	return "interrupted"
 }
 
+// errRequestNotSent marks a request the command was interrupted before.
+var errRequestNotSent = errors.New("not sent: the command was interrupted first")
+
 // errNotSent is the error of a request the command was interrupted before.
 func errNotSent() error {
-	return exitcode.Errorf(exitcode.Interrupted, "not sent: the command was interrupted first")
+	return &exitcode.Error{Code: exitcode.Interrupted, Err: errRequestNotSent}
 }
 
 // bmcError classifies what went wrong with a request to a processor.
@@ -195,15 +221,18 @@ func bmcUnreachable(err error) bool {
 }
 
 // neverSent says whether an error proves that a Redfish request never
-// reached the processor: its name did not resolve, or nothing accepted the
-// connection. Only then may an action be tried over another transport.
+// reached the processor: its name did not resolve, nothing accepted the
+// connection, or it presented another certificate than the one recorded,
+// which the handshake refuses before the request is written. A request
+// that failed any other way may have been carried out.
 func neverSent(err error) bool {
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		return true
-	}
-	var opErr *net.OpError
-	return errors.As(err, &opErr) && opErr.Op == "dial"
+	var (
+		dnsErr *net.DNSError
+		opErr  *net.OpError
+		pin    *redfish.PinMismatchError
+	)
+	return errors.As(err, &dnsErr) || errors.As(err, &pin) ||
+		(errors.As(err, &opErr) && opErr.Op == "dial")
 }
 
 // callResults turns a fan-out into result rows, with state giving the state
@@ -532,8 +561,9 @@ func mayFallBack(action, transport string, err error) bool {
 	case code == exitcode.Interrupted, code == exitcode.Usage:
 		return false
 	case errors.As(err, &pin):
-		// A processor presenting another certificate may not be the
-		// processor; its account goes to it over no other protocol either.
+		// The request never left, but a processor presenting another
+		// certificate may not be the processor; its account goes to it
+		// over no other protocol either.
 		return false
 	case action == ipmi.ActionStatus:
 		return true

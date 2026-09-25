@@ -16,8 +16,12 @@ to try and in which order; `redfish` and `ipmi` are the only entries it takes.
 Reading the power state falls back to the next transport when the first fails.
 An action falls back only when the first provably never reached the service
 processor, because its name did not resolve or nothing accepted the
-connection; one that may have arrived is never sent again. `--ipmi` uses IPMI
-alone.
+connection; one that may have arrived is never sent again. A processor that
+presents another certificate than the one recorded never receives the request
+either, since the certificate is refused before it is sent, but it is not
+tried over another transport: it may not be the processor, and its account
+goes to it over no protocol. `provision reinstall` counts it the same way, as
+unreachable, and exits `3`. `--ipmi` uses IPMI alone.
 
 ## Reading state
 

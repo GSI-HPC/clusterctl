@@ -33,13 +33,19 @@ type fakeBMCs struct {
 	// refuse is, per node, the request body a processor answers with a
 	// 400, such as "ForceRestart" or "Disabled".
 	refuse map[string]string
+	// pinned is the nodes whose processor presents another certificate
+	// than the one recorded.
+	pinned map[string]bool
+	// panics is, per node, the method or request body that makes
+	// clusterctl panic while it is sent, such as "GET" or "Pxe".
+	panics map[string]string
 }
 
 // newFakeBMCs puts fake processors behind the Redfish clients reinstall and
 // status build, for the rest of the test.
 func newFakeBMCs(t *testing.T) *fakeBMCs {
 	t.Helper()
-	f := &fakeBMCs{down: map[string]bool{}, refuse: map[string]string{}}
+	f := &fakeBMCs{down: map[string]bool{}, refuse: map[string]string{}, pinned: map[string]bool{}, panics: map[string]string{}}
 	old := provisionClient
 	provisionClient = func(a *app.App, ctx context.Context, node string) (*redfish.Client, error) {
 		c, err := old(a, ctx, node)
@@ -65,10 +71,17 @@ func (f *fakeBMCs) answer(node string, req *http.Request) (*http.Response, error
 	}
 	f.mu.Lock()
 	f.seen = append(f.seen, strings.TrimSpace(node+" "+req.Method+" "+body))
-	down, refuse := f.down[node], f.refuse[node]
+	down, refuse, pinned, panics := f.down[node], f.refuse[node], f.pinned[node], f.panics[node]
 	f.mu.Unlock()
-	if down {
+	switch {
+	case down:
 		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	case pinned:
+		// The handshake refuses the certificate before the request is
+		// written.
+		return nil, &redfish.PinMismatchError{Host: req.URL.Hostname(), Recorded: "SHA256:old", Seen: "SHA256:new"}
+	case panics != "" && strings.Contains(req.Method+" "+body, panics):
+		panic("index out of range [3] with length 3")
 	}
 	status, answer := http.StatusOK, ""
 	switch {

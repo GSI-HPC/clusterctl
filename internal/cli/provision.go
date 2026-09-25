@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path"
@@ -16,7 +15,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -1150,7 +1148,7 @@ func (p *reinstallPlan) run(a *app.App, noReset bool) error {
 		return p.fail(a, "configuring the network boot", err, p.nodes)
 	}
 
-	errs := forEachBMCError(a, p.clients(p.nodes), func(ctx context.Context, _ int, c *redfish.Client) error {
+	errs := sendToBMCs(a, p.nodes, func(ctx context.Context, c *redfish.Client) error {
 		return c.SetBootOverride(ctx, "Pxe", false)
 	})
 	for i, n := range p.nodes {
@@ -1180,7 +1178,7 @@ func (p *reinstallPlan) run(a *app.App, noReset bool) error {
 		p.settle()
 		return nil
 	}
-	errs = forEachBMCError(a, p.clients(p.nodes), func(ctx context.Context, _ int, c *redfish.Client) error {
+	errs = sendToBMCs(a, p.nodes, func(ctx context.Context, c *redfish.Client) error {
 		return c.Reset(ctx, redfish.ResetForceRestart)
 	})
 	// A node whose reset failed is disarmed with the rest, even though a
@@ -1202,12 +1200,22 @@ func (p *reinstallPlan) run(a *app.App, noReset bool) error {
 	return nil
 }
 
-func (p *reinstallPlan) clients(nodes []*reinstallNode) []*redfish.Client {
-	out := make([]*redfish.Client, len(nodes))
+// sendToBMCs sends one change to the processor of each node, through the
+// Redfish fan-out, and returns the error of each.
+func sendToBMCs(a *app.App, nodes []*reinstallNode, do func(context.Context, *redfish.Client) error) []error {
+	names := make([]string, len(nodes))
+	clients := make([]*redfish.Client, len(nodes))
 	for i, n := range nodes {
-		out[i] = n.client
+		names[i], clients[i] = n.Node, n.client
 	}
-	return out
+	calls := redfishEach(a, names, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (struct{}, error) {
+		return struct{}{}, do(ctx, c)
+	})
+	errs := make([]error, len(calls))
+	for i, call := range calls {
+		errs[i] = call.err
+	}
+	return errs
 }
 
 // settle works out the state of every node from what became of each change.
@@ -1237,7 +1245,7 @@ func (p *reinstallPlan) fail(a *app.App, step string, stepErr error, left []*rei
 			overridden = append(overridden, n)
 		}
 	}
-	errs := forEachBMCError(a, p.clients(overridden), func(ctx context.Context, _ int, c *redfish.Client) error {
+	errs := sendToBMCs(a, overridden, func(ctx context.Context, c *redfish.Client) error {
 		return c.ClearBootOverride(ctx)
 	})
 	for i, n := range overridden {
@@ -1343,69 +1351,18 @@ func orDash(s string) string {
 	return s
 }
 
-// errBMCNotSent marks a request the command was interrupted before.
-var errBMCNotSent = errors.New("not sent: the command was interrupted first")
-
 // stepOutcome names what became of one request to a processor.
 func stepOutcome(err error, done string) string {
 	switch {
 	case err == nil:
 		return done
-	case errors.Is(err, errBMCNotSent):
+	case errors.Is(err, errRequestNotSent):
 		return stepNotSent
-	case neverReached(err):
+	case neverSent(err):
 		return stepUnreachable
 	default:
 		return stepFailed
 	}
-}
-
-// neverReached says whether an error proves that a request never reached
-// the processor: its name did not resolve, nothing accepted the connection,
-// or it presented another certificate than the one recorded. A request
-// that failed any other way may have been carried out.
-func neverReached(err error) bool {
-	var (
-		dnsErr *net.DNSError
-		opErr  *net.OpError
-		pin    *redfish.PinMismatchError
-	)
-	return errors.As(err, &dnsErr) || errors.As(err, &pin) ||
-		(errors.As(err, &opErr) && opErr.Op == "dial")
-}
-
-// forEachBMCError sends one request to each processor in parallel, bounded
-// by the configured concurrency, and returns the error of each one. A nil
-// client is skipped. Once the command is interrupted nothing more is sent.
-func forEachBMCError(a *app.App, clients []*redfish.Client, do func(context.Context, int, *redfish.Client) error) []error {
-	errs := make([]error, len(clients))
-	limit := a.Spec.BMC.Redfish.MaxConcurrent
-	if limit < 1 {
-		limit = 8
-	}
-	ctx := a.Context()
-	sem := make(chan struct{}, limit)
-	var wg sync.WaitGroup
-	for i, c := range clients {
-		if c == nil {
-			continue
-		}
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-		}
-		if ctx.Err() != nil {
-			errs[i] = fmt.Errorf("%w: %w", errBMCNotSent, ctx.Err())
-			continue
-		}
-		wg.Add(1)
-		go func(i int, c *redfish.Client) {
-			defer func() { <-sem; wg.Done() }()
-			errs[i] = do(ctx, i, c)
-		}(i, c)
-	}
-	wg.Wait()
-	return errs
 }
 
 // nodeFailures names the nodes whose request failed. It exits with the
@@ -1552,17 +1509,14 @@ credential, and 1 when a host refused.`,
 				}
 				clients[i], s.BMC = c, c.Host
 			}
-			power := make([]string, len(nodes))
-			powerErrs := forEachBMCError(a, clients, func(ctx context.Context, i int, c *redfish.Client) error {
-				state, err := c.PowerState(ctx)
-				power[i] = state
-				return err
+			calls := redfishEach(a, nodes, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+				return c.PowerState(ctx)
 			})
 			for i, s := range states {
-				if powerErrs[i] != nil {
-					s.fail(powerErrs[i])
+				if calls[i].err != nil {
+					s.fail(calls[i].err)
 				}
-				s.Power = output.EscapeCell(power[i])
+				s.Power = output.EscapeCell(calls[i].value)
 			}
 
 			results, err := runOnNodes(a, ns, func(string) transport.Request {
