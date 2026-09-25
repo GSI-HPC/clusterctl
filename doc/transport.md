@@ -189,8 +189,8 @@ problem and every command refuses to run with it:
   must agree on everything that goes into it.
 
 A misspelt keyword is found only by ssh itself, which then refuses every
-connection. `transport.Client.CheckConfig` has ssh read the file and its
-includes with `ssh -G` and reports everything ssh said.
+connection. `clusterctl doctor` has ssh read the file and its includes with
+`ssh -G` for every host role and reports everything ssh said.
 
 An include for a file that does not exist is left out, so ssh never fails over
 a path a site does not use. An include with a pattern is passed to ssh as it
