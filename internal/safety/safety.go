@@ -21,6 +21,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
+	"github.com/GSI-HPC/clusterctl/internal/naming"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -138,24 +139,18 @@ func (g *Gate) ProtectedIn(targets *nodeset.NodeSet) (*nodeset.NodeSet, error) {
 	shorts := nodeset.New()
 	for _, name := range protected.Expand() {
 		if !hostname.IsIP(name) {
-			_ = shorts.Add(strings.ToLower(short(name)))
+			_ = shorts.Add(strings.ToLower(naming.Short(name)))
 		}
 	}
 	for _, name := range targets.Expand() {
 		if hostname.IsIP(name) || hit.Contains(name) {
 			continue
 		}
-		if shorts.Contains(strings.ToLower(short(name))) {
+		if shorts.Contains(strings.ToLower(naming.Short(name))) {
 			_ = hit.Add(name)
 		}
 	}
 	return hit, nil
-}
-
-// short returns a host name without its domain.
-func short(name string) string {
-	before, _, _ := strings.Cut(name, ".")
-	return before
 }
 
 // Action describes what is about to happen, for the prompt and the preview.
