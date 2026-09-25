@@ -188,8 +188,9 @@ every node had answered. When several of these happen in one run, the exit code
 is the first of 130, 3 and 1 that applies.
 
 What a node prints is its own, so control characters in it are shown as escapes
-such as `\x1b` or `\r` rather than passed to your terminal, where they could
-overwrite another node's line. The machine formats carry the output unchanged.
+such as `\x1b`, `\r` or `\u202e` rather than passed to your terminal, where they
+could overwrite another node's line or show it in another order. A tab is kept.
+The machine formats carry the output unchanged.
 
 For a machine, ask for it:
 

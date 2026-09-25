@@ -87,16 +87,28 @@ last column is not padded, so a copied line carries no trailing spaces.
 
 A value in a table may come from a node, a BMC or a Slurm user, so it is
 escaped before it is printed: a newline, carriage return or tab shows as `\n`,
-`\r` or `\t`, and any other control character as an escape such as `\x1b`. A
-value cannot start a row of its own or move the cursor over what is already on
-the screen. The `json` and `yaml` formats escape the same characters in their
-own syntax; `jsonpath` and `jq` print a selected string as it is, like
-`jq -r`.
+`\r` or `\t`, and any other control character as an escape such as `\x1b`.
+So do a byte that is not UTF-8, the Unicode controls that change the direction
+text is shown in, such as `\u202e`, and the line and paragraph separators
+`\u2028` and `\u2029`. A value cannot start a row of its own, show itself in
+another order than it has or move the cursor over what is already on the
+screen. The `json` and `yaml` formats replace a byte that is not UTF-8 with
+U+FFFD. The `yaml` format escapes every other one of these characters in its
+own syntax. The `json` format escapes the C0 control characters and the line
+and paragraph separators, but leaves DEL, the C1 control characters and the
+direction controls in a string as they are, as JSON allows; a program that
+shows a string from it on a terminal has to escape it. `jsonpath` and `jq`
+print a selected string as it is, like `jq -r`.
 
 ## Progress and errors go to stderr
 
 Everything a program would parse goes to standard output; notes, progress and
 prompts go to standard error. Redirecting one does not lose the other.
+
+An error message often quotes what a node, a BMC or a group source said, so it
+is escaped the same way before it is printed, except that newlines and tabs are
+kept: some messages are several lines on purpose, such as the list of problems
+clusterctl found in a configuration file.
 
 ## Exit codes
 

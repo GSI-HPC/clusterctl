@@ -79,6 +79,13 @@ every command rather than in the ones that remembered to implement them.
 depend only on `transport`, `config` and the model. No subsystem imports `cli`
 or `app`, so a subsystem can be exercised in a test without a command tree.
 
+Text that came from a node, a BMC, Slurm, a group source or an agent is
+escaped with `output.EscapeText`, or `output.EscapeCell` where it has to stay
+on one line, before it reaches a terminal. There is no other escaper: a
+package that quotes such text in an error, as the group resolver does, uses
+the same helper, and `cli` escapes every error it prints once more on the way
+out, which changes nothing in text that is already escaped.
+
 The transport is reached through the `transport.Runner` interface everywhere
 except in the commands that open an interactive session. That is what lets a
 dry run swap in a recorder and a test drive the whole program without a
