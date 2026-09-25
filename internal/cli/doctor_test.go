@@ -4,10 +4,12 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -146,5 +148,21 @@ esac
 	got := checks["generated ssh configuration"]
 	if got.Status != statusFail || !strings.Contains(got.Detail, "Bad configuration option: forwardagnet") {
 		t.Errorf("generated ssh configuration = %+v, want the bad option named", got)
+	}
+}
+
+// doctor asked ssh for its version outside the command's context, so a
+// client that hung there held doctor after Ctrl-C until it chose to answer.
+func TestDoctorStopsAskingSSHWhenInterrupted(t *testing.T) {
+	bin := t.TempDir()
+	fakeTool(t, bin, "ssh", "exec sleep 30\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(300*time.Millisecond, cancel)
+
+	start := time.Now()
+	h, _ := run(t, harnessOptions{ctx: ctx}, "doctor", "--set", "ssh.binary="+bin+"/ssh")
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("doctor took %v to return after the interrupt:\n%s", elapsed, h.out)
 	}
 }

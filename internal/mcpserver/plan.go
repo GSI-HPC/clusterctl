@@ -475,6 +475,13 @@ func (s *Server) apply(ctx context.Context, req *mcp.CallToolRequest, in applyIn
 		}
 	}
 
+	// The ssh configuration is written under the call's context, which
+	// the change is not: a call given up on from here on is still sent,
+	// so the one thing that can end with it, asking ssh for its version,
+	// is done while that fails the call, not the plan.
+	if _, err := a.SSH.ConfigPath(); err != nil {
+		return nil, nil, err
+	}
 	if !s.plans.take(p) {
 		return nil, nil, exitcode.Errorf(exitcode.Usage, "plan %s was applied already", p.id)
 	}

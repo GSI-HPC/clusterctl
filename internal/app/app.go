@@ -316,6 +316,7 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		KnownHostsFile: absolute(a.Path(a.Spec.SSH.KnownHostsFile)),
 		DefaultUser:    a.Spec.DefaultUser,
 		NoTerminal:     !streams.IsTTY,
+		Context:        ctx,
 	}
 	if err := sshOpts.Validate(); err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
