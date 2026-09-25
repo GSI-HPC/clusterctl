@@ -705,3 +705,30 @@ func TestPinStoreFirstContactsRace(t *testing.T) {
 		t.Errorf("%d different certificates were accepted at first contact, want 1", accepted)
 	}
 }
+
+// A client built without a pin store accepted any certificate without a
+// word and sent the account to whoever presented it. Every command sets a
+// store, so only a direct user of the package was exposed; it is refused.
+func TestAClientWithoutAPinStoreIsRefused(t *testing.T) {
+	t.Parallel()
+
+	for name, store := range map[string]*redfish.PinStore{
+		"no store":               nil,
+		"a store without a path": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newFakeBMC(t, nil)
+			_, err := f.pinningClient(t, store).System(context.Background())
+			if err == nil {
+				t.Fatal("a client that pins nothing reached the service processor")
+			}
+			if !strings.Contains(err.Error(), "pin") {
+				t.Errorf("error = %v, want it to say that no pin store is set", err)
+			}
+			if got := f.requests.Load(); got != 0 {
+				t.Errorf("the service processor got %d requests, want none", got)
+			}
+		})
+	}
+}

@@ -52,7 +52,9 @@ type Client struct {
 	// Verify checks the certificate against the system roots instead of
 	// pinning it. Few sites can use this.
 	Verify bool
-	// Pins records the certificate seen for each host.
+	// Pins records the certificate seen for each host. Unless Verify is
+	// set, a client without one, or with one without a path, is refused
+	// before it connects.
 	Pins *PinStore
 	// MinTLSVersion allows old firmware to be reached: "1.0" to "1.3".
 	MinTLSVersion string
@@ -113,7 +115,13 @@ func (c *Client) httpClient(ctx context.Context) (*http.Client, error) {
 		if !c.Verify {
 			// The chain cannot be verified, so it is not: the certificate is
 			// compared with the one recorded for this host instead, and a
-			// change is refused.
+			// change is refused. Without a store to record it in, any
+			// certificate would do, and the account would go to whoever
+			// presented one.
+			if c.Pins == nil || c.Pins.Path == "" {
+				return nil, fmt.Errorf("refusing to reach %s: its certificate is neither verified "+
+					"nor pinned, because the client has no pin store", c.Host)
+			}
 			tlsConfig.InsecureSkipVerify = true
 			tlsConfig.VerifyPeerCertificate = c.pinVerifier(ctx)
 		}
@@ -164,7 +172,7 @@ func (c *Client) pinVerifier(ctx context.Context) func([][]byte, [][]*x509.Certi
 		}
 		seen := Fingerprint(cert)
 		if c.Pins == nil || c.Pins.Path == "" {
-			return nil
+			return fmt.Errorf("%s: no pin store to check the certificate against", c.Host)
 		}
 		recorded, ok, err := c.Pins.Get(c.Host)
 		if err != nil {
