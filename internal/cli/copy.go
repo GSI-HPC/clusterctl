@@ -119,9 +119,6 @@ two, so it is refused. Globs and ~ work in both.
 				Targets: ns,
 				Detail:  detail,
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
 				return err
 			}
 

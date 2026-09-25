@@ -155,7 +155,7 @@ that Slurm reports running a job, or cannot say about, is refused unless
 				return err
 			}
 			if err := confirmResolved(a, gated, func() error { return plan.resolve(a) }); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 			return printBMCResults(a, runPower(a, plan, action, batch, stagger))
 		}))
@@ -485,7 +485,7 @@ machine reinstalling in a loop, so --persistent has to be asked for.
 				clients, err = redfishClients(a, nodes.Expand())
 				return err
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 			calls := redfishEach(a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				return target + " " + mode, c.SetBootOverride(ctx, target, persistent)
@@ -508,7 +508,7 @@ Remove the boot source override, so the nodes boot their usual way again.`,
 					clients, err = redfishClients(a, nodes.Expand())
 					return err
 				}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 			calls := redfishEach(a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				return "cleared", c.ClearBootOverride(ctx)
@@ -614,7 +614,7 @@ reset asks Slurm first, as bmc power does, and --lose-jobs overrides that.`,
 				}
 			}
 			if err := a.Gate.Confirm(gated); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 			return redfishRequest(a, nodes, "POST", args[0], body)
 		}))
@@ -864,7 +864,7 @@ it is shown and sends the BMC account to it.`,
 				Targets: targets,
 				Detail:  "drops from " + path + ":\n    " + strings.Join(lines, "\n    "),
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 			for _, d := range drops {
 				if err := store.Remove(a.Context(), d.host); err != nil {

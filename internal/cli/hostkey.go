@@ -305,9 +305,6 @@ changed without a reinstall is worth understanding before it is trusted.`,
 				Targets: ns,
 				Detail:  "writes " + path,
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
 				return err
 			}
 
@@ -380,9 +377,6 @@ that the key it comes back with can be collected cleanly.`,
 				Targets: ns,
 				Detail:  "writes " + path,
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
 				return err
 			}
 

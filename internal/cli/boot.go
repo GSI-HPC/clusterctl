@@ -577,7 +577,7 @@ was not reported fails the command.
 				Targets: ns,
 				Detail:  detail,
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 
 			err = writeBootLinks(a, role, root, links)
@@ -636,7 +636,7 @@ was not reported fails the command.`,
 			if err := a.Gate.Confirm(safety.Action{
 				Verb: "remove the network boot configuration of", Targets: ns,
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 
 			err = removeBootLinks(a, role, root, links)
@@ -711,7 +711,7 @@ previewed and confirmed like any other change.`,
 				// The target is the PXE service's host, not a node.
 				NotNodes: true,
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
 				Argv:    []string{"git", "-C", path, "pull", "--ff-only"},
@@ -797,7 +797,7 @@ form: GRUB loads the target at every boot until "boot grub unset" removes it.
 				Detail: fmt.Sprintf("%s -> %s, persistently: it stays until \"clusterctl boot grub unset %s\"",
 					link, args[1], node),
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 			if _, err := a.RunOnRole(a.Context(), role, transport.Request{
 				Argv:    []string{"ln", "-sfn", args[1], link},
@@ -824,7 +824,7 @@ no longer finds a configuration named after the node.`,
 				Targets: singleNode(node),
 				Detail:  "removes " + link,
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 			if _, err := a.RunOnRole(a.Context(), role, transport.Request{
 				Argv:    []string{"rm", "-f", "--", link},
