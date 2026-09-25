@@ -10,7 +10,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -109,30 +108,21 @@ func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, c
 	if limit < 1 {
 		limit = 8
 	}
-	sem := make(chan struct{}, limit)
-	var wg sync.WaitGroup
-
 	calls := make([]redfishCall[T], len(names))
 	for i, node := range names {
 		calls[i] = redfishCall[T]{node: node, client: clients[i]}
-		if clients[i] == nil {
-			continue
-		}
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-		}
-		if ctx.Err() != nil {
-			calls[i].err = errNotSent()
-			continue
-		}
-		calls[i].sent = true
-		wg.Go(func() {
-			defer func() { <-sem }()
-			calls[i].send(ctx, changes, do)
-		})
 	}
-	wg.Wait()
+	fanout.Each(ctx, len(calls), limit, func(i int) {
+		if calls[i].client != nil {
+			calls[i].sent = true
+			calls[i].send(ctx, changes, do)
+		}
+	})
+	for i := range calls {
+		if calls[i].client != nil && !calls[i].sent {
+			calls[i].err = errNotSent()
+		}
+	}
 	return calls
 }
 

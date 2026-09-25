@@ -283,3 +283,36 @@ func TestHostkeyRemoveTakesTheInventoryBMCAddress(t *testing.T) {
 		t.Errorf("the removal is not reported under 10.9.0.77:\n%s", h.out)
 	}
 }
+
+// An interrupt stops the scan: hostkey waited for a free slot without
+// watching the context, so it went on to scan every remaining host.
+func TestHostkeyScanStartsNothingOnceInterrupted(t *testing.T) {
+	host := startFakeHost(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var (
+		mu     sync.Mutex
+		dialed int
+	)
+	scanDial = func(dctx context.Context, network, _ string) (net.Conn, error) {
+		mu.Lock()
+		dialed++
+		mu.Unlock()
+		cancel()
+		return (&net.Dialer{}).DialContext(dctx, network, host.address)
+	}
+	t.Cleanup(func() { scanDial = nil })
+
+	h, err := run(t, harnessOptions{ctx: ctx}, "--fanout", "1", "hostkey", "scan", "-n", "exe[1-4]", "--timeout", "5s")
+	if err == nil {
+		t.Fatalf("the interrupted scan succeeded:\n%s", h.out)
+	}
+	if dialed != 1 {
+		t.Errorf("%d hosts were dialled, want only the one under way when the interrupt came", dialed)
+	}
+	for _, name := range []string{"exe0001", "exe0002", "exe0003", "exe0004"} {
+		if !strings.Contains(h.out.String(), name) {
+			t.Errorf("%s is missing from the report:\n%s", name, h.out)
+		}
+	}
+}
