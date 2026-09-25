@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -351,32 +350,13 @@ before deciding whose work is filling the queue.`,
 				return err
 			}
 
-			type key struct{ user, account, partition string }
-			counts := map[key]int{}
-			for _, j := range jobs {
-				counts[key{j.User, j.Account, j.Partition}]++
-			}
-			keys := make([]key, 0, len(counts))
-			for k := range counts {
-				keys = append(keys, k)
-			}
-			sort.Slice(keys, func(i, j int) bool {
-				if counts[keys[i]] != counts[keys[j]] {
-					return counts[keys[i]] > counts[keys[j]]
-				}
-				return keys[i].user < keys[j].user
-			})
-
+			counts := slurm.CountJobs(jobs)
 			t := output.NewTable(output.Cols("USER", "ACCOUNT", "PARTITION", "JOBS").Right("JOBS")...)
-			object := make([]map[string]any, 0, len(keys))
-			for _, k := range keys {
-				t.Add(k.user, k.account, k.partition, fmt.Sprint(counts[k]))
-				object = append(object, map[string]any{
-					"user": k.user, "account": k.account, "partition": k.partition, "jobs": counts[k],
-				})
+			for _, n := range counts {
+				t.Add(n.User, n.Account, n.Partition, fmt.Sprint(n.Jobs))
 			}
 			t.Caption = fmt.Sprintf("%d jobs in state %s", len(jobs), state)
-			return a.Print(output.Result{Table: t, Object: object})
+			return a.Print(output.Result{Table: t, Object: counts})
 		}))
 
 	cmd.Flags().StringVar(&state, "state", "PENDING", "the job state to count")

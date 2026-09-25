@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -371,7 +370,7 @@ func (s *Server) querySlurm(ctx context.Context, _ *mcp.CallToolRequest, in slur
 		if err != nil {
 			return nil, nil, callError(exitcode.Wrap(exitcode.Transport, err))
 		}
-		rows := summarise(jobs)
+		rows := slurm.CountJobs(jobs)
 		count = len(rows)
 		items = rows[:min(limit, count)]
 	default:
@@ -381,35 +380,4 @@ func (s *Server) querySlurm(ctx context.Context, _ *mcp.CallToolRequest, in slur
 	return nil, &slurmOutput{
 		Context: s.context, Kind: in.Kind, Count: count, Truncated: count > limit, Items: items,
 	}, nil
-}
-
-// summaryRow counts the jobs of one user in one account and partition.
-type summaryRow struct {
-	User      string `json:"user"`
-	Account   string `json:"account"`
-	Partition string `json:"partition"`
-	Jobs      int    `json:"jobs"`
-}
-
-// summarise counts jobs per user, account and partition, most jobs first.
-func summarise(jobs []slurm.Job) []summaryRow {
-	type key struct{ user, account, partition string }
-	counts := map[key]int{}
-	for _, j := range jobs {
-		counts[key{j.User, j.Account, j.Partition}]++
-	}
-	rows := make([]summaryRow, 0, len(counts))
-	for k, n := range counts {
-		rows = append(rows, summaryRow{User: k.user, Account: k.account, Partition: k.partition, Jobs: n})
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Jobs != rows[j].Jobs {
-			return rows[i].Jobs > rows[j].Jobs
-		}
-		if rows[i].User != rows[j].User {
-			return rows[i].User < rows[j].User
-		}
-		return rows[i].Account+rows[i].Partition < rows[j].Account+rows[j].Partition
-	})
-	return rows
 }
