@@ -4,6 +4,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -240,6 +242,11 @@ configuration yet and carries no traffic, so it is reported down, with both
 states shown. A port the fabric does not answer for is reported as such. Any
 port that is not up makes the command fail.
 
+When the fabric host stops before it has answered for every port, at the
+command's timeout or because the connection dropped, the ports it answered
+for are shown and the others read no answer, and the command fails with the
+reason it stopped. It only reads, so --dry-run asks the fabric too.
+
   clusterctl fabric state -n exe[1-10]`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
@@ -266,11 +273,19 @@ port that is not up makes the command fail.
 				}
 			}
 
-			result, err := a.RunOnRole(a.Context(), role, transport.Request{
+			// This only reads, so a dry run asks the fabric as the real run
+			// does. A script that stopped early, at its timeout or when the
+			// connection dropped, has printed the ports it got to: those are
+			// kept, and the others read no answer. Only one that printed
+			// nothing, such as ssh that could not reach the fabric host,
+			// leaves nothing to show, and so does an interrupt: the ports
+			// not asked yet would read as if they had not answered.
+			result, runErr := a.ReadOnRole(a.Context(), role, transport.Request{
 				Script: portStateScript(guids),
 			})
-			if err != nil {
-				return err
+			interrupted := runErr != nil && (errors.Is(runErr, context.Canceled) || exitcode.From(runErr) == exitcode.Interrupted)
+			if runErr != nil && (result == nil || result.Stdout == "" || interrupted) {
+				return runErr
 			}
 			parsePortStates(entries, result.Stdout)
 
@@ -285,6 +300,19 @@ port that is not up makes the command fail.
 			}
 			if err := a.Print(output.Result{Table: t, Object: entries}); err != nil {
 				return err
+			}
+			if runErr != nil {
+				// The transport's own error says why the script stopped;
+				// ReadOnRole's quotes the first line the host printed,
+				// which may be a port's answer.
+				if result.Err != nil {
+					runErr = result.Err
+				}
+				if notUp > 0 {
+					return fmt.Errorf("%d of %d ports are not up, and the fabric host stopped before it had answered for all: %w",
+						notUp, len(entries), runErr)
+				}
+				return fmt.Errorf("the fabric host stopped before it was done: %w", runErr)
 			}
 			if notUp > 0 {
 				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d ports are not up", notUp, len(entries))
