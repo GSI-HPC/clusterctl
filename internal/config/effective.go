@@ -124,7 +124,7 @@ func (b *Bundle) Resolve(opts ResolveOptions) (*Resolved, error) {
 	}
 
 	// 4. the workstation
-	wsDoc := b.workstationFor(ctx)
+	wsDoc := b.workstationFor()
 	if wsDoc != nil {
 		tree.MergeDocumentExcept(v1alpha1.LayerWorkstation, wsDoc, "spec", "workstation", "overrides")
 		if err := applyOverrides(tree, v1alpha1.LayerWorkstation, wsDoc, "spec.overrides"); err != nil {
@@ -172,7 +172,7 @@ func (b *Bundle) Resolve(opts ResolveOptions) (*Resolved, error) {
 
 // workstationFor picks the Workstation document for this machine: the one
 // named after the host, else the unnamed one.
-func (b *Bundle) workstationFor(ctx v1alpha1.Context) *Document {
+func (b *Bundle) workstationFor() *Document {
 	if host, err := os.Hostname(); err == nil {
 		if doc, ok := b.Workstations[host]; ok {
 			return doc
