@@ -237,9 +237,14 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	}
 	// --fanout is applied as the flags layer of the configuration, so that
 	// config explain reports it; the built-in default is in defaults.yaml.
-	// This only catches a fanout.max of zero written somewhere.
-	if a.Spec.Fanout.Max == 0 {
+	// The schema refuses a fan-out below one in a document; this catches
+	// --set, the environment and the overrides tables, which it does not
+	// see. Only a value nothing set at all falls back to the default.
+	if o, set := resolved.Tree.Origin("fanout.max"); !set && a.Spec.Fanout.Max == 0 {
 		a.Spec.Fanout.Max = fanout.DefaultMax
+	} else if a.Spec.Fanout.Max < 1 {
+		return nil, exitcode.Errorf(exitcode.Usage, "%s: fanout.max is %d; it must be at least 1",
+			o, a.Spec.Fanout.Max)
 	}
 	if err := a.absoluteCommandLinePaths(); err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)

@@ -41,6 +41,8 @@ type root struct {
 	assumeYes   bool
 	force       bool
 	fanout      int
+	// fanoutGiven tells a --fanout that was given from one that was not.
+	fanoutGiven func() bool
 
 	// runner replaces the transport; only the tests set it.
 	runner transport.Runner
@@ -64,6 +66,12 @@ func (r *root) App() (*app.App, error) {
 				"--set takes PATH=VALUE, got %q", assignment)
 		}
 		set[strings.TrimSpace(key)] = value
+	}
+
+	// Zero is what an absent --fanout reads as, so a given one below one
+	// would otherwise be dropped without a word.
+	if r.fanoutGiven != nil && r.fanoutGiven() && r.fanout < 1 {
+		return nil, exitcode.Errorf(exitcode.Usage, "--fanout is %d; it must be at least 1", r.fanout)
 	}
 
 	nodes, fromFlag, err := r.nodesFromFlagOrEnv()
@@ -181,7 +189,8 @@ are about to do and ask before doing it.`),
 	flags.BoolVar(&r.dryRun, "dry-run", false, "report what would be done and change nothing")
 	flags.BoolVarP(&r.assumeYes, "yes", "y", false, "answer the confirmation prompts with yes")
 	flags.BoolVar(&r.force, "force", false, "allow protected hosts, and nodes the inventory does not know, to be touched")
-	flags.IntVar(&r.fanout, "fanout", 0, "how many hosts to work on at once (default: from the configuration)")
+	flags.IntVar(&r.fanout, "fanout", 0, "how many hosts to work on at once, at least 1 (default: from the configuration)")
+	r.fanoutGiven = func() bool { return flags.Changed("fanout") }
 
 	registerCompletions(cmd, r)
 

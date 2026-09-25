@@ -190,6 +190,10 @@ so is every `--set` and environment variable:
 - **A mapping merges key by key**, as it does in a document. `safety:
   {confirmAbove: 4}` and `safety.confirmAbove: 4` mean the same, and neither
   touches `safety.protectedHosts`.
+- **Limits keep their range.** `fanout.max` has to be at least 1, like
+  `safety.powerOnBatch`. A `0` or a negative value is refused wherever it is
+  written, `--fanout` included, rather than read as the default of 16; only
+  a value that nothing sets falls back to it.
 
 ```
 $ clusterctl config validate
