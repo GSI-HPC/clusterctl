@@ -10,12 +10,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -62,7 +63,7 @@ func (c *Client) generateConfig() ([]byte, error) {
 	// Roles that share a host share its block; Validate made sure they
 	// agree on what goes into it.
 	written := map[string]bool{}
-	for _, name := range sortedKeys(c.roles) {
+	for _, name := range slices.Sorted(maps.Keys(c.roles)) {
 		role := c.roles[name]
 		if role.Host == "" || written[role.Host] {
 			continue
@@ -133,7 +134,7 @@ func (b *block) set(key, format string, args ...any) {
 // options appends the configured extra keywords, refusing those this block
 // or the trust settings already decide.
 func (b *block) options(where string, options map[string]string, refused map[string]string) error {
-	for _, k := range sortedKeys(options) {
+	for _, k := range slices.Sorted(maps.Keys(options)) {
 		key := canonicalKeyword(k)
 		if why, ok := refused[key]; ok {
 			return fmt.Errorf("%s: the ssh option %s is refused: %s", where, k, why)
@@ -149,7 +150,7 @@ func (b *block) options(where string, options map[string]string, refused map[str
 // roleBodies renders the settings of every role's Host block.
 func (c *Client) roleBodies() (map[string]string, error) {
 	out := map[string]string{}
-	for _, name := range sortedKeys(c.roles) {
+	for _, name := range slices.Sorted(maps.Keys(c.roles)) {
 		body, err := c.roleBody(name, c.roles[name])
 		if err != nil {
 			return nil, err
@@ -474,7 +475,7 @@ func (c *Client) resolveJumps(value string) (string, []string, error) {
 
 // roleByHost returns the first role, in name order, whose host is host.
 func (c *Client) roleByHost(host string) string {
-	for _, name := range sortedKeys(c.roles) {
+	for _, name := range slices.Sorted(maps.Keys(c.roles)) {
 		if c.roles[name].Host == host {
 			return name
 		}
@@ -522,7 +523,7 @@ func (o Options) Validate() error {
 		}
 	}
 	checkOptions := func(where string, options map[string]string) {
-		for _, k := range sortedKeys(options) {
+		for _, k := range slices.Sorted(maps.Keys(options)) {
 			if !keyword.MatchString(k) {
 				fail("%s: %q is not an ssh option keyword", where, k)
 			}
@@ -533,7 +534,7 @@ func (o Options) Validate() error {
 	}
 	checkOptions("ssh.options", o.SSH.Options)
 
-	for _, name := range sortedKeys(o.Roles) {
+	for _, name := range slices.Sorted(maps.Keys(o.Roles)) {
 		role := o.Roles[name]
 		if hasControl(name, false) {
 			fail("role %q: the name holds a control character", name)
@@ -578,7 +579,7 @@ func (c *Client) checkSharedHosts(bodies map[string]string) error {
 	}
 	first := map[string]string{}
 	var errs []error
-	for _, name := range sortedKeys(c.roles) {
+	for _, name := range slices.Sorted(maps.Keys(c.roles)) {
 		host := c.roles[name].Host
 		if host == "" {
 			continue
@@ -601,7 +602,7 @@ func (c *Client) checkSharedHosts(bodies map[string]string) error {
 // cycle before it sends a single packet, and does so without end.
 func (c *Client) checkJumpCycles() error {
 	next := map[string][]string{}
-	for _, name := range sortedKeys(c.roles) {
+	for _, name := range slices.Sorted(maps.Keys(c.roles)) {
 		// A value that does not resolve is reported by roleBodies.
 		if jump := c.roles[name].ProxyJump; jump != "" {
 			if _, roles, err := c.resolveJumps(jump); err == nil {
@@ -641,7 +642,7 @@ func (c *Client) checkJumpCycles() error {
 		state[name] = done
 		return nil
 	}
-	for _, name := range sortedKeys(c.roles) {
+	for _, name := range slices.Sorted(maps.Keys(c.roles)) {
 		if err := visit(name); err != nil {
 			return err
 		}
@@ -747,13 +748,4 @@ func expandHome(path string) string {
 		}
 	}
 	return path
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

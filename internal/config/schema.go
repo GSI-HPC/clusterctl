@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -180,12 +182,7 @@ func unknownKeys(root, schema *jsonschema.Schema, doc *Document, value any, path
 	switch v := value.(type) {
 	case map[string]any:
 		var out []string
-		keys := make([]string, 0, len(v))
-		for k := range v {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
+		for _, k := range slices.Sorted(maps.Keys(v)) {
 			child := joinPath(path, k)
 			if resolved.Properties != nil {
 				if prop, ok := resolved.Properties.Get(k); ok {

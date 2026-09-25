@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -40,7 +42,7 @@ func yamlBlock(b *strings.Builder, v any, indent int) {
 		if len(t) == 0 {
 			break
 		}
-		for _, k := range sortedKeys(t) {
+		for _, k := range slices.Sorted(maps.Keys(t)) {
 			b.WriteString(pad)
 			b.WriteString(yamlString(k))
 			b.WriteByte(':')

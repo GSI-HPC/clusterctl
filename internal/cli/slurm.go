@@ -6,6 +6,8 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -111,13 +113,7 @@ node carries.
 }
 
 func stateGroupNames() []string {
-	groups := slurm.StateGroups()
-	out := make([]string, 0, len(groups))
-	for name := range groups {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(slurm.StateGroups()))
 }
 
 func newSlurmNodeDrainCommand(r *root) *cobra.Command {

@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/GSI-HPC/clusterctl/nodeset"
@@ -202,14 +201,4 @@ func (r Result) nodes() (*nodeset.NodeSet, error) {
 		}
 	}
 	return ns, nil
-}
-
-// sortedKeys returns the keys of a map in a stable order.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

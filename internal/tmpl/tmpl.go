@@ -12,7 +12,8 @@ package tmpl
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -53,12 +54,7 @@ func Expand(template string, vars map[string]string) (string, error) {
 
 // Names lists the placeholders a variable set offers, in sorted order.
 func Names(vars map[string]string) []string {
-	out := make([]string, 0, len(vars))
-	for k := range vars {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(vars))
 }
 
 // Prefixed copies a map of values under a dotted prefix, so that a domain

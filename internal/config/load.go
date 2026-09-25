@@ -6,9 +6,10 @@ package config
 import (
 	_ "embed"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -241,12 +242,7 @@ func documentName(doc *Document) string {
 
 // names returns the keys of an index in sorted order.
 func names(index map[string]*Document) []string {
-	out := make([]string, 0, len(index))
-	for k := range index {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(index))
 }
 
 // dirOf returns the directory a document was read from, which relative paths

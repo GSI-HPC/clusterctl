@@ -7,8 +7,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -192,7 +193,7 @@ func applyOverrides(tree *Tree, layer string, doc *Document, at string) error {
 	if !ok {
 		return nil
 	}
-	for _, k := range sortedKeys(overrides) {
+	for _, k := range slices.Sorted(maps.Keys(overrides)) {
 		src := at + "." + k
 		o := doc.Position(src)
 		if err := tree.override(layer, k, overrides[k], o, docOrigin(doc), src); err != nil {
@@ -217,7 +218,7 @@ func applyContextOverrides(tree *Tree, ctx v1alpha1.Context, src contextSource) 
 			return fmt.Errorf("context %q: %w", ctx.Name, err)
 		}
 	}
-	for _, k := range sortedKeys(ctx.Overrides) {
+	for _, k := range slices.Sorted(maps.Keys(ctx.Overrides)) {
 		src := "overrides." + k
 		if err := tree.override(v1alpha1.LayerContext, k, ctx.Overrides[k],
 			from(src), from, src); err != nil {
@@ -229,12 +230,7 @@ func applyContextOverrides(tree *Tree, ctx v1alpha1.Context, src contextSource) 
 
 // applyEnv applies the environment variables that override configuration.
 func applyEnv(tree *Tree, env func(string) string) error {
-	vars := make([]string, 0, len(envPaths))
-	for k := range envPaths {
-		vars = append(vars, k)
-	}
-	sort.Strings(vars)
-	for _, name := range vars {
+	for _, name := range slices.Sorted(maps.Keys(envPaths)) {
 		raw := env(name)
 		if raw == "" {
 			continue
@@ -253,12 +249,7 @@ func applyEnv(tree *Tree, env func(string) string) error {
 
 // applySet applies the --set assignments.
 func applySet(tree *Tree, set map[string]string) error {
-	keys := make([]string, 0, len(set))
-	for k := range set {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(set)) {
 		value, err := ParseSetValue(set[k])
 		if err != nil {
 			return fmt.Errorf("--set %s: %w", k, err)

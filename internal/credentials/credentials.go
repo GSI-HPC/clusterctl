@@ -14,8 +14,10 @@ package credentials
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -94,7 +96,7 @@ func (r *Resolver) Get(ctx context.Context, name string) (Credential, error) {
 	spec, ok := r.Credentials[name]
 	if !ok {
 		return Credential{}, fmt.Errorf("unknown credential %q; the site defines %s",
-			name, strings.Join(r.names(), ", "))
+			name, strings.Join(slices.Sorted(maps.Keys(r.Credentials)), ", "))
 	}
 	password, err := r.read(ctx, name, spec.Password)
 	if err != nil {
@@ -109,14 +111,6 @@ func (r *Resolver) Get(ctx context.Context, name string) (Credential, error) {
 	r.cache[name] = out
 	r.mu.Unlock()
 	return out, nil
-}
-
-func (r *Resolver) names() []string {
-	out := make([]string, 0, len(r.Credentials))
-	for name := range r.Credentials {
-		out = append(out, name)
-	}
-	return out
 }
 
 func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordSource) (string, error) {

@@ -6,7 +6,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -186,12 +188,12 @@ credentials are involved.`,
 			found, failed := scanTargets(a, ns, bmc, timeout)
 
 			t := output.NewTable(output.Cols("HOST", "TYPE", "KEY")...)
-			for _, host := range sortedMapKeys(found) {
+			for _, host := range slices.Sorted(maps.Keys(found)) {
 				for _, e := range found[host] {
 					t.Add(host, e.Type, abbreviate(e.Key))
 				}
 			}
-			for _, host := range sortedMapKeys(failed) {
+			for _, host := range slices.Sorted(maps.Keys(failed)) {
 				t.Add(host, "unreachable", failed[host].Error())
 			}
 			if err := a.Print(output.Result{Table: t, Object: found}); err != nil {
@@ -240,7 +242,7 @@ for this command to decide which.`,
 
 			t := output.NewTable(output.Cols("HOST", "STATUS", "DETAIL")...)
 			changed, missing, revoked := 0, 0, 0
-			for _, host := range sortedMapKeys(found) {
+			for _, host := range slices.Sorted(maps.Keys(found)) {
 				known := file.Find(host)
 				switch {
 				case anyRevoked(file, host, found[host]):
@@ -260,7 +262,7 @@ for this command to decide which.`,
 						abbreviate(known[0].Key), abbreviate(found[host][0].Key)))
 				}
 			}
-			for _, host := range sortedMapKeys(failed) {
+			for _, host := range slices.Sorted(maps.Keys(failed)) {
 				t.Add(host, "unreachable", failed[host].Error())
 			}
 			if err := a.Print(output.Result{Table: t}); err != nil {
@@ -327,7 +329,7 @@ changed without a reinstall is worth understanding before it is trusted.`,
 			written := 0
 			refused := map[string]bool{}
 			err = hostkeys.Modify(a.Context(), path, func(f *hostkeys.File) error {
-				for _, host := range sortedMapKeys(found) {
+				for _, host := range slices.Sorted(maps.Keys(found)) {
 					// A revoked key is never written back as trusted, and
 					// the entry already there stays as it is.
 					if anyRevoked(f, host, found[host]) {
@@ -344,14 +346,14 @@ changed without a reinstall is worth understanding before it is trusted.`,
 			}
 
 			t := output.NewTable(output.Cols("HOST", "STATUS", "TYPE")...)
-			for _, host := range sortedMapKeys(found) {
+			for _, host := range slices.Sorted(maps.Keys(found)) {
 				if refused[host] {
 					t.Add(host, "REVOKED", found[host][0].Type)
 					continue
 				}
 				t.Add(host, "written", found[host][0].Type)
 			}
-			for _, host := range sortedMapKeys(failed) {
+			for _, host := range slices.Sorted(maps.Keys(failed)) {
 				t.Add(host, "unreachable", failed[host].Error())
 			}
 			t.Caption = fmt.Sprintf("%d keys written to %s", written, path)
