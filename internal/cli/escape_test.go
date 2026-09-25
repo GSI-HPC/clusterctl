@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -49,5 +50,26 @@ func TestExecEscapesBidiControlsAndLineSeparators(t *testing.T) {
 		if want := `bad\u2028worse\u202e`; !strings.Contains(h.errOut.String(), want) {
 			t.Errorf("%v: stderr = %q, want %q", extra, h.errOut, want)
 		}
+	}
+}
+
+// Follow-up #79: the group resolver had an escaper of its own, which left the
+// bidirectional controls, the line separator and bytes that are not UTF-8 as
+// they were.
+func TestFailingGroupCommandEscapesItsMessage(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		return &transport.Result{
+			Target: tg, ExitCode: 1,
+			Stderr: "sinfo: \u202edenied\u2028\u2066 \xff\x1b[2J\n",
+			Err:    fmt.Errorf("%s: command exited 1", tg),
+		}, nil
+	}}
+	h, code := exitCodeOf(t, harnessOptions{recorder: rec}, "node", "select", "@slurm:main")
+	if code != exitcode.TargetFailed {
+		t.Errorf("exit code = %d, want %d", code, exitcode.TargetFailed)
+	}
+	wantNoRaw(t, "stderr", h.errOut.String())
+	if want := `sinfo: \u202edenied\u2028\u2066 \xff\x1b[2J`; !strings.Contains(h.errOut.String(), want) {
+		t.Errorf("stderr = %q, want %q", h.errOut, want)
 	}
 }
