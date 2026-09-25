@@ -65,9 +65,7 @@ func TestBMCInterruptedResetIsReportedAsUnknown(t *testing.T) {
 	h, err := run(t, harnessOptions{ctx: ctx},
 		append(noSlurm, "--set", "bmc.redfish.maxConcurrent=1", "-o", "json",
 			"bmc", "power", "cycle", "--batch", "3", "-y", "-n", "exe[0001-0003]")...)
-	if got := exitcode.From(err); got != exitcode.Interrupted {
-		t.Errorf("exit code %d, want %d (%v)", got, exitcode.Interrupted, err)
-	}
+	wantCode(t, err, exitcode.Interrupted)
 	states := map[string]any{}
 	for _, row := range jsonRows(t, h) {
 		states[row["node"].(string)] = row["state"]
@@ -93,9 +91,7 @@ func TestBMCActionThatReachedTheProcessorIsNotSentAgain(t *testing.T) {
 	})
 
 	h, err := run(t, harnessOptions{recorder: ipmiOK()}, append(noSlurm, "bmc", "power", "off", "-y", "-n", "exe0001")...)
-	if got := exitcode.From(err); got != exitcode.TargetFailed {
-		t.Errorf("exit code %d, want %d (%v)", got, exitcode.TargetFailed, err)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	if calls := ipmiCalls(h); len(calls) != 0 {
 		t.Errorf("the action was sent again over IPMI: %v", h.recorder.Commands())
 	}

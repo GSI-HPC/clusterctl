@@ -323,9 +323,7 @@ func TestSecretsPushDecryptsBeforeItAsks(t *testing.T) {
 	if strings.Contains(h.errOut.String()+h.out.String(), "[y/N]") {
 		t.Errorf("secrets push asked before it could decrypt:\n%s", h.errOut)
 	}
-	if calls := h.recorder.Commands(); len(calls) != 0 {
-		t.Errorf("commands were sent: %q", calls)
-	}
+	wantNoCalls(t, h)
 }
 
 const twoSecretFiles = `        - target: /etc/munge/munge.key

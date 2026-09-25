@@ -98,9 +98,7 @@ func TestHostkeyScanGoesThroughTheJumpHost(t *testing.T) {
 	if err == nil {
 		t.Fatal("the fake jump host refuses the forward, so the scan should fail")
 	}
-	if got, want := exitcode.From(err), exitcode.Transport; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Transport)
 	data, readErr := os.ReadFile(argsFile)
 	if readErr != nil {
 		t.Fatalf("ssh was not run to reach the jump host: %v; output:\n%s", readErr, h.out)
@@ -170,9 +168,7 @@ func TestHostkeyVerifyReportsARevokedKey(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a revoked key should fail verify:\n%s", h.out)
 	}
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	if !strings.Contains(h.out.String(), "REVOKED") {
 		t.Errorf("the revocation is not reported:\n%s", h.out)
 	}
@@ -199,9 +195,7 @@ func TestHostkeyRefreshKeepsNotesAndRevocations(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a host offering a revoked key should fail the refresh:\n%s", h.out)
 	}
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 
 	data, err := os.ReadFile(known)
 	if err != nil {

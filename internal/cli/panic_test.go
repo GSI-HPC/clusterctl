@@ -39,9 +39,7 @@ func TestAPanicOnOneNodeFailsOnlyThatNode(t *testing.T) {
 		return &transport.Result{Target: tg, Stdout: "Dell|R650|Dell|0A1B|Dell|2.1|2026-01-01|MT4123\n"}, nil
 	}}
 	h, err := run(t, harnessOptions{recorder: rec}, "-o", "json", "node", "hw", "-n", "exe[0001-0003]")
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	var rows []map[string]string
 	if err := json.Unmarshal(h.out.Bytes(), &rows); err != nil {
 		t.Fatalf("node hw printed no JSON: %v\n%s", err, h.out)

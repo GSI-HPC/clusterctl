@@ -191,9 +191,7 @@ func TestConfigExplainNamesTheLayerAndLine(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unset path should be reported")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 }
 
 func TestNodeSelectEvaluatesGroupsAndOperators(t *testing.T) {
@@ -270,9 +268,7 @@ func TestExecReportsFailingNodes(t *testing.T) {
 	if err == nil {
 		t.Fatal("a failing node should make the command fail")
 	}
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	if !strings.Contains(h.out.String(), "exe0001: ok") {
 		t.Errorf("the successful nodes are not reported:\n%s", h.out)
 	}
@@ -304,9 +300,7 @@ func TestExecRequiresACommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("exec with nothing to run should be refused")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 }
 
 func TestSelectionIsRequired(t *testing.T) {
@@ -340,9 +334,7 @@ func TestDestructiveCommandRefusesProtectedHosts(t *testing.T) {
 	if !strings.Contains(err.Error(), "--force") {
 		t.Errorf("error = %v, want it to name the way out", err)
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 }
 
 func TestDryRunChangesNothing(t *testing.T) {
@@ -416,9 +408,7 @@ func TestSlurmDrainNeedsAReasonAndConfirmation(t *testing.T) {
 	if err == nil {
 		t.Fatal("a declined action should not proceed")
 	}
-	if got, want := exitcode.From(err), exitcode.Interrupted; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Interrupted)
 	if changes := cluster.changes(); len(changes) != 0 {
 		t.Errorf("a declined action sent %v", changes)
 	}
@@ -441,9 +431,7 @@ func TestOutputFormats(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unknown output format should be refused")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 }
 
 func TestUnknownContextIsReported(t *testing.T) {

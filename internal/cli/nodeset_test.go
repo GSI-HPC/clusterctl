@@ -29,9 +29,7 @@ func TestDanglingOperatorIsAUsageError(t *testing.T) {
 			if err == nil {
 				t.Fatalf("the command succeeded:\n%s%s", h.out, h.errOut)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), "operand") {
 				t.Errorf("error = %v, want it to name the missing operand", err)
 			}

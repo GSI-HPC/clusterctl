@@ -23,9 +23,7 @@ func TestLoginRejectsASecondName(t *testing.T) {
 			if err == nil {
 				t.Fatalf("a second name should be refused; would run:\n%s", h.out)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), "--") {
 				t.Errorf("error = %v, want it to point at --", err)
 			}

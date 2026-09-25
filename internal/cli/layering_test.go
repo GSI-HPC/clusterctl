@@ -68,9 +68,7 @@ func wantProtected(t *testing.T, opts harnessOptions, args ...string) {
 	if err == nil {
 		t.Fatalf("the protected host wlm01 was not refused:\n%s", h.out)
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-	}
+	wantCode(t, err, exitcode.Usage)
 }
 
 // Review 9.1: an override in the nested form merges key by key, like every
@@ -128,9 +126,7 @@ func TestOverrideValueIsValidated(t *testing.T) {
 			if err == nil {
 				t.Fatal("config validate accepted the override")
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), "override.yaml:") {
 				t.Errorf("error = %v, want it to name the file and line", err)
 			}
@@ -162,9 +158,7 @@ func TestOverrideKeysAreCaseSensitive(t *testing.T) {
 	if !strings.Contains(err.Error(), `--set`) || !strings.Contains(err.Error(), `did you mean "protectedHosts"`) {
 		t.Errorf("error = %v, want it to name --set and suggest the field", err)
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 
 	// The unknown path of an override is reported where it was written,
 	// with the field that was probably meant.
@@ -199,9 +193,7 @@ func TestDuplicateDocumentsAreRefused(t *testing.T) {
 			t.Errorf("error = %v, want it to contain %q", err, want)
 		}
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 	wantProtected(t, harnessOptions{bare: true, config: []string{dir}})
 }
 
@@ -269,9 +261,7 @@ func TestConfigInitRefusesToShadowTheSearchPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("config init wrote a configuration that shadows the team's")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 	if !strings.Contains(err.Error(), team) || !strings.Contains(err.Error(), "config init DIR") {
 		t.Errorf("error = %v, want it to name %s and the way out", err, team)
 	}
@@ -369,9 +359,7 @@ func TestConfigInitFailsWithUsageLocally(t *testing.T) {
 	if err == nil {
 		t.Fatal("config init wrote below a regular file")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-	}
+	wantCode(t, err, exitcode.Usage)
 }
 
 // Review 9.12: a field that no code reads is not accepted, so that setting
@@ -436,9 +424,7 @@ func TestClusterNamingNoInventoryNeverReadsAnotherSite(t *testing.T) {
 					t.Errorf("error = %v, want it to say %q", err, want)
 				}
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if strings.Contains(h.out.String()+h.errOut.String(), "gpu") {
 				t.Errorf("site b's nodes were reached:\n%s%s", h.out, h.errOut)
 			}

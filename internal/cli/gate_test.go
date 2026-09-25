@@ -69,9 +69,7 @@ func TestProtectedHostIsRefusedUnderEverySpelling(t *testing.T) {
 			if !strings.Contains(err.Error(), "protected host wlm01") {
 				t.Errorf("error = %v, want it to name wlm01 as protected", err)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 
 			// A power action may also be stopped earlier, by the naming
 			// rules refusing a domain they do not give wlm01; either way
@@ -80,9 +78,7 @@ func TestProtectedHostIsRefusedUnderEverySpelling(t *testing.T) {
 			if err == nil {
 				t.Fatalf("power off -n %s was let through:\n%s", name, h.errOut)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), "protected host wlm01") &&
 				!strings.Contains(err.Error(), "is not the host name the naming rules give wlm01") {
 				t.Errorf("error = %v, want wlm01 refused", err)
@@ -148,9 +144,7 @@ func TestProtectedHostsEntryThatNamesNoKnownNodeIsRefused(t *testing.T) {
 			if !strings.Contains(err.Error(), "safety.protectedHosts") {
 				t.Errorf("error = %v, want it to name the setting", err)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 			// A command that changes something refuses too, rather than
 			// running with less protection than the site wrote down.
 			if _, err := run(t, harnessOptions{bare: true, config: []string{dir}},
@@ -192,9 +186,7 @@ func TestProtectedHostsGroupThatCannotBeResolvedRefusesChanges(t *testing.T) {
 	if !strings.Contains(err.Error(), "safety.protectedHosts") {
 		t.Errorf("error = %v, want it to name the setting", err)
 	}
-	if calls := h.recorder.Calls(); len(calls) != 0 {
-		t.Errorf("sent %d commands, want none", len(calls))
-	}
+	wantNoCalls(t, h)
 }
 
 // A name the inventory does not know may be another spelling of a machine
@@ -207,12 +199,8 @@ func TestChangeToANodeTheInventoryDoesNotKnowNeedsForce(t *testing.T) {
 	if !strings.Contains(err.Error(), "ghost1") || !strings.Contains(err.Error(), "--force") {
 		t.Errorf("error = %v, want it to name ghost1 and the way out", err)
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
-	if calls := h.recorder.Calls(); len(calls) != 0 {
-		t.Errorf("sent %d commands, want none", len(calls))
-	}
+	wantCode(t, err, exitcode.Usage)
+	wantNoCalls(t, h)
 
 	h, err = run(t, harnessOptions{}, "exec", "--confirm", "-y", "--force", "-n", "ghost1", "--", "true")
 	if err != nil {
@@ -291,9 +279,7 @@ func TestSafetyLimitsOutOfRangeAreRefused(t *testing.T) {
 			if err == nil {
 				t.Fatalf("config validate accepted %s", tc.to)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 		})
 	}
 	for _, set := range []string{"safety.confirmAbove=-5", "safety.powerOnBatch=0"} {
@@ -430,9 +416,7 @@ func TestFanoutBelowOneIsRefused(t *testing.T) {
 			if !strings.Contains(err.Error(), "site.yaml:") || !strings.Contains(err.Error(), "fanout") {
 				t.Errorf("error = %v, want the file, the line and the setting", err)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 		})
 		t.Run("context override "+value, func(t *testing.T) {
 			dir := exampleWith(t, "config.yaml", func(s string) string {
@@ -458,9 +442,7 @@ func TestFanoutBelowOneIsRefused(t *testing.T) {
 				if err == nil {
 					t.Fatalf("%v was accepted", args)
 				}
-				if got, want := exitcode.From(err), exitcode.Usage; got != want {
-					t.Errorf("exit code = %d, want %d", got, want)
-				}
+				wantCode(t, err, exitcode.Usage)
 			})
 		}
 	}

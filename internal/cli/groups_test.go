@@ -192,9 +192,7 @@ func TestBareGroupDoesNotFallThroughOnAFailure(t *testing.T) {
 		t.Fatalf("@compute resolved to %q while the slurm source could not be asked",
 			strings.TrimSpace(h.out.String()))
 	}
-	if got, want := exitcode.From(err), exitcode.Transport; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Transport)
 	for _, want := range []string{`"slurm"`, "Connection timed out"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %q", err, want)
@@ -218,9 +216,7 @@ func TestBareGroupFallsThroughWhenASourceHasNoSuchGroup(t *testing.T) {
 	if err == nil {
 		t.Fatal("a group no source defines resolved")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 	if !strings.Contains(err.Error(), "no group source defines") {
 		t.Errorf("error %q does not say that no source defines the group", err)
 	}
@@ -239,9 +235,7 @@ func TestUnreachableGroupSourceExitsAsATransportFailure(t *testing.T) {
 			if err == nil {
 				t.Fatal("the command succeeded without its group source")
 			}
-			if got, want := exitcode.From(err), exitcode.Transport; got != want {
-				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-			}
+			wantCode(t, err, exitcode.Transport)
 		})
 	}
 }
@@ -260,9 +254,7 @@ func TestFailingGroupCommandKeepsItsMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("a failing group command resolved")
 	}
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	if !strings.Contains(err.Error(), "Unable to contact slurm controller") {
 		t.Errorf("error %q lost what the command said", err)
 	}
@@ -286,9 +278,7 @@ func TestNodeGroupsKeepsWhatTheOtherSourcesFound(t *testing.T) {
 			if err == nil {
 				t.Fatal("the command succeeded while the slurm source could not be asked")
 			}
-			if got, want := exitcode.From(err), exitcode.Transport; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Transport)
 			if !strings.Contains(err.Error(), `"slurm"`) {
 				t.Errorf("error %q does not name the failed source", err)
 			}
@@ -352,9 +342,7 @@ func TestExecGroupSourceRequiresARole(t *testing.T) {
 	if err == nil {
 		t.Fatal("an exec group source without a role was accepted")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 	if !strings.Contains(err.Error(), "role") || strings.Contains(err.Error(), "second Cluster") {
 		t.Errorf("error %q does not name the missing role", err)
 	}

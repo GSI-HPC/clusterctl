@@ -211,9 +211,7 @@ func TestSlurmChangesRefuseNamesSlurmExpands(t *testing.T) {
 			if err == nil {
 				t.Fatalf("the change went ahead:\n%s%s", h.out, h.errOut)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error = %v, want it to name %q", err, tc.want)
 			}
@@ -424,9 +422,7 @@ func TestSlurmFailuresKeepSlurmsMessageAndTheRightCode(t *testing.T) {
 			Err:    errors.New("login (login.hpc.example.org): command exited 1")}
 		_, err := run(t, harnessOptions{recorder: cluster.recorder()},
 			"slurm", "node", "resume", "-n", "exe[1-2]", "-y")
-		if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-			t.Errorf("exit code = %d, want %d", got, want)
-		}
+		wantCode(t, err, exitcode.TargetFailed)
 		if err == nil || !strings.Contains(err.Error(), "Invalid node state specified") {
 			t.Errorf("error = %v, want Slurm's message", err)
 		}
@@ -442,9 +438,7 @@ func TestSlurmFailuresKeepSlurmsMessageAndTheRightCode(t *testing.T) {
 		}
 		_, err := run(t, harnessOptions{recorder: cluster.recorder()},
 			"slurm", "node", "drain", "ticket 42", "-n", "exe[1-2]", "-y")
-		if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-			t.Errorf("exit code = %d, want %d", got, want)
-		}
+		wantCode(t, err, exitcode.TargetFailed)
 		if err == nil || !strings.Contains(err.Error(), "exe0001 is drained with this reason, exe0002 is not") {
 			t.Errorf("error = %v, want it to say which nodes changed", err)
 		}
@@ -464,9 +458,7 @@ func TestSlurmFailuresKeepSlurmsMessageAndTheRightCode(t *testing.T) {
 	} {
 		t.Run("unreachable "+strings.Join(args[:3], " "), func(t *testing.T) {
 			_, err := run(t, harnessOptions{recorder: unreachable()}, args...)
-			if got, want := exitcode.From(err), exitcode.Transport; got != want {
-				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-			}
+			wantCode(t, err, exitcode.Transport)
 		})
 	}
 
@@ -476,9 +468,7 @@ func TestSlurmFailuresKeepSlurmsMessageAndTheRightCode(t *testing.T) {
 				Err: errors.New("login: command exited 1")}, nil
 		}}
 		_, err := run(t, harnessOptions{recorder: rec}, "slurm", "node", "list", "--state", "bogus")
-		if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-			t.Errorf("exit code = %d, want %d", got, want)
-		}
+		wantCode(t, err, exitcode.TargetFailed)
 		if err == nil || !strings.Contains(err.Error(), "Invalid node state specified: bogus") {
 			t.Errorf("error = %v, want sinfo's message", err)
 		}
@@ -486,9 +476,7 @@ func TestSlurmFailuresKeepSlurmsMessageAndTheRightCode(t *testing.T) {
 
 	t.Run("a user getent does not know", func(t *testing.T) {
 		_, err := run(t, harnessOptions{recorder: newSlurmCluster().recorder()}, "slurm", "user", "add", "ghost", "proj", "-y")
-		if got, want := exitcode.From(err), exitcode.Usage; got != want {
-			t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-		}
+		wantCode(t, err, exitcode.Usage)
 		if err == nil || !strings.Contains(err.Error(), `the cluster does not know a user account "ghost"`) {
 			t.Errorf("error = %v", err)
 		}
@@ -634,9 +622,7 @@ func TestSlurmAccountingRefusesNamesSacctmgrExpands(t *testing.T) {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cluster := newSlurmCluster()
 			_, err := run(t, harnessOptions{recorder: cluster.recorder()}, append(append([]string{"slurm"}, args...), "-y")...)
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if changes := cluster.changes(); len(changes) != 0 {
 				t.Errorf("sent %v", changes)
 			}

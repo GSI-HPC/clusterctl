@@ -120,9 +120,7 @@ func TestSlurmCheckIsOnForAFreshConfiguration(t *testing.T) {
 	if err == nil {
 		t.Fatal("a node running a job was powered off on a fresh configuration")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-	}
+	wantCode(t, err, exitcode.Usage)
 	if sinfo, _ := sinfoCalls(rec); sinfo != 1 {
 		t.Errorf("sinfo was sent %d times, want once", sinfo)
 	}
@@ -165,9 +163,7 @@ func TestSlurmCheckRefusesEveryBusyState(t *testing.T) {
 			if err == nil {
 				t.Fatalf("a node in state %s was powered off", state)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), "exe0007") || !strings.Contains(err.Error(), "--lose-jobs") {
 				t.Errorf("error = %v, want it to name the node and the override", err)
 			}
@@ -299,9 +295,7 @@ func TestSlurmCheckRunsInADryRun(t *testing.T) {
 	if err == nil {
 		t.Fatalf("the dry run approved powering off a busy node:\n%s", h.errOut)
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-	}
+	wantCode(t, err, exitcode.Usage)
 	if strings.Contains(h.errOut.String(), "Would power off") {
 		t.Errorf("the dry run previewed the power-off:\n%s", h.errOut)
 	}

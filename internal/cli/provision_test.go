@@ -242,9 +242,7 @@ func TestReinstallAsksSlurmFirst(t *testing.T) {
 		if err == nil {
 			t.Fatal("a node running a job was reinstalled")
 		}
-		if got, want := exitcode.From(err), exitcode.Usage; got != want {
-			t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-		}
+		wantCode(t, err, exitcode.Usage)
 		if !strings.Contains(err.Error(), "--lose-jobs") {
 			t.Errorf("error = %v, want it to name the override", err)
 		}
@@ -408,9 +406,7 @@ func TestReinstallDisarmsWhatItArmed(t *testing.T) {
 		if err == nil {
 			t.Fatal("the reinstall succeeded")
 		}
-		if got, want := exitcode.From(err), exitcode.Transport; got != want {
-			t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-		}
+		wantCode(t, err, exitcode.Transport)
 		for _, node := range []string{"exe0001", "exe0003"} {
 			if got, want := strings.Join(h.bmcs.of(node), ", "), "boot once, clear"; got != want {
 				t.Errorf("%s: sent %s, want %s", node, got, want)
@@ -446,9 +442,7 @@ func TestReinstallDisarmsWhatItArmed(t *testing.T) {
 		if err == nil {
 			t.Fatal("the reinstall succeeded")
 		}
-		if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-			t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-		}
+		wantCode(t, err, exitcode.TargetFailed)
 		if got, want := strings.Join(h.bmcs.of("exe0002"), ", "), "boot once, reset, clear"; got != want {
 			t.Errorf("exe0002: sent %s, want %s", got, want)
 		}
@@ -593,9 +587,7 @@ func TestProvisionStatusReportsEveryNode(t *testing.T) {
 	if err == nil {
 		t.Fatal("status succeeded although a processor could not be reached")
 	}
-	if got, want := exitcode.From(err), exitcode.Transport; got != want {
-		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-	}
+	wantCode(t, err, exitcode.Transport)
 	var states []provisionState
 	if err := json.Unmarshal(out.out.Bytes(), &states); err != nil {
 		t.Fatalf("output is not a list of nodes: %v\n%s", err, out.out)

@@ -161,9 +161,7 @@ cat <<'EOF'
 				if err == nil {
 					t.Fatalf("a port in %s was reported up:\n%s", tc.state, h.out)
 				}
-				if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-					t.Errorf("exit code = %d, want %d", got, want)
-				}
+				wantCode(t, err, exitcode.TargetFailed)
 			}
 			var got []struct {
 				Node, State, LinkState, PhysicalState string
@@ -255,9 +253,7 @@ func TestFabricGUIDReportsNodesItCannotIdentify(t *testing.T) {
 	if err == nil {
 		t.Fatalf("nodes without an identifier were not reported:\n%s", h.out)
 	}
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	for _, node := range []string{"exe0002", "exe0003"} {
 		if !strings.Contains(h.errOut.String(), node) {
 			t.Errorf("%s is not named on standard error:\n%s", node, h.errOut)
@@ -280,9 +276,7 @@ func TestFabricGUIDFailsWhenDHCPCannotBeRead(t *testing.T) {
 	if err == nil {
 		t.Fatalf("an unreachable DHCP host was not reported:\n%s", h.out)
 	}
-	if got, want := exitcode.From(err), exitcode.Transport; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Transport)
 }
 
 // TestFabricGUIDPrefersDHCP is the report's 12.10: the inventory address won
@@ -318,9 +312,7 @@ func TestHCAConfigSetRefusesWhatIsNotASetting(t *testing.T) {
 			if err == nil {
 				t.Fatalf("%q was accepted", args)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if n := len(h.recorder.Calls()); n != 0 {
 				t.Errorf("%d requests were sent", n)
 			}
@@ -351,9 +343,7 @@ func TestHCAConfigNeverTakesANodeForTheValue(t *testing.T) {
 	if err == nil {
 		t.Fatal("the old form was accepted")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 	if n := len(h.recorder.Calls()); n != 0 {
 		t.Errorf("%d requests were sent", n)
 	}
@@ -386,9 +376,7 @@ exit 0
 	if err == nil {
 		t.Fatalf("a node with an adapter left unchanged was reported ok:\n%s", h.out)
 	}
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	log, _ := os.ReadFile(filepath.Join(work, "mlxconfig.log"))
 	for _, dev := range []string{"mlx5_0", "mlx5_1"} {
 		if !strings.Contains(string(log), dev) {

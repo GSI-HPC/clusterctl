@@ -83,9 +83,7 @@ func TestInventoryRefusesACopiedAddress(t *testing.T) {
 	if err == nil {
 		t.Fatal("a reinstall went ahead on an inventory with a copied address")
 	}
-	if n := len(h.recorder.Calls()); n != 0 {
-		t.Errorf("%d commands were sent", n)
-	}
+	wantNoCalls(t, h)
 }
 
 // An address that is not an IP address went straight into the name of a

@@ -34,9 +34,7 @@ func TestAPanicOnOneProcessorFailsOnlyThatNode(t *testing.T) {
 		})
 		h, err := run(t, harnessOptions{recorder: ipmiOK()},
 			append(noSlurm, "--set", "bmc.order=[redfish]", "-o", "json", "bmc", "power", "status", "-n", "exe[0001-0003]")...)
-		if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-			t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-		}
+		wantCode(t, err, exitcode.TargetFailed)
 		for _, row := range jsonRows(t, h) {
 			switch row["node"] {
 			case "exe0002":
@@ -56,9 +54,7 @@ func TestAPanicOnOneProcessorFailsOnlyThatNode(t *testing.T) {
 		h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
 		h.bmcs.panics["exe0002"] = "Pxe"
 		_, err := h.run(t, harnessOptions{}, "provision", "reinstall", "-n", "exe[0001-0003]", "-y")
-		if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-			t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-		}
+		wantCode(t, err, exitcode.TargetFailed)
 		for _, node := range []string{"exe0001", "exe0003"} {
 			if got, want := strings.Join(h.bmcs.of(node), ", "), "boot once, clear"; got != want {
 				t.Errorf("%s: sent %s, want %s", node, got, want)
@@ -105,9 +101,7 @@ func TestAChangedCertificateIsOneFailureInEveryCommand(t *testing.T) {
 		})
 		h, err := run(t, harnessOptions{recorder: ipmiOK()},
 			append(noSlurm, "-o", "json", "bmc", "power", "off", "-y", "-n", "exe[0001-0002]")...)
-		if got, want := exitcode.From(err), exitcode.Transport; got != want {
-			t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-		}
+		wantCode(t, err, exitcode.Transport)
 		if calls := ipmiCalls(h); len(calls) != 0 {
 			t.Errorf("exe0001 fell back to IPMI: %v", h.recorder.Commands())
 		}
@@ -125,9 +119,7 @@ func TestAChangedCertificateIsOneFailureInEveryCommand(t *testing.T) {
 		h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
 		h.bmcs.pinned["exe0002"] = true
 		out, err := h.run(t, harnessOptions{}, "-o", "json", "provision", "reinstall", "-n", "exe[0001-0003]", "-y")
-		if got, want := exitcode.From(err), exitcode.Transport; got != want {
-			t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-		}
+		wantCode(t, err, exitcode.Transport)
 		if err == nil || !strings.Contains(err.Error(), "certificate") {
 			t.Errorf("error = %v, want it to name the certificate", err)
 		}
