@@ -5,6 +5,7 @@ package cli
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,28 +20,59 @@ func processorOf(req *http.Request) string {
 	return node
 }
 
-// bmc.redfish.maxConcurrent bounds the requests in flight to the processors.
-// Each request is held until one more than the limit are under way, which
-// never happens while the limit is kept, so exactly the limit run at once.
+// bmc.redfish.maxConcurrent bounds the requests in flight to the processors,
+// and --fanout lowers it where it is lower but never raises it: --fanout 1
+// asks one processor at a time, in bmc power as in the other Redfish
+// commands, while --fanout 4, and fanout.max from the Site document, --set
+// or the environment, leave it at 2. Each request is held until one more
+// than the limit are under way, which never happens while the limit is
+// kept, so exactly the limit run at once.
 func TestTheRedfishFanOutKeepsToItsLimit(t *testing.T) {
-	isolateHome(t)
-	t.Setenv("BMC_PASSWORD", "s3cret")
-	calls := &fanouttest.InFlight{Hold: 3}
-	fakeRedfish(t, calls.RoundTripper(roundTrip(func(req *http.Request) (*http.Response, error) {
-		return answer(req, http.StatusOK, system), nil
-	})).RoundTrip)
+	siteFanout := exampleWith(t, "site.yaml", func(s string) string {
+		return strings.Replace(s, "  fanout:\n    max: 24\n", "  fanout:\n    max: 1\n", 1)
+	})
+	powerStatus := []string{"bmc", "power", "status"}
+	for _, tc := range []struct {
+		name    string
+		config  []string
+		env     string
+		args    []string
+		command []string
+		want    int
+	}{
+		{"bmc.redfish.maxConcurrent alone", nil, "", nil, powerStatus, 2},
+		{"a lower --fanout", nil, "", []string{"--fanout", "1"}, powerStatus, 1},
+		{"a lower --fanout outside bmc power", nil, "", []string{"--fanout", "1"}, []string{"bmc", "redfish", "info"}, 1},
+		{"a higher --fanout", nil, "", []string{"--fanout", "4"}, powerStatus, 2},
+		{"fanout.max in the Site document", []string{siteFanout}, "", nil, powerStatus, 2},
+		{"fanout.max with --set", nil, "", []string{"--set", "fanout.max=1"}, powerStatus, 2},
+		{"fanout.max from the environment", nil, "1", nil, powerStatus, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateHome(t)
+			t.Setenv("BMC_PASSWORD", "s3cret")
+			if tc.env != "" {
+				t.Setenv("CLUSTERCTL_FANOUT", tc.env)
+			}
+			calls := &fanouttest.InFlight{Hold: tc.want + 1}
+			fakeRedfish(t, calls.RoundTripper(roundTrip(func(req *http.Request) (*http.Response, error) {
+				return answer(req, http.StatusOK, system), nil
+			})).RoundTrip)
 
-	h, err := run(t, harnessOptions{recorder: ipmiOK()},
-		append(noSlurm, "--set", "bmc.redfish.maxConcurrent=2", "--set", "bmc.order=[redfish]",
-			"bmc", "power", "status", "-n", "exe[0001-0005]")...)
-	if err != nil {
-		t.Fatalf("bmc power status failed: %v\n%s", err, h.errOut)
-	}
-	if got := calls.Peak(); got != 2 {
-		t.Errorf("%d requests were in flight at once, want 2", got)
-	}
-	if got := calls.Started(); got < 5 {
-		t.Errorf("%d requests were sent, want one for each of the 5 processors at least", got)
+			args := slices.Concat(noSlurm,
+				[]string{"--set", "bmc.redfish.maxConcurrent=2", "--set", "bmc.order=[redfish]"},
+				tc.args, tc.command, []string{"-n", "exe[0001-0005]"})
+			h, err := run(t, harnessOptions{config: tc.config, recorder: ipmiOK()}, args...)
+			if err != nil {
+				t.Fatalf("%s failed: %v\n%s", strings.Join(tc.command, " "), err, h.errOut)
+			}
+			if got := calls.Peak(); got != tc.want {
+				t.Errorf("%d requests were in flight at once, want %d", got, tc.want)
+			}
+			if got := calls.Started(); got < 5 {
+				t.Errorf("%d requests were sent, want one for each of the 5 processors at least", got)
+			}
+		})
 	}
 }
 

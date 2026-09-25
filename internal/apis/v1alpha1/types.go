@@ -201,8 +201,9 @@ type RedfishSpec struct {
 	// Timeout bounds one request, and how long a connection to a BMC is
 	// kept idle.
 	Timeout Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	// MaxConcurrent bounds how many BMCs are talked to at once.
-	MaxConcurrent int `json:"maxConcurrent,omitempty" yaml:"maxConcurrent,omitempty" jsonschema:"minimum=1"`
+	// MaxConcurrent bounds how many BMCs are talked to at once. A lower
+	// --fanout lowers it for one command; fanout.max does not change it.
+	MaxConcurrent int `json:"maxConcurrent,omitempty" yaml:"maxConcurrent,omitempty" jsonschema:"minimum=1,description=How many service processors are sent Redfish requests at once; a lower --fanout lowers it and fanout.max does not change it"`
 	// SystemPath is the Redfish path of the computer system, which differs
 	// between vendors.
 	SystemPath string `json:"systemPath,omitempty" yaml:"systemPath,omitempty"`

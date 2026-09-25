@@ -150,7 +150,8 @@ side by side does not multiply these bounds.
 Every such pool is one loop, `fanout.Each`, which starts nothing once the
 command is interrupted, and `fanout.Map` runs any kind of work on it, the
 executor's among them. Each kind of work has a bound of its own, which
-`fanout.max` in the configuration does not change
+`fanout.max` in the configuration does not change and a lower `--fanout`
+lowers, through `App.Bound`
 ([ADR 0022](adr/0022-bounded-pools-and-power-batches.md)). A power-on and a
 power cycle are sent in batches by `fanout.Batches`, the set split evenly, one
 batch after the other with a pause between, and a batch with a failure stops

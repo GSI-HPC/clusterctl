@@ -95,7 +95,7 @@ contexts:
 | `hosts` | Infrastructure roles: `host`, `user`, `forwardAgent`, `forwardX11`, `proxyJump`, `controlMaster`, `legacyAlgorithms`, `options`, `description` |
 | `networks` | Named CIDRs, used by tunnels |
 | `credentials` | Named accounts and where their password is read from |
-| `bmc` | Out-of-band access: `credential`, `order`, `ipmi`, `redfish`, `pdu`, `vendors` |
+| `bmc` | Out-of-band access: `credential`, `order`, `ipmi`, `redfish` (`redfish.maxConcurrent` processors at once, fewer when `--fanout` is lower; `fanout.max` does not change it), `pdu`, `vendors` |
 | `ssh` | Transport: `knownHostsFile`, `include`, timeouts, `sendEnv`, `options`, `binary` |
 | `tunnels` | sshuttle profiles: `remote`, `subnets`, `excludes`, `dns`, `method` |
 | `safety` | `protectedHosts`, `confirmAbove`, `slurmAware`, `powerOnBatch`, `powerOnStagger` |

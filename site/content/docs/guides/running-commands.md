@@ -141,6 +141,13 @@ The default is conservative, because a connection through a tunnel or a jump
 host is more fragile than a local one, and because a wide fan-out is what makes
 sshd refuse connections under `MaxStartups`.
 
+Redfish requests go to `bmc.redfish.maxConcurrent` service processors at a
+time, 8 by default, whatever `fanout.max` says: a processor is much slower
+than a node, and a site that widens the fan-out for its nodes does not mean to
+widen it for its processors. A `--fanout` below that lowers it too, so
+`--fanout 1` asks one processor at a time; one above it does not raise it, so
+`--fanout 64` still asks 8 at once.
+
 `fanout.max` and `--fanout` have to be at least 1. A `0` or a negative value
 is refused, by `config validate` with the file and line it was written on,
 rather than quietly read as the default.

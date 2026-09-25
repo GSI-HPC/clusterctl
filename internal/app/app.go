@@ -665,6 +665,24 @@ func (a *App) Executor() *fanout.Executor {
 	return &fanout.Executor{Runner: a.Runner, Max: a.Spec.Fanout.Max, PanicLog: a.Diag}
 }
 
+// FanoutFlag is what --fanout gave, zero when it was not given. fanout.max
+// holds it too, but it may as well come from a document, the environment
+// or --set, and only the flag lowers the bounds that have a setting of
+// their own (Bound). Under clusterctl mcp it is the server's own --fanout,
+// since an agent cannot give one.
+func (a *App) FanoutFlag() int { return a.opts.Fanout }
+
+// Bound is the bound of a kind of work that has a setting of its own, such
+// as bmc.redfish.maxConcurrent: the setting, or --fanout where that was
+// given and is lower. --fanout never raises it, and fanout.max in the
+// configuration does not change it (ADR 0022).
+func (a *App) Bound(setting int) int {
+	if f := a.FanoutFlag(); f > 0 && f < setting {
+		return f
+	}
+	return setting
+}
+
 // Timeout returns the command timeout for remote execution.
 func (a *App) Timeout() v1alpha1.Duration { return a.Spec.Fanout.CommandTimeout }
 
