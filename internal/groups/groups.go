@@ -21,16 +21,15 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
+	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -469,7 +468,7 @@ func (r *Resolver) run(target transport.Target, command []string) (string, error
 			return "", result.Err
 		}
 		return "", exitcode.Errorf(exitcode.TargetFailed, "%s: %s exited %d: %s",
-			target, command[0], result.ExitCode, escape(firstLine(result.Stderr, result.Stdout)))
+			target, command[0], result.ExitCode, output.EscapeCell(firstLine(result.Stderr, result.Stdout)))
 	}
 	return strings.Join(fields(result.Stdout), ","), nil
 }
@@ -484,21 +483,6 @@ func firstLine(candidates ...string) string {
 		}
 	}
 	return "the command failed without saying why"
-}
-
-// escape makes the control characters of text that came from a host
-// visible, so that it cannot rewrite the terminal it is printed on.
-func escape(s string) string {
-	var b strings.Builder
-	for _, c := range s {
-		if unicode.IsControl(c) {
-			q := strconv.QuoteRune(c)
-			b.WriteString(q[1 : len(q)-1])
-			continue
-		}
-		b.WriteRune(c)
-	}
-	return b.String()
 }
 
 // fields splits command output on whitespace and commas, which is how the
