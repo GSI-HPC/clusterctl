@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -453,6 +454,63 @@ func TestBootGrubSetSaysItPersistsAndCanBeUnset(t *testing.T) {
 	h, err = run(t, harnessOptions{}, "boot", "grub", "unset", "exe0001")
 	if err == nil || len(h.recorder.Calls()) != 0 {
 		t.Errorf("boot grub unset without a terminal should be refused and send nothing, got %v", err)
+	}
+}
+
+// TestBootGrubSetChecksTheTarget covers services.tftp.root, which #90 found
+// unread: boot grub set linked whatever it was given, so a mistyped target
+// left a dangling link that only the node's next boot revealed, and an
+// absolute link was one a TFTP server confined to its root cannot follow.
+// The commands run in a real shell against a TFTP root in a temporary
+// directory.
+func TestBootGrubSetChecksTheTarget(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "grub/1.0/grub.cfg.install-exec"), "menuentry install {}\n")
+	mustWrite(t, filepath.Join(root, "images/rescue.cfg"), "menuentry rescue {}\n")
+	link := filepath.Join(root, "grub/grub.cfg-0A000201")
+	grubSet := func(target string, extra ...string) (*pxeHost, *harness, error) {
+		p := newPXEHost(t, pxeOptions{})
+		h, err := p.run(t, harnessOptions{}, append([]string{
+			"--set", "services.tftp.root=" + root, "--set", "services.tftp.grubPath=" + root + "/grub",
+			"boot", "grub", "set", "exe0001", target, "-y"}, extra...)...)
+		return p, h, err
+	}
+
+	for target, want := range map[string]string{
+		root + "/grub/1.0/grub.cfg.install-exec": "1.0/grub.cfg.install-exec",
+		"1.0/grub.cfg.install-exec":              "1.0/grub.cfg.install-exec",
+		root + "/images/rescue.cfg":              "../images/rescue.cfg",
+	} {
+		_ = os.Remove(link)
+		if _, h, err := grubSet(target); err != nil {
+			t.Fatalf("boot grub set %s: %v\n%s", target, err, h.errOut)
+		}
+		if got, err := os.Readlink(link); err != nil || got != want {
+			t.Errorf("boot grub set %s linked %q (%v), want %q", target, got, err, want)
+		}
+		if _, err := os.Stat(link); err != nil {
+			t.Errorf("boot grub set %s left a link that does not resolve: %v", target, err)
+		}
+	}
+
+	_ = os.Remove(link)
+	for _, target := range []string{"/etc/hostname", "../../../../etc/hostname", root + "/grub/1.0/nosuch.cfg", root + "/grub/1.0"} {
+		for _, dryRun := range []bool{false, true} {
+			var extra []string
+			if dryRun {
+				extra = []string{"--dry-run"}
+			}
+			p, _, err := grubSet(target, extra...)
+			wantCode(t, err, exitcode.Usage)
+			for _, c := range p.rec.Calls() {
+				if slices.Contains(c.Request.Argv, "ln") {
+					t.Errorf("boot grub set %s %v linked it: %q", target, extra, c.Command)
+				}
+			}
+		}
+		if _, err := os.Lstat(link); err == nil {
+			t.Fatalf("boot grub set %s left a link", target)
+		}
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -757,6 +759,11 @@ GRUB looks for a file named after the node's address in hexadecimal, which is
 what this command computes. Unlike a PXE boot path, the link has no one-shot
 form: GRUB loads the target at every boot until "boot grub unset" removes it.
 
+TARGET is a file on the TFTP host, relative to services.tftp.grubPath unless
+it is absolute. It has to exist and to lie under services.tftp.root, which is
+all the TFTP server serves. The link is written relative to its directory, so
+that a TFTP server confined to its root follows it too.
+
   clusterctl boot grub set exe0001 /srv/tftp/grub/1.0/grub.cfg.install-exec`,
 		cobra.ExactArgs(2),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
@@ -764,20 +771,35 @@ form: GRUB loads the target at every boot until "boot grub unset" removes it.
 			if err != nil {
 				return err
 			}
+			target, rel, err := grubTarget(a, args[1])
+			if err != nil {
+				return err
+			}
+			// The target is looked for the way the link will find it, from
+			// the link's directory, so a dry run refuses what the real run
+			// would leave dangling.
+			if _, err := a.ReadOnRole(a.Context(), role, transport.Request{
+				Argv: []string{"test", "-f", path.Dir(link) + "/" + rel},
+			}); err != nil {
+				if exitcode.From(err) != exitcode.TargetFailed {
+					return err
+				}
+				return exitcode.Errorf(exitcode.Usage, "%s is not a file on the TFTP host, so GRUB would load nothing", target)
+			}
 			if err := a.Gate.Confirm(safety.Action{
 				Verb:    "set the GRUB configuration of",
 				Targets: singleNode(node),
 				Detail: fmt.Sprintf("%s -> %s, persistently: it stays until \"clusterctl boot grub unset %s\"",
-					link, args[1], node),
+					link, rel, node),
 			}); err != nil {
 				return err
 			}
 			if _, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Argv: []string{"ln", "-sfn", args[1], link},
+				Argv: []string{"ln", "-sfn", "--", rel, link},
 			}); err != nil {
 				return err
 			}
-			a.Printf("%s now loads %s at every boot, until \"clusterctl boot grub unset %s\"\n", node, args[1], node)
+			a.Printf("%s now loads %s at every boot, until \"clusterctl boot grub unset %s\"\n", node, target, node)
 			return nil
 		}))
 
@@ -856,6 +878,39 @@ func grubLink(a *app.App, expr string) (role, node, link string, err error) {
 		return "", "", "", exitcode.Wrap(exitcode.Usage, err)
 	}
 	return role, node, grubPath + "/grub.cfg-" + hex, nil
+}
+
+// grubTarget resolves the TARGET of boot grub set, a path on the TFTP host,
+// and returns it with the path the link holds, which is relative to the
+// link's directory: a TFTP server confined to its root resolves an absolute
+// link inside that root, where the path does not exist. The target has to
+// lie under the root, which is all the server serves.
+func grubTarget(a *app.App, target string) (abs, rel string, err error) {
+	spec := a.Spec.Services.TFTP
+	root, dir := path.Clean(spec.Root), path.Clean(spec.GrubPath)
+	under := func(p string) bool { return root == "/" || strings.HasPrefix(p, root+"/") }
+	switch {
+	case !path.IsAbs(root):
+		return "", "", exitcode.Errorf(exitcode.Usage, "services.tftp.root %q is not an absolute path", spec.Root)
+	case !path.IsAbs(dir) || dir != root && !under(dir):
+		return "", "", exitcode.Errorf(exitcode.Usage,
+			"services.tftp.grubPath %q is not a directory under services.tftp.root %s", spec.GrubPath, root)
+	}
+	abs = path.Clean(target)
+	if !path.IsAbs(abs) {
+		abs = path.Join(dir, target)
+	}
+	if !under(abs) {
+		return "", "", exitcode.Errorf(exitcode.Usage,
+			"%s is outside the TFTP root %s, which is all the TFTP server serves", abs, root)
+	}
+	split := func(p string) []string { return strings.FieldsFunc(p, func(c rune) bool { return c == '/' }) }
+	from, to := split(dir), split(abs)
+	common := 0
+	for common < len(from) && common < len(to) && from[common] == to[common] {
+		common++
+	}
+	return abs, path.Join(append(slices.Repeat([]string{".."}, len(from)-common), to[common:]...)...), nil
 }
 
 func singleNode(node string) *nodeset.NodeSet {
