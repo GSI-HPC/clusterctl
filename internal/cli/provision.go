@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -187,10 +188,7 @@ This overwrites files on the nodes, so it asks first.
 // that exists is left as it is. The payload is never an argument and never
 // a file on this machine.
 func secretScript(file v1alpha1.SecretFile, size int) string {
-	mode := file.Mode
-	if mode == "" {
-		mode = "0600"
-	}
+	mode := cmp.Or(file.Mode, "0600")
 	dir := shellquote.Quote(path.Dir(file.Target))
 	var b strings.Builder
 	fmt.Fprintf(&b, "set -eu\numask 077\nmkdir -p -m 0700 %s\n", dir)
@@ -951,7 +949,7 @@ commands that remove it.
 				output.Column{Name: "STATE"},
 			)
 			for _, n := range plan.nodes {
-				t.Add(n.Node, n.BootPath, orDash(n.BootLink), orDash(n.BootOnce), orDash(n.Reset), n.State)
+				t.Add(n.Node, n.BootPath, cmp.Or(n.BootLink, "-"), cmp.Or(n.BootOnce, "-"), cmp.Or(n.Reset, "-"), n.State)
 			}
 			t.Caption = plan.caption(noReset)
 			if printErr := a.Print(output.Result{Table: t, Object: plan.nodes}); printErr != nil && err == nil {
@@ -1322,13 +1320,6 @@ func (p *reinstallPlan) caption(noReset bool) string {
 	return ""
 }
 
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
 // stepOutcome names what became of one request to a processor.
 func stepOutcome(err error, done string) string {
 	switch {
@@ -1468,9 +1459,9 @@ credential, and 1 when a host refused.`,
 					s.fail(fmt.Errorf("reading the boot links on %s: %w", role, linkErr))
 					continue
 				}
-				s.BootPath = output.EscapeCell(orNone(links[address]))
+				s.BootPath = output.EscapeCell(cmp.Or(links[address], "none"))
 				if suffix != "" {
-					s.PersistentBootPath = output.EscapeCell(orNone(links[address+suffix]))
+					s.PersistentBootPath = output.EscapeCell(cmp.Or(links[address+suffix], "none"))
 				}
 			}
 
@@ -1528,15 +1519,15 @@ credential, and 1 when a host refused.`,
 			var failedNames []string
 			var failedErrs []error
 			for _, s := range states {
-				row := []string{s.Node, orUnknown(s.BootPath)}
+				row := []string{s.Node, cmp.Or(s.BootPath, "unknown")}
 				if suffix != "" {
-					row = append(row, orUnknown(s.PersistentBootPath))
+					row = append(row, cmp.Or(s.PersistentBootPath, "unknown"))
 				}
 				reachable := "no"
 				if s.SSH {
 					reachable = "yes"
 				}
-				row = append(row, orUnknown(s.Power), reachable, s.Uptime, s.Error)
+				row = append(row, cmp.Or(s.Power, "unknown"), reachable, s.Uptime, s.Error)
 				t.Add(row...)
 				if s.err != nil {
 					failedNames = append(failedNames, s.Node)
@@ -1553,17 +1544,10 @@ credential, and 1 when a host refused.`,
 		}))
 }
 
-func orUnknown(s string) string {
-	if s == "" {
-		return "unknown"
-	}
-	return s
-}
-
 // sshReason is the reason a node gave for failing, or the transport's.
 func sshReason(res *transport.Result) string {
 	for _, text := range []string{res.Stderr, res.Stdout} {
-		for _, line := range strings.Split(text, "\n") {
+		for line := range strings.SplitSeq(text, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				return line
 			}

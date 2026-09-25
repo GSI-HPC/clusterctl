@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -166,7 +167,7 @@ func TestExecResultsAreCached(t *testing.T) {
 	}}
 	r := testResolver(t, rec, t.TempDir())
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := r.Resolve("slurm", "main"); err != nil {
 			t.Fatalf("Resolve failed: %v", err)
 		}
@@ -294,9 +295,7 @@ func TestDiskCacheIsKeptPerScopeHostAndGroup(t *testing.T) {
 			exec.Map = []string{"sinfo", "-h", "-o", "%N", "-M", "other", "-p", groups.PlaceholderGroup}
 			src.Exec = &exec
 			sources := map[string]v1alpha1.GroupSource{}
-			for k, v := range o.Spec.Sources {
-				sources[k] = v
-			}
+			maps.Copy(sources, o.Spec.Sources)
 			sources["slurm"] = src
 			o.Spec.Sources = sources
 		}, "gpu/a100", false},
@@ -455,7 +454,7 @@ func TestExecListIsCached(t *testing.T) {
 
 	rec := answer("main,gpu")
 	r := testResolver(t, rec, dir)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		got, err := r.List("slurm")
 		if err != nil {
 			t.Fatal(err)

@@ -4,6 +4,7 @@
 package mcpserver
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -365,10 +366,7 @@ func (s *Server) querySlurm(ctx context.Context, _ *mcp.CallToolRequest, in slur
 		count = len(partitions)
 		items = partitions[:min(limit, count)]
 	case "summary":
-		state := in.State
-		if state == "" {
-			state = "PENDING"
-		}
+		state := cmp.Or(in.State, "PENDING")
 		jobs, err := c.Jobs(ctx, slurm.JobFilter{States: upper(state)})
 		if err != nil {
 			return nil, nil, callError(exitcode.Wrap(exitcode.Transport, err))

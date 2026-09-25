@@ -339,16 +339,12 @@ func (inv *Inventory) apply(name string, defaults v1alpha1.NodeDefaults, e v1alp
 	node, ok := inv.nodes[name]
 	if !ok {
 		node = &Node{Name: name, Attributes: map[string]string{}}
-		for k, v := range defaults.Attributes {
-			node.Attributes[k] = v
-		}
+		maps.Copy(node.Attributes, defaults.Attributes)
 		node.Rack, node.Level = node.Attributes["rack"], node.Attributes["level"]
 		inv.nodes[name] = node
 		inv.order = append(inv.order, name)
 	}
-	for k, v := range e.Attributes {
-		node.Attributes[k] = v
-	}
+	maps.Copy(node.Attributes, e.Attributes)
 	// The rack and the level are also exposed as attributes, so that a
 	// group source reading an attribute can build one group per rack
 	// without the rack having to be written twice. Either way of writing

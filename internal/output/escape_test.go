@@ -64,8 +64,8 @@ func TestTableCellCannotForgeARow(t *testing.T) {
 
 	for _, spec := range []string{"table", "wide"} {
 		got := render(t, spec, output.Result{Table: table})
-		lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
-		for _, line := range lines {
+		lines := strings.SplitSeq(strings.TrimRight(got, "\n"), "\n")
+		for line := range lines {
 			if strings.HasPrefix(line, "exe0002") {
 				t.Errorf("-o %s printed a forged row:\n%s", spec, got)
 			}

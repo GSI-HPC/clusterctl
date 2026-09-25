@@ -94,7 +94,7 @@ func TestTableAlignsAndDoesNotTruncate(t *testing.T) {
 	if !strings.Contains(got, long) {
 		t.Errorf("the value was truncated:\n%s", got)
 	}
-	for _, line := range strings.Split(strings.TrimRight(got, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(got, "\n"), "\n") {
 		if strings.HasSuffix(line, " ") {
 			t.Errorf("line %q has trailing whitespace", line)
 		}

@@ -335,7 +335,7 @@ func TestCincShowReportsNodesItCouldNotRead(t *testing.T) {
 	h, err := run(t, harnessOptions{recorder: rec}, "cinc", "show", "-n", "exe[1-4]")
 	wantCode(t, err, exitcode.Transport)
 	rows := map[string]string{}
-	for _, line := range strings.Split(h.out.String(), "\n") {
+	for line := range strings.SplitSeq(h.out.String(), "\n") {
 		if name, rest, ok := strings.Cut(line, " "); ok {
 			rows[name] = rest
 		}

@@ -173,14 +173,12 @@ func TestRedfishClientsAreBuiltConcurrently(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for _, node := range nodeset.MustParse("exe[0001-0008]").Expand() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			client, err := a.RedfishClient(context.Background(), node)
 			if err != nil || client.Password != "s3cret" {
 				t.Errorf("RedfishClient(%q) = %v, %v", node, client, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

@@ -5,6 +5,7 @@ package cli
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -141,7 +142,7 @@ func (c *slurmCluster) selected(req transport.Request) []slurm.Row {
 	var wanted *nodeset.NodeSet
 	if list := slurm.Arg(req, "--nodes"); list != "" {
 		wanted = nodeset.New()
-		for _, word := range strings.Split(list, ",") {
+		for word := range strings.SplitSeq(list, ",") {
 			switch {
 			case strings.EqualFold(word, "all"):
 				for _, n := range c.nodes {
@@ -172,11 +173,9 @@ func (c *slurmCluster) selected(req transport.Request) []slurm.Row {
 }
 
 func matchesAny(match string, states []string) bool {
-	for _, have := range strings.Fields(match) {
-		for _, want := range states {
-			if have == want {
-				return true
-			}
+	for have := range strings.FieldsSeq(match) {
+		if slices.Contains(states, have) {
+			return true
 		}
 	}
 	return false

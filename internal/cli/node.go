@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -395,9 +396,7 @@ and -o yaml too.`,
 				status := fanout.Status(res)
 				if res.Failed() {
 					detail := failureDetail(res)
-					if detail == "" {
-						detail = status
-					}
+					detail = cmp.Or(detail, status)
 					t.Add(res.Target.Name, status, "", "", "", "", "")
 					object = append(object, map[string]string{
 						"node": res.Target.Name, "status": status, "error": detail,

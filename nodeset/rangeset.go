@@ -109,7 +109,7 @@ func parseSpans(spec string) ([]span, int, error) {
 		spans []span
 		total int
 	)
-	for _, part := range strings.Split(spec, ",") {
+	for part := range strings.SplitSeq(spec, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			return nil, 0, fmt.Errorf("empty range element in %q", spec)
@@ -124,8 +124,8 @@ func parseSpans(spec string) ([]span, int, error) {
 			part = part[:slash]
 		}
 		lo, hi := part, ""
-		if dash := strings.IndexByte(part, '-'); dash >= 0 {
-			lo, hi = part[:dash], part[dash+1:]
+		if before, after, ok := strings.Cut(part, "-"); ok {
+			lo, hi = before, after
 		}
 		start, err := parseNumber(lo)
 		if err != nil {

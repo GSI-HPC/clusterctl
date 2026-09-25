@@ -290,12 +290,10 @@ var (
 	globalRefused = trustKeywords
 )
 
-func merged(maps ...map[string]string) map[string]string {
+func merged(tables ...map[string]string) map[string]string {
 	out := map[string]string{}
-	for _, m := range maps {
-		for k, v := range m {
-			out[k] = v
-		}
+	for _, m := range tables {
+		maps.Copy(out, m)
 	}
 	return out
 }
@@ -446,7 +444,7 @@ func (c *Client) resolveJumps(value string) (string, []string, error) {
 		hops  []string
 		roles []string
 	)
-	for _, element := range strings.Split(value, ",") {
+	for element := range strings.SplitSeq(value, ",") {
 		hop, err := parseHop(strings.TrimSpace(element))
 		if err != nil {
 			return "", nil, fmt.Errorf("proxyJump %q: %w", value, err)

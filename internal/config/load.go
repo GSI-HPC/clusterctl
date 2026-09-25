@@ -4,6 +4,7 @@
 package config
 
 import (
+	"cmp"
 	_ "embed"
 	"fmt"
 	"maps"
@@ -194,9 +195,7 @@ func (b *Bundle) mergeConfigDocuments(docs []*Document) error {
 
 // Context returns the named context, or the current one when name is empty.
 func (b *Bundle) Context(name string) (v1alpha1.Context, error) {
-	if name == "" {
-		name = b.Config.CurrentContext
-	}
+	name = cmp.Or(name, b.Config.CurrentContext)
 	if name == "" {
 		if len(b.Config.Contexts) == 1 {
 			return b.Config.Contexts[0], nil

@@ -123,8 +123,8 @@ var effects = map[string]safety.Effect{
 // after the program name.
 func commandPath(cmd *cobra.Command) string {
 	path := cmd.CommandPath()
-	if i := strings.IndexByte(path, ' '); i >= 0 {
-		return path[i+1:]
+	if _, after, ok := strings.Cut(path, " "); ok {
+		return after
 	}
 	return ""
 }

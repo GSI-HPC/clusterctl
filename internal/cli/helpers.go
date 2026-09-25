@@ -178,10 +178,8 @@ func (e *hostFailures) Error() string { return e.message }
 func (e *hostFailures) Unwrap() []error { return e.errs }
 
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
+	before, _, _ := strings.Cut(s, "\n")
+	return before
 }
 
 func lastNonEmpty(s string) string {

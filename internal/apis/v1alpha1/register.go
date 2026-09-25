@@ -3,7 +3,10 @@
 
 package v1alpha1
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // GroupVersion identifies this version of the configuration schema.
 const GroupVersion = "clusterctl/v1alpha1"
@@ -39,12 +42,7 @@ type ObjectMeta struct {
 
 // KnownKind reports whether kind is one this version defines.
 func KnownKind(kind string) bool {
-	for _, k := range Kinds() {
-		if k == kind {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Kinds(), kind)
 }
 
 // CheckTypeMeta validates the apiVersion and kind of a document.

@@ -403,13 +403,14 @@ func TestSopsValuesComeBackAsWritten(t *testing.T) {
 		"unicode":   "grüße 🔑",
 		"empty":     "",
 	}
-	doc := secretDoc
+	var doc strings.Builder
+	doc.WriteString(secretDoc)
 	for key, value := range values {
-		doc += "  " + key + ": " + strconv.Quote(value) + "\n"
+		doc.WriteString("  " + key + ": " + strconv.Quote(value) + "\n")
 	}
-	doc += "binaryData:\n  munge-key: czNjcjN0LWtleQ==\n"
+	doc.WriteString("binaryData:\n  munge-key: czNjcjN0LWtleQ==\n")
 	id := newIdentity(t)
-	file := sopstest.Encrypt(t, doc+"# a comment, encrypted too\n", id.Recipient().String())
+	file := sopstest.Encrypt(t, doc.String()+"# a comment, encrypted too\n", id.Recipient().String())
 	got, err := decrypt(t, realSops(t), file, secrets.SopsKeys{Identities: identities(t, id.String()+"\n")})
 	if err != nil {
 		t.Fatalf("DecryptSops failed: %v", err)

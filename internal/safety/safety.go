@@ -158,10 +158,8 @@ func (g *Gate) ProtectedIn(targets *nodeset.NodeSet) (*nodeset.NodeSet, error) {
 
 // short returns a host name without its domain.
 func short(name string) string {
-	if i := strings.IndexByte(name, '.'); i >= 0 {
-		return name[:i]
-	}
-	return name
+	before, _, _ := strings.Cut(name, ".")
+	return before
 }
 
 // Action describes what is about to happen, for the prompt and the preview.

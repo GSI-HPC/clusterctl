@@ -9,6 +9,7 @@
 package version
 
 import (
+	"cmp"
 	"fmt"
 	"runtime"
 	"runtime/debug"
@@ -72,13 +73,9 @@ func fromBuildInfo(info Info, bi *debug.BuildInfo) Info {
 			switch s.Key {
 			case "vcs.revision":
 				checkout = true
-				if info.Commit == "" {
-					info.Commit = s.Value
-				}
+				info.Commit = cmp.Or(info.Commit, s.Value)
 			case "vcs.time":
-				if info.Date == "" {
-					info.Date = s.Value
-				}
+				info.Date = cmp.Or(info.Date, s.Value)
 			case "vcs.modified":
 				info.Dirty = s.Value == "true"
 			}
@@ -88,9 +85,7 @@ func fromBuildInfo(info Info, bi *debug.BuildInfo) Info {
 		}
 	}
 
-	if info.Version == "" {
-		info.Version = "devel"
-	}
+	info.Version = cmp.Or(info.Version, "devel")
 	return info
 }
 

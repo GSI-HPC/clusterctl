@@ -72,7 +72,7 @@ func TestRunBoundsConcurrency(t *testing.T) {
 
 	e := &fanout.Executor{Runner: rec, Max: 3}
 	var all []transport.Target
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		all = append(all, transport.Target{Name: fmt.Sprintf("exe%d", i)})
 	}
 	e.Run(context.Background(), all, transport.Request{Argv: []string{"true"}})

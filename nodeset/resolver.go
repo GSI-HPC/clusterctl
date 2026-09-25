@@ -4,6 +4,7 @@
 package nodeset
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"strings"
@@ -39,8 +40,8 @@ func resolveGroup(ref string, res Resolver, depth int, b *budget) (*NodeSet, err
 	// resolver backed by several sources can search them all for a bare
 	// @group reference rather than being limited to its default.
 	source, group := "", ref
-	if colon := strings.IndexByte(ref, ':'); colon >= 0 {
-		source, group = ref[:colon], ref[colon+1:]
+	if before, after, ok := strings.Cut(ref, ":"); ok {
+		source, group = before, after
 	}
 	if group == "" {
 		return nil, fmt.Errorf("empty group name in @%s", ref)
@@ -83,9 +84,7 @@ func NewMapResolver(source string, groups map[string]string) *MapResolver {
 
 // Resolve implements Resolver. An empty source means the default one.
 func (m *MapResolver) Resolve(source, group string) (string, error) {
-	if source == "" {
-		source = m.Default
-	}
+	source = cmp.Or(source, m.Default)
 	groups, ok := m.Groups[source]
 	if !ok {
 		return "", fmt.Errorf("unknown group source %q", source)
@@ -99,9 +98,7 @@ func (m *MapResolver) Resolve(source, group string) (string, error) {
 
 // List implements Resolver. An empty source means the default one.
 func (m *MapResolver) List(source string) ([]string, error) {
-	if source == "" {
-		source = m.Default
-	}
+	source = cmp.Or(source, m.Default)
 	groups, ok := m.Groups[source]
 	if !ok {
 		return nil, fmt.Errorf("unknown group source %q", source)

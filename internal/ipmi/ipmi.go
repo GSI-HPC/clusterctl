@@ -12,9 +12,11 @@
 package ipmi
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -110,18 +112,13 @@ func (b *Backend) Power(ctx context.Context, action string, bmcs *nodeset.NodeSe
 }
 
 func (b *Backend) backend() string {
-	if b.Spec.Backend != "" {
-		return b.Spec.Backend
-	}
-	return BackendIpmipower
+	return cmp.Or(b.Spec.Backend, BackendIpmipower)
 }
 
 // CheckAction reports whether the backends understand a power action.
 func CheckAction(action string) error {
-	for _, known := range Actions() {
-		if action == known {
-			return nil
-		}
+	if slices.Contains(Actions(), action) {
+		return nil
 	}
 	return exitcode.Errorf(exitcode.Usage, "unknown power action %q; expected one of %s",
 		action, strings.Join(Actions(), ", "))
@@ -203,14 +200,8 @@ func (b *Backend) runIpmipower(ctx context.Context, action string, bmcs *nodeset
 	if err != nil {
 		return nil, err
 	}
-	binary := b.Spec.IpmipowerPath
-	if binary == "" {
-		binary = "/usr/sbin/ipmipower"
-	}
-	driver := b.Spec.Driver
-	if driver == "" {
-		driver = "LAN_2_0"
-	}
+	binary := cmp.Or(b.Spec.IpmipowerPath, "/usr/sbin/ipmipower")
+	driver := cmp.Or(b.Spec.Driver, "LAN_2_0")
 
 	argv := []string{binary, "--config-file", passwordFilePlaceholder,
 		"--driver-type", driver, "--hostname", bmcs.Hostlist(), flag}
@@ -234,10 +225,7 @@ func (b *Backend) runIpmitool(ctx context.Context, action string, bmcs *nodeset.
 	if err != nil {
 		return nil, err
 	}
-	binary := b.Spec.IpmitoolPath
-	if binary == "" {
-		binary = "/usr/bin/ipmitool"
-	}
+	binary := cmp.Or(b.Spec.IpmitoolPath, "/usr/bin/ipmitool")
 
 	// ipmitool takes one host per invocation, so the loop runs on the
 	// gateway rather than opening one ssh connection per processor. Each
@@ -292,9 +280,7 @@ func (b *Backend) collect(result *transport.Result, bmcs *nodeset.NodeSet, answe
 		case found:
 			status.State = "unknown"
 			status.Err = text
-			if status.Err == "" {
-				status.Err = "the IPMI backend printed nothing for it"
-			}
+			status.Err = cmp.Or(status.Err, "the IPMI backend printed nothing for it")
 			status.Cause = errors.New(status.Err)
 		default:
 			status.State = "unknown"

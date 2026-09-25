@@ -12,6 +12,7 @@ package hostkeys
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/sha1" // ssh hashes known_hosts names with HMAC-SHA1
@@ -413,10 +414,7 @@ type Scanner struct {
 // handshake, best first, so the server picks the strongest it has and an
 // unreachable host costs one timeout rather than one for each algorithm.
 func (s *Scanner) Scan(ctx context.Context, host string) ([]Entry, error) {
-	port := s.Port
-	if port == "" {
-		port = "22"
-	}
+	port := cmp.Or(s.Port, "22")
 	timeout := s.Timeout
 	if timeout <= 0 {
 		timeout = 10 * time.Second

@@ -69,21 +69,17 @@ func startServer(t *testing.T) *testServer {
 		_ = listener.Close()
 		wg.Wait()
 	})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
 				return
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				serveConn(conn, config)
-			}()
+			})
 		}
-	}()
+	})
 
 	port := listener.Addr().(*net.TCPAddr).Port
 	return &testServer{
@@ -172,7 +168,7 @@ func resolved(t *testing.T, config, host string) map[string]string {
 		t.Fatalf("ssh -G -F %s %s failed: %v\n%s", config, host, err, out)
 	}
 	values := map[string]string{}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		key, value, ok := strings.Cut(line, " ")
 		if ok {
 			if prev, seen := values[key]; seen {

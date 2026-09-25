@@ -576,7 +576,7 @@ func TestPlansAndAppliesAreAudited(t *testing.T) {
 		t.Fatal(err)
 	}
 	var outcomes []string
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		var e struct {
 			Event   string    `json:"event"`
 			Plan    string    `json:"plan"`

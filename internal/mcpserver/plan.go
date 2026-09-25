@@ -241,11 +241,9 @@ func (s *Server) addPlanTools() {
 		Description: "Carry out a plan from plan_change. Repeat the plan's nodes and count exactly as the plan " +
 			"gave them. The user is asked to confirm, and above the site's threshold to type the number of " +
 			"hosts; a declined confirmation changes nothing.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(true), OpenWorldHint: ptr(true)},
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(true)},
 	}, s.applyPlan)
 }
-
-func ptr[T any](v T) *T { return &v }
 
 // planInput is the argument of plan_change.
 type planInput struct {

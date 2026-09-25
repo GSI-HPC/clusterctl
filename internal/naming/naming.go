@@ -7,6 +7,7 @@ package naming
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"regexp"
 	"strings"
@@ -161,9 +162,7 @@ func (n *Namer) match(node string) (rule, bool) {
 
 func (n *Namer) expand(template, node string) (string, error) {
 	vars := make(map[string]string, len(n.vars)+1)
-	for k, v := range n.vars {
-		vars[k] = v
-	}
+	maps.Copy(vars, n.vars)
 	vars["name"] = node
 	out, err := tmpl.Expand(template, vars)
 	if err != nil {
@@ -198,8 +197,6 @@ func (n *Namer) mapSet(ns *nodeset.NodeSet, f func(string) (string, error)) (*no
 
 // Short returns the node name without its domain.
 func Short(name string) string {
-	if i := strings.IndexByte(name, '.'); i >= 0 {
-		return name[:i]
-	}
-	return name
+	before, _, _ := strings.Cut(name, ".")
+	return before
 }

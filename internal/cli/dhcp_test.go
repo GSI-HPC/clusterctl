@@ -23,7 +23,7 @@ func serveDHCP(files map[string]string) *transport.Recorder {
 			return &transport.Result{Target: tg, ExitCode: 1, Stderr: "No such file or directory"}, nil
 		}
 		var report strings.Builder
-		for _, line := range strings.Split(req.Script, "\n") {
+		for line := range strings.SplitSeq(req.Script, "\n") {
 			if fields := strings.Fields(line); len(fields) > 1 && fields[0] == "bootlink" {
 				report.WriteString("ok\t" + fields[1] + "\n")
 			}

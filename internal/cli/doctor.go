@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -175,10 +176,7 @@ func localChecks(a *app.App) []check {
 
 	// A sshuttle that is not installed means the tunnels cannot come up.
 	if len(a.Spec.Tunnels) > 0 {
-		binary := a.Spec.Workstation.SshuttleBinary
-		if binary == "" {
-			binary = "sshuttle"
-		}
+		binary := cmp.Or(a.Spec.Workstation.SshuttleBinary, "sshuttle")
 		if _, err := exec.LookPath(binary); err != nil {
 			checks = append(checks, check{"sshuttle", statusWarn,
 				binary + " is not in PATH; the tunnels cannot be started"})
@@ -294,7 +292,7 @@ func sshConfigCheck(a *app.App, path string) check {
 
 func nonEmptyLines(s string) []string {
 	var out []string
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			out = append(out, line)
 		}
