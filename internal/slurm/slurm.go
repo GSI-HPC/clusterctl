@@ -181,11 +181,15 @@ type Node struct {
 	ReasonTime string `json:"reasonTime,omitempty" yaml:"reasonTime,omitempty"`
 }
 
+// stateFlags are the characters sinfo appends to a state to flag it: not
+// responding, powered down, rebooting, maintenance and so on.
+const stateFlags = "*~#!%$@^-"
+
 // BaseState strips the flag characters Slurm appends to a state, so that
 // "idle*" and "idle" compare equal.
 func (n Node) BaseState() string {
 	state, _, _ := strings.Cut(strings.ToLower(n.State), "+")
-	return strings.TrimRight(state, "*~#!%$@^-")
+	return strings.TrimRight(state, stateFlags)
 }
 
 // noReason reports whether sinfo's reason field says there is none. sinfo

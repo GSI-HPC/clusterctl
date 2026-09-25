@@ -10,7 +10,6 @@ import (
 	"net"
 	"os/exec"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +21,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
+	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -245,11 +245,6 @@ func addLoseJobsFlag(cmd *cobra.Command, loseJobs *bool) {
 		"go ahead although Slurm reports jobs on the nodes, or cannot say")
 }
 
-// sinfoHostlistLimit is the longest host list handed to sinfo. A longer one
-// would come close to the limit on one argument, so sinfo is asked about
-// every node instead and the answer is narrowed here.
-const sinfoHostlistLimit = 16 << 10
-
 // checkSlurmIdle refuses a power action on nodes that may be running a job.
 //
 // It fails closed: a node counts as idle only when Slurm reports it in a
@@ -270,7 +265,11 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs 
 		return nil
 	}
 
-	jobs, err := slurmJobs(a, nodes)
+	c, err := a.Slurm()
+	var jobs slurm.JobState
+	if err == nil {
+		jobs, err = c.JobCheck(a.Context(), nodes)
+	}
 	if err != nil {
 		if loseJobs {
 			a.Printf("could not ask Slurm whether %s run jobs (%s); going ahead because --lose-jobs was given\n", nodes, output.EscapeCell(err.Error()))
@@ -284,7 +283,7 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs 
 		return fmt.Errorf("could not ask Slurm whether %s run jobs, so nothing was done; "+
 			"pass --lose-jobs to go ahead without the check: %w", nodes, err)
 	}
-	if jobs.idle() {
+	if jobs.Idle() {
 		return nil
 	}
 	if loseJobs {
@@ -292,160 +291,10 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs 
 		return nil
 	}
 	advice := "pass --lose-jobs to go ahead and lose any jobs on them"
-	if !jobs.busy.IsEmpty() {
+	if !jobs.Busy.IsEmpty() {
 		advice = "drain them and wait for their jobs to end, or pass --lose-jobs to lose the jobs"
 	}
 	return exitcode.Errorf(exitcode.Usage, "%s; %s", jobs, advice)
-}
-
-func plural2(n int) string {
-	if n == 1 {
-		return "is"
-	}
-	return "are"
-}
-
-// slurmJobState is what Slurm said about the nodes of a power action.
-type slurmJobState struct {
-	// busy are the nodes in a state that runs jobs.
-	busy *nodeset.NodeSet
-	// strange are the nodes in a state the check does not know, with the
-	// states as Slurm wrote them.
-	strange *nodeset.NodeSet
-	states  []string
-	// missing are the nodes Slurm did not report at all.
-	missing *nodeset.NodeSet
-}
-
-func (s slurmJobState) idle() bool {
-	return s.busy.IsEmpty() && s.strange.IsEmpty() && s.missing.IsEmpty()
-}
-
-// String names every node that is not known to be idle, and why.
-func (s slurmJobState) String() string {
-	var parts []string
-	if !s.busy.IsEmpty() {
-		parts = append(parts, fmt.Sprintf("%s %s running Slurm jobs", s.busy, plural2(s.busy.Len())))
-	}
-	if !s.strange.IsEmpty() {
-		quoted := make([]string, len(s.states))
-		for i, state := range s.states {
-			// The state comes from the Slurm host; quoting it keeps control
-			// characters off the terminal.
-			quoted[i] = strconv.Quote(state)
-		}
-		parts = append(parts, fmt.Sprintf("Slurm reports %s in a state not known to be free of jobs (%s)",
-			s.strange, strings.Join(quoted, ", ")))
-	}
-	if !s.missing.IsEmpty() {
-		pronoun := "they run"
-		if s.missing.Len() == 1 {
-			pronoun = "it runs"
-		}
-		parts = append(parts, fmt.Sprintf("Slurm did not report %s, so whether %s jobs is not known "+
-			"(check that the Slurm and inventory names agree)", s.missing, pronoun))
-	}
-	return strings.Join(parts, "; ")
-}
-
-// slurmJobs asks Slurm about the state of every node in the set.
-func slurmJobs(a *app.App, nodes *nodeset.NodeSet) (slurmJobState, error) {
-	target, err := a.Role(a.Spec.Slurm.Role)
-	if err != nil {
-		return slurmJobState{}, err
-	}
-	// --all includes the nodes of hidden partitions, which run jobs too.
-	argv := []string{"sinfo", "--all", "-h", "-N", "-o", "%N %T"}
-	if hostlist := nodes.Hostlist(); len(hostlist) <= sinfoHostlistLimit {
-		argv = append(argv, "-n", hostlist)
-	}
-	req := a.Collect(transport.Request{Argv: argv, Timeout: 30 * time.Second})
-	result, err := a.ReadRunner.Run(a.Context(), target, req)
-	if err != nil {
-		return slurmJobState{}, err
-	}
-	if err := result.Check("sinfo"); err != nil {
-		return slurmJobState{}, err
-	}
-
-	// sinfo lists a node once per partition; the busiest answer counts.
-	verdict := map[string]slurmVerdict{}
-	stateOf := map[string]string{}
-	for _, line := range result.Lines() {
-		fields := strings.Fields(line)
-		if len(fields) == 0 || !nodes.Contains(fields[0]) {
-			continue
-		}
-		name, state := fields[0], ""
-		if len(fields) > 1 {
-			state = fields[1]
-		}
-		if v := classifySlurmState(state); v > verdict[name] {
-			verdict[name] = v
-			stateOf[name] = state
-		}
-	}
-
-	out := slurmJobState{busy: nodeset.New(), strange: nodeset.New(), missing: nodeset.New()}
-	seen := map[string]bool{}
-	for _, name := range nodes.Expand() {
-		switch verdict[name] {
-		case slurmUnreported:
-			_ = out.missing.Add(name)
-		case slurmStrange:
-			_ = out.strange.Add(name)
-			if state := stateOf[name]; !seen[state] {
-				seen[state] = true
-				out.states = append(out.states, state)
-			}
-		case slurmBusy:
-			_ = out.busy.Add(name)
-		}
-	}
-	return out, nil
-}
-
-// slurmVerdict is what a state says about jobs, ordered so that the more
-// cautious verdict is the larger one.
-type slurmVerdict int
-
-const (
-	slurmUnreported slurmVerdict = iota
-	slurmIdle
-	slurmStrange
-	slurmBusy
-)
-
-// slurmStateSuffixes are the characters sinfo appends to a state to flag
-// it: not responding, powered down, rebooting, maintenance and so on.
-const slurmStateSuffixes = "*~#!%$@^-+"
-
-// classifySlurmState reads a %T state. A compound state such as
-// "mixed+drain" is busy when any part is, and idle only when every part is
-// known to run no job.
-//
-// Only the states Slurm prints for a node without jobs count as idle. Slurm
-// prints "fail" for a mixed node with the fail flag, and "maint" and
-// "reboot" for a node whose jobs are still completing, so those are not.
-func classifySlurmState(state string) slurmVerdict {
-	base := strings.TrimRight(strings.ToLower(state), slurmStateSuffixes)
-	if base == "" {
-		return slurmStrange
-	}
-	verdict := slurmIdle
-	for part := range strings.SplitSeq(base, "+") {
-		switch part {
-		case "allocated", "alloc", "mixed", "mix", "completing", "comp",
-			"draining", "drng", "failing", "failg":
-			return slurmBusy
-		case "idle", "drained", "drain", "down", "future", "futr",
-			"planned", "plnd", "reserved", "resv",
-			"power_down", "powering_down", "powered_down", "pow_dn":
-		default:
-			verdict = slurmStrange
-		}
-	}
-	return verdict
 }
 
 func newBMCBootCommand(r *root) *cobra.Command {
