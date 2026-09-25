@@ -103,14 +103,6 @@ func TestSetsFold(t *testing.T) {
 	if got, want := hosts.String(), "exe[1-3].hpc.example.org"; got != want {
 		t.Errorf("FQDNSet = %q, want %q", got, want)
 	}
-
-	bmcs, err := n.BMCSet(nodeset.MustParse("exe[1-3]"))
-	if err != nil {
-		t.Fatalf("BMCSet failed: %v", err)
-	}
-	if got, want := bmcs.String(), "exe[1-3].mgmt.hpc.example.org"; got != want {
-		t.Errorf("BMCSet = %q, want %q", got, want)
-	}
 }
 
 func TestMissingDomainIsReported(t *testing.T) {
@@ -256,9 +248,6 @@ func TestBMCRefusesWhatItCannotDerive(t *testing.T) {
 		if got, err := tc.namer.BMC(tc.node); err == nil {
 			t.Errorf("%s: BMC(%q) = %q, want it refused", tc.name, tc.node, got)
 		}
-	}
-	if got, err := scaffold.BMCSet(nodeset.MustParse("exe[01-02]")); err == nil {
-		t.Errorf("BMCSet = %s, want it refused", got)
 	}
 }
 

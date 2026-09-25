@@ -378,11 +378,6 @@ func Load(path string) (*File, error) {
 	return Parse(data)
 }
 
-// Save writes a known_hosts file atomically.
-func Save(path string, f *File) error {
-	return fileutil.WriteAtomic(path, f.Render(), 0o644)
-}
-
 // Modify reads, changes and writes a known_hosts file under a lock, so that
 // two administrators refreshing at the same time cannot lose an entry.
 func Modify(ctx context.Context, path string, change func(*File) error) error {
@@ -405,8 +400,6 @@ var errCollected = errors.New("host key collected")
 // Scanner collects host keys by starting an SSH handshake and stopping as
 // soon as the server has presented its key.
 type Scanner struct {
-	// Algorithms are the key types to ask for, best first.
-	Algorithms []string
 	// Timeout bounds one host, from the dial to the key.
 	Timeout time.Duration
 	// Port is the SSH port; empty means 22.
@@ -420,10 +413,6 @@ type Scanner struct {
 // handshake, best first, so the server picks the strongest it has and an
 // unreachable host costs one timeout rather than one for each algorithm.
 func (s *Scanner) Scan(ctx context.Context, host string) ([]Entry, error) {
-	algorithms := s.Algorithms
-	if len(algorithms) == 0 {
-		algorithms = DefaultAlgorithms
-	}
 	port := s.Port
 	if port == "" {
 		port = "22"
@@ -440,7 +429,7 @@ func (s *Scanner) Scan(ctx context.Context, host string) ([]Entry, error) {
 		dial = (&net.Dialer{}).DialContext
 	}
 	address := net.JoinHostPort(host, port)
-	entry, err := scanOne(ctx, dial, address, host, algorithms, timeout)
+	entry, err := scanOne(ctx, dial, address, host, DefaultAlgorithms, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("no host key could be collected from %s: %w", host, err)
 	}

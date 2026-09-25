@@ -121,11 +121,6 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-// MergeMap merges a plain tree that did not come from a file.
-func (t *Tree) MergeMap(layer string, value map[string]any) {
-	t.mergeValue(layer, fixedOrigin(Origin{}), "", nil, value)
-}
-
 // originFunc says where the value written at a path of its source was
 // written.
 type originFunc func(srcPath string) Origin

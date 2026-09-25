@@ -64,16 +64,6 @@ var envPaths = map[string]string{
 	"CLUSTERCTL_BROWSER":         "workstation.browser",
 }
 
-// EnvOverrides lists the environment variables that override configuration,
-// for the documentation and for doctor.
-func EnvOverrides() map[string]string {
-	out := make(map[string]string, len(envPaths))
-	for k, v := range envPaths {
-		out[k] = v
-	}
-	return out
-}
-
 // Resolve merges the layers in order and decodes the result.
 func (b *Bundle) Resolve(opts ResolveOptions) (*Resolved, error) {
 	env := opts.Env

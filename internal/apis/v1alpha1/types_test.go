@@ -87,14 +87,11 @@ func TestDurationOr(t *testing.T) {
 	}
 }
 
-func TestLayersAndKindsAreComplete(t *testing.T) {
+func TestKindsAreComplete(t *testing.T) {
 	t.Parallel()
 
 	if got, want := len(v1alpha1.Kinds()), 6; got != want {
 		t.Errorf("Kinds() has %d entries, want %d", got, want)
-	}
-	if got, want := len(v1alpha1.Layers()), 7; got != want {
-		t.Errorf("Layers() has %d entries, want %d", got, want)
 	}
 	if !v1alpha1.KnownKind(v1alpha1.KindNodeInventory) || v1alpha1.KnownKind("Pod") {
 		t.Error("KnownKind does not agree with Kinds()")

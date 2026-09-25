@@ -122,15 +122,6 @@ func load(files []string, read func(string) ([]byte, error)) (*Bundle, error) {
 	return b, nil
 }
 
-// LoadDefault reads the configuration from the search path.
-func LoadDefault(env func(string) string) (*Bundle, error) {
-	files, err := SearchPath(env)
-	if err != nil {
-		return nil, err
-	}
-	return Load(files)
-}
-
 // addDocument indexes a document by name. Two documents of one kind and name
 // are an error rather than one replacing the other: the files of a directory
 // are read in name order, so a stale copy such as site_old.yaml, or a

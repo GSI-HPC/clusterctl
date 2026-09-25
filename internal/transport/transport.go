@@ -21,10 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
-	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -102,17 +100,12 @@ type Request struct {
 	// Script is a shell program run with the shell's -c, as one argument.
 	// Argv and Script are mutually exclusive.
 	Script string
-	// Shell runs Script; it defaults to bash.
-	Shell string
 	// TTY controls pseudo terminal allocation.
 	TTY TTY
 	// Timeout bounds the command. It is enforced on the target with
 	// timeout(1), because killing the local ssh leaves the remote process
 	// running.
 	Timeout time.Duration
-	// Env is exported for the command. It is passed through env(1) rather
-	// than SendEnv, which needs the server to allow each name.
-	Env map[string]string
 	// Stdin is fed to the command. Secrets travel this way so that they
 	// never appear in an argument vector, where ps shows them.
 	Stdin io.Reader
@@ -388,24 +381,14 @@ func RemoteCommand(req Request) (string, error) {
 		parts = append(parts, "timeout", "-k",
 			duration(killGrace), duration(req.Timeout))
 	}
-	if len(req.Env) > 0 {
-		parts = append(parts, "env")
-		for _, k := range slices.Sorted(maps.Keys(req.Env)) {
-			parts = append(parts, k+"="+req.Env[k])
-		}
-	}
 
 	switch {
 	case req.Script != "":
-		shell := req.Shell
-		if shell == "" {
-			shell = defaultShell
-		}
-		parts = append(parts, shell, "-c", req.Script)
+		parts = append(parts, defaultShell, "-c", req.Script)
 	case len(req.Argv) > 0:
 		parts = append(parts, req.Argv...)
 	case len(parts) > 0:
-		return "", errors.New("a timeout or environment was given without a command")
+		return "", errors.New("a timeout was given without a command")
 	default:
 		return "", nil
 	}

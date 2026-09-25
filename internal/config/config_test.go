@@ -19,12 +19,11 @@ const exampleDir = "../../examples/site"
 
 func loadExample(t *testing.T) *config.Bundle {
 	t.Helper()
-	b, err := config.LoadDefault(func(k string) string {
-		if k == config.EnvConfig {
-			return exampleDir
-		}
-		return ""
-	})
+	files, err := config.ExpandEntries([]string{exampleDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := config.Load(files)
 	if err != nil {
 		t.Fatalf("loading the example configuration: %v", err)
 	}

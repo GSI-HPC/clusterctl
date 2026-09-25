@@ -128,7 +128,7 @@ func TestParseRejectsAMalformedLine(t *testing.T) {
 	}
 }
 
-func TestLoadAndSave(t *testing.T) {
+func TestLoadAndModify(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "known_hosts")
@@ -140,9 +140,11 @@ func TestLoadAndSave(t *testing.T) {
 		t.Error("a missing file should read as empty")
 	}
 
-	empty.Add(hostkeys.Entry{Hosts: []string{"exe1"}, Type: "ssh-ed25519", Key: "AAAA"})
-	if err := hostkeys.Save(path, empty); err != nil {
-		t.Fatalf("Save failed: %v", err)
+	if err := hostkeys.Modify(context.Background(), path, func(f *hostkeys.File) error {
+		f.Add(hostkeys.Entry{Hosts: []string{"exe1"}, Type: "ssh-ed25519", Key: "AAAA"})
+		return nil
+	}); err != nil {
+		t.Fatalf("Modify failed: %v", err)
 	}
 	loaded, err := hostkeys.Load(path)
 	if err != nil {

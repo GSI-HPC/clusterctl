@@ -156,9 +156,6 @@ func (s *Server) Run(ctx context.Context, t mcp.Transport) error {
 // memory.
 func (s *Server) SDK() *mcp.Server { return s.sdk }
 
-// Context names the context the server is pinned to.
-func (s *Server) Context() string { return s.context }
-
 // app resolves the command context for one call. Every call reads the
 // configuration afresh, so an edit to the inventory or the protected hosts
 // is seen without restarting, and every call gets its own streams, so that
