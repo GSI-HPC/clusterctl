@@ -187,8 +187,8 @@ type IPMISpec struct {
 	// where ps would show it.
 	PasswordTransport string `json:"passwordTransport,omitempty" yaml:"passwordTransport,omitempty" jsonschema:"enum=file"`
 	// IpmipowerPath and IpmitoolPath override the backend locations.
-	IpmipowerPath string   `json:"ipmipowerPath,omitempty" yaml:"ipmipowerPath,omitempty"`
-	IpmitoolPath  string   `json:"ipmitoolPath,omitempty" yaml:"ipmitoolPath,omitempty"`
+	IpmipowerPath string   `json:"ipmipowerPath,omitempty" yaml:"ipmipowerPath,omitempty" jsonschema:"minLength=1"`
+	IpmitoolPath  string   `json:"ipmitoolPath,omitempty" yaml:"ipmitoolPath,omitempty" jsonschema:"minLength=1"`
 	Timeout       Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
 
@@ -205,7 +205,7 @@ type RedfishSpec struct {
 	// Timeout bounds one request.
 	Timeout Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	// MaxConcurrent bounds how many BMCs are talked to at once.
-	MaxConcurrent int `json:"maxConcurrent,omitempty" yaml:"maxConcurrent,omitempty"`
+	MaxConcurrent int `json:"maxConcurrent,omitempty" yaml:"maxConcurrent,omitempty" jsonschema:"minimum=1"`
 	// SystemPath is the Redfish path of the computer system, which differs
 	// between vendors.
 	SystemPath string `json:"systemPath,omitempty" yaml:"systemPath,omitempty"`
@@ -215,9 +215,9 @@ type RedfishSpec struct {
 type PDUSpec struct {
 	// NameFormat builds the PDU host name from the row and the rack, as a
 	// printf format with two string verbs.
-	NameFormat string `json:"nameFormat,omitempty" yaml:"nameFormat,omitempty" jsonschema:"description=printf format taking the row and the rack"`
+	NameFormat string `json:"nameFormat,omitempty" yaml:"nameFormat,omitempty" jsonschema:"minLength=1,description=printf format taking the row and the rack"`
 	Domain     string `json:"domain,omitempty" yaml:"domain,omitempty"`
-	User       string `json:"user,omitempty" yaml:"user,omitempty"`
+	User       string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"minLength=1"`
 	Credential string `json:"credential,omitempty" yaml:"credential,omitempty"`
 }
 
@@ -338,13 +338,13 @@ type DHCPService struct {
 	Role string `json:"role,omitempty" yaml:"role,omitempty"`
 	// ConfigPath is the dhcpd configuration read for addresses and boot
 	// files.
-	ConfigPath string `json:"configPath,omitempty" yaml:"configPath,omitempty"`
+	ConfigPath string `json:"configPath,omitempty" yaml:"configPath,omitempty" jsonschema:"minLength=1"`
 	// CacheTTL is how long a fetched copy of that file is reused.
 	CacheTTL Duration `json:"cacheTtl,omitempty" yaml:"cacheTtl,omitempty"`
 	// LogPath is the system log searched for DHCP responses.
-	LogPath string `json:"logPath,omitempty" yaml:"logPath,omitempty"`
+	LogPath string `json:"logPath,omitempty" yaml:"logPath,omitempty" jsonschema:"minLength=1"`
 	// Interface is the default interface for a traffic capture.
-	Interface string `json:"interface,omitempty" yaml:"interface,omitempty"`
+	Interface string `json:"interface,omitempty" yaml:"interface,omitempty" jsonschema:"minLength=1"`
 }
 
 // PXESrvService is the PXE boot path service.
@@ -352,11 +352,11 @@ type PXESrvService struct {
 	Role string `json:"role,omitempty" yaml:"role,omitempty"`
 	// Root is where per node boot path links live, BootPath where the boot
 	// configurations they point at live.
-	Root     string `json:"root,omitempty" yaml:"root,omitempty"`
-	BootPath string `json:"bootPath,omitempty" yaml:"bootPath,omitempty"`
+	Root     string `json:"root,omitempty" yaml:"root,omitempty" jsonschema:"minLength=1"`
+	BootPath string `json:"bootPath,omitempty" yaml:"bootPath,omitempty" jsonschema:"minLength=1"`
 	// StaticSuffix marks a boot path that survives the first request.
 	StaticSuffix string `json:"staticSuffix,omitempty" yaml:"staticSuffix,omitempty"`
-	LogPath      string `json:"logPath,omitempty" yaml:"logPath,omitempty"`
+	LogPath      string `json:"logPath,omitempty" yaml:"logPath,omitempty" jsonschema:"minLength=1"`
 	// RepoPath is the git checkout git-pull refreshes.
 	RepoPath string `json:"repoPath,omitempty" yaml:"repoPath,omitempty"`
 }
@@ -365,7 +365,7 @@ type PXESrvService struct {
 type TFTPService struct {
 	Role     string `json:"role,omitempty" yaml:"role,omitempty"`
 	Root     string `json:"root,omitempty" yaml:"root,omitempty"`
-	GrubPath string `json:"grubPath,omitempty" yaml:"grubPath,omitempty"`
+	GrubPath string `json:"grubPath,omitempty" yaml:"grubPath,omitempty" jsonschema:"minLength=1"`
 	LogPath  string `json:"logPath,omitempty" yaml:"logPath,omitempty"`
 }
 
@@ -388,9 +388,9 @@ type CincService struct {
 	RolesPath string `json:"rolesPath,omitempty" yaml:"rolesPath,omitempty"`
 	// SoloConfigPath is the file on the node naming its archive and run
 	// list.
-	SoloConfigPath string `json:"soloConfigPath,omitempty" yaml:"soloConfigPath,omitempty"`
+	SoloConfigPath string `json:"soloConfigPath,omitempty" yaml:"soloConfigPath,omitempty" jsonschema:"minLength=1"`
 	// Binary is the client run on the node.
-	Binary string `json:"binary,omitempty" yaml:"binary,omitempty"`
+	Binary string `json:"binary,omitempty" yaml:"binary,omitempty" jsonschema:"minLength=1"`
 	// Secrets are the age encrypted files pushed to a node after it is
 	// installed.
 	Secrets []SecretFile `json:"secrets,omitempty" yaml:"secrets,omitempty"`

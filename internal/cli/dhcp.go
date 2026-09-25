@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"time"
@@ -46,9 +47,6 @@ func dhcpConfig(a *app.App) (*dhcp.Config, error) {
 			"no host role runs the DHCP server; set services.dhcp.role")
 	}
 	path := spec.ConfigPath
-	if path == "" {
-		path = "/etc/dhcp/dhcpd.conf"
-	}
 	ttl := spec.CacheTTL.Or(2 * time.Minute)
 	cfg, err := dhcp.ParseFile(path, func(file string) ([]byte, error) {
 		return a.RemoteFile(a.Context(), spec.Role, file, ttl)
@@ -168,9 +166,6 @@ a node is not coming up. At most 10000 lines are shown.`,
 				return exitcode.Errorf(exitcode.Usage, "no host role runs the DHCP server; set services.dhcp.role")
 			}
 			path := spec.LogPath
-			if path == "" {
-				path = "/var/log/syslog"
-			}
 			result, err := a.RunOnRole(a.Context(), spec.Role, transport.Request{
 				Argv: []string{"sh", "-c",
 					fmt.Sprintf("grep -a -e dhcpd -- %s | tail -n %d", shellquote.Quote(path), lines)},
@@ -225,13 +220,7 @@ running by accident; --seconds must be at least 1.`,
 			if spec.Role == "" {
 				return exitcode.Errorf(exitcode.Usage, "no host role runs the DHCP server; set services.dhcp.role")
 			}
-			device := iface
-			if device == "" {
-				device = spec.Interface
-			}
-			if device == "" {
-				device = "any"
-			}
+			device := cmp.Or(iface, spec.Interface)
 			target, err := a.Role(spec.Role)
 			if err != nil {
 				return err

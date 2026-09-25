@@ -128,14 +128,6 @@ func pxeRole(a *app.App) (string, error) {
 	return role, nil
 }
 
-// pxeRoot returns the directory the PXE service looks up boot links in.
-func pxeRoot(a *app.App) string {
-	if root := a.Spec.Services.PXESrv.Root; root != "" {
-		return root
-	}
-	return "/srv/pxesrv"
-}
-
 // bootLink is the boot path link of one node on the PXE service, and what
 // became of it.
 type bootLink struct {
@@ -445,7 +437,7 @@ the command.`,
 			if err != nil {
 				return err
 			}
-			root := pxeRoot(a)
+			root := a.Spec.Services.PXESrv.Root
 
 			ns, err := a.SelectOptional(strings.Join(args, ","))
 			if err != nil {
@@ -544,7 +536,7 @@ was not reported fails the command.
 			if err != nil {
 				return err
 			}
-			root := pxeRoot(a)
+			root := a.Spec.Services.PXESrv.Root
 
 			var explicit string
 			rest := args
@@ -610,7 +602,7 @@ was not reported fails the command.`,
 			if err != nil {
 				return err
 			}
-			root := pxeRoot(a)
+			root := a.Spec.Services.PXESrv.Root
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -656,9 +648,6 @@ a boot path may point at.`,
 				return err
 			}
 			path := a.Spec.Services.PXESrv.BootPath
-			if path == "" {
-				path = "/srv/pxesrv/boot"
-			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
 				Argv: []string{"find", path, "-type", "f", "-name", "ipxe.*", "-o", "-type", "f", "-name", "grub.cfg*"},
 			})
@@ -739,9 +728,6 @@ for a boot configuration and does not get the expected one.`,
 				return err
 			}
 			path := a.Spec.Services.PXESrv.LogPath
-			if path == "" {
-				path = "/var/log/pxesrv.log"
-			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
 				Argv: []string{"tail", "-n", fmt.Sprint(lines), path},
 			})
@@ -854,9 +840,6 @@ func grubLink(a *app.App, expr string) (role, node, link string, err error) {
 		return "", "", "", exitcode.Errorf(exitcode.Usage, "no host role runs the TFTP service; set services.tftp.role")
 	}
 	grubPath := a.Spec.Services.TFTP.GrubPath
-	if grubPath == "" {
-		grubPath = "/srv/tftp/grub"
-	}
 	ns, err := a.Select(expr)
 	if err != nil {
 		return "", "", "", err

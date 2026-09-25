@@ -974,12 +974,7 @@ The host name is built from the configured format, the row and the rack.`,
 }
 
 func pduHost(a *app.App, row, rack string) (string, error) {
-	format := a.Spec.BMC.PDU.NameFormat
-	if format == "" {
-		return "", exitcode.Errorf(exitcode.Usage,
-			"no power distribution unit name format is configured; set bmc.pdu.nameFormat")
-	}
-	host := fmt.Sprintf(format, row, rack)
+	host := fmt.Sprintf(a.Spec.BMC.PDU.NameFormat, row, rack)
 	if domain := a.Spec.BMC.PDU.Domain; domain != "" && !strings.Contains(host, ".") {
 		host += "." + domain
 	}
@@ -999,9 +994,6 @@ Connect to the power distribution unit of a rack, or run one command on it.
 				return err
 			}
 			user := a.Spec.BMC.PDU.User
-			if user == "" {
-				user = "admin"
-			}
 			var argv []string
 			if at := cmd.ArgsLenAtDash(); at >= 0 {
 				argv = args[at:]
