@@ -68,9 +68,7 @@ func TestBMCPowerOverIPMIReportsEveryNode(t *testing.T) {
 	}}
 	h, err := run(t, harnessOptions{recorder: recorder},
 		append(noSlurm, "-o", "json", "bmc", "power", "off", "--ipmi", "-y", "-n", "exe[0001-0004]")...)
-	if got := exitcode.From(err); got != exitcode.Transport {
-		t.Errorf("exit code %d, want %d (%v)", got, exitcode.Transport, err)
-	}
+	wantCode(t, err, exitcode.Transport)
 	rows := jsonRows(t, h)
 	if len(rows) != 4 {
 		t.Fatalf("got %d rows, want 4:\n%s", len(rows), h.out)
@@ -312,9 +310,7 @@ func TestBMCInterruptBeforeSendingExits130(t *testing.T) {
 	defer cancel()
 	h, err := run(t, harnessOptions{ctx: ctx, recorder: recorder},
 		"-o", "json", "bmc", "power", "off", "-y", "-n", "exe[0001-0003]")
-	if got := exitcode.From(err); got != exitcode.Interrupted {
-		t.Errorf("exit code %d, want %d (%v)", got, exitcode.Interrupted, err)
-	}
+	wantCode(t, err, exitcode.Interrupted)
 	if strings.Contains(h.out.String(), "state") {
 		for _, row := range jsonRows(t, h) {
 			if row["state"] != "not sent" {

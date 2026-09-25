@@ -123,9 +123,7 @@ func TestDHCPReadFailureKeepsTheMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("a failed read succeeded")
 	}
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	if !strings.Contains(err.Error(), "No such file or directory") {
 		t.Errorf("error %q lost what cat said", err)
 	}

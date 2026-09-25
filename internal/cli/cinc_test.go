@@ -155,12 +155,8 @@ func TestCincConfigRejectsWhatIsNotAnArchiveURL(t *testing.T) {
 			args := append([]string{"cinc", "config"}, tc.args...)
 			args = append(args, "-n", "exe0001", "--yes")
 			h, err := run(t, harnessOptions{}, args...)
-			if got := exitcode.From(err); got != exitcode.Usage {
-				t.Errorf("exit code = %d (%v), want %d", got, err, exitcode.Usage)
-			}
-			if calls := h.recorder.Commands(); len(calls) != 0 {
-				t.Errorf("something was sent: %q", calls)
-			}
+			wantCode(t, err, exitcode.Usage)
+			wantNoCalls(t, h)
 		})
 	}
 }
@@ -337,9 +333,7 @@ func TestCincShowReportsNodesItCouldNotRead(t *testing.T) {
 	}}
 
 	h, err := run(t, harnessOptions{recorder: rec}, "cinc", "show", "-n", "exe[1-4]")
-	if got := exitcode.From(err); got != exitcode.Transport {
-		t.Errorf("exit code = %d (%v), want %d", got, err, exitcode.Transport)
-	}
+	wantCode(t, err, exitcode.Transport)
 	rows := map[string]string{}
 	for _, line := range strings.Split(h.out.String(), "\n") {
 		if name, rest, ok := strings.Cut(line, " "); ok {
@@ -384,9 +378,7 @@ func TestCincShowReportsNodesItCouldNotRead(t *testing.T) {
 func TestCincShowFlagsAFileItCannotRead(t *testing.T) {
 	rec := cincNode("CHEF_RECIPE_URL=http://installer/$(id)\x1b[2J.tgz\n")
 	h, err := run(t, harnessOptions{recorder: rec}, "cinc", "show", "-n", "exe0001")
-	if got := exitcode.From(err); got != exitcode.TargetFailed {
-		t.Errorf("exit code = %d (%v), want %d", got, err, exitcode.TargetFailed)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	if strings.Contains(h.out.String(), "\x1b") {
 		t.Errorf("a control character from the node reached the terminal: %q", h.out)
 	}

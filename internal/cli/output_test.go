@@ -44,9 +44,7 @@ func TestMalformedJSONPathDoesNotPanic(t *testing.T) {
 	if err == nil {
 		t.Fatal("a malformed jsonpath was accepted")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 }
 
 // TestExecJQSelectsFailingTargets covers review finding 12.3 with the idiom
@@ -60,9 +58,7 @@ func TestExecJQSelectsFailingTargets(t *testing.T) {
 	}}
 	h, err := run(t, harnessOptions{recorder: rec}, "exec", "-n", "exe[1-2]",
 		"-o", "jq=.[] | select(.exitCode != 0) | .target.name", "--", "true")
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	if got, want := h.out.String(), "exe0002\n"; got != want {
 		t.Errorf("output = %q, want %q", got, want)
 	}

@@ -303,9 +303,7 @@ func TestBootAddressesAreCheckedBeforeAnythingIsSent(t *testing.T) {
 			if err == nil {
 				t.Fatal("the address should be refused")
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error = %v, want it to name %q", err, tc.want)
 			}
@@ -325,9 +323,7 @@ func TestBootUnsetResolvesBeforeTheGate(t *testing.T) {
 	if err == nil {
 		t.Fatalf("the dry run should fail as the real run would:\n%s", h.errOut)
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 
 	h, err = p.run(t, harnessOptions{tty: true, stdin: "y\n"}, "boot", "unset", "-n", "exe0002")
 	if err == nil {
@@ -353,9 +349,7 @@ func TestBootSetAndUnsetReportEachNode(t *testing.T) {
 	if err == nil {
 		t.Fatal("a node whose link could not be written should fail the command")
 	}
-	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	if !strings.Contains(err.Error(), "exe0003") {
 		t.Errorf("error = %v, want it to name exe0003", err)
 	}

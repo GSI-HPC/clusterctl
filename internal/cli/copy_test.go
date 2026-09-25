@@ -130,9 +130,7 @@ func TestCopyGivesUpOnAStalledTransfer(t *testing.T) {
 	}
 	// A transfer given up on is a connection that did not finish, not a
 	// command that failed on the node.
-	if got, want := exitcode.From(err), exitcode.Transport; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Transport)
 	if !strings.Contains(h.out.String()+err.Error(), "exe0001") {
 		t.Errorf("the node is not named:\n%s\n%v", h.out, err)
 	}
@@ -155,9 +153,7 @@ func TestCopyRefusesShellSyntaxInRemotePaths(t *testing.T) {
 			if err == nil {
 				t.Fatal("the path should be refused")
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if got := len(scpCalls(t, dir)); got != 0 {
 				t.Errorf("scp ran %d times, want none", got)
 			}

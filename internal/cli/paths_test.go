@@ -40,9 +40,7 @@ func TestAStateDirectoryOthersCanWriteIsRefused(t *testing.T) {
 			if err == nil {
 				t.Fatalf("login ran with a %s directory anyone can write:\n%s", name, h.out)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d", got, want)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), dir) {
 				t.Errorf("the error does not name the directory: %v", err)
 			}
@@ -68,9 +66,7 @@ func TestNoStateDirectoryIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("a command ran without a state directory")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 	if !strings.Contains(err.Error(), "XDG_STATE_HOME") {
 		t.Errorf("the error does not say what to set: %v", err)
 	}
@@ -100,9 +96,7 @@ func TestAMisspelledConfigIsReported(t *testing.T) {
 		if err == nil {
 			t.Fatalf("a missing configuration was skipped:\n%s", h.out)
 		}
-		if got, want := exitcode.From(err), exitcode.Usage; got != want {
-			t.Errorf("exit code = %d, want %d", got, want)
-		}
+		wantCode(t, err, exitcode.Usage)
 		if !strings.Contains(err.Error(), misspelled) {
 			t.Errorf("the error does not name the missing file: %v", err)
 		}
@@ -161,9 +155,7 @@ func TestConfigurationOthersCanWriteIsRefused(t *testing.T) {
 				if err == nil {
 					t.Fatalf("configuration in %s was read", entry)
 				}
-				if got, want := exitcode.From(err), exitcode.Usage; got != want {
-					t.Errorf("exit code = %d, want %d", got, want)
-				}
+				wantCode(t, err, exitcode.Usage)
 				if !strings.Contains(err.Error(), "chmod go-w") {
 					t.Errorf("the error does not say how to fix it: %v", err)
 				}
@@ -226,9 +218,7 @@ func TestConfigInitRefusesADirectoryOthersCanWrite(t *testing.T) {
 		if err == nil {
 			t.Fatalf("config init wrote into %s:\n%s", dir, h.out)
 		}
-		if got, want := exitcode.From(err), exitcode.Usage; got != want {
-			t.Errorf("exit code = %d, want %d", got, want)
-		}
+		wantCode(t, err, exitcode.Usage)
 		if strings.Contains(h.out.String(), "export") {
 			t.Errorf("config init said to read %s:\n%s", dir, h.out)
 		}
@@ -266,7 +256,5 @@ func TestConfigInitRefusesAnotherUsersDirectory(t *testing.T) {
 	if err == nil {
 		t.Fatal("config init wrote into another user's directory")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 }

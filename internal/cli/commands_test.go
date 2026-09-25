@@ -247,9 +247,7 @@ func TestConfigInitRefusesSeveralPlaces(t *testing.T) {
 	if err == nil {
 		t.Fatal("config init chose one of several places")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 	if !strings.Contains(err.Error(), "clusterctl config init DIR") {
 		t.Errorf("the error does not say how to name the directory: %v", err)
 	}
@@ -281,9 +279,7 @@ func TestConfigInitRefusesADirectoryThatIsNotEmpty(t *testing.T) {
 				if err == nil {
 					t.Fatalf("config init %v wrote into a directory holding %s", extra, name)
 				}
-				if got, want := exitcode.From(err), exitcode.Usage; got != want {
-					t.Errorf("exit code = %d, want %d", got, want)
-				}
+				wantCode(t, err, exitcode.Usage)
 				if !strings.Contains(err.Error(), name) {
 					t.Errorf("the error does not name what is there: %v", err)
 				}
@@ -626,9 +622,7 @@ func TestSlurmUserAddChecksTheDirectoryFirst(t *testing.T) {
 	if err == nil {
 		t.Fatal("adding a user the cluster does not know should be refused")
 	}
-	if got, want := exitcode.From(err), exitcode.Usage; got != want {
-		t.Errorf("exit code = %d, want %d", got, want)
-	}
+	wantCode(t, err, exitcode.Usage)
 }
 
 func TestPDUListDerivesTheNames(t *testing.T) {

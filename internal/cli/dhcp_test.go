@@ -87,9 +87,7 @@ host exe0002 {
 	if err == nil {
 		t.Fatal("reinstall of a node with no declaration of its own should fail")
 	}
-	if got := exitcode.From(err); got != exitcode.Usage {
-		t.Errorf("exit code = %d, want %d (%v)", got, exitcode.Usage, err)
-	}
+	wantCode(t, err, exitcode.Usage)
 	if script := linkScripts(rec); script != "" {
 		t.Errorf("reinstall sent a script although no address is known:\n%s", script)
 	}
@@ -169,9 +167,7 @@ host exe0006.hpc.example.org {
 	if err == nil {
 		t.Fatal("boot set should refuse a node with two addresses")
 	}
-	if got := exitcode.From(err); got != exitcode.Usage {
-		t.Errorf("exit code = %d, want %d (%v)", got, exitcode.Usage, err)
-	}
+	wantCode(t, err, exitcode.Usage)
 	for _, want := range []string{"exe0006", "exe0006.hpc.example.org"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %v, want it to name %s", err, want)
@@ -192,9 +188,7 @@ host weird-name-0001 {
 }
 `})
 	h, err := run(t, harnessOptions{recorder: rec}, "dhcp", "hosts", "-n", "exe0007")
-	if got := exitcode.From(err); got != exitcode.TargetFailed {
-		t.Errorf("exit code = %d, want %d (%v)", got, exitcode.TargetFailed, err)
-	}
+	wantCode(t, err, exitcode.TargetFailed)
 	out := h.out.String()
 	for _, want := range []string{"weird-name-0001", "comment"} {
 		if !strings.Contains(out, want) {
@@ -272,9 +266,7 @@ func TestDHCPLogAndCaptureRejectUnboundedArguments(t *testing.T) {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			rec := &transport.Recorder{}
 			_, err := run(t, harnessOptions{recorder: rec}, append([]string{"--dry-run"}, args...)...)
-			if got := exitcode.From(err); got != exitcode.Usage {
-				t.Errorf("exit code = %d, want %d (%v)", got, exitcode.Usage, err)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if calls := rec.Calls(); len(calls) != 0 {
 				t.Errorf("sent %d requests, want none", len(calls))
 			}

@@ -31,9 +31,7 @@ func TestAnEmptyNodesFlagDoesNotFallBackToTheEnvironment(t *testing.T) {
 			if err == nil {
 				t.Fatalf("an empty -n should be refused; it printed:\n%s%s", h.out, h.errOut)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), "-n") {
 				t.Errorf("error = %v, want it to name -n", err)
 			}
@@ -73,9 +71,7 @@ func TestTheNodesFlagIsGivenOnce(t *testing.T) {
 			if err == nil {
 				t.Fatalf("a repeated -n should be refused; it printed:\n%s%s", h.out, h.errOut)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if strings.Contains(h.errOut.String(), "Would") {
 				t.Errorf("a preview was printed:\n%s", h.errOut)
 			}
@@ -97,18 +93,14 @@ func TestANodeSetArgumentAndTheNodesFlagContradict(t *testing.T) {
 			if err == nil {
 				t.Fatalf("an argument together with -n should be refused; it printed:\n%s%s", h.out, h.errOut)
 			}
-			if got, want := exitcode.From(err), exitcode.Usage; got != want {
-				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
-			}
+			wantCode(t, err, exitcode.Usage)
 			if !strings.Contains(err.Error(), "-n") {
 				t.Errorf("error = %v, want it to name -n", err)
 			}
 			if strings.Contains(h.errOut.String(), "Would") {
 				t.Errorf("a preview was printed:\n%s", h.errOut)
 			}
-			if n := len(h.recorder.Calls()); n != 0 {
-				t.Errorf("%d commands were sent, want none", n)
-			}
+			wantNoCalls(t, h)
 		})
 	}
 }
