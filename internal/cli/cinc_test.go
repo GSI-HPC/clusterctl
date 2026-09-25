@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
@@ -284,6 +285,46 @@ func TestCincRunPassesTheFileAsArguments(t *testing.T) {
 			runs := clientRuns(rec)
 			if len(runs) != 1 || !reflect.DeepEqual(runs[0], tc.want) {
 				t.Errorf("client runs = %q, want %q", runs, tc.want)
+			}
+		})
+	}
+}
+
+// cinc run gave the client fanout.commandTimeout, or 30 minutes when that
+// was unset, and it never is: the default is ten minutes, so a run that
+// converges a new node was stopped after ten. The client has at least 30
+// minutes now, and the setting when it allows longer; reading the file
+// keeps the setting.
+func TestCincRunGivesTheClientThirtyMinutes(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		set        []string
+		read, want time.Duration
+	}{
+		{"by default", nil, 10 * time.Minute, 30 * time.Minute},
+		{"with a shorter command timeout", []string{"--set", "fanout.commandTimeout=2m"}, 2 * time.Minute, 30 * time.Minute},
+		{"with a longer command timeout", []string{"--set", "fanout.commandTimeout=1h"}, time.Hour, time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := cincNode("CHEF_RECIPE_URL=http://installer/cinc/latest.tgz\n")
+			args := append([]string{"cinc", "run", "-n", "exe0001", "--yes"}, tc.set...)
+			h, err := run(t, harnessOptions{recorder: rec}, args...)
+			if err != nil {
+				t.Fatalf("cinc run failed: %v\n%s%s", err, h.out, h.errOut)
+			}
+			var read, client []time.Duration
+			for _, c := range rec.Calls() {
+				if len(c.Request.Argv) > 0 {
+					client = append(client, c.Request.Timeout)
+				} else {
+					read = append(read, c.Request.Timeout)
+				}
+			}
+			if len(client) != 1 || client[0] != tc.want {
+				t.Errorf("the client was given %v, want %v", client, tc.want)
+			}
+			if len(read) != 1 || read[0] != tc.read {
+				t.Errorf("reading the file was given %v, want %v", read, tc.read)
 			}
 		})
 	}
