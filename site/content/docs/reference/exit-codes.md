@@ -14,6 +14,11 @@ renumbered.
 | `3` | Transport | A host could not be reached, resolved or authenticated with |
 | `130` | Interrupted | Ctrl-C, or a confirmation declined |
 
+`help` and `completion` follow the same rule. `clusterctl completion zhs`
+names no shell and `clusterctl help slurm node drian` names no command, so
+both exit `2` and print nothing on standard output, rather than printing help
+that a redirection would take for the script or the page asked for.
+
 ## Why 1 and 3 are separate
 
 A wrapper needs to tell "the node said no" from "the node was not there".

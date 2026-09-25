@@ -45,3 +45,36 @@ func TestCompletionContactsNothing(t *testing.T) {
 		})
 	}
 }
+
+// TestCompletionOfTheBuiltins checks that the words a shell script asks for
+// are still offered for cobra's own commands, now that they are part of the
+// tree from the start.
+func TestCompletionOfTheBuiltins(t *testing.T) {
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"__complete", ""}, []string{"completion", "help", "slurm"}},
+		{[]string{"__complete", "completion", ""}, []string{"bash", "zsh", "fish", "powershell"}},
+		{[]string{"__complete", "help", ""}, []string{"slurm", "node"}},
+		{[]string{"__complete", "help", "slurm", ""}, []string{"node", "job"}},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args[1:], " "), func(t *testing.T) {
+			h, err := run(t, harnessOptions{}, tt.args...)
+			if err != nil {
+				t.Fatalf("completion failed: %v", err)
+			}
+			words := map[string]bool{}
+			for _, line := range strings.Split(h.out.String(), "\n") {
+				word, _, _ := strings.Cut(line, "\t")
+				words[word] = true
+			}
+			for _, want := range tt.want {
+				if !words[want] {
+					t.Errorf("completion does not offer %s:\n%s", want, h.out)
+				}
+			}
+		})
+	}
+}

@@ -62,6 +62,74 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 	}
 }
 
+// TestBuiltinUsageErrorsExitTwo checks cobra's own completion and help
+// commands, which cobra added only when the tree ran: a shell that does not
+// exist printed help and exited 0, so "clusterctl completion zhs > file"
+// left a file of help text behind a success, an extra argument exited 1, and
+// a help topic that names no command printed the root help and exited 0.
+func TestBuiltinUsageErrorsExitTwo(t *testing.T) {
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"completion", "nosuchshell"}, []string{`unknown command "nosuchshell" for "clusterctl completion"`}},
+		{[]string{"completion", "zhs"}, []string{`"zhs"`, "zsh"}},
+		{[]string{"completion", "bash", "extra"}, []string{`"extra"`}},
+		{[]string{"help", "nosuch"}, []string{`unknown help topic "nosuch"`}},
+		{[]string{"help", "slurm", "node", "drian"}, []string{`unknown help topic "slurm node drian"`, `"drian"`, "drain"}},
+		{[]string{"help", "version", "extra"}, []string{`unknown help topic "version extra"`}},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			h, code := exitCodeOf(t, harnessOptions{}, tt.args...)
+			if code != exitcode.Usage {
+				t.Errorf("exit code = %d, want %d; stderr:\n%s", code, exitcode.Usage, h.errOut)
+			}
+			if h.out.Len() != 0 {
+				t.Errorf("a usage error printed to stdout, where a script reads results:\n%s", h.out)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(h.errOut.String(), want) {
+					t.Errorf("stderr does not say %q:\n%s", want, h.errOut)
+				}
+			}
+		})
+	}
+}
+
+// TestBuiltinsStillWork checks the other side: every shell still gets its
+// script, and help on a real command, or on none, still prints that help.
+func TestBuiltinsStillWork(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"completion", "bash"}, "__start_clusterctl"},
+		{[]string{"completion", "zsh"}, "#compdef clusterctl"},
+		{[]string{"completion", "fish"}, "complete -c clusterctl"},
+		{[]string{"completion", "powershell"}, "Register-ArgumentCompleter"},
+		{[]string{"completion"}, "Available Commands"},
+		{[]string{"help"}, "Available Commands"},
+		{[]string{"help", "slurm", "node", "drain"}, "clusterctl slurm node drain"},
+		{[]string{"help", "completion", "bash"}, "bash-completion"},
+		{[]string{"slurm", "node", "drain", "--help"}, "clusterctl slurm node drain"},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			h, code := exitCodeOf(t, harnessOptions{}, tt.args...)
+			if code != exitcode.OK {
+				t.Errorf("exit code = %d, want 0; stderr:\n%s", code, h.errOut)
+			}
+			if !strings.Contains(h.out.String(), tt.want) {
+				t.Errorf("stdout does not carry %q:\n%s", tt.want, h.out)
+			}
+			if h.errOut.Len() != 0 {
+				t.Errorf("stderr is not empty:\n%s", h.errOut)
+			}
+		})
+	}
+}
+
 // TestUnknownSubcommandIsNamed checks that the refusal says which word was
 // not understood and suggests what was probably meant.
 func TestUnknownSubcommandIsNamed(t *testing.T) {
