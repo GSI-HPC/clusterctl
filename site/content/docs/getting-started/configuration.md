@@ -67,7 +67,7 @@ needs.
 | `Cluster` | Which site it belongs to, its Slurm, its groups, its boot paths |
 | `NodeInventory` | The nodes: attributes, racks, addresses, boot paths |
 | `Workstation` | What is true of this machine rather than of the site |
-| `Secret` | Passwords and keys, encrypted with sops |
+| `Secret` | Passwords and keys, encrypted with sops, and decrypted by the `sops` command when a command needs one |
 
 ## A minimal site
 

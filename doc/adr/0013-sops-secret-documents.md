@@ -3,7 +3,7 @@
 
 # 0013 — Secrets live in sops encrypted Secret documents
 
-Status: accepted
+Status: superseded in part by [0019](0019-decrypt-with-the-sops-command.md)
 
 ## Context
 

@@ -225,6 +225,7 @@ spec:
   browser: firefox
   pager: less
   sshuttleBinary: sshuttle
+  sopsBinary: sops             # the sops that decrypts a Secret, 3.10.0 or later
   overrides: {}
 ```
 

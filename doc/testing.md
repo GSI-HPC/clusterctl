@@ -41,6 +41,20 @@ still differ. `clustershell.py` next to it records the answers again.
 `httptest`. It is how the reset-type check, the once-only action and the boot
 override default are covered without hardware.
 
+**The real sops** encrypts and decrypts the Secret documents in the tests.
+clusterctl runs `sops` to read a Secret, so a test of that is only worth
+something against the program itself: `sopstest` encrypts each fixture with
+`sops encrypt` to an age or OpenSSH key the test has just generated, so no
+private key is kept in the repository. A tampered file, a changed type tag, a
+foreign key and an identity that only claims to be a recipient are all put to
+the real binary. A fake `sops`, a shell script, covers what the real one cannot
+be made to do on demand: an exit status sops uses after it has opened the data
+key, and a refusal that must happen before sops runs at all, which the fake
+records if it is started. The tests need `sops` in `PATH`; `mise install`
+installs the version `mise.toml` pins, and a test fails, rather than skips,
+without it. CI runs the whole suite a second time with the oldest sops
+supported.
+
 **A recording transport** stands in for ssh. `transport.Recorder` records what
 would have been sent and replies with prepared output, so the subsystems and
 the whole command tree can be driven without a cluster. A reply is handed the
