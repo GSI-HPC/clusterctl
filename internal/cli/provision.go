@@ -908,14 +908,8 @@ commands that remove it.
 			}
 
 			err = plan.run(a, noReset)
-			t := output.NewTable(
-				output.Column{Name: "NODE"},
-				output.Column{Name: "BOOT PATH", Wide: true},
-				output.Column{Name: "BOOT LINK"},
-				output.Column{Name: "BOOT ONCE"},
-				output.Column{Name: "RESET"},
-				output.Column{Name: "STATE"},
-			)
+			t := output.NewTable(output.Cols("NODE", "BOOT PATH", "BOOT LINK", "BOOT ONCE", "RESET", "STATE").
+				Wide("BOOT PATH")...)
 			for _, n := range plan.nodes {
 				t.Add(n.Node, n.BootPath, cmp.Or(n.BootLink, "-"), cmp.Or(n.BootOnce, "-"), cmp.Or(n.Reset, "-"), n.State)
 			}

@@ -6,6 +6,7 @@ package output
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -36,13 +37,40 @@ func NewTable(columns ...Column) *Table {
 	return &Table{Columns: columns}
 }
 
+// Columns are the headings of a table: plain ones from Cols, marked by Wide
+// and Right.
+type Columns []Column
+
 // Cols builds plain columns from their names.
-func Cols(names ...string) []Column {
-	out := make([]Column, len(names))
+func Cols(names ...string) Columns {
+	out := make(Columns, len(names))
 	for i, n := range names {
 		out[i] = Column{Name: n}
 	}
 	return out
+}
+
+// Wide shows the named columns only under -o wide.
+func (c Columns) Wide(names ...string) Columns {
+	return c.mark(names, func(col *Column) { col.Wide = true })
+}
+
+// Right aligns the values of the named columns to the right.
+func (c Columns) Right(names ...string) Columns {
+	return c.mark(names, func(col *Column) { col.Right = true })
+}
+
+// mark sets a property of the named columns. A name that is none of them is
+// a mistake in the program, which every test of the table's command finds.
+func (c Columns) mark(names []string, set func(*Column)) Columns {
+	for _, name := range names {
+		i := slices.IndexFunc(c, func(col Column) bool { return col.Name == name })
+		if i < 0 {
+			panic("output: the table has no column " + name)
+		}
+		set(&c[i])
+	}
+	return c
 }
 
 // Add appends a row. Missing cells are left empty and extra cells are kept,

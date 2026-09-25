@@ -58,14 +58,8 @@ List the nodes of the inventory, optionally limited to a node set.`,
 				}
 			}
 
-			t := output.NewTable(
-				output.Column{Name: "NODE"},
-				output.Column{Name: "CLASS"},
-				output.Column{Name: "RACK"},
-				output.Column{Name: "ADDRESS"},
-				output.Column{Name: "VENDOR", Wide: true},
-				output.Column{Name: "CID", Wide: true},
-			)
+			t := output.NewTable(output.Cols("NODE", "CLASS", "RACK", "ADDRESS", "VENDOR", "CID").
+				Wide("VENDOR", "CID")...)
 			for _, n := range nodes {
 				t.Add(n.Name, n.Attributes["class"], n.Rack, n.Address, n.Attributes["vendor"], n.CID)
 			}
@@ -229,11 +223,7 @@ command fail, after what the other sources answered has been printed.`,
 				return groupsError(node, groupErr)
 			}
 
-			t := output.NewTable(
-				output.Column{Name: "SOURCE"},
-				output.Column{Name: "GROUP"},
-				output.Column{Name: "NODES", Wide: true},
-			)
+			t := output.NewTable(output.Cols("SOURCE", "GROUP", "NODES").Wide("NODES")...)
 			listing := map[string][]string{}
 			var failed []error
 			for _, source := range a.Groups.Sources() {
@@ -323,11 +313,7 @@ list that rack; with a node name, list the rack that node sits in.`,
 				}
 			}
 
-			t := output.NewTable(
-				output.Column{Name: "RACK"},
-				output.Column{Name: "NODES"},
-				output.Column{Name: "COUNT", Right: true},
-			)
+			t := output.NewTable(output.Cols("RACK", "NODES", "COUNT").Right("COUNT")...)
 			object := map[string]string{}
 			for _, rack := range racks {
 				ns := a.Inventory.InRack(rack)
@@ -375,16 +361,9 @@ and -o yaml too.`,
 				return err
 			}
 
-			t := output.NewTable(
-				output.Column{Name: "NODE"},
-				output.Column{Name: "STATUS"},
-				output.Column{Name: "VENDOR"},
-				output.Column{Name: "PRODUCT"},
-				output.Column{Name: "BOARD", Wide: true},
-				output.Column{Name: "BIOS"},
-				output.Column{Name: "BIOS DATE", Wide: true},
-				output.Column{Name: "INFINIBAND"},
-			)
+			t := output.NewTable(output.Cols(
+				"NODE", "STATUS", "VENDOR", "PRODUCT", "BOARD", "BIOS", "BIOS DATE", "INFINIBAND").
+				Wide("BOARD", "BIOS DATE")...)
 			// Every node gets an entry, a failed one with how it failed,
 			// so that a script counting the answers sees the failures.
 			object := make([]map[string]string, 0, len(results))

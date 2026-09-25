@@ -280,15 +280,8 @@ port that is not up makes the command fail.
 			}
 			parsePortStates(entries, result.Stdout)
 
-			t := output.NewTable(
-				output.Column{Name: "NODE"},
-				output.Column{Name: "GUID"},
-				output.Column{Name: "STATE"},
-				output.Column{Name: "LINK"},
-				output.Column{Name: "PHYSICAL"},
-				output.Column{Name: "WIDTH", Wide: true},
-				output.Column{Name: "SPEED", Wide: true},
-			)
+			t := output.NewTable(output.Cols("NODE", "GUID", "STATE", "LINK", "PHYSICAL", "WIDTH", "SPEED").
+				Wide("WIDTH", "SPEED")...)
 			notUp := 0
 			for _, e := range entries {
 				if e.State != portUp {
@@ -653,12 +646,7 @@ goes through the confirmation gate.
 			if err != nil {
 				return err
 			}
-			t := output.NewTable(
-				output.Column{Name: "NODE"},
-				output.Column{Name: "DEVICE"},
-				output.Column{Name: "STATUS"},
-				output.Column{Name: "ERROR", Wide: true},
-			)
+			t := output.NewTable(output.Cols("NODE", "DEVICE", "STATUS", "ERROR").Wide("ERROR")...)
 			for _, res := range results {
 				lines := res.Lines()
 				if res.Err != nil || len(lines) == 0 {

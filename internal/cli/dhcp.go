@@ -87,15 +87,9 @@ has only those counts as missing.
 				return err
 			}
 
-			t := output.NewTable(
-				output.Column{Name: "NODE"},
-				output.Column{Name: "DECLARATION"},
-				output.Column{Name: "MATCH"},
-				output.Column{Name: "ADDRESS"},
-				output.Column{Name: "MAC"},
-				output.Column{Name: "CLIENT ID", Wide: true},
-				output.Column{Name: "BOOT FILE"},
-			)
+			t := output.NewTable(output.Cols(
+				"NODE", "DECLARATION", "MATCH", "ADDRESS", "MAC", "CLIENT ID", "BOOT FILE").
+				Wide("CLIENT ID")...)
 			object := map[string][]dhcp.Match{}
 			missing := 0
 			for _, node := range ns.Expand() {
@@ -133,12 +127,8 @@ Print every host declaration the DHCP server carries.`,
 			if err != nil {
 				return err
 			}
-			t := output.NewTable(
-				output.Column{Name: "DECLARATION"},
-				output.Column{Name: "ADDRESS"},
-				output.Column{Name: "MAC"},
-				output.Column{Name: "BOOT FILE", Wide: true},
-			)
+			t := output.NewTable(output.Cols("DECLARATION", "ADDRESS", "MAC", "BOOT FILE").
+				Wide("BOOT FILE")...)
 			for _, h := range cfg.Hosts {
 				t.Add(h.Name, h.Address, strings.Join(h.MACs, ","), h.Filename)
 			}

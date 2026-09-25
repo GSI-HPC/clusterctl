@@ -785,3 +785,24 @@ contexts:
 		t.Errorf("the secret travelled in the command: %q", commands[0])
 	}
 }
+
+// A table names its wide and right-aligned columns, and a name that is not
+// one of its columns panics. These are the tables no other test renders.
+func TestTablesThatNameTheirColumnsRender(t *testing.T) {
+	for _, tc := range []struct {
+		rec  *transport.Recorder
+		args []string
+	}{
+		{serveDHCP(map[string]string{dhcpdPath: "host exe1 { hardware ethernet 00:11:22:33:44:55; }\n"}),
+			[]string{"dhcp", "config"}},
+		{(&slurmCluster{}).recorder(), []string{"slurm", "job", "list"}},
+		{nil, []string{"tunnel", "list"}},
+	} {
+		for _, format := range []string{"table", "wide"} {
+			h, err := run(t, harnessOptions{recorder: tc.rec}, append(tc.args, "-o", format)...)
+			if err != nil {
+				t.Errorf("%v -o %s: %v\n%s", tc.args, format, err, h.errOut)
+			}
+		}
+	}
+}

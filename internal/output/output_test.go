@@ -5,6 +5,7 @@ package output_test
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -230,4 +231,18 @@ func TestIsMachine(t *testing.T) {
 			t.Errorf("String() = %q, want %q", f.String(), spec)
 		}
 	}
+}
+
+func TestColsMarksColumnsByName(t *testing.T) {
+	cols := output.Cols("NODE", "CPUS", "REASON").Wide("REASON").Right("CPUS")
+	want := output.Columns{{Name: "NODE"}, {Name: "CPUS", Right: true}, {Name: "REASON", Wide: true}}
+	if !reflect.DeepEqual(cols, want) {
+		t.Errorf("columns = %+v, want %+v", cols, want)
+	}
+	defer func() {
+		if recover() == nil {
+			t.Error("a column that does not exist was marked without a panic")
+		}
+	}()
+	output.Cols("NODE").Wide("NODES")
 }

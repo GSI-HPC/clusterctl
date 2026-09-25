@@ -75,16 +75,9 @@ node carries.
 				return err
 			}
 
-			t := output.NewTable(
-				output.Column{Name: "NODE"},
-				output.Column{Name: "STATE"},
-				output.Column{Name: "PARTITION"},
-				output.Column{Name: "CPUS", Right: true},
-				output.Column{Name: "MEMORY", Right: true, Wide: true},
-				output.Column{Name: "FEATURES", Wide: true},
-				output.Column{Name: "GRES", Wide: true},
-				output.Column{Name: "REASON"},
-			)
+			t := output.NewTable(output.Cols(
+				"NODE", "STATE", "PARTITION", "CPUS", "MEMORY", "FEATURES", "GRES", "REASON").
+				Wide("MEMORY", "FEATURES", "GRES").Right("CPUS", "MEMORY")...)
 			for _, n := range nodes {
 				reason := n.Reason
 				if reason != "" && n.ReasonUser != "" {
@@ -275,20 +268,10 @@ nodes they run on.
 				return err
 			}
 
-			t := output.NewTable(
-				output.Column{Name: "JOB"},
-				output.Column{Name: "USER"},
-				output.Column{Name: "ACCOUNT"},
-				output.Column{Name: "PARTITION"},
-				output.Column{Name: "STATE"},
-				output.Column{Name: "NODES"},
-				output.Column{Name: "CPUS", Right: true, Wide: true},
-				output.Column{Name: "TIME LIMIT", Wide: true},
-				output.Column{Name: "RUNTIME"},
-				output.Column{Name: "REASON", Wide: true},
-				output.Column{Name: "WORKDIR", Wide: true},
-				output.Column{Name: "COMMAND", Wide: true},
-			)
+			t := output.NewTable(output.Cols(
+				"JOB", "USER", "ACCOUNT", "PARTITION", "STATE", "NODES", "CPUS", "TIME LIMIT",
+				"RUNTIME", "REASON", "WORKDIR", "COMMAND").
+				Wide("CPUS", "TIME LIMIT", "REASON", "WORKDIR", "COMMAND").Right("CPUS")...)
 			for _, j := range jobs {
 				t.Add(j.ID, j.User, j.Account, j.Partition, j.State, j.Nodes,
 					j.CPUs, j.TimeLimit, j.Runtime, j.Reason, j.WorkDir, j.Command)
@@ -336,17 +319,9 @@ Read what finished out of the accounting database.
 				return err
 			}
 
-			t := output.NewTable(
-				output.Column{Name: "JOB"},
-				output.Column{Name: "USER"},
-				output.Column{Name: "ACCOUNT"},
-				output.Column{Name: "STATE"},
-				output.Column{Name: "EXIT"},
-				output.Column{Name: "ELAPSED"},
-				output.Column{Name: "NODES", Wide: true},
-				output.Column{Name: "START", Wide: true},
-				output.Column{Name: "END", Wide: true},
-			)
+			t := output.NewTable(output.Cols(
+				"JOB", "USER", "ACCOUNT", "STATE", "EXIT", "ELAPSED", "NODES", "START", "END").
+				Wide("NODES", "START", "END")...)
 			for _, j := range jobs {
 				t.Add(j.JobID, j.User, j.Account, j.State, j.ExitCode, j.Elapsed, j.Nodes, j.Start, j.End)
 			}
@@ -392,12 +367,7 @@ before deciding whose work is filling the queue.`,
 				return keys[i].user < keys[j].user
 			})
 
-			t := output.NewTable(
-				output.Column{Name: "USER"},
-				output.Column{Name: "ACCOUNT"},
-				output.Column{Name: "PARTITION"},
-				output.Column{Name: "JOBS", Right: true},
-			)
+			t := output.NewTable(output.Cols("USER", "ACCOUNT", "PARTITION", "JOBS").Right("JOBS")...)
 			object := make([]map[string]any, 0, len(keys))
 			for _, k := range keys {
 				t.Add(k.user, k.account, k.partition, fmt.Sprint(counts[k]))
@@ -423,12 +393,8 @@ List the accounts of the accounting database.`,
 			if err != nil {
 				return err
 			}
-			t := output.NewTable(
-				output.Column{Name: "ACCOUNT"},
-				output.Column{Name: "DESCRIPTION"},
-				output.Column{Name: "ORGANIZATION", Wide: true},
-				output.Column{Name: "COORDINATORS"},
-			)
+			t := output.NewTable(output.Cols("ACCOUNT", "DESCRIPTION", "ORGANIZATION", "COORDINATORS").
+				Wide("ORGANIZATION")...)
 			for _, acc := range accounts {
 				t.Add(acc.Account, acc.Description, acc.Organization, acc.Coordinators)
 			}
@@ -669,18 +635,11 @@ they offer.`,
 			if err != nil {
 				return err
 			}
-			t := output.NewTable(
-				output.Column{Name: "PARTITION"},
-				output.Column{Name: "AVAIL"},
-				output.Column{Name: "NODES", Right: true},
-				output.Column{Name: "MAX TIME"},
-				output.Column{Name: "DEFAULT TIME", Wide: true},
-				output.Column{Name: "MEMORY", Right: true, Wide: true},
-				output.Column{Name: "CPUS", Right: true, Wide: true},
-				output.Column{Name: "CPU A/I/O/T", Wide: true},
-				output.Column{Name: "GROUPS", Wide: true},
-				output.Column{Name: "NODELIST", Wide: true},
-			)
+			t := output.NewTable(output.Cols(
+				"PARTITION", "AVAIL", "NODES", "MAX TIME", "DEFAULT TIME", "MEMORY", "CPUS",
+				"CPU A/I/O/T", "GROUPS", "NODELIST").
+				Wide("DEFAULT TIME", "MEMORY", "CPUS", "CPU A/I/O/T", "GROUPS", "NODELIST").
+				Right("NODES", "MEMORY", "CPUS")...)
 			for _, p := range partitions {
 				t.Add(p.Name, p.Available, p.NodeCount, p.MaxTime, p.DefaultTime,
 					p.Memory, p.CPUs, p.CPUState, p.Groups, p.Nodes)

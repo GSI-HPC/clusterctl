@@ -64,12 +64,8 @@ List the tunnel profiles the site offers and what each one routes.`,
 		cobra.NoArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			m := manager(a)
-			t := output.NewTable(
-				output.Column{Name: "NAME"},
-				output.Column{Name: "REMOTE"},
-				output.Column{Name: "SUBNETS"},
-				output.Column{Name: "DESCRIPTION", Wide: true},
-			)
+			t := output.NewTable(output.Cols("NAME", "REMOTE", "SUBNETS", "DESCRIPTION").
+				Wide("DESCRIPTION")...)
 			for _, s := range m.Status() {
 				t.Add(s.Name, s.Remote, s.Subnets, s.Description)
 			}
@@ -87,13 +83,8 @@ started by tunnel start does.`,
 		cobra.NoArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			status := manager(a).Status()
-			t := output.NewTable(
-				output.Column{Name: "NAME"},
-				output.Column{Name: "STATE"},
-				output.Column{Name: "PID", Right: true},
-				output.Column{Name: "REMOTE"},
-				output.Column{Name: "SUBNETS", Wide: true},
-			)
+			t := output.NewTable(output.Cols("NAME", "STATE", "PID", "REMOTE", "SUBNETS").
+				Wide("SUBNETS").Right("PID")...)
 			for _, s := range status {
 				state, pid := "down", ""
 				if s.Running {

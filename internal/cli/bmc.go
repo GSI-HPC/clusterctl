@@ -376,13 +376,7 @@ accepts.`,
 			calls := redfishEach(a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
 				return c.System(ctx)
 			})
-			t := output.NewTable(
-				output.Column{Name: "NODE"},
-				output.Column{Name: "SOURCE"},
-				output.Column{Name: "MODE"},
-				output.Column{Name: "ACCEPTS", Wide: true},
-				output.Column{Name: "ERROR"},
-			)
+			t := output.NewTable(output.Cols("NODE", "SOURCE", "MODE", "ACCEPTS", "ERROR").Wide("ACCEPTS")...)
 			type row struct {
 				Node    string   `json:"node"`
 				Source  string   `json:"source,omitempty"`
@@ -480,15 +474,9 @@ the power state and the reset types the firmware accepts.`,
 			calls := redfishEach(a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
 				return c.System(ctx)
 			})
-			t := output.NewTable(
-				output.Column{Name: "NODE"},
-				output.Column{Name: "POWER"},
-				output.Column{Name: "HEALTH"},
-				output.Column{Name: "MODEL"},
-				output.Column{Name: "BIOS", Wide: true},
-				output.Column{Name: "RESET TYPES", Wide: true},
-				output.Column{Name: "ERROR"},
-			)
+			t := output.NewTable(output.Cols(
+				"NODE", "POWER", "HEALTH", "MODEL", "BIOS", "RESET TYPES", "ERROR").
+				Wide("BIOS", "RESET TYPES")...)
 			// Every node is in the object, a failed one with its error, so
 			// that a reader of the JSON sees what the table shows.
 			object := map[string]any{}
