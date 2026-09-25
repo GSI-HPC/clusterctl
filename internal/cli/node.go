@@ -455,7 +455,7 @@ and -o yaml too.`,
 					if detail := failureDetail(res); detail != "" {
 						line += ": " + detail
 					}
-					a.Printf("%s: %s\n", res.Target.Name, escapeControl(line))
+					a.Printf("%s: %s\n", res.Target.Name, output.EscapeCell(line))
 				}
 			}
 			return failureError(results)
