@@ -149,7 +149,8 @@ are also published: `https://gsi-hpc.github.io/clusterctl/schema/v1alpha1/site.j
 Without `CLUSTERCTL_CONFIG`, clusterctl reads `/etc/clusterctl` and then your
 own configuration directory: `~/.config/clusterctl` on Linux,
 `~/Library/Application Support/clusterctl` on macOS. A directory
-contributes its `.yaml` files in name order.
+contributes its `.yaml` and `.yml` files in name order, leaving out hidden
+files such as `.sops.yaml`.
 
 ```console
 $ export CLUSTERCTL_CONFIG=/srv/site-config:~/.config/clusterctl
