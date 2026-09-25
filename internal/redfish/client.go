@@ -68,6 +68,12 @@ type Client struct {
 	client *http.Client
 }
 
+// Format prints the client without its password, whatever the verb, so that
+// a log line or an error that prints one cannot give the account away.
+func (c Client) Format(f fmt.State, _ rune) {
+	_, _ = fmt.Fprintf(f, "redfish.Client{Host: %q, Username: %q}", c.Host, c.Username)
+}
+
 // BaseURL is the root of the Redfish service on this host.
 //
 // The host has to be a host name or an address and nothing more. A port,

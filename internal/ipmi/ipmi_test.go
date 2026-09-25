@@ -5,6 +5,7 @@ package ipmi_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -397,5 +398,18 @@ func TestIpmitoolTimeoutScalesWithTheSet(t *testing.T) {
 	}
 	if !strings.Contains(runner.script, "timeout ") {
 		t.Errorf("each ipmitool run is not bounded on its own:\n%s", runner.script)
+	}
+}
+
+func TestABackendDoesNotPrintItsPassword(t *testing.T) {
+	t.Parallel()
+
+	b := ipmi.Backend{Target: transport.Target{Name: "mgmt", Host: "mgmt"}, Username: "admin", Password: "hunter2"}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
+		for _, v := range []any{b, &b} {
+			if got := fmt.Sprintf(verb, v); strings.Contains(got, "hunter2") || !strings.Contains(got, "admin") {
+				t.Errorf("Sprintf(%q) = %q, want the account and no password", verb, got)
+			}
+		}
 	}
 }

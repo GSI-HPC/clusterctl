@@ -63,6 +63,12 @@ type Backend struct {
 	Password string
 }
 
+// Format prints the backend without the password, whatever the verb, so
+// that a log line or an error that prints one cannot give the account away.
+func (b Backend) Format(f fmt.State, _ rune) {
+	_, _ = fmt.Fprintf(f, "ipmi.Backend{Target: %q, Username: %q}", b.Target.String(), b.Username)
+}
+
 // Status is what one service processor answered.
 type Status struct {
 	// BMC is the service processor that was asked.

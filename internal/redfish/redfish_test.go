@@ -730,3 +730,16 @@ func TestAClientWithoutAPinStoreIsRefused(t *testing.T) {
 		})
 	}
 }
+
+func TestAClientDoesNotPrintItsPassword(t *testing.T) {
+	t.Parallel()
+
+	c := redfish.Client{Host: "bmc1", Username: "admin", Password: "hunter2"}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
+		for _, v := range []any{c, &c} {
+			if got := fmt.Sprintf(verb, v); strings.Contains(got, "hunter2") || !strings.Contains(got, "bmc1") {
+				t.Errorf("Sprintf(%q) = %q, want the host and no password", verb, got)
+			}
+		}
+	}
+}
