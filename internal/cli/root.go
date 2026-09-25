@@ -331,6 +331,11 @@ func execute(ctx context.Context, cmd *cobra.Command, streams app.Streams) int {
 // report prints an error and returns the exit code it asks for. A dry run
 // that stopped on purpose is not an error.
 //
+// An error often quotes what a node, a BMC, a group source or an agent
+// said, so its message is escaped with output.EscapeText like any other
+// untrusted text. The lines clusterctl breaks a message into, such as the
+// problems of a configuration file, are kept.
+//
 // A command that failed once ctx, the context a signal cancels, had ended
 // was interrupted, whatever its error says: a request the interrupt stopped
 // fails as it happens to, and some paths keep only an error's text, so the
@@ -344,12 +349,12 @@ func report(ctx context.Context, streams app.Streams, err error) int {
 		return exitcode.Interrupted
 	}
 	if ctx.Err() != nil {
-		_, _ = fmt.Fprintf(streams.Err, "clusterctl: interrupted: %v\n", err)
+		_, _ = fmt.Fprintf(streams.Err, "clusterctl: interrupted: %s\n", output.EscapeText(err.Error()))
 		return exitcode.Interrupted
 	}
 	// The exit code is what a caller acts on; a message that cannot be
 	// written changes nothing about it.
-	_, _ = fmt.Fprintf(streams.Err, "clusterctl: %v\n", err)
+	_, _ = fmt.Fprintf(streams.Err, "clusterctl: %s\n", output.EscapeText(err.Error()))
 	return exitcode.From(err)
 }
 
