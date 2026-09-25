@@ -15,6 +15,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 
@@ -37,7 +38,13 @@ type harness struct {
 func run(t *testing.T, opts harnessOptions, args ...string) (*harness, error) {
 	t.Helper()
 	h, cmd := build(t, opts, args...)
-	return h, cmd.Execute()
+	err := cmd.Execute()
+	// A dry run stops the command with a signal, which report turns into
+	// success.
+	if safety.IsDryRun(err) {
+		err = nil
+	}
+	return h, err
 }
 
 // build builds the command tree over the example configuration, ready to run

@@ -140,9 +140,6 @@ Slurm does not read as exactly the node named is refused.
 				Targets: ns,
 				Detail:  fmt.Sprintf("reason: %q", reason),
 			}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
 				return err
 			}
 			if err := c.Drain(a.Context(), ns, reason); err != nil {
@@ -165,9 +162,6 @@ The nodes are checked against Slurm before anything is shown, as for drain.`,
 				return err
 			}
 			if err := a.Gate.Confirm(safety.Action{Verb: "resume", Targets: ns}); err != nil {
-				if safety.IsDryRun(err) {
-					return nil
-				}
 				return err
 			}
 			if err := c.Resume(a.Context(), ns); err != nil {
@@ -710,11 +704,7 @@ func confirmAccounting(a *app.App, c *slurm.Client, what string) error {
 func confirmChange(a *app.App, what string) error {
 	ns := nodeset.New()
 	_ = ns.Add("accounting")
-	err := a.Gate.Confirm(safety.Action{Verb: output.EscapeCell(what) + " on", Targets: ns, NotNodes: true})
-	if safety.IsDryRun(err) {
-		return safety.ErrDryRun
-	}
-	return err
+	return a.Gate.Confirm(safety.Action{Verb: output.EscapeCell(what) + " on", Targets: ns, NotNodes: true})
 }
 
 func first(args []string) string {

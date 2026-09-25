@@ -309,14 +309,5 @@ func safetyAction(verb string, targets *nodeset.NodeSet, detail string) safety.A
 	return safety.Action{Verb: verb, Targets: targets, Detail: detail}
 }
 
-// dryRunOrError turns the dry run signal into a clean stop and passes
-// anything else on.
-func dryRunOrError(err error) error {
-	if safety.IsDryRun(err) {
-		return nil
-	}
-	return err
-}
-
 // shellQuote quotes one word for a remote shell.
 func shellQuote(s string) string { return shellquote.Quote(s) }

@@ -661,7 +661,7 @@ goes through the confirmation gate.
 
 			if err := a.Gate.Confirm(safetyAction("change the adapter firmware setting of", ns,
 				fmt.Sprintf("%s=%s on every adapter", key, value))); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 			results, err := runOnNodes(a, ns, func(string) transport.Request {
 				return transport.Request{

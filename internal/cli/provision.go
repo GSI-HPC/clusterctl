@@ -124,7 +124,7 @@ This overwrites files on the nodes, so it asks first.
 				Targets: ns,
 				Detail:  strings.Join(names, ", "),
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 
 			t := output.NewTable(output.Cols("NODE", "SECRET", "STATUS")...)
@@ -639,7 +639,7 @@ new file is moved into place only once it has arrived complete.
 			if err := a.Gate.Confirm(safety.Action{
 				Verb: "set the configuration source of", Targets: ns, Detail: detail,
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 
 			body := solo.render()
@@ -777,7 +777,7 @@ This changes the nodes, so it asks first.`,
 			if err := a.Gate.Confirm(safety.Action{
 				Verb: "run the configuration management on", Targets: ns, Detail: detail,
 			}); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 
 			reads, err := runOnNodes(a, ns, func(string) transport.Request {
@@ -936,7 +936,7 @@ commands that remove it.
 			}
 			action.Detail = strings.Join(details, "\n  ")
 			if err := a.Gate.Confirm(action); err != nil {
-				return dryRunOrError(err)
+				return err
 			}
 
 			err = plan.run(a, noReset)
