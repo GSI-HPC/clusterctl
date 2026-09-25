@@ -24,8 +24,8 @@ import (
 // can be done is to remember the certificate seen the first time and refuse a
 // silent change, which is what an ssh known_hosts file does for host keys.
 type PinStore struct {
-	// Path is the file the pins are kept in. An empty path disables
-	// pinning, which is reported rather than assumed.
+	// Path is the file the pins are kept in. A client refuses a store
+	// without one, since it could pin nothing.
 	Path string
 }
 
