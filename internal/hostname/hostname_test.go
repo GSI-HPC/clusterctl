@@ -96,3 +96,24 @@ func TestCheckQuotesWhatItRefuses(t *testing.T) {
 		t.Errorf("the error carries the raw escape character: %q", err)
 	}
 }
+
+func TestCheckUser(t *testing.T) {
+	t.Parallel()
+
+	for _, user := range []string{"alice_adm", "Alice.Adm", "root", ".svc", "_svc", "a-b", "1000"} {
+		if err := hostname.CheckUser(user); err != nil {
+			t.Errorf("CheckUser(%q) = %v, want it accepted", user, err)
+		}
+	}
+	// "@" and "$" are Kerberos realms and machine accounts, which ssh
+	// cannot be given in user@host; the rest ssh reads as an option or
+	// ssh_config as the end of a value.
+	for _, user := range []string{"", "-l", "-oProxyCommand=x", "alice@EXAMPLE.ORG", "svc$", `DOM\alice`,
+		"alice adm", "al:ice", "ålice", "alice\nUser root"} {
+		if err := hostname.CheckUser(user); err == nil {
+			t.Errorf("CheckUser(%q) accepted it", user)
+		} else if strings.ContainsRune(err.Error(), '\n') {
+			t.Errorf("CheckUser(%q): the error carries the raw newline: %q", user, err)
+		}
+	}
+}

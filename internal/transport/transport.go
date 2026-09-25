@@ -371,31 +371,10 @@ func (c *Client) destination(target Target) (string, error) {
 	if user == "" {
 		return target.Host, nil
 	}
-	if !isUserName(user) {
-		return "", exitcode.Errorf(exitcode.Usage,
-			"%s: %q is not a user name: use letters, digits, '.', '_' and '-', not beginning with '-'",
-			target.Name, user)
+	if err := hostname.CheckUser(user); err != nil {
+		return "", exitcode.Wrap(exitcode.Usage, fmt.Errorf("%s: %w", target.Name, err))
 	}
 	return user + "@" + target.Host, nil
-}
-
-// isUserName reports whether an account is spelled in the portable user name
-// alphabet of POSIX, in which ssh gives no character a meaning.
-func isUserName(user string) bool {
-	if user == "" || user[0] == '-' {
-		return false
-	}
-	for i := 0; i < len(user); i++ {
-		if !isUserChar(user[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-func isUserChar(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-		c == '.' || c == '_' || c == '-'
 }
 
 // userFor resolves the account to log in as.

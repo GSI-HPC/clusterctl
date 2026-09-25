@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
 // Package hostname decides whether a name may be handed to ssh or put into
-// a URL as a host.
+// a URL as a host, and whether an account may be handed to ssh as a user.
 //
 // A node name reaches places that give some characters a meaning: ssh reads
 // a leading "-" as an option, and a URL reads ":", "@", "/", "?" and "#" as
 // the port, the userinfo, the path, the query and the fragment. Checking each
 // place for the characters it happens to care about would miss the next one,
 // so a name is accepted only when it is spelled in the host name alphabet of
-// RFC 1123, in which none of them has a meaning.
+// RFC 1123, in which none of them has a meaning, and an account only when it
+// is spelled in the portable user name alphabet of POSIX.
 package hostname
 
 import (
@@ -72,6 +73,26 @@ func checkLabel(label string) error {
 
 func isHostChar(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-'
+}
+
+// CheckUser reports whether user is an account name in the portable user
+// name alphabet of POSIX: ASCII letters, digits, ".", "_" and "-", not
+// beginning with "-", which ssh would read as an option. The same rule is
+// the pattern of every user field in the schema, so that a name ssh cannot
+// be given is refused where it is written, not when a command connects.
+func CheckUser(user string) error {
+	if user == "" {
+		return fmt.Errorf("the user name is empty")
+	}
+	if user[0] == '-' {
+		return fmt.Errorf("%q is not a user name: it begins with a hyphen", user)
+	}
+	for i := 0; i < len(user); i++ {
+		if c := user[i]; !isHostChar(c) && c != '.' && c != '_' {
+			return fmt.Errorf("%q is not a user name: %q is not a letter, a digit, \".\", \"_\" or \"-\"", user, rune(c))
+		}
+	}
+	return nil
 }
 
 // CheckHost reports whether host names a machine on its own: a host name as

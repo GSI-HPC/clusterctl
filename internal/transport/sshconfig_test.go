@@ -407,6 +407,49 @@ func TestProxyJumpResolvesEveryHop(t *testing.T) {
 	}
 }
 
+// TestNamesFollowOneRule covers #90's finding that writing ssh_config and
+// connecting checked names by different rules: alice@EXAMPLE.ORG and svc$
+// passed config validate as the context user and then failed every
+// connection, .alice was refused although a connection took it, and a jump
+// host could hold an underscore that no other host name may.
+func TestNamesFollowOneRule(t *testing.T) {
+	t.Parallel()
+	for user, ok := range map[string]bool{
+		"alice_adm": true, "Alice.Adm": true, ".alice": true,
+		"alice@EXAMPLE.ORG": false, "svc$": false, `DOM\alice`: false, "-l": false,
+	} {
+		places := map[string]transport.Options{
+			"the context user": {DefaultUser: user},
+			"a role user":      {Roles: map[string]v1alpha1.HostRole{"a": {Host: "a.example.org", User: user}}},
+			"a jump user": {Roles: map[string]v1alpha1.HostRole{
+				"a": {Host: "a.example.org", ProxyJump: user + "@gw.example.org"}}},
+		}
+		for place, opts := range places {
+			opts.KnownHostsFile = "/k"
+			if err := opts.Validate(); (err == nil) != ok {
+				t.Errorf("%s %q: Validate() = %v, want accepted %v", place, user, err, ok)
+			}
+		}
+		_, err := transport.New(transport.Options{}).Destination(transport.Target{Name: "a", Host: "a.example.org", User: user})
+		if (err == nil) != ok {
+			t.Errorf("connecting as %q: %v, want accepted %v", user, err, ok)
+		}
+	}
+	for hop, ok := range map[string]bool{
+		"gw.example.org": true, "gw.example.org.": true, "[2001:db8::1]:2222": true, "10.0.0.1:22": true,
+		// A role's name never reaches ssh, only its host does.
+		"install_gw": true, "admin@install_gw:2222": true,
+		"gw_1.example.org": false, "gw*.example.org": false, "admin@": false,
+	} {
+		opts := transport.Options{KnownHostsFile: "/k", Roles: map[string]v1alpha1.HostRole{
+			"a":          {Host: "a.example.org", ProxyJump: hop},
+			"install_gw": {Host: "installer.example.org"}}}
+		if err := opts.Validate(); (err == nil) != ok {
+			t.Errorf("jump host %q: Validate() = %v, want accepted %v", hop, err, ok)
+		}
+	}
+}
+
 func TestSmallerGeneratorDefects(t *testing.T) {
 	t.Parallel()
 	refused := map[string]transport.Options{

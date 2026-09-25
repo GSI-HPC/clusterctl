@@ -139,8 +139,9 @@ func TestScaffoldRejectsWhatCannotBeAName(t *testing.T) {
 		{config.ScaffoldOptions{Domain: "{domains.hpc}"}, "not a DNS name"},
 		{config.ScaffoldOptions{Login: "login host"}, "not a host name"},
 		{config.ScaffoldOptions{Login: "-oProxyCommand=x"}, "not a host name"},
-		{config.ScaffoldOptions{User: "-l"}, "not an account name"},
-		{config.ScaffoldOptions{User: "alice adm"}, "not an account name"},
+		{config.ScaffoldOptions{User: "-l"}, "not a user name"},
+		{config.ScaffoldOptions{User: "alice adm"}, "not a user name"},
+		{config.ScaffoldOptions{User: "alice@EXAMPLE.ORG"}, "not a user name"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.want, func(t *testing.T) {

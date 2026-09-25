@@ -24,8 +24,9 @@ type Context struct {
 	Name string `json:"name" yaml:"name" jsonschema:"required,description=Name given to --context"`
 	// Cluster names the Cluster document this context acts on.
 	Cluster string `json:"cluster" yaml:"cluster" jsonschema:"required,description=Name of the Cluster document"`
-	// User is the remote account used for roles that do not name one.
-	User string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"description=Default remote account"`
+	// User is the remote account used for roles that do not name one, in
+	// the portable user name alphabet.
+	User string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"description=Default remote account,pattern=^[A-Za-z0-9._][A-Za-z0-9._-]*$"`
 	// Overrides are applied on top of the site and cluster layers while this
 	// context is current. Keys are dotted paths into the merged
 	// configuration, for example "ssh.connectTimeout".
@@ -212,7 +213,7 @@ type PDUSpec struct {
 	// printf format with two string verbs.
 	NameFormat string `json:"nameFormat,omitempty" yaml:"nameFormat,omitempty" jsonschema:"minLength=1,description=printf format taking the row and the rack"`
 	Domain     string `json:"domain,omitempty" yaml:"domain,omitempty"`
-	User       string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"minLength=1"`
+	User       string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"pattern=^[A-Za-z0-9._][A-Za-z0-9._-]*$"`
 	Credential string `json:"credential,omitempty" yaml:"credential,omitempty"`
 }
 
@@ -273,8 +274,8 @@ type TunnelSpec struct {
 	Excludes []string `json:"excludes,omitempty" yaml:"excludes,omitempty"`
 	// DNS forwards DNS queries through the tunnel.
 	DNS bool `json:"dns,omitempty" yaml:"dns,omitempty"`
-	// User is the remote account.
-	User string `json:"user,omitempty" yaml:"user,omitempty"`
+	// User is the remote account, in the portable user name alphabet.
+	User string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"pattern=^[A-Za-z0-9._][A-Za-z0-9._-]*$"`
 	// Method selects the sshuttle firewall method.
 	Method string `json:"method,omitempty" yaml:"method,omitempty"`
 	// Options are extra sshuttle arguments.
