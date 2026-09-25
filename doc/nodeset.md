@@ -183,6 +183,16 @@ stored under a key made of the site, the cluster and the context, the host
 the command ran on and the exact argument vector, so no two clusters, and no
 two group names, ever share an entry.
 
+Within one command each lookup is made once. Callers that ask for the same
+group, listing or `@source:*` at the same time wait for one command and share
+its answer, a failure included. A group's nodes, and that a source has no
+such group, are then kept for the rest of the command, whatever `cacheTtl`
+says; a source that could not be asked, or a lookup an interrupt stopped, is
+not, and the next caller asks again. Whether a group is not an `exec`
+source's is decided on a listing made during the command, never on one from
+the cache, since that may predate the group: it is made once, however many
+groups the command finds missing.
+
 A source that fails does not hide what the others found: `node groups` and
 `node describe` print the memberships and groups that could be read, name the
 failed source on the error stream and exit non-zero.
