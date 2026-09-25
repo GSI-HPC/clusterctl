@@ -49,6 +49,21 @@ func Wrap(code int, err error) error {
 	return &Error{Code: code, Err: err}
 }
 
+// Has reports whether an error says which exit code it asks for.
+func Has(err error) bool {
+	var coded *Error
+	return errors.As(err, &coded)
+}
+
+// Default gives an error the exit code code, unless it asks for one
+// already.
+func Default(code int, err error) error {
+	if Has(err) {
+		return err
+	}
+	return Wrap(code, err)
+}
+
 func (e *Error) Error() string { return e.Err.Error() }
 
 func (e *Error) Unwrap() error { return e.Err }

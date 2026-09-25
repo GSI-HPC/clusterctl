@@ -5,6 +5,8 @@ package transport_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -338,5 +341,40 @@ func TestTargetString(t *testing.T) {
 	}
 	if got, want := (transport.Target{Name: "gw", Host: "gw"}).String(), "gw"; got != want {
 		t.Errorf("String = %q, want %q", got, want)
+	}
+}
+
+func TestCheckSaysWhyACommandFailed(t *testing.T) {
+	t.Parallel()
+
+	target := transport.Target{Name: "login", Host: "login"}
+	coded := exitcode.Wrap(exitcode.Transport, errors.New("login: Connection refused"))
+	tests := []struct {
+		name   string
+		result transport.Result
+		code   int
+		want   string
+	}{
+		{"success", transport.Result{}, exitcode.OK, ""},
+		{"the transport's own failure", transport.Result{ExitCode: 255, Err: coded}, exitcode.Transport, "login: Connection refused"},
+		{"no exit status", transport.Result{ExitCode: -1, Err: errors.New("cut off")}, exitcode.Transport, "cut off"},
+		{"a refusal", transport.Result{ExitCode: 2, Stderr: "one\n\n  two\n", Stdout: "out\n"},
+			exitcode.TargetFailed, "ls on login exited 2: one; two"},
+		{"a refusal on standard output", transport.Result{ExitCode: 2, Stdout: "\nfirst\nsecond\n"},
+			exitcode.TargetFailed, "ls on login exited 2: first"},
+		{"a silent refusal", transport.Result{ExitCode: 2}, exitcode.TargetFailed, "ls on login exited 2"},
+		{"what the host said is escaped", transport.Result{ExitCode: 1, Stderr: "a\x1b[2Kb\n"},
+			exitcode.TargetFailed, `ls on login exited 1: a\x1b[2Kb`},
+	}
+	for _, tc := range tests {
+		result := tc.result
+		result.Target = target
+		err := result.Check("ls")
+		if got := exitcode.From(err); got != tc.code {
+			t.Errorf("%s: exit code = %d (%v), want %d", tc.name, got, err, tc.code)
+		}
+		if got := fmt.Sprint(err); tc.want != "" && got != tc.want {
+			t.Errorf("%s: error = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

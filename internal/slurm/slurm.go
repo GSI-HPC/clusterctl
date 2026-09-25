@@ -15,7 +15,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -27,7 +26,6 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -80,7 +78,8 @@ func (c *Client) readLines(ctx context.Context, argv []string) ([]string, error)
 
 // exec runs one client. Every error it returns carries an exit code: a login
 // node that cannot be reached is a transport failure, and a client that ran
-// and refused is a failed target, reported with what it said.
+// and refused is a failed target, reported with what it said. The transport
+// reports a non-zero exit as "command exited N", which would drop that.
 func (c *Client) exec(ctx context.Context, runner transport.Runner, argv []string) (*transport.Result, error) {
 	result, err := runner.Run(ctx, c.Target, transport.Request{
 		Argv:    argv,
@@ -88,51 +87,9 @@ func (c *Client) exec(ctx context.Context, runner transport.Runner, argv []strin
 		TTY:     transport.TTYNone,
 	})
 	if err != nil {
-		return nil, keepCode(exitcode.Transport, err)
+		return nil, exitcode.Default(exitcode.Transport, err)
 	}
-	if result.Failed() {
-		return result, c.failure(argv[0], result)
-	}
-	return result, nil
-}
-
-// failure describes a client that did not succeed.
-//
-// The transport reports any non-zero exit as "command exited N", which
-// drops what Slurm said. Only a failure the transport classified itself, such
-// as ssh's own exit 255, or one with no exit status at all, is passed on as
-// it is.
-func (c *Client) failure(program string, result *transport.Result) error {
-	var coded *exitcode.Error
-	if result.Err != nil && (errors.As(result.Err, &coded) || result.ExitCode <= 0) {
-		return keepCode(exitcode.Transport, result.Err)
-	}
-	message := oneLine(result.Stderr)
-	if message == "" {
-		return exitcode.Errorf(exitcode.TargetFailed, "%s on %s exited %d", program, c.Target, result.ExitCode)
-	}
-	return exitcode.Errorf(exitcode.TargetFailed, "%s on %s exited %d: %s", program, c.Target, result.ExitCode, message)
-}
-
-// keepCode gives an error an exit code unless it carries one already.
-func keepCode(code int, err error) error {
-	var coded *exitcode.Error
-	if errors.As(err, &coded) {
-		return err
-	}
-	return exitcode.Wrap(code, err)
-}
-
-// oneLine makes what a client printed safe to put into one line of an error:
-// its lines are joined with "; " and escaped with output.EscapeCell.
-func oneLine(s string) string {
-	var lines []string
-	for line := range strings.SplitSeq(s, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return output.EscapeCell(strings.Join(lines, "; "))
+	return result, result.Check(argv[0])
 }
 
 func (c *Client) timeout() time.Duration {

@@ -4,7 +4,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -56,8 +55,7 @@ func dhcpConfig(a *app.App) (*dhcp.Config, error) {
 	})
 	if err != nil {
 		// A file that could not be fetched keeps the exit code saying so.
-		var coded *exitcode.Error
-		if errors.As(err, &coded) {
+		if exitcode.Has(err) {
 			return nil, err
 		}
 		return nil, exitcode.Errorf(exitcode.TargetFailed, "parsing %s: %w", path, err)
