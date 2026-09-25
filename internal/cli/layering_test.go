@@ -411,3 +411,20 @@ func TestClusterNamingNoInventoryNeverReadsAnotherSite(t *testing.T) {
 		t.Errorf("beta: node fqdn = %q, want %q", got, want)
 	}
 }
+
+// A --set without a value is refused by mcp serve as by every other
+// command, before the server starts and with the same message. mcp serve
+// used to read it as an empty value, which the key's type check refused
+// as null, or not at all for a key that takes null.
+func TestSetWithoutAValueIsRefused(t *testing.T) {
+	for _, args := range [][]string{
+		{"--set", "ssh.binary", "config", "view"},
+		{"--set", "ssh.binary", "mcp", "serve"},
+	} {
+		_, err := run(t, harnessOptions{}, args...)
+		wantCode(t, err, exitcode.Usage)
+		if err == nil || !strings.Contains(err.Error(), "--set takes PATH=VALUE") {
+			t.Errorf("%v: err = %v, want --set refused for its missing value", args, err)
+		}
+	}
+}
