@@ -50,49 +50,47 @@ var scanDial func(ctx context.Context, network, address string) (net.Conn, error
 func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duration) (map[string][]hostkeys.Entry, map[string]error) {
 	found := map[string][]hostkeys.Entry{}
 	failed := map[string]error{}
-	var mu sync.Mutex
-
-	limit := a.Spec.Fanout.Max
-	if limit < 1 {
-		limit = fanout.DefaultMax
+	resolve := a.Namer.FQDN
+	if bmc {
+		resolve = a.BMCHost
 	}
-	sem := make(chan struct{}, limit)
-	var wg sync.WaitGroup
+	var hosts []string
+	var scanners []*hostkeys.Scanner
 	for _, node := range ns.Expand() {
-		var (
-			host string
-			err  error
-		)
-		if bmc {
-			host, err = a.BMCHost(node)
-		} else {
-			host, err = a.Namer.FQDN(node)
-		}
+		host, err := resolve(node)
 		if err != nil {
-			mu.Lock()
 			failed[node] = err
-			mu.Unlock()
 			continue
 		}
 		scanner := &hostkeys.Scanner{Timeout: timeout, Dial: scanDial}
 		if hops := jumpHops(a, host); len(hops) > 0 {
 			scanner.Dial = dialThrough(a, hops)
 		}
-
-		sem <- struct{}{}
-		wg.Go(func() {
-			defer func() { <-sem }()
-			entries, err := scanHost(a.Context(), scanner, host)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				failed[host] = err
-				return
-			}
-			found[host] = entries
-		})
+		hosts, scanners = append(hosts, host), append(scanners, scanner)
 	}
-	wg.Wait()
+
+	limit := a.Spec.Fanout.Max
+	if limit < 1 {
+		limit = fanout.DefaultMax
+	}
+	var mu sync.Mutex
+	fanout.Each(a.Context(), len(hosts), limit, func(i int) {
+		entries, err := scanHost(a.Context(), scanners[i], hosts[i])
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil {
+			failed[hosts[i]] = err
+			return
+		}
+		found[hosts[i]] = entries
+	})
+	// A host the interrupt came before did not answer either.
+	for _, host := range hosts {
+		_, ok := found[host]
+		if _, bad := failed[host]; !ok && !bad {
+			failed[host] = a.Context().Err()
+		}
+	}
 	return found, failed
 }
 

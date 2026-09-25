@@ -50,21 +50,31 @@ func (e *Executor) Run(ctx context.Context, targets []transport.Target, req tran
 // the others: the point of a fan-out is to learn about every node.
 func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, build func(transport.Target) transport.Request) []*transport.Result {
 	results := make([]*transport.Result, len(targets))
-	if len(targets) == 0 {
-		return results
-	}
-
 	limit := e.Max
 	if limit < 1 {
 		limit = DefaultMax
 	}
-	if limit > len(targets) {
-		limit = len(targets)
+	Each(ctx, len(targets), limit, func(i int) {
+		results[i] = e.runOne(ctx, targets[i], build)
+	})
+	for i, r := range results {
+		if r == nil {
+			// Whatever has not started is reported as cancelled rather than
+			// left as a nil result.
+			results[i] = &transport.Result{Target: targets[i], ExitCode: -1, Err: ctx.Err()}
+		}
 	}
+	return results
+}
 
-	sem := make(chan struct{}, limit)
+// Each calls work with every index below n, at most limit at a time, and
+// returns once every call has returned. When ctx ends, no further call is
+// started, so an interrupt stops a fan-out the same way wherever it is; the
+// caller tells what was left out by what work did not record.
+func Each(ctx context.Context, n, limit int, work func(i int)) {
+	sem := make(chan struct{}, max(1, min(limit, n)))
 	var wg sync.WaitGroup
-	for i, target := range targets {
+	for i := range n {
 		select {
 		case <-ctx.Done():
 		case sem <- struct{}{}:
@@ -74,20 +84,15 @@ func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, buil
 				<-sem
 			}
 		}
-		if err := ctx.Err(); err != nil {
-			// Whatever has not started is reported as cancelled rather than
-			// left as a nil result.
-			results[i] = &transport.Result{Target: target, ExitCode: -1, Err: err}
-			continue
+		if ctx.Err() != nil {
+			break
 		}
-
 		wg.Go(func() {
 			defer func() { <-sem }()
-			results[i] = e.runOne(ctx, target, build)
+			work(i)
 		})
 	}
 	wg.Wait()
-	return results
 }
 
 // runOne works on one target. A panic in the runner, in build or in
