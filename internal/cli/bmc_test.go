@@ -320,3 +320,33 @@ func TestInventoryNameWithCapitalsIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// bmc web took its argument as it was typed, so a name that is not a host
+// name ended up in the URL that is opened in the browser, where exe0003/x?
+// made the node itself the host.
+func TestBMCWebSelectsTheNode(t *testing.T) {
+	for _, arg := range []string{"exe0003/x?", "exe0003#", "exe[0001-0002]", "-exe0001", " "} {
+		h, err := run(t, harnessOptions{}, "bmc", "web", "--", arg)
+		if err == nil {
+			t.Errorf("bmc web %q: accepted, output:\n%s", arg, h.out)
+			continue
+		}
+		if got := exitcode.From(err); got != exitcode.Usage {
+			t.Errorf("bmc web %q: exit code = %d, want %d (%v)", arg, got, exitcode.Usage, err)
+		}
+		if h.out.Len() != 0 {
+			t.Errorf("bmc web %q: printed %q, want nothing", arg, h.out)
+		}
+	}
+
+	for _, arg := range []string{"exe0001", "EXE1", "exe0001.hpc.example.org"} {
+		h, err := run(t, harnessOptions{}, "bmc", "web", arg)
+		if err != nil {
+			t.Errorf("bmc web %s failed: %v", arg, err)
+			continue
+		}
+		if got, want := strings.TrimSpace(h.out.String()), "https://exe0001.mgmt.hpc.example.org"; got != want {
+			t.Errorf("bmc web %s = %q, want %q", arg, got, want)
+		}
+	}
+}

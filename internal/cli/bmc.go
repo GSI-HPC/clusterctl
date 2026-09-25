@@ -760,7 +760,13 @@ one is configured.`,
 			if err != nil {
 				return err
 			}
-			host, err := a.BMCHost(args[0])
+			// The URL is opened in a browser, so the name is selected like
+			// every other node argument before it is put into one.
+			node, err := oneNode(a, args[0])
+			if err != nil {
+				return err
+			}
+			host, err := a.BMCHost(node)
 			if err != nil {
 				return err
 			}
