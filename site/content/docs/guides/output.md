@@ -124,14 +124,18 @@ The difference between 1 and 3 is what lets a script tell "the node said no"
 from "the node was not there":
 
 ```bash
-if ! clusterctl exec -n '@compute' -- systemctl is-active slurmd; then
-  case $? in
-    1) echo "some nodes are unhealthy" ;;
-    3) echo "some nodes are unreachable" ;;
-    *) echo "clusterctl could not run" ; exit 2 ;;
-  esac
-fi
+clusterctl exec -n '@compute' -- systemctl is-active slurmd
+case $? in
+  0) echo "all healthy" ;;
+  1) echo "some nodes are unhealthy" ;;
+  3) echo "some nodes are unreachable" ;;
+  *) echo "clusterctl could not run" ; exit 2 ;;
+esac
 ```
+
+Read `$?` straight after clusterctl. After `if ! clusterctl …; then` it holds
+the status of the `!`, which is always 0 inside the `then`. Under `set -e`,
+keep the status with `rc=0; clusterctl … || rc=$?` and switch on `$rc`.
 
 ## Scripting safely
 
