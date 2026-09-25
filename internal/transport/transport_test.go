@@ -15,6 +15,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -431,22 +432,28 @@ func TestCheckSaysWhyACommandFailed(t *testing.T) {
 
 	target := transport.Target{Name: "login", Host: "login"}
 	coded := exitcode.Wrap(exitcode.Transport, errors.New("login: Connection refused"))
+	timedOut := &transport.TimeoutError{Target: target, ExitCode: 124, Timeout: time.Minute}
 	tests := []struct {
 		name   string
 		result transport.Result
 		code   int
 		want   string
+		class  progress.Class
 	}{
-		{"success", transport.Result{}, exitcode.OK, ""},
-		{"the transport's own failure", transport.Result{ExitCode: 255, Err: coded}, exitcode.Transport, "login: Connection refused"},
-		{"no exit status", transport.Result{ExitCode: -1, Err: errors.New("cut off")}, exitcode.Transport, "cut off"},
+		{"success", transport.Result{}, exitcode.OK, "", progress.ClassNone},
+		{"the transport's own failure", transport.Result{ExitCode: 255, Err: coded}, exitcode.Transport, "login: Connection refused",
+			progress.ClassTransport},
+		{"no exit status", transport.Result{ExitCode: -1, Err: errors.New("cut off")}, exitcode.Transport, "cut off",
+			progress.ClassTransport},
 		{"a refusal", transport.Result{ExitCode: 2, Stderr: "one\n\n  two\n", Stdout: "out\n"},
-			exitcode.TargetFailed, "ls on login exited 2: one; two"},
+			exitcode.TargetFailed, "ls on login exited 2: one; two", progress.ClassTarget},
 		{"a refusal on standard output", transport.Result{ExitCode: 2, Stdout: "\nfirst\nsecond\n"},
-			exitcode.TargetFailed, "ls on login exited 2: first"},
-		{"a silent refusal", transport.Result{ExitCode: 2}, exitcode.TargetFailed, "ls on login exited 2"},
+			exitcode.TargetFailed, "ls on login exited 2: first", progress.ClassTarget},
+		{"a silent refusal", transport.Result{ExitCode: 2}, exitcode.TargetFailed, "ls on login exited 2", progress.ClassTarget},
 		{"what the host said is escaped", transport.Result{ExitCode: 1, Stderr: "a\x1b[2Kb\n"},
-			exitcode.TargetFailed, `ls on login exited 1: a\x1b[2Kb`},
+			exitcode.TargetFailed, `ls on login exited 1: a\x1b[2Kb`, progress.ClassTarget},
+		{"a remote timeout", transport.Result{ExitCode: 124, Err: timedOut, Stderr: "slow\n"},
+			exitcode.TargetFailed, "ls on login exited 124: slow", progress.ClassTimeout},
 	}
 	for _, tc := range tests {
 		result := tc.result
@@ -457,6 +464,9 @@ func TestCheckSaysWhyACommandFailed(t *testing.T) {
 		}
 		if got := fmt.Sprint(err); tc.want != "" && got != tc.want {
 			t.Errorf("%s: error = %q, want %q", tc.name, got, tc.want)
+		}
+		if got := progress.Classify(err); got != tc.class {
+			t.Errorf("%s: class = %s, want %s", tc.name, got, tc.class)
 		}
 	}
 }

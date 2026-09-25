@@ -16,6 +16,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -183,7 +184,8 @@ func TestTheVersionQuestionStopsWithTheCommand(t *testing.T) {
 // defaults. ssh is stopped once the command has had its timeout, the kill
 // grace and the time reaching the host may take, which leaves a host that
 // answers late its own answer, and a host that did not is reported as
-// unreachable, not as interrupted.
+// unreachable, not as interrupted. Either way a progress display reads the
+// command as one that ran out of time.
 func TestRunBoundsACommandWithATimeout(t *testing.T) {
 	t.Parallel()
 	background := func(*testing.T) context.Context { return context.Background() }
@@ -193,14 +195,15 @@ func TestRunBoundsACommandWithATimeout(t *testing.T) {
 		ctx     func(*testing.T) context.Context
 		code    int
 		detail  string
+		class   progress.Class
 		atLeast time.Duration
 	}{
 		{"a host that stopped answering", "exec sleep 60", background,
-			exitcode.Transport, "no answer 6s after the command's 100ms timeout ran out", 6100 * time.Millisecond},
+			exitcode.Transport, "no answer 6s after the command's 100ms timeout ran out", progress.ClassTimeout, 6100 * time.Millisecond},
 		{"a host that answered after its timeout", "sleep 1; exit 124", background,
-			exitcode.TargetFailed, "command exited 124", time.Second},
+			exitcode.TargetFailed, "command exited 124", progress.ClassTimeout, time.Second},
 		{"an interrupt", "exec sleep 60", cancelSoon,
-			exitcode.Interrupted, "context canceled", 0},
+			exitcode.Interrupted, "context canceled", progress.ClassCanceled, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -222,6 +225,13 @@ func TestRunBoundsACommandWithATimeout(t *testing.T) {
 			}
 			if tc.code != exitcode.Interrupted && errors.Is(result.Err, context.Canceled) {
 				t.Errorf("error = %v, which reads as an interrupt", result.Err)
+			}
+			if got := progress.Classify(result.Err); got != tc.class {
+				t.Errorf("class = %s, want %s (error %v)", got, tc.class, result.Err)
+			}
+			if err := result.Check(""); progress.Classify(err) != tc.class || exitcode.From(err) != tc.code {
+				t.Errorf("Check = %v, class %s, exit code %d; want class %s, exit code %d",
+					err, progress.Classify(err), exitcode.From(err), tc.class, tc.code)
 			}
 			if elapsed < tc.atLeast || elapsed > tc.atLeast+10*time.Second {
 				t.Errorf("Run returned after %v, want %v or a little more", elapsed, tc.atLeast)
@@ -279,6 +289,74 @@ func TestTheTimeToReachAHostCountsEveryAttemptAndJump(t *testing.T) {
 			c := transport.New(transport.Options{SSH: tc.ssh, Roles: roles})
 			if got := transport.Reach(c, transport.Target{Name: tc.host, Host: tc.host}); got != tc.want {
 				t.Errorf("reaching %s may take %v, want %v", tc.host, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAStatusOfTimeoutCountsOnlyAfterTheTimeout checks that a command
+// ended by timeout(1) on the host, which exits 124, or 137 once it had to be
+// killed, is told apart from one that exited the same way by itself: a
+// script's own exit 124, or a child the kernel killed when memory ran out.
+// Only a command that ran for its whole timeout ran out of time. Either
+// reads and exits as it always has, as a command that exited with a status,
+// through Check too; only the class a progress display reads differs.
+func TestAStatusOfTimeoutCountsOnlyAfterTheTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		script  string
+		timeout time.Duration
+		status  int
+		class   progress.Class
+	}{
+		{"stopped by its timeout", "sleep 0.2; exit 124", 100 * time.Millisecond, 124, progress.ClassTimeout},
+		{"killed by its timeout", "sleep 0.2; exit 137", 100 * time.Millisecond, 137, progress.ClassTimeout},
+		{"a script's own exit 124", "exit 124", time.Minute, 124, progress.ClassTarget},
+		{"a child killed on the host", "exit 137", time.Minute, 137, progress.ClassTarget},
+		{"a 124 without a timeout", "sleep 0.2; exit 124", 0, 124, progress.ClassTarget},
+		{"another status after the timeout", "sleep 0.2; exit 1", 100 * time.Millisecond, 1, progress.ClassTarget},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := fakeClient(t, "echo 'it said so' >&2; "+tc.script)
+			req := transport.Request{Argv: []string{"true"}, Timeout: tc.timeout}
+			result, err := c.Run(context.Background(), target, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.ExitCode != tc.status {
+				t.Errorf("exit status = %d, want %d", result.ExitCode, tc.status)
+			}
+			want := fmt.Sprintf("exe0001 (exe0001.example.org): command exited %d", tc.status)
+			if got := fmt.Sprint(result.Err); got != want {
+				t.Errorf("error = %q, want %q", got, want)
+			}
+			checked := result.Check("true")
+			wantChecked := fmt.Sprintf("true on exe0001 (exe0001.example.org) exited %d: it said so", tc.status)
+			if got := fmt.Sprint(checked); got != wantChecked {
+				t.Errorf("Check = %q, want %q", got, wantChecked)
+			}
+			for what, err := range map[string]error{"Run": result.Err, "Check": checked} {
+				if got := exitcode.From(err); got != exitcode.TargetFailed {
+					t.Errorf("%s: exit code = %d, want %d", what, got, exitcode.TargetFailed)
+				}
+				if got := progress.Classify(err); got != tc.class {
+					t.Errorf("%s: class = %s, want %s", what, got, tc.class)
+				}
+				var timedOut *transport.TimeoutError
+				if errors.As(err, &timedOut) != (tc.class == progress.ClassTimeout) {
+					t.Errorf("%s: error %v is a TimeoutError: %v", what, err, timedOut != nil)
+				}
+			}
+
+			req.Stdin, req.Stdout, req.Stderr = strings.NewReader(""), &strings.Builder{}, &strings.Builder{}
+			err = c.Interactive(context.Background(), target, req)
+			if got := fmt.Sprint(err); got != want {
+				t.Errorf("Interactive: error = %q, want %q", got, want)
+			}
+			if got := progress.Classify(err); got != tc.class {
+				t.Errorf("Interactive: class = %s, want %s", got, tc.class)
 			}
 		})
 	}

@@ -33,6 +33,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 )
 
@@ -49,6 +50,11 @@ const (
 	// sshConnectionFailed is the exit status ssh itself reports when it
 	// could not reach or authenticate with the host.
 	sshConnectionFailed = 255
+	// timedOutStopped and timedOutKilled are what timeout(1) exits with
+	// when it ended a command: 124 when the command stopped once told to,
+	// 137 when it had to be killed after the grace.
+	timedOutStopped = 124
+	timedOutKilled  = 137
 	// statusGuard runs a remote command and exits with its status, except
 	// that 255 becomes 254: a command's own 255 would otherwise read as
 	// ssh's, and a host that answered as one that could not be reached. It
@@ -171,8 +177,9 @@ func (r *Result) Failed() bool { return r == nil || r.Err != nil || r.ExitCode !
 // other failure is that of a host that answered: it exits 1, and what the
 // command printed on standard error is the reason, its lines joined into
 // one, or else the first line it printed on standard output. The reason is
-// escaped, because the host wrote it. program names what ran, for the
-// message; it may be empty.
+// escaped, because the host wrote it. The error Run gave, such as a
+// TimeoutError, is still found behind it with errors.As. program names what
+// ran, for the message; it may be empty.
 func (r *Result) Check(program string) error {
 	switch {
 	case !r.Failed():
@@ -191,12 +198,30 @@ func (r *Result) Check(program string) error {
 		said = lines(r.Stdout)
 		said = said[:min(1, len(said))]
 	}
+	var reason error
 	if len(said) == 0 {
-		return exitcode.Errorf(exitcode.TargetFailed, "%s exited %d", what, r.ExitCode)
+		reason = exitcode.Errorf(exitcode.TargetFailed, "%s exited %d", what, r.ExitCode)
+	} else {
+		reason = exitcode.Errorf(exitcode.TargetFailed, "%s exited %d: %s", what, r.ExitCode,
+			output.EscapeCell(strings.Join(said, "; ")))
 	}
-	return exitcode.Errorf(exitcode.TargetFailed, "%s exited %d: %s", what, r.ExitCode,
-		output.EscapeCell(strings.Join(said, "; ")))
+	if r.Err == nil {
+		return reason
+	}
+	return &explained{reason: reason, err: r.Err}
 }
+
+// explained is the error Check gives for a command that exited with a
+// status: what the host said, which carries the exit code, in place of the
+// error Run gave. That error stays behind it for errors.As, so that a remote
+// timeout is still one after Check.
+type explained struct {
+	reason error
+	err    error
+}
+
+func (e *explained) Error() string   { return e.reason.Error() }
+func (e *explained) Unwrap() []error { return []error{e.reason, e.err} }
 
 // lines returns the lines of s that say something, without the spaces around
 // them.
@@ -495,10 +520,11 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 		Stderr:   stderr.String(),
 		Duration: time.Since(start),
 	}
-	result.ExitCode, result.Err = classify(ctx, target, runErr, result.Stderr)
+	result.ExitCode, result.Err = classify(ctx, target, runErr, result.Stderr, req.Timeout, result.Duration)
 	if runErr != nil && ctx.Err() == nil && runCtx.Err() != nil {
 		// The caller's context is live, so this is no interrupt: the host
-		// did not stay reachable for as long as the command ran.
+		// did not stay reachable for as long as the command ran. The error
+		// wraps the deadline, which a progress display reads as a timeout.
 		result.ExitCode = -1
 		result.Err = exitcode.Wrap(exitcode.Transport, fmt.Errorf(
 			"%s: no answer %s after the command's %s timeout ran out; the host stopped answering, "+
@@ -550,7 +576,9 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 	if cmd.Stderr == nil {
 		cmd.Stderr = os.Stderr
 	}
-	_, err = classify(ctx, target, cmd.Run(), "")
+	start := time.Now()
+	runErr := cmd.Run()
+	_, err = classify(ctx, target, runErr, "", req.Timeout, time.Since(start))
 	return err
 }
 
@@ -582,8 +610,10 @@ func (c *Client) command(ctx context.Context, args []string) *exec.Cmd {
 //
 // A command that ended because its context did is reported as interrupted,
 // whatever ssh exited with: once ssh has been killed, its status says nothing
-// about the host.
-func classify(ctx context.Context, target Target, err error, stderr string) (int, error) {
+// about the host. timeout is the request's and ran how long the command
+// took, which tell a command that timeout(1) ended from one that exited the
+// same way by itself.
+func classify(ctx context.Context, target Target, err error, stderr string, timeout, ran time.Duration) (int, error) {
 	if err == nil {
 		return 0, nil
 	}
@@ -601,8 +631,40 @@ func classify(ctx context.Context, target Target, err error, stderr string) (int
 			fmt.Errorf("running ssh for %s: %w", target, err))
 	}
 	code := exitErr.ExitCode()
+	if timedOut(code, timeout, ran) {
+		return code, &TimeoutError{Target: target, ExitCode: code, Timeout: timeout}
+	}
 	return code, exited(target, code, stderr)
 }
+
+// timedOut reports whether a command that exited with code was ended by
+// timeout(1). Its statuses count only once the command has run for the
+// whole of its timeout: a command can exit 124 by itself, and 137 is also
+// the status of one the host killed for another reason, such as the kernel
+// when memory ran out. The time is measured here and includes reaching the
+// host, so a command that timed out always ran that long.
+func timedOut(code int, timeout, ran time.Duration) bool {
+	return timeout > 0 && ran >= timeout && (code == timedOutStopped || code == timedOutKilled)
+}
+
+// TimeoutError is the error of a remote command that timeout(1) ended
+// because it ran for the whole of its request's Timeout. The host answered,
+// so it reads and exits like any other command that exited with a status;
+// only its progress class tells a display that the command ran out of time.
+type TimeoutError struct {
+	Target Target
+	// ExitCode is timeout(1)'s: 124, or 137 when the command had to be
+	// killed.
+	ExitCode int
+	Timeout  time.Duration
+}
+
+func (e *TimeoutError) Error() string {
+	return fmt.Sprintf("%s: command exited %d", e.Target, e.ExitCode)
+}
+
+// ProgressClass says that the command ran out of time.
+func (e *TimeoutError) ProgressClass() progress.Class { return progress.ClassTimeout }
 
 // cancelled is the error of a command that was stopped because its context
 // ended, what naming it. An interrupt exits 130; a deadline is the command's

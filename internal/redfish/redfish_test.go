@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 )
 
@@ -391,6 +393,59 @@ func TestRejectedAccountIsATransportFailure(t *testing.T) {
 	}
 }
 
+// A refused request reads and exits as it did before it had a type of its
+// own, and tells a progress display why it failed: a 401 or a 403 turned
+// the account away, and any other refusal is the processor's own, which
+// the exit code classes.
+func TestARefusedRequestSaysWhyItWasRefused(t *testing.T) {
+	t.Parallel()
+
+	f := newFakeBMC(t, nil)
+	f.mux.HandleFunc("/redfish/v1/refuse/{status}", func(w http.ResponseWriter, r *http.Request) {
+		status, _ := strconv.Atoi(r.PathValue("status"))
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "go away"}})
+	})
+	for _, tc := range []struct {
+		status int
+		want   string
+		code   int
+		class  progress.Class
+	}{
+		{http.StatusUnauthorized, "example.com: 401 Unauthorized: go away", exitcode.Transport, progress.ClassAuth},
+		{http.StatusForbidden, "example.com: 403 Forbidden: go away", exitcode.TargetFailed, progress.ClassAuth},
+		{http.StatusBadRequest, "example.com: 400 Bad Request: go away", exitcode.TargetFailed, progress.ClassTarget},
+		{http.StatusNotFound, "example.com: 404 Not Found: go away", exitcode.TargetFailed, progress.ClassTarget},
+		{http.StatusInternalServerError, "example.com: 500 Internal Server Error: go away", exitcode.TargetFailed, progress.ClassTarget},
+	} {
+		_, err := f.client(t).Get(context.Background(), "/redfish/v1/refuse/"+strconv.Itoa(tc.status))
+		if got := fmt.Sprint(err); got != tc.want {
+			t.Errorf("%d: error = %q, want %q", tc.status, got, tc.want)
+		}
+		if got := exitcode.From(err); got != tc.code {
+			t.Errorf("%d: exit code = %d, want %d", tc.status, got, tc.code)
+		}
+		if got := progress.Classify(err); got != tc.class {
+			t.Errorf("%d: class = %s, want %s", tc.status, got, tc.class)
+		}
+		var refused *redfish.StatusError
+		if !errors.As(err, &refused) || refused.StatusCode != tc.status {
+			t.Errorf("%d: error = %#v, want a StatusError with that status", tc.status, err)
+		}
+	}
+
+	// The account the fake turns away, as a wrong password is.
+	c := f.client(t)
+	c.Password = "wrong"
+	_, err := c.PowerState(context.Background())
+	if got, want := fmt.Sprint(err), "example.com: 401 Unauthorized: "; got != want {
+		t.Errorf("a wrong password: error = %q, want %q", got, want)
+	}
+	if got := progress.Classify(err); got != progress.ClassAuth {
+		t.Errorf("a wrong password: class = %s, want %s", got, progress.ClassAuth)
+	}
+}
+
 func TestResetChecksTheVendorProfile(t *testing.T) {
 	t.Parallel()
 
@@ -626,6 +681,12 @@ func TestPinningRefusesAChangedCertificate(t *testing.T) {
 	}
 	if mismatch.Recorded != earlier || mismatch.Seen != f.fingerprint() {
 		t.Errorf("mismatch = %+v, want recorded %s and seen %s", mismatch, earlier, f.fingerprint())
+	}
+	if got, want := exitcode.From(err), exitcode.Transport; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	if got, want := progress.Classify(err), progress.ClassPin; got != want {
+		t.Errorf("class = %s, want %s", got, want)
 	}
 	if got := f.requests.Load(); got != 0 {
 		t.Errorf("%d requests reached the server behind a changed certificate", got)
