@@ -737,13 +737,21 @@ func batched(action string) bool {
 	return action == ipmi.ActionOn || action == ipmi.ActionCycle
 }
 
+// staggerAfter waits out the pause between two batches; the tests replace
+// it.
+var staggerAfter = time.After
+
 // runPower carries out a power action on the whole plan, in batches with a
 // pause between them where the action powers machines on.
 //
 // A batch with a failure stops the run, because the failure may be the
 // breaker the batching is there to protect; the nodes of the later batches
 // are reported as not tried. An interrupt stops it too, and what was not
-// sent is reported as such.
+// sent is reported as such, after a batch that failed as well, since the
+// interrupt is what left it out then: a batch it cut short fails too. The
+// batches are those of fanout.Batches, reported under its step, "power
+// <action>", each with its nodes as its targets, and showing no limit, for
+// the reason run gives.
 func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch int, stagger time.Duration) []bmcResult {
 	if !batched(action) || batch <= 0 || p.nodes.Len() <= batch {
 		return p.runStep(ctx, a, p.nodes.Expand(), action)
@@ -753,37 +761,36 @@ func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch 
 	if action == ipmi.ActionCycle {
 		verb = "power cycling"
 	}
-	chunks := p.nodes.Split((p.nodes.Len() + batch - 1) / batch)
 	var results []bmcResult
-	skip := func(from int, outcome bmcOutcome, state string, err error) {
-		for _, chunk := range chunks[from:] {
-			for _, node := range chunk.Expand() {
-				row := bmcResult{Node: node, BMC: p.bmc[node], State: state, outcome: outcome}
-				row.fail(err)
-				results = append(results, row)
-			}
+	batches := fanout.Batches(ctx, p.nodes, fanout.BatchOptions{
+		Step:  "power " + action,
+		Size:  batch,
+		Pause: stagger,
+		After: staggerAfter,
+		BeforePause: func(pause time.Duration) {
+			a.Printf("waiting %s before the next batch\n", pause)
+		},
+		Before: func(i, n int, chunk *nodeset.NodeSet) {
+			a.Printf("%s %s (%d of %d)\n", verb, chunk, i+1, n)
+		},
+	}, func(ctx context.Context, chunk *nodeset.NodeSet) error {
+		rows := p.run(ctx, a, chunk.Expand(), action)
+		results = append(results, rows...)
+		return bmcExit(rows)
+	})
+	for _, b := range batches {
+		if b.Ran {
+			continue
 		}
-	}
-	for i, chunk := range chunks {
-		if i > 0 {
-			if bmcExit(results) != nil {
-				skip(i, outcomeNotTried, "not tried", errors.New("not tried: an earlier batch failed"))
-				break
-			}
-			if stagger > 0 {
-				a.Printf("waiting %s before the next batch\n", stagger)
-				select {
-				case <-ctx.Done():
-				case <-time.After(stagger):
-				}
-			}
-			if ctx.Err() != nil {
-				skip(i, outcomeNotSent, "not sent", errNotSent())
-				break
-			}
+		outcome, state, err := outcomeNotSent, "not sent", errNotSent()
+		if errors.Is(b.Err, fanout.ErrNotTried) {
+			outcome, state, err = outcomeNotTried, "not tried", b.Err
 		}
-		a.Printf("%s %s (%d of %d)\n", verb, chunk, i+1, len(chunks))
-		results = append(results, p.runStep(ctx, a, chunk.Expand(), action)...)
+		for _, node := range b.Nodes.Expand() {
+			row := bmcResult{Node: node, BMC: p.bmc[node], State: state, outcome: outcome}
+			row.fail(err)
+			results = append(results, row)
+		}
 	}
 	return results
 }

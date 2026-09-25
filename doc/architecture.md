@@ -152,13 +152,15 @@ command is interrupted, and `fanout.Map` runs any kind of work on it, the
 executor's among them. Each kind of work has a bound of its own, which
 `fanout.max` in the configuration does not change
 ([ADR 0022](adr/0022-bounded-pools-and-power-batches.md)). A power-on and a
-power cycle are sent in batches, the set split evenly, one batch after the
-other with a pause between, and a batch with a failure stops the run. A pool on
-`Map` reports its work as the spans of `internal/progress`: a step, with every
-target queued before the first one runs and each ended before it gives its
-place to the next, so that a display never counts more running than the
-bound, and has counted every target, those an interrupt left out among
-them, by the time the step ends.
+power cycle are sent in batches by `fanout.Batches`, the set split evenly, one
+batch after the other with a pause between, and a batch with a failure stops
+the run. A pool on `Map` reports its work as the spans of `internal/progress`:
+a step, with every target queued before the first one runs and each ended
+before it gives its place to the next, so that a display never counts more
+running than the bound, and has counted every target, those an interrupt left
+out among them, by the time the step ends. `Batches` reports each batch the
+same way, all of them announced before the first is sent, and the pauses
+between them as waits.
 
 A panic while one target is worked on is recovered in that target's worker,
 since `recover` only reaches its own goroutine, and becomes that target's

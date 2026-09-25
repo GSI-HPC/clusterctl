@@ -12,11 +12,13 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
+	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // noSlurm turns the Slurm job check off, which these tests are not about.
@@ -158,6 +160,38 @@ func TestBMCPowerOnReportsEveryBatch(t *testing.T) {
 	}
 	if got := len(ipmiCalls(h)); got != 0 {
 		t.Errorf("--batch 0: %d batches were sent, want none", got)
+	}
+}
+
+// A power-on interrupted during a batch sends no more batches, and says of
+// their nodes that they were not sent, as for an interrupt during a pause:
+// the batch it cut short failed, but the interrupt is what left the rest
+// out. The command exits 130.
+func TestBMCPowerOnInterruptedDuringABatch(t *testing.T) {
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	answer := ipmiAnswer(func(bmc string) string {
+		if strings.HasPrefix(bmc, "exe0004.") {
+			cancel()
+			return "connection timeout"
+		}
+		return "ok"
+	})
+	h, err := run(t, harnessOptions{ctx: ctx, recorder: &transport.Recorder{Reply: answer}},
+		append(noSlurm, "-o", "json", "bmc", "power", "on", "--ipmi", "--batch", "3", "--stagger", "1ms", "-y", "-n", "exe[1-9]")...)
+	wantCode(t, err, exitcode.Interrupted)
+	rows := jsonRows(t, h)
+	if len(rows) != 9 {
+		t.Fatalf("got %d rows, want 9:\n%s", len(rows), h.out)
+	}
+	for _, row := range rows[6:] {
+		if row["state"] != "not sent" {
+			t.Errorf("%v: state %v, want not sent", row["node"], row["state"])
+		}
+	}
+	if got := len(ipmiCalls(h)); got != 2 {
+		t.Errorf("got %d batches sent, want 2", got)
 	}
 }
 
@@ -435,5 +469,112 @@ func TestBMCPowerEndsEachNodeAsItsProcessorAnswers(t *testing.T) {
 	}
 	if peak > 2 {
 		t.Errorf("%d nodes were running at once, want the limit of 2 at most", peak)
+	}
+}
+
+// fakeStagger replaces the pause between two batches for the rest of the
+// test: pause is called with its length instead of waiting it out, and
+// the pause ends at once unless pause says to wait for the context.
+func fakeStagger(t *testing.T, pause func(time.Duration) (wait bool)) {
+	t.Helper()
+	previous := staggerAfter
+	t.Cleanup(func() { staggerAfter = previous })
+	staggerAfter = func(d time.Duration) <-chan time.Time {
+		over := make(chan time.Time, 1)
+		if !pause(d) {
+			over <- time.Time{}
+		}
+		return over
+	}
+}
+
+// A power-on in batches is one step over the whole set, with every batch
+// announced before the first is sent and the pause between two a wait of
+// its own: a counter reaches its total whether a batch failed, which
+// leaves the later ones not tried, or an interrupt came in a pause, which
+// leaves them not sent. The notes on standard error and the rows are what
+// they were.
+func TestBMCPowerReportsItsBatches(t *testing.T) {
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	for _, tc := range []struct {
+		name      string
+		nodes     string
+		interrupt bool
+		code      int
+		notes     []string
+		rows      map[string]string
+		want      string
+	}{
+		{"a batch fails", "exe[1-10]", false, exitcode.TargetFailed,
+			[]string{
+				"powering on exe[0001-0003] (1 of 4)\nwaiting 5s before the next batch\npowering on exe[0004-0006] (2 of 4)\n",
+			},
+			map[string]string{"exe0001": "ok", "exe0005": "unknown", "exe0007": "not tried", "exe0010": "not tried"}, `
+step power on total=10 [fold]: failed (target): 1 of 3 service processors failed
+  batch 1/4 node=exe[0001-0003] batch=1/4 total=3: ok
+    target exe[0001-0003]: ok
+  batch 2/4 node=exe[0004-0006] batch=2/4 total=3: failed (target): 1 of 3 service processors failed
+    target exe0005: failed (target): connection timeout
+    target exe[0004,0006]: ok
+  batch 3/4 node=exe[0007-0008] batch=3/4 total=2: skipped: not tried: an earlier batch failed
+  batch 4/4 node=exe[0009-0010] batch=4/4 total=2: skipped: not tried: an earlier batch failed
+  wait stagger timeout=5s: ok
+`},
+		{"an interrupt in a pause", "exe[1-6]", true, exitcode.Interrupted,
+			[]string{"powering on exe[0001-0003] (1 of 2)\nwaiting 5s before the next batch\n"},
+			map[string]string{"exe0003": "ok", "exe0004": "not sent", "exe0006": "not sent"}, `
+step power on total=6 [fold]: canceled (canceled): context canceled
+  batch 1/2 node=exe[0001-0003] batch=1/2 total=3: ok
+    target exe[0001-0003]: ok
+  batch 2/2 node=exe[0004-0006] batch=2/2 total=3: canceled (canceled): context canceled
+  wait stagger timeout=5s: canceled (canceled): context canceled
+`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			watched, tree := watch(t)
+			ctx, cancel := context.WithCancel(watched)
+			defer cancel()
+			var pauses []time.Duration
+			fakeStagger(t, func(d time.Duration) bool {
+				pauses = append(pauses, d)
+				if tc.interrupt {
+					cancel()
+				}
+				return tc.interrupt
+			})
+			recorder := &transport.Recorder{Reply: ipmiAnswer(func(bmc string) string {
+				if strings.HasPrefix(bmc, "exe0005.") {
+					return "connection timeout"
+				}
+				return "ok"
+			})}
+
+			h, err := run(t, harnessOptions{ctx: ctx, recorder: recorder},
+				append(noSlurm, "-o", "json", "bmc", "power", "on", "--ipmi", "--batch", "3", "-y", "-n", tc.nodes)...)
+			wantCode(t, err, tc.code)
+			if len(pauses) != 1 || pauses[0] != 5*time.Second {
+				t.Errorf("paused %v, want once for safety.powerOnStagger, 5s", pauses)
+			}
+			for _, note := range tc.notes {
+				if !strings.Contains(h.errOut.String(), note) {
+					t.Errorf("standard error does not say %q:\n%s", note, h.errOut)
+				}
+			}
+			states := map[string]string{}
+			for _, row := range jsonRows(t, h) {
+				states[row["node"].(string)], _ = row["state"].(string)
+			}
+			if want, _ := nodeset.Parse(tc.nodes); len(states) != want.Len() {
+				t.Errorf("%d rows, want one for each of the %d nodes:\n%s", len(states), want.Len(), h.out)
+			}
+			for node, want := range tc.rows {
+				if states[node] != want {
+					t.Errorf("%s: state %q, want %q", node, states[node], want)
+				}
+			}
+			if got := tree(); got != tc.want[1:] {
+				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
+			}
+		})
 	}
 }
