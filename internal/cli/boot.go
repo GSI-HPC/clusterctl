@@ -5,6 +5,7 @@ package cli
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -52,12 +53,12 @@ asked for.`,
 // The address names a file on the PXE and TFTP hosts, where the link to it
 // is written as root, so anything that does not parse as an IP address is
 // refused rather than joined into a path.
-func nodeAddress(a *app.App, node string) (string, error) {
+func nodeAddress(ctx context.Context, a *app.App, node string) (string, error) {
 	address, source := "", "the inventory"
 	if entry, ok := a.Inventory.Lookup(node); ok && entry.Address != "" {
 		address = entry.Address
 	} else {
-		cfg, err := a.DHCPConfig(a.Context())
+		cfg, err := a.DHCPConfig(ctx)
 		if err != nil {
 			return "", err
 		}
@@ -86,7 +87,7 @@ func nodeAddress(a *app.App, node string) (string, error) {
 // nodeAddresses resolves the boot address of each node, in order, and
 // refuses two nodes that share one: the link named after the address would
 // arm both, and one of them was not asked for.
-func nodeAddresses(a *app.App, nodes []string) ([]string, error) {
+func nodeAddresses(ctx context.Context, a *app.App, nodes []string) ([]string, error) {
 	owners := map[string][]string{}
 	for _, n := range a.Inventory.All() {
 		if ip := net.ParseIP(n.Address); ip != nil {
@@ -96,7 +97,7 @@ func nodeAddresses(a *app.App, nodes []string) ([]string, error) {
 	addresses := make([]string, len(nodes))
 	seen := map[string]string{}
 	for i, node := range nodes {
-		address, err := nodeAddress(a, node)
+		address, err := nodeAddress(ctx, a, node)
 		if err != nil {
 			return nil, err
 		}
@@ -154,9 +155,9 @@ const (
 // anything is written, so a node with no boot path stops the command
 // instead of leaving half the set configured. An explicit path wins over
 // the cluster rules; a rule marked static asks for a persistent link.
-func resolveBootLinks(a *app.App, ns *nodeset.NodeSet, explicit string, persistent bool) ([]bootLink, error) {
+func resolveBootLinks(ctx context.Context, a *app.App, ns *nodeset.NodeSet, explicit string, persistent bool) ([]bootLink, error) {
 	nodes := ns.Expand()
-	addresses, err := nodeAddresses(a, nodes)
+	addresses, err := nodeAddresses(ctx, a, nodes)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +234,7 @@ func describeBootLinks(links []bootLink) string {
 // and a one-shot link is refused over a persistent one, which the PXE
 // service would keep offering after the first request. It only reads, so a
 // dry run makes the same check and is refused where the real run would be.
-func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
+func checkBootLinks(ctx context.Context, a *app.App, role, root string, links []bootLink) error {
 	var paths []string
 	seen := map[string]bool{}
 	for _, l := range links {
@@ -248,7 +249,7 @@ func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
 		script.WriteString(" " + shellquote.Quote(p))
 	}
 	script.WriteString("; do [ -f \"$p\" ] || printf '%s\\n' \"$p\"; done\n")
-	result, err := a.ReadOnRole(a.Context(), role, transport.Request{
+	result, err := a.ReadOnRole(ctx, role, transport.Request{
 		Script: script.String(),
 	})
 	if err != nil {
@@ -271,7 +272,7 @@ func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
 	if suffix == "" {
 		return nil
 	}
-	existing, err := readBootLinks(a, role, root)
+	existing, err := readBootLinks(ctx, a, role, root)
 	if err != nil {
 		return err
 	}
@@ -291,8 +292,8 @@ func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
 
 // readBootLinks lists the links under the PXE root, name to target, in one
 // call rather than one connection per node.
-func readBootLinks(a *app.App, role, root string) (map[string]string, error) {
-	result, err := a.ReadOnRole(a.Context(), role, transport.Request{
+func readBootLinks(ctx context.Context, a *app.App, role, root string) (map[string]string, error) {
+	result, err := a.ReadOnRole(ctx, role, transport.Request{
 		Argv: []string{"find", root, "-maxdepth", "1", "-type", "l", "-printf", "%f\t%l\n"},
 	})
 	if err != nil {
@@ -339,18 +340,18 @@ bootunlink() {
 
 // writeBootLinks points the PXE service at each node's boot path and
 // records the outcome in each link.
-func writeBootLinks(a *app.App, role, root string, links []bootLink) error {
+func writeBootLinks(ctx context.Context, a *app.App, role, root string, links []bootLink) error {
 	var script strings.Builder
 	script.WriteString(bootLinkScript)
 	for i, l := range links {
 		fmt.Fprintf(&script, "bootlink %d %s %s\n", i, shellquote.Quote(l.Path), shellquote.Quote(linkName(a, root, l)))
 	}
-	return runLinkScript(a, role, script.String(), links, "set")
+	return runLinkScript(ctx, a, role, script.String(), links, "set")
 }
 
 // removeBootLinks removes the one-shot and the persistent link of each node
 // and records the outcome in each link.
-func removeBootLinks(a *app.App, role, root string, links []bootLink) error {
+func removeBootLinks(ctx context.Context, a *app.App, role, root string, links []bootLink) error {
 	suffix := a.Spec.Services.PXESrv.StaticSuffix
 	var script strings.Builder
 	script.WriteString(bootUnlinkScript)
@@ -361,14 +362,14 @@ func removeBootLinks(a *app.App, role, root string, links []bootLink) error {
 		}
 		fmt.Fprintf(&script, "bootunlink %d %s\n", i, names)
 	}
-	return runLinkScript(a, role, script.String(), links, "removed")
+	return runLinkScript(ctx, a, role, script.String(), links, "removed")
 }
 
-func runLinkScript(a *app.App, role, script string, links []bootLink, done string) error {
+func runLinkScript(ctx context.Context, a *app.App, role, script string, links []bootLink, done string) error {
 	for i := range links {
 		links[i].Result, links[i].Error = "unknown", "the PXE host did not report this link"
 	}
-	result, runErr := a.RunOnRole(a.Context(), role, transport.Request{
+	result, runErr := a.RunOnRole(ctx, role, transport.Request{
 		Script: script,
 	})
 	if result != nil {
@@ -447,7 +448,7 @@ the command.`,
 			}
 			// One listing answers for every node, rather than one connection
 			// per node as the shell version did.
-			links, err := readBootLinks(a, role, root)
+			links, err := readBootLinks(a.Context(), a, role, root)
 			if err != nil {
 				return err
 			}
@@ -479,7 +480,7 @@ the command.`,
 			var failed []string
 			var firstErr error
 			for _, node := range ns.Expand() {
-				address, err := nodeAddress(a, node)
+				address, err := nodeAddress(a.Context(), a, node)
 				if err != nil {
 					object[node] = state{Error: err.Error()}
 					row := []string{node, "unknown", ""}
@@ -551,11 +552,11 @@ was not reported fails the command.
 				return err
 			}
 
-			links, err := resolveBootLinks(a, ns, explicit, persistent)
+			links, err := resolveBootLinks(a.Context(), a, ns, explicit, persistent)
 			if err != nil {
 				return err
 			}
-			if err := checkBootLinks(a, role, root, links); err != nil {
+			if err := checkBootLinks(a.Context(), a, role, root, links); err != nil {
 				return err
 			}
 			detail := describeBootLinks(links)
@@ -568,7 +569,7 @@ was not reported fails the command.
 				return err
 			}
 
-			err = writeBootLinks(a, role, root, links)
+			err = writeBootLinks(a.Context(), a, role, root, links)
 			t := output.NewTable(output.Cols("NODE", "ADDRESS", "BOOT PATH", "MODE", "RESULT")...)
 			for _, l := range links {
 				t.Add(l.Node, l.Address, l.Path, l.Mode, resultText(l))
@@ -612,7 +613,7 @@ was not reported fails the command.`,
 			// The addresses are resolved before the question, so that
 			// what is confirmed is what runs.
 			nodes := ns.Expand()
-			addresses, err := nodeAddresses(a, nodes)
+			addresses, err := nodeAddresses(a.Context(), a, nodes)
 			if err != nil {
 				return err
 			}
@@ -627,7 +628,7 @@ was not reported fails the command.`,
 				return err
 			}
 
-			err = removeBootLinks(a, role, root, links)
+			err = removeBootLinks(a.Context(), a, role, root, links)
 			t := output.NewTable(output.Cols("NODE", "ADDRESS", "RESULT")...)
 			for _, l := range links {
 				t.Add(l.Node, l.Address, resultText(l))
@@ -767,7 +768,7 @@ that a TFTP server confined to its root follows it too.
   clusterctl boot grub set exe0001 /srv/tftp/grub/1.0/grub.cfg.install-exec`,
 		cobra.ExactArgs(2),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
-			role, node, link, err := grubLink(a, args[0])
+			role, node, link, err := grubLink(a.Context(), a, args[0])
 			if err != nil {
 				return err
 			}
@@ -808,7 +809,7 @@ Remove the link that points a node's GRUB configuration at a target, so GRUB
 no longer finds a configuration named after the node.`,
 		cobra.ExactArgs(1),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
-			role, node, link, err := grubLink(a, args[0])
+			role, node, link, err := grubLink(a.Context(), a, args[0])
 			if err != nil {
 				return err
 			}
@@ -833,7 +834,7 @@ Print the address of a node and the GRUB configuration file name it asks for,
 which is the address in hexadecimal.`,
 		cobra.ExactArgs(1),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
-			address, err := nodeAddress(a, args[0])
+			address, err := nodeAddress(a.Context(), a, args[0])
 			if err != nil {
 				return err
 			}
@@ -893,7 +894,7 @@ atftpd or dnsmasq-tftp.`,
 
 // grubLink resolves the TFTP role, the one node named and the GRUB link
 // named after its address.
-func grubLink(a *app.App, expr string) (role, node, link string, err error) {
+func grubLink(ctx context.Context, a *app.App, expr string) (role, node, link string, err error) {
 	role = a.Spec.Services.TFTP.Role
 	if role == "" {
 		return "", "", "", exitcode.Errorf(exitcode.Usage, "no host role runs the TFTP service; set services.tftp.role")
@@ -907,7 +908,7 @@ func grubLink(a *app.App, expr string) (role, node, link string, err error) {
 		return "", "", "", exitcode.Errorf(exitcode.Usage, "%s is %d nodes; name one", expr, ns.Len())
 	}
 	node = ns.Expand()[0]
-	addresses, err := nodeAddresses(a, []string{node})
+	addresses, err := nodeAddresses(ctx, a, []string{node})
 	if err != nil {
 		return "", "", "", err
 	}

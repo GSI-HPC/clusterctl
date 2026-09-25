@@ -200,7 +200,7 @@ running by accident; --seconds must be at least 1.`,
 			}
 			// The capture is watched live, so it is wired to the terminal
 			// rather than collected at the end.
-			return session(a, cmd, target, req)
+			return session(a.Context(), a, cmd, target, req)
 		})
 	cmd.Flags().StringVarP(&iface, "interface", "i", "", "interface to capture on (default: from the configuration)")
 	cmd.Flags().IntVar(&seconds, "seconds", 60, "how long to capture")
@@ -225,5 +225,5 @@ func roleShell(r *root, cmd *cobra.Command, args []string, role func(*app.App) s
 	if at := cmd.ArgsLenAtDash(); at >= 0 {
 		argv = args[at:]
 	}
-	return session(a, cmd, target, transport.Request{Argv: argv})
+	return session(a.Context(), a, cmd, target, transport.Request{Argv: argv})
 }

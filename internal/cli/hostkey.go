@@ -48,7 +48,7 @@ var scanDial func(ctx context.Context, network, address string) (net.Conn, error
 //
 // The hosts are scanned in parallel, bounded like any fan-out, so that nodes
 // still in the installer cost one timeout between them rather than one each.
-func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duration) (map[string][]hostkeys.Entry, map[string]error) {
+func scanTargets(ctx context.Context, a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duration) (map[string][]hostkeys.Entry, map[string]error) {
 	found := map[string][]hostkeys.Entry{}
 	failed := map[string]error{}
 	resolve := a.Namer.FQDN
@@ -71,8 +71,8 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 	}
 
 	var mu sync.Mutex
-	fanout.Each(a.Context(), len(hosts), a.Spec.Fanout.Max, func(i int) {
-		entries, err := scanHost(a.Context(), a.Diag, scanners[i], hosts[i])
+	fanout.Each(ctx, len(hosts), a.Spec.Fanout.Max, func(i int) {
+		entries, err := scanHost(ctx, a.Diag, scanners[i], hosts[i])
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {
@@ -85,7 +85,7 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 	for _, host := range hosts {
 		_, ok := found[host]
 		if _, bad := failed[host]; !ok && !bad {
-			failed[host] = a.Context().Err()
+			failed[host] = ctx.Err()
 		}
 	}
 	return found, failed
@@ -174,7 +174,7 @@ credentials are involved.`,
 			if err != nil {
 				return err
 			}
-			found, failed := scanTargets(a, ns, bmc, timeout)
+			found, failed := scanTargets(a.Context(), a, ns, bmc, timeout)
 
 			t := output.NewTable(output.Cols("HOST", "TYPE", "KEY")...)
 			for _, host := range slices.Sorted(maps.Keys(found)) {
@@ -223,7 +223,7 @@ for this command to decide which.`,
 			if err != nil {
 				return err
 			}
-			found, failed := scanTargets(a, ns, bmc, timeout)
+			found, failed := scanTargets(a.Context(), a, ns, bmc, timeout)
 
 			t := output.NewTable(output.Cols("HOST", "STATUS", "DETAIL")...)
 			changed, missing, revoked := 0, 0, 0
@@ -303,7 +303,7 @@ changed without a reinstall is worth understanding before it is trusted.`,
 				return err
 			}
 
-			found, failed := scanTargets(a, ns, bmc, timeout)
+			found, failed := scanTargets(a.Context(), a, ns, bmc, timeout)
 			written := 0
 			refused := map[string]bool{}
 			err = hostkeys.Modify(a.Context(), path, func(f *hostkeys.File) error {

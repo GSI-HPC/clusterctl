@@ -354,7 +354,7 @@ and -o yaml too.`,
 			if err != nil {
 				return err
 			}
-			results, err := runOnNodes(a, ns, transport.Request{
+			results, err := runOnNodes(a.Context(), a, ns, transport.Request{
 				Script: hardwareScript,
 			})
 			if err != nil {
