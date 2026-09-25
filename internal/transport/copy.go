@@ -6,7 +6,7 @@ package transport
 import (
 	"context"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 	"time"
 )
@@ -25,6 +25,10 @@ type CopyRequest struct {
 	Recursive bool
 	// Preserve keeps modification times and modes.
 	Preserve bool
+	// Progress receives scp's standard output, where it draws its progress
+	// meter when that is a terminal. nil discards it: the meters of
+	// transfers running side by side would overwrite each other.
+	Progress io.Writer
 }
 
 // CopyArgs builds the scp argument vector for a transfer.
@@ -95,7 +99,7 @@ func (c *Client) Copy(ctx context.Context, target Target, req CopyRequest) (*Res
 	cmd := c.command(ctx, args)
 	stderr := &capture{limit: DefaultMaxOutput}
 	cmd.Stderr = stderr
-	cmd.Stdout = os.Stderr
+	cmd.Stdout = req.Progress
 
 	start := time.Now()
 	runErr := cmd.Run()

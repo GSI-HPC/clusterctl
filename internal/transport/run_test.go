@@ -117,6 +117,35 @@ func TestCopyReportsAnInterruptAsInterrupted(t *testing.T) {
 	}
 }
 
+// scp draws its progress meter on its standard output, which was the
+// process's standard error whoever asked for the transfer. It is the
+// request's Progress now, and the null device without one, where scp draws
+// nothing.
+func TestCopySendsScpsOutputToProgressOnly(t *testing.T) {
+	t.Parallel()
+	c := fakeClient(t, `[ /dev/stdout -ef /dev/null ] && echo discarded >&2; echo "hosts 100%"`)
+	req := transport.CopyRequest{Sources: []string{"/etc/hosts"}, Destination: "/tmp/hosts", Upload: true}
+
+	var progress strings.Builder
+	req.Progress = &progress
+	result, err := c.Copy(context.Background(), target, req)
+	if err != nil || result.Err != nil {
+		t.Fatalf("copy failed: %v %v", err, result.Err)
+	}
+	if got, want := progress.String(), "hosts 100%\n"; got != want {
+		t.Errorf("Progress got %q, want %q", got, want)
+	}
+
+	req.Progress = nil
+	result, err = c.Copy(context.Background(), target, req)
+	if err != nil || result.Err != nil {
+		t.Fatalf("copy failed: %v %v", err, result.Err)
+	}
+	if !strings.Contains(result.Stderr, "discarded") {
+		t.Errorf("without Progress, scp's output did not go to the null device (stderr %q)", result.Stderr)
+	}
+}
+
 // ssh is asked for its version before the configuration is written, and it
 // was asked under a context of its own, so an interrupt did not reach it: a
 // client that hung there held the command for five seconds, and the
