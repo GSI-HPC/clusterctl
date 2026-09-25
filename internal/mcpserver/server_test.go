@@ -592,3 +592,48 @@ func TestPlansAndAppliesAreAudited(t *testing.T) {
 		t.Errorf("audit = %v, want %v", outcomes, want)
 	}
 }
+
+// describe_nodes showed the name the naming rules derive, not the bmcAddress
+// the bmc commands reach, and left the field empty without a word when a
+// node has no service processor name at all.
+func TestDescribeNodesShowsTheBMCTheCommandsReach(t *testing.T) {
+	type view struct {
+		Items []struct {
+			Name     string `json:"name"`
+			BMC      string `json:"bmc"`
+			BMCError string `json:"bmcError"`
+		} `json:"items"`
+	}
+
+	dir := copySite(t)
+	edit(t, dir, "inventory.yaml", "    - nodes: exe0001\n",
+		"    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n    - nodes: exe0001\n")
+	var out view
+	start(t, setup{config: dir}).call(t, "describe_nodes",
+		map[string]any{"nodes": "exe[3-4]", "facets": []string{"inventory"}}, &out)
+	if len(out.Items) != 2 {
+		t.Fatalf("items = %+v", out.Items)
+	}
+	if got := out.Items[0]; got.BMC != "10.9.0.77" || got.BMCError != "" {
+		t.Errorf("exe0003 = %+v, want its BMC shown as 10.9.0.77", got)
+	}
+	if got := out.Items[1]; got.BMC != "exe0004.mgmt.hpc.example.org" || got.BMCError != "" {
+		t.Errorf("exe0004 = %+v, want its BMC shown by its derived name", got)
+	}
+
+	// Without a bmc template, a node without a bmcAddress has no BMC, and
+	// the view says why.
+	edit(t, dir, "site.yaml", "        bmc: \"{name}.{domains.mgmtHpc}\"\n", "")
+	out = view{}
+	start(t, setup{config: dir}).call(t, "describe_nodes",
+		map[string]any{"nodes": "exe[3-4]", "facets": []string{"inventory"}}, &out)
+	if len(out.Items) != 2 {
+		t.Fatalf("items = %+v", out.Items)
+	}
+	if got := out.Items[0]; got.BMC != "10.9.0.77" || got.BMCError != "" {
+		t.Errorf("exe0003 = %+v, want its BMC shown as 10.9.0.77", got)
+	}
+	if got := out.Items[1]; got.BMC != "" || !strings.Contains(got.BMCError, "bmcAddress") {
+		t.Errorf("exe0004 = %+v, want no BMC and the reason", got)
+	}
+}

@@ -124,6 +124,7 @@ type nodeView struct {
 	Name        string              `json:"name"`
 	Host        string              `json:"host,omitempty"`
 	BMC         string              `json:"bmc,omitempty"`
+	BMCError    string              `json:"bmcError,omitempty" jsonschema:"why the node has no service processor host"`
 	InInventory bool                `json:"inInventory"`
 	Inventory   *inventory.Node     `json:"inventory,omitempty"`
 	Groups      map[string][]string `json:"groups,omitempty"`
@@ -189,7 +190,13 @@ func (s *Server) describeNodes(ctx context.Context, _ *mcp.CallToolRequest, in d
 		view := &out.Items[i]
 		view.Name = name
 		view.Host, _ = a.Namer.FQDN(name)
-		view.BMC, _ = a.Namer.BMC(name)
+		// The host the bmc commands reach, or why there is none: an empty
+		// field alone reads as a node that simply has no BMC.
+		if bmc, err := a.BMCHost(name); err != nil {
+			view.BMCError = err.Error()
+		} else {
+			view.BMC = bmc
+		}
 		if node, ok := a.Inventory.Lookup(name); ok {
 			view.InInventory = true
 			if want("inventory") {
