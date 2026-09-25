@@ -92,7 +92,7 @@ hardware, and **deferred** when it is deliberately not done.
 | R55 | List and create accounts, coordinators and fair share | `slurm` | met |
 | R56 | Associate users, checked against the directory with getent | `slurm` | met |
 | R57 | Parse the parsable output, never the display output | `slurm` | met |
-| R58 | Refuse a power action on a node running a job | `cli/bmc.go` | met |
+| R58 | Refuse a power action on a node running a job | `slurm/jobcheck.go`, `cli/bmc.go` | met |
 
 ## Everything else
 
