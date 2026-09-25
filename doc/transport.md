@@ -172,7 +172,10 @@ problem and every command refuses to run with it:
 - no value holds a control character, and a description that spans lines
   becomes one comment line per line;
 - a role's `host` is a host name or an address, never a pattern;
-- a user name is one word and does not start with a dash;
+- a user name, of the context, a role, a jump host, a tunnel or the PDUs, is
+  spelled in the portable user name alphabet, as when connecting;
+  `alice@EXAMPLE.ORG` or `svc$` is refused here rather than by every
+  connection;
 - an option key is one keyword. `Host`, `Match`, `Include` and the trust
   keywords above are refused in `options`, and so is a keyword the generated
   block already sets, which ssh would silently ignore. A role's `options` may
@@ -181,10 +184,11 @@ problem and every command refuses to run with it:
   `~/Library/Application Support`, does not split them; a path holding a
   double quote or a backslash is refused;
 - each element of a `proxyJump` list is a role, optionally with an account as
-  in `admin@mgmt`, or a fully qualified host or an address, optionally with a
-  port. A bare word that is not a role is refused as a likely misspelling. A
-  chain that comes back to where it started, through role names or through
-  their hosts, is refused: ssh would start hops without end;
+  in `admin@mgmt`, or a fully qualified host name or an address, checked as a
+  destination is, optionally with a port. A bare word that is not a role is
+  refused as a likely misspelling. A chain that comes back to where it
+  started, through role names or through their hosts, is refused: ssh would
+  start hops without end;
 - roles that connect to the same host have one block between them, so they
   must agree on everything that goes into it.
 

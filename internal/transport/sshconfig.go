@@ -24,6 +24,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
+	"github.com/GSI-HPC/clusterctl/internal/hostname"
 )
 
 // generateConfig renders the ssh_config that every connection is made with.
@@ -384,8 +385,8 @@ func parseHop(s string) (jumpHop, error) {
 	var hop jumpHop
 	if at := strings.LastIndex(s, "@"); at >= 0 {
 		hop.user, s = s[:at], s[at+1:]
-		if !validUser(hop.user) {
-			return hop, fmt.Errorf("%q is not a user name", hop.user)
+		if err := hostname.CheckUser(hop.user); err != nil {
+			return hop, err
 		}
 	}
 	switch {
@@ -411,8 +412,8 @@ func parseHop(s string) (jumpHop, error) {
 			return hop, fmt.Errorf("%q is not a port", hop.port)
 		}
 	}
-	if !validHost(hop.host) {
-		return hop, fmt.Errorf("%q is not a host name", hop.host)
+	if hop.host == "" {
+		return hop, fmt.Errorf("the host name is empty")
 	}
 	return hop, nil
 }
@@ -459,6 +460,10 @@ func (c *Client) resolveJumps(value string) (string, []string, error) {
 			name, isRole = byHost, true
 		} else if !strings.ContainsAny(hop.host, ".:") {
 			return "", nil, fmt.Errorf("proxyJump %q: %q is neither a role nor a fully qualified host name", value, hop.host)
+		} else if err := hostname.CheckHost(hop.host); err != nil {
+			// A role stands for its host, which is checked with the role;
+			// its name, which may hold an underscore, never reaches ssh.
+			return "", nil, fmt.Errorf("proxyJump %q: %w", value, err)
 		}
 		if isRole {
 			roles = append(roles, name)
@@ -502,8 +507,10 @@ func (o Options) Validate() error {
 	if err := checkPath(o.StateDir); err != nil {
 		fail("state directory: %w", err)
 	}
-	if o.DefaultUser != "" && !validUser(o.DefaultUser) {
-		fail("the context user %q is not a user name", o.DefaultUser)
+	if o.DefaultUser != "" {
+		if err := hostname.CheckUser(o.DefaultUser); err != nil {
+			fail("the context user: %w", err)
+		}
 	}
 	for i, include := range o.SSH.Include {
 		if err := checkPath(include); err != nil {
@@ -537,11 +544,15 @@ func (o Options) Validate() error {
 		if hasControl(name, false) {
 			fail("role %q: the name holds a control character", name)
 		}
-		if role.Host != "" && !validHost(role.Host) {
-			fail("role %s: host %q is not a host name; it is written as a Host pattern, which must match that host alone", name, role.Host)
+		if role.Host != "" {
+			if err := hostname.CheckHost(role.Host); err != nil {
+				fail("role %s: %w; it is written as a Host pattern, which must match that host alone", name, err)
+			}
 		}
-		if role.User != "" && !validUser(role.User) {
-			fail("role %s: %q is not a user name", name, role.User)
+		if role.User != "" {
+			if err := hostname.CheckUser(role.User); err != nil {
+				fail("role %s: %w", name, err)
+			}
 		}
 		if hasControl(role.Description, true) {
 			fail("role %s: the description holds a control character", name)
@@ -648,20 +659,7 @@ func (c *Client) checkJumpCycles() error {
 	return nil
 }
 
-var (
-	keyword  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
-	hostName = regexp.MustCompile(`^[A-Za-z0-9_:][A-Za-z0-9_.:-]*$`)
-	userName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.@-]*\$?$`)
-)
-
-// validHost accepts a host name or an address, and nothing ssh would read as
-// a pattern.
-func validHost(s string) bool { return hostName.MatchString(s) }
-
-// validUser accepts an account name. It may not start with a dash, because
-// user@host is an argument of its own and would otherwise be read as an
-// option.
-func validUser(s string) bool { return userName.MatchString(s) }
+var keyword = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
 
 // checkPath refuses what the double quotes a path is written in cannot hold.
 func checkPath(path string) error {

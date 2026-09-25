@@ -16,6 +16,7 @@ import (
 	"text/template"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
+	"github.com/GSI-HPC/clusterctl/internal/hostname"
 )
 
 // scaffoldFS holds the templates of a new configuration, one file each. A
@@ -134,8 +135,6 @@ var (
 	scaffoldName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	// scaffoldHost is a DNS name of one label or several.
 	scaffoldHost = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
-	// scaffoldUser is an account name as ssh takes it.
-	scaffoldUser = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._@-]*$`)
 )
 
 // check refuses a value that could only be a mistake. The schema accepts any
@@ -152,8 +151,8 @@ func (o ScaffoldOptions) check() error {
 		return fmt.Errorf("the domain %q is not a DNS name", o.Domain)
 	case !scaffoldHost.MatchString(o.Login):
 		return fmt.Errorf("the login host %q is not a host name", o.Login)
-	case o.User != "" && !scaffoldUser.MatchString(o.User):
-		return fmt.Errorf("the user %q is not an account name", o.User)
+	case o.User != "":
+		return hostname.CheckUser(o.User)
 	}
 	return nil
 }
