@@ -173,6 +173,12 @@ func (p *pxeHost) scripts() []string {
 	return out
 }
 
+// isBootPathCheck says whether a request is the check that the boot paths
+// exist on the PXE host, which only reads.
+func isBootPathCheck(req transport.Request) bool {
+	return strings.HasPrefix(req.Script, "for p in") && strings.Contains(req.Script, `[ -f "$p" ]`)
+}
+
 func (p *pxeHost) changes() []string {
 	var out []string
 	for _, s := range p.scripts() {
@@ -487,6 +493,57 @@ func TestBootSetRefusesAMissingBootPath(t *testing.T) {
 	if p.exists("10.0.2.1") || len(p.changes()) != 0 {
 		t.Errorf("a dangling link was written: %q", p.changes())
 	}
+}
+
+// A dry run reads the PXE host as the real run does, so it is refused where
+// the real run would be: it used to skip the check and succeed.
+func TestBootSetDryRunChecksThePXEHost(t *testing.T) {
+	t.Run("a missing boot path", func(t *testing.T) {
+		p := newPXEHost(t, pxeOptions{})
+		missing := filepath.Join(p.root, "boot/cluster/1.O/exe/ipxe.net2")
+		_, err := p.run(t, harnessOptions{}, "--dry-run", "boot", "set", "-n", "exe0001", missing)
+		if got, want := exitcode.From(err), exitcode.Usage; got != want {
+			t.Fatalf("exit code = %d, want %d (%v)", got, want, err)
+		}
+		if !strings.Contains(err.Error(), missing) {
+			t.Errorf("error = %v, want it to name the path", err)
+		}
+		if len(p.changes()) != 0 {
+			t.Errorf("a dry run changed the PXE host: %q", p.changes())
+		}
+	})
+
+	t.Run("a persistent link in the way", func(t *testing.T) {
+		p := newPXEHost(t, pxeOptions{})
+		p.link(t, "10.0.2.1.static", p.exePath())
+		_, err := p.run(t, harnessOptions{}, "--set", staticSuffix, "--dry-run", "boot", "set", "-n", "exe0001")
+		if got, want := exitcode.From(err), exitcode.Usage; got != want {
+			t.Fatalf("exit code = %d, want %d (%v)", got, want, err)
+		}
+		if !strings.Contains(err.Error(), "persistent") {
+			t.Errorf("error = %v, want it to name the persistent link", err)
+		}
+		if p.exists("10.0.2.1") || len(p.changes()) != 0 {
+			t.Errorf("a dry run changed the PXE host: %q", p.changes())
+		}
+	})
+
+	t.Run("a boot path that exists", func(t *testing.T) {
+		p := newPXEHost(t, pxeOptions{})
+		h, err := p.run(t, harnessOptions{}, "--dry-run", "boot", "set", "-n", "exe0001")
+		if err != nil {
+			t.Fatalf("the dry run failed: %v\n%s", err, h.errOut)
+		}
+		if strings.Contains(h.errOut.String(), "not checked") {
+			t.Errorf("the preview says something was not checked:\n%s", h.errOut)
+		}
+		if len(p.scripts()) == 0 {
+			t.Error("the dry run did not read the PXE host")
+		}
+		if p.exists("10.0.2.1") || len(p.changes()) != 0 {
+			t.Errorf("a dry run changed the PXE host: %q", p.changes())
+		}
+	})
 }
 
 // 10.3: the log is read into memory whole, so the count is bounded.

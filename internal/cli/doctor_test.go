@@ -6,8 +6,10 @@ package cli
 import (
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -61,27 +63,49 @@ func TestDoctorFindsTheBackendAtItsPath(t *testing.T) {
 	}
 }
 
-// TestDoctorDryRunContactsNothing is the report's 2.14: under --dry-run the
-// recorder answered every request with success, and every role was reported
-// ok without being contacted.
-func TestDoctorDryRunContactsNothing(t *testing.T) {
-	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
-		t.Errorf("%s was contacted under --dry-run", tg)
+// TestDoctorDryRunChecksTheRoles: under --dry-run every role was reported
+// as not contacted, although the check only runs true. It is a read, so a
+// dry run makes it for real: a role that answers is ok, and one that does
+// not fails as it would without --dry-run.
+func TestDoctorDryRunChecksTheRoles(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		sent []transport.Request
+	)
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		mu.Lock()
+		sent = append(sent, req)
+		mu.Unlock()
+		if tg.Role == "dhcp" {
+			return &transport.Result{Target: tg, ExitCode: 255, Err: exitcode.Errorf(exitcode.Transport, "connection refused")}, nil
+		}
 		return &transport.Result{Target: tg}, nil
 	}}
 	checks, _ := doctorChecks(t, harnessOptions{recorder: rec}, "--remote", "--dry-run")
 	roles := 0
 	for name, c := range checks {
-		if !strings.HasPrefix(name, "role ") && !strings.HasPrefix(name, "tools on ") {
+		if !strings.HasPrefix(name, "role ") {
 			continue
 		}
 		roles++
-		if c.Status != statusSkip {
-			t.Errorf("%s = %+v under --dry-run, want it skipped", name, c)
+		want := statusOK
+		if name == "role dhcp" {
+			want = statusFail
+		}
+		if c.Status != want {
+			t.Errorf("%s = %+v under --dry-run, want %s", name, c, want)
 		}
 	}
-	if roles == 0 {
-		t.Error("the roles are not named in the output")
+	if roles < 2 {
+		t.Errorf("%d roles are named in the output, want every role of the example", roles)
+	}
+	for _, req := range sent {
+		if len(req.Argv) > 0 && req.Argv[0] != "true" {
+			t.Errorf("doctor sent %q, which is not a check", req.Argv)
+		}
+		if req.Script != "" && !strings.Contains(req.Script, "command -v") && !strings.Contains(req.Script, "test -x") {
+			t.Errorf("doctor sent a script that is not a check:\n%s", req.Script)
+		}
 	}
 }
 

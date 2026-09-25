@@ -103,11 +103,22 @@ func (a *App) cacheScope() string {
 // RunOnRole runs one command on an infrastructure host and returns the
 // result, failing the command when it did not succeed.
 func (a *App) RunOnRole(ctx context.Context, role string, req transport.Request) (*transport.Result, error) {
+	return a.runOnRole(ctx, a.Runner, role, req)
+}
+
+// ReadOnRole is RunOnRole for a command that only reads. It runs through
+// ReadRunner, so a dry run reaches the host and sees what the real run
+// would.
+func (a *App) ReadOnRole(ctx context.Context, role string, req transport.Request) (*transport.Result, error) {
+	return a.runOnRole(ctx, a.ReadRunner, role, req)
+}
+
+func (a *App) runOnRole(ctx context.Context, runner transport.Runner, role string, req transport.Request) (*transport.Result, error) {
 	target, err := a.Role(role)
 	if err != nil {
 		return nil, err
 	}
-	result, err := a.Runner.Run(ctx, target, req)
+	result, err := runner.Run(ctx, target, req)
 	if err != nil {
 		if hasCode(err) {
 			return nil, err

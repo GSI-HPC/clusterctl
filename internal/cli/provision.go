@@ -957,9 +957,7 @@ commands that remove it.
 			} else {
 				details = append(details, "then each machine is set to boot from the network once and reset through Redfish")
 			}
-			if a.DryRun() {
-				details = append(details, dryRunChecks)
-			} else if err := checkBootLinks(a, plan.role, plan.root, plan.links); err != nil {
+			if err := checkBootLinks(a, plan.role, plan.root, plan.links); err != nil {
 				return err
 			}
 			action.Detail = strings.Join(details, "\n  ")

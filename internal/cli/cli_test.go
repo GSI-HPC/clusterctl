@@ -352,9 +352,21 @@ func TestDryRunChangesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a dry run should succeed: %v", err)
 	}
-	// Slurm is asked, as the real run would; nothing else is sent.
-	if sinfo, other := sinfoCalls(h.recorder); sinfo != 1 || other != 0 {
-		t.Errorf("a dry run sent sinfo %d times and %d other commands, want sinfo once and nothing else", sinfo, other)
+	// Slurm and the PXE host are asked, as the real run would ask them;
+	// nothing else is sent.
+	sinfo, checks := 0, 0
+	for _, c := range h.recorder.Calls() {
+		switch {
+		case isSinfo(c.Request):
+			sinfo++
+		case isBootPathCheck(c.Request):
+			checks++
+		default:
+			t.Errorf("a dry run sent %q", c.Command)
+		}
+	}
+	if sinfo != 1 || checks != 1 {
+		t.Errorf("a dry run sent sinfo %d times and checked the boot paths %d times, want each once", sinfo, checks)
 	}
 	if !strings.Contains(h.errOut.String(), "Would reinstall") {
 		t.Errorf("the dry run says nothing:\n%s", h.errOut)

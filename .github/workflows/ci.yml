@@ -63,8 +63,19 @@ jobs:
           ./bin/clusterctl exec --dry-run -n 'exe[1-3]' --confirm -- uptime
           # A reinstall resolves the BMC credential before it asks, even in
           # a dry run. --no-reset leaves Slurm, which no runner can reach,
-          # out of it.
-          BMC_PASSWORD=smoke ./bin/clusterctl provision reinstall --dry-run --no-reset -n exe0001
+          # out of it. The dry run reads the PXE host as the real run does,
+          # and no runner can reach that either, so ssh is a stand-in: one
+          # that finds every boot path, and one that reports the boot path
+          # of exe0001 missing, which has to refuse the dry run with exit 2.
+          present="$RUNNER_TEMP/ssh-present"
+          missing="$RUNNER_TEMP/ssh-missing"
+          printf '#!/bin/sh\nexit 0\n' > "$present"
+          printf '#!/bin/sh\n[ "$1" = -V ] || echo /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2\n' > "$missing"
+          chmod 755 "$present" "$missing"
+          BMC_PASSWORD=smoke ./bin/clusterctl --set ssh.binary="$present" provision reinstall --dry-run --no-reset -n exe0001
+          code=0
+          BMC_PASSWORD=smoke ./bin/clusterctl --set ssh.binary="$missing" provision reinstall --dry-run --no-reset -n exe0001 || code=$?
+          test "$code" -eq 2
 
       # What config init writes has to be accepted by the rest of the binary,
       # and a second run into the same directory has to be refused.
