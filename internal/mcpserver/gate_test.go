@@ -41,3 +41,19 @@ func TestPlanRefusesANodeTheInventoryDoesNotKnow(t *testing.T) {
 		t.Errorf("message = %q, want ghost1 refused as unknown", msg)
 	}
 }
+
+// A forced run lets a protected host through, and the plan put to the user
+// would have to name it. The server never forces: whatever it was started
+// with, a plan touching wlm01 is refused and names it.
+func TestPlanIsNeverForced(t *testing.T) {
+	f := start(t, setup{force: true})
+	for _, nodes := range []string{"exe1,wlm01", "exe1,ghost1"} {
+		msg := f.refused(t, "plan_change", map[string]any{"action": "drain", "nodes": nodes, "reason": "x"})
+		if !strings.Contains(msg, strings.TrimPrefix(nodes, "exe1,")) || !strings.Contains(msg, "--force") {
+			t.Errorf("plan_change on %s: message = %q, want it refused and named", nodes, msg)
+		}
+	}
+	if sent := f.cluster.sent(); len(sent) != 0 {
+		t.Errorf("sent %v", sent)
+	}
+}

@@ -423,3 +423,91 @@ func TestNothingIsConfirmedOnceInterrupted(t *testing.T) {
 		}
 	}
 }
+
+// --force let a protected host, and one the inventory does not know, through
+// without naming either: the preview showed the verb, the count and the set,
+// and -y showed nothing at all.
+func TestForceNamesWhatItLetsThrough(t *testing.T) {
+	t.Parallel()
+
+	forced := func(t *testing.T, answer string, set func(g *safety.Gate)) (*safety.Gate, *bytes.Buffer) {
+		t.Helper()
+		g, out := gate(t, answer)
+		g.Known = nodeset.MustParse("exe[1-10],wlm01,dbm01")
+		g.Force = true
+		if set != nil {
+			set(g)
+		}
+		return g, out
+	}
+	a := action("power off", "exe[1-2],wlm01,ghost1")
+	named := func(t *testing.T, text string) {
+		t.Helper()
+		if !strings.Contains(text, "--force lets through the protected host wlm01") {
+			t.Errorf("wlm01 is not named as protected:\n%s", text)
+		}
+		if !strings.Contains(text, "--force lets through ghost1, which the inventory does not know") {
+			t.Errorf("ghost1 is not named as unknown:\n%s", text)
+		}
+	}
+
+	t.Run("preview", func(t *testing.T) {
+		g, _ := forced(t, "", nil)
+		p, err := g.Preview(a)
+		if err != nil {
+			t.Fatalf("Preview failed: %v", err)
+		}
+		named(t, strings.Join(p.Forced, "\n"))
+		if len(p.Forced) != 2 {
+			t.Errorf("Forced = %q, want one line for each", p.Forced)
+		}
+	})
+	t.Run("question", func(t *testing.T) {
+		g, out := forced(t, "y\n", nil)
+		if err := g.Confirm(a); err != nil {
+			t.Fatalf("Confirm failed: %v", err)
+		}
+		text := out.String()
+		named(t, text)
+		if strings.Index(text, "protected host wlm01") > strings.Index(text, "Continue?") {
+			t.Errorf("the forced hosts are not shown before the question:\n%s", text)
+		}
+	})
+	t.Run("assume yes", func(t *testing.T) {
+		g, out := forced(t, "", func(g *safety.Gate) { g.AssumeYes = true })
+		if err := g.Confirm(a); err != nil {
+			t.Fatalf("Confirm failed: %v", err)
+		}
+		named(t, out.String())
+	})
+	t.Run("dry run", func(t *testing.T) {
+		g, out := forced(t, "", func(g *safety.Gate) { g.DryRun = true })
+		if err := g.Confirm(a); !safety.IsDryRun(err) {
+			t.Fatalf("Confirm = %v, want the dry run signal", err)
+		}
+		named(t, out.String())
+	})
+	t.Run("announce", func(t *testing.T) {
+		g, out := forced(t, "", nil)
+		if err := g.Announce(a); err != nil {
+			t.Fatalf("Announce failed: %v", err)
+		}
+		named(t, out.String())
+	})
+	t.Run("nothing to name", func(t *testing.T) {
+		g, out := forced(t, "", func(g *safety.Gate) { g.AssumeYes = true })
+		p, err := g.Preview(action("power off", "exe[1-2]"))
+		if err != nil || len(p.Forced) != 0 {
+			t.Errorf("Preview = %q, %v; want nothing forced", p.Forced, err)
+		}
+		if err := g.Confirm(action("power off", "exe[1-2]")); err != nil || out.Len() != 0 {
+			t.Errorf("Confirm = %v and printed %q; want nothing", err, out)
+		}
+	})
+	t.Run("not forced", func(t *testing.T) {
+		g, out := forced(t, "", func(g *safety.Gate) { g.Force = false })
+		if err := g.Announce(a); err == nil || out.Len() != 0 {
+			t.Errorf("Announce = %v and printed %q; want the refusal and nothing printed", err, out)
+		}
+	})
+}

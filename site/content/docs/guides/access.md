@@ -233,5 +233,15 @@ A change to a node the inventory does not know is refused too, because the
 gate cannot tell whether it is another name for a protected host. Pass
 `--force` when you mean it.
 
+`--force` never lets a host through silently. The preview names the protected
+hosts and the unknown nodes it lets through, before the question and in a dry
+run, and with `-y`, or for `exec` without `--confirm`, the same lines go to
+standard error:
+
+```console
+$ clusterctl bmc power off --force -y -n 'exe[1-4],wlm01'
+--force lets through the protected host wlm01
+```
+
 `confirmAbove` is the host count above which the number has to be typed back
 rather than confirmed with a `y`. At `0` the number is asked for every time.
