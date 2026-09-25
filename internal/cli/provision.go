@@ -280,13 +280,14 @@ func newSecretsCheckCommand(r *root) *cobra.Command {
 	var decrypt bool
 	cmd := leaf("check", "Check the sops encrypted Secret documents", `
 List every Secret document with its keys, the master keys sops encrypted it
-to and how many references use it. None of this needs a key: the names, the
-keys and the sops metadata are readable, and a reference to a key that does
-not exist is already refused when the configuration loads.
+to and how many references use it. None of this needs a key or sops: the
+names, the keys and the sops metadata are readable, and a reference to a key
+that does not exist is already refused when the configuration loads.
 
-With --decrypt each document is also decrypted, in memory, and the result
-is thrown away. It proves this workstation can read every secret before a
-reinstall needs one, and prints nothing of the plaintext.
+With --decrypt each document is also decrypted by the sops command, into
+memory, and the result is thrown away. It proves this workstation can read
+every secret before a reinstall needs one, and prints nothing of the
+plaintext. The caption of the table names the sops that decrypts.
 
   clusterctl secrets check --decrypt`,
 		cobra.NoArgs,
@@ -339,7 +340,16 @@ reinstall needs one, and prints nothing of the plaintext.
 					"encryptedTo": recipients, "used": used[name], "status": status,
 				})
 			}
+			// Which sops decrypts, and whether it can: it is not needed to
+			// list the documents, so only --decrypt fails without it.
 			t.Caption = fmt.Sprintf("%d Secret documents", t.Len())
+			if t.Len() > 0 {
+				if found, err := a.Sops().Find(a.Context()); err == nil {
+					t.Caption += ", decrypted with sops " + found.Version + " at " + found.Path
+				} else {
+					t.Caption += "; " + err.Error()
+				}
+			}
 			if err := a.Print(output.Result{Table: t, Object: objects}); err != nil {
 				return err
 			}

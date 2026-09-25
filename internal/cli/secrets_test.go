@@ -19,6 +19,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/secrets"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -265,6 +266,32 @@ func TestSecretsWithoutATerminalUseOnlyTheWorkstationIdentities(t *testing.T) {
 	h, err = run(t, harnessOptions{config: []string{dir}, tty: true}, "secrets", "check", "--decrypt")
 	if err != nil {
 		t.Fatalf("secrets check --decrypt at a terminal failed: %v\n%s", err, h.out)
+	}
+}
+
+// TestCommandsWithoutASecretNeedNoSops: sops is run only to decrypt, so a
+// machine without it runs everything else, lists its Secrets, and is told
+// which sops it needs only when a secret is opened.
+func TestCommandsWithoutASecretNeedNoSops(t *testing.T) {
+	dir, _ := secretSite{values: bmcSecret, identities: true}.write(t)
+	t.Setenv("PATH", t.TempDir())
+
+	for _, args := range [][]string{
+		{"config", "validate"},
+		{"node", "list"},
+		{"secrets", "check"},
+	} {
+		if h, err := run(t, harnessOptions{config: []string{dir}}, args...); err != nil {
+			t.Errorf("%s without sops: %v\n%s", args, err, h.out)
+		}
+	}
+	h, err := run(t, harnessOptions{config: []string{dir}}, "secrets", "check", "--decrypt")
+	if exitcode.From(err) != exitcode.TargetFailed || !strings.Contains(h.out.String(), "sops "+secrets.MinSopsVersion+" or later") {
+		t.Errorf("secrets check --decrypt without sops: %v, want the version needed named\n%s", err, h.out)
+	}
+	h, err = run(t, harnessOptions{config: []string{dir}}, "doctor")
+	if err == nil || !strings.Contains(h.out.String(), secrets.MinSopsVersion) {
+		t.Errorf("doctor without sops: %v, want the sops check failed\n%s", err, h.out)
 	}
 }
 

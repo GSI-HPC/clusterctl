@@ -113,7 +113,9 @@ func TestSecretValueSaysWhatWasTried(t *testing.T) {
 	if err == nil {
 		t.Fatal("decrypting without a key should fail")
 	}
-	for _, want := range []string{`Secret "example"`, "no key available here opens it", "age age1", "via sops"} {
+	// sops' own account names each key it tried: here the age recipient,
+	// found by sops itself.
+	for _, want := range []string{`Secret "example"`, "no key available here opens it", "age1", "sops found itself"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}

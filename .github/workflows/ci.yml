@@ -22,6 +22,12 @@ env:
   # of this line instead, because that is the one carrying the standard
   # library's security fixes.
   GO_VERSION: '1.26'
+  # The sops the tests decrypt Secret documents with, the one mise.toml and
+  # release.yml pin, and the oldest clusterctl supports
+  # (secrets.MinSopsVersion). Dependabot updates neither; doc/release.md says
+  # how.
+  SOPS_VERSION: '3.13.3'
+  SOPS_MIN_VERSION: '3.10.0'
 
 jobs:
   test:
@@ -37,6 +43,13 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
+
+      # Built from its tagged source, which the Go checksum database vouches
+      # for, the same way on every runner.
+      - name: Install sops
+        run: |
+          go install "github.com/getsops/sops/v3/cmd/sops@v${SOPS_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Build
         run: make build
@@ -98,6 +111,13 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
 
+      # Built from its tagged source, which the Go checksum database vouches
+      # for, the same way on every runner.
+      - name: Install sops
+        run: |
+          go install "github.com/getsops/sops/v3/cmd/sops@v${SOPS_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: Measure coverage
         run: make cover
 
@@ -106,6 +126,28 @@ jobs:
           name: coverage
           path: coverage.out
           retention-days: 14
+
+  # The oldest sops clusterctl accepts has to read and refuse everything the
+  # current one does. Its tests encrypt with it too.
+  sops-minimum:
+    name: Test with the oldest sops supported
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      - name: Install sops
+        run: |
+          go install "github.com/getsops/sops/v3/cmd/sops@v${SOPS_MIN_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Test
+        run: |
+          sops --disable-version-check --version | grep -Fx "sops ${SOPS_MIN_VERSION}"
+          go test ./...
 
   lint:
     name: Lint

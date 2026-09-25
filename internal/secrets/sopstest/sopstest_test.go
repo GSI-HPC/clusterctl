@@ -4,6 +4,9 @@
 package sopstest_test
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,13 +28,21 @@ data:
   bmc-password: hunter2
 `
 
-// The files these helpers write stand in for what sops writes in every test
-// that reads a secret, so they have to be files the reader decrypts, with
-// exactly the values the rule names encrypted.
+// The files these helpers write stand in for what an administrator's sops
+// writes in every test that reads a secret, so they have to be files the
+// reader decrypts, with exactly the values the rule names encrypted.
 func TestEncryptWritesWhatTheReaderDecrypts(t *testing.T) {
 	t.Parallel()
 
 	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := filepath.Join(t.TempDir(), "identity")
+	if err := os.WriteFile(identity, []byte(id.String()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := secrets.IdentityFiles([]string{identity})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +75,8 @@ func TestEncryptWritesWhatTheReaderDecrypts(t *testing.T) {
 			if strings.Contains(string(tt.file), "hunter2") {
 				t.Fatalf("the plaintext is in the file:\n%s", tt.file)
 			}
-			values, err := secrets.DecryptSops(tt.file, secrets.SopsKeys{Identities: []age.Identity{id}}, []string{"data"})
+			s := &secrets.Sops{Binary: sopstest.Binary(t)}
+			values, err := secrets.DecryptSops(context.Background(), s, tt.file, secrets.SopsKeys{Identities: ids}, []string{"data"})
 			if err != nil {
 				t.Fatalf("DecryptSops: %v", err)
 			}
