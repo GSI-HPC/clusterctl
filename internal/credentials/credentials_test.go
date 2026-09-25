@@ -21,9 +21,46 @@ func resolver(t *testing.T, creds map[string]v1alpha1.Credential, env map[string
 	t.Helper()
 	return &credentials.Resolver{
 		Credentials: creds,
-		BaseDir:     t.TempDir(),
+		Path:        inDir(t.TempDir()),
 		Env:         func(k string) string { return env[k] },
 		Prompt:      func(string) (string, error) { return "typed", nil },
+	}
+}
+
+// inDir resolves a relative path against dir, as app.Path does against the
+// site.
+func inDir(dir string) func(string) string {
+	return func(p string) string {
+		if filepath.IsAbs(p) {
+			return p
+		}
+		return filepath.Join(dir, p)
+	}
+}
+
+// An age encrypted password is one line, and its newline is not part of it.
+// The file is handed over as the configuration names it: app resolves it,
+// as it does every other secret file.
+func TestFromAnAgeFile(t *testing.T) {
+	t.Parallel()
+
+	r := resolver(t, map[string]v1alpha1.Credential{
+		"bmc": {Username: "admin", Password: v1alpha1.PasswordSource{AgeFile: "secrets/bmc.age"}},
+	}, nil)
+	var asked string
+	r.AgeFile = func(path string) ([]byte, error) {
+		asked = path
+		return []byte("hunter2\n"), nil
+	}
+	cred, err := r.Get(context.Background(), "bmc")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got := cred.Password(); got != "hunter2" {
+		t.Errorf("password = %q, want hunter2", got)
+	}
+	if asked != "secrets/bmc.age" {
+		t.Errorf("decrypted %q, want the path as configured", asked)
 	}
 }
 
@@ -76,7 +113,7 @@ func TestFromFileAndCommand(t *testing.T) {
 	}
 
 	r := &credentials.Resolver{
-		BaseDir: dir,
+		Path: inDir(dir),
 		Credentials: map[string]v1alpha1.Credential{
 			"file":    {Username: "u", Password: v1alpha1.PasswordSource{File: "password"}},
 			"command": {Username: "u", Password: v1alpha1.PasswordSource{Command: []string{"echo", "from-command"}}},
@@ -297,8 +334,8 @@ func TestRelativeHelperResolvesAgainstTheSite(t *testing.T) {
 			// A bare name is still looked up in PATH.
 			"bare": {Username: "admin", Password: v1alpha1.PasswordSource{Command: []string{"echo", "from-path"}}},
 		},
-		BaseDir: site,
-		Env:     func(string) string { return "" },
+		Path: inDir(site),
+		Env:  func(string) string { return "" },
 	}
 	for name, want := range map[string]string{
 		"command": "from-config-dir",

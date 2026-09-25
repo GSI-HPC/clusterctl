@@ -140,11 +140,17 @@ func (a *App) SecretContent(file v1alpha1.SecretFile) ([]byte, error) {
 	if file.SecretRef != nil {
 		return a.SecretValue(*file.SecretRef)
 	}
+	return a.AgeFile(file.Source)
+}
+
+// AgeFile decrypts an age encrypted file of the site into memory, with the
+// identities of the workstation.
+func (a *App) AgeFile(path string) ([]byte, error) {
 	ids, err := a.Identities()
 	if err != nil {
 		return nil, err
 	}
-	out, err := secrets.Decrypt(a.Path(file.Source), ids)
+	out, err := secrets.Decrypt(a.Path(path), ids)
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}

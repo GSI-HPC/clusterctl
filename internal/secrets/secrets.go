@@ -168,13 +168,3 @@ func Decrypt(path string, identities []age.Identity) ([]byte, error) {
 	}
 	return out.Bytes(), nil
 }
-
-// DecryptString decrypts a file whose content is one line, such as a
-// password, and returns it without the trailing newline.
-func DecryptString(path string, identities []age.Identity) (string, error) {
-	data, err := Decrypt(path, identities)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimRight(string(data), "\r\n"), nil
-}
