@@ -106,10 +106,12 @@ id. Then:
    role at another host, while the plan waited. The gate is re-checked too,
    so a host protected since the plan was made is refused.
 2. The gate's question is put to the administrator as an **MCP elicitation**:
-   the summary, the context and cluster as they resolve now, and a yes/no, or
-   the host count above `safety.confirmAbove` as it reads now, so a threshold
-   lowered while the plan waited applies. The client shows it to the person
-   and returns the answer. The model neither sees nor writes it.
+   the quoted reason, the context and cluster as they resolve now, the
+   summary, and a yes/no, or the host count above `safety.confirmAbove` as it
+   reads now, so a threshold lowered while the plan waited applies. The reason
+   is the agent's, so it comes first and the server's summary last, next to
+   the answer. The client shows it to the person and returns the answer. The
+   model neither sees nor writes it.
    `safety.Preview.Accept` judges the answer, which is the rule the terminal
    prompt uses.
 3. The plan is taken, so it is applied at most once. The apply is recorded
