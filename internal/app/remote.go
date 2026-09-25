@@ -10,9 +10,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -44,24 +44,10 @@ func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Durati
 		}
 	}
 
-	result, err := a.ReadRunner.Run(ctx, target, a.Collect(transport.Request{Argv: []string{"cat", path}}))
+	result, err := a.ReadOnRole(ctx, role, transport.Request{Argv: []string{"cat", path}})
 	if err != nil {
-		return nil, exitcode.Wrap(exitcode.Transport, err)
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	if result.Failed() {
-		// ssh's own failure arrives coded as a transport failure. Anything
-		// else happened on a host that answered, and what it said is the
-		// reason.
-		var coded *exitcode.Error
-		if errors.As(result.Err, &coded) {
-			return nil, result.Err
-		}
-		// The message came from the host, so it is quoted: a control
-		// character in it cannot rewrite the terminal it is printed on.
-		return nil, exitcode.Errorf(exitcode.TargetFailed, "reading %s on %s: %q",
-			path, target, firstNonEmptyLine(result.Stderr, result.Stdout))
-	}
-
 	data := []byte(result.Stdout)
 	if ttl > 0 && len(data) > 0 {
 		// A cache that cannot be written is not worth failing the command
@@ -127,65 +113,11 @@ func (a *App) runOnRole(ctx context.Context, runner transport.Runner, role strin
 	}
 	result, err := runner.Run(ctx, target, a.Collect(req))
 	if err != nil {
-		if hasCode(err) {
+		// An interrupt is left as it is: report turns it into 130.
+		if errors.Is(err, context.Canceled) {
 			return nil, err
 		}
-		return nil, exitcode.Wrap(exitcode.Transport, err)
+		return nil, exitcode.Default(exitcode.Transport, err)
 	}
-	if result.Failed() {
-		// ssh's own failure arrives coded as a transport failure, and an
-		// interrupt as one. Anything else happened on a host that answered,
-		// and what it said is the reason.
-		if hasCode(result.Err) {
-			return result, result.Err
-		}
-		if strings.TrimSpace(result.Stderr+result.Stdout) == "" {
-			return result, exitcode.Errorf(exitcode.TargetFailed, "%s: command exited %d", target, result.ExitCode)
-		}
-		// The message came from the host, so it is quoted: a control
-		// character in it cannot rewrite the terminal it is printed on.
-		return result, exitcode.Errorf(exitcode.TargetFailed, "%s: exit %d: %q",
-			target, result.ExitCode, firstNonEmptyLine(result.Stderr, result.Stdout))
-	}
-	return result, nil
-}
-
-// hasCode reports whether an error already says which exit code it asks for,
-// or is an interrupt, which report turns into 130.
-func hasCode(err error) bool {
-	var coded *exitcode.Error
-	return errors.As(err, &coded) || errors.Is(err, context.Canceled)
-}
-
-func firstNonEmptyLine(candidates ...string) string {
-	for _, c := range candidates {
-		for _, line := range splitLines(c) {
-			if line != "" {
-				return line
-			}
-		}
-	}
-	return "the command failed without saying why"
-}
-
-func splitLines(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			out = append(out, trimSpace(s[start:i]))
-			start = i + 1
-		}
-	}
-	return append(out, trimSpace(s[start:]))
-}
-
-func trimSpace(s string) string {
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t' || s[0] == '\r') {
-		s = s[1:]
-	}
-	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t' || s[len(s)-1] == '\r') {
-		s = s[:len(s)-1]
-	}
-	return s
+	return result, result.Check("")
 }

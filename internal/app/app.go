@@ -548,11 +548,7 @@ func (a *App) Select(expr string) (*nodeset.NodeSet, error) {
 		// A group source that could not be asked has already said so with
 		// an exit code of its own; only what carries none is the
 		// expression's fault.
-		var coded *exitcode.Error
-		if errors.As(err, &coded) {
-			return nil, err
-		}
-		return nil, exitcode.Wrap(exitcode.Usage, err)
+		return nil, exitcode.Default(exitcode.Usage, err)
 	}
 	if ns.IsEmpty() {
 		return nil, exitcode.Errorf(exitcode.Usage, "%q names no node", expr)

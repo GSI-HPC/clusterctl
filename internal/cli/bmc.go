@@ -6,7 +6,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os/exec"
@@ -277,8 +276,9 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs 
 			a.Printf("could not ask Slurm whether %s run jobs (%s); going ahead because --lose-jobs was given\n", nodes, output.EscapeCell(err.Error()))
 			return nil
 		}
-		var coded *exitcode.Error
-		if !errors.As(err, &coded) {
+		// Slurm that could not be asked, or that refused, is out of reach
+		// for the check, however it failed.
+		if exitcode.From(err) == exitcode.TargetFailed {
 			err = exitcode.Wrap(exitcode.Transport, err)
 		}
 		return fmt.Errorf("could not ask Slurm whether %s run jobs, so nothing was done; "+
@@ -364,11 +364,8 @@ func slurmJobs(a *app.App, nodes *nodeset.NodeSet) (slurmJobState, error) {
 	if err != nil {
 		return slurmJobState{}, err
 	}
-	if result.Failed() {
-		if result.Err != nil {
-			return slurmJobState{}, result.Err
-		}
-		return slurmJobState{}, fmt.Errorf("sinfo exited %d", result.ExitCode)
+	if err := result.Check("sinfo"); err != nil {
+		return slurmJobState{}, err
 	}
 
 	// sinfo lists a node once per partition; the busiest answer counts.

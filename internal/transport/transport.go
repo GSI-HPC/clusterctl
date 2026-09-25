@@ -32,6 +32,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
+	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 )
 
@@ -160,6 +161,52 @@ func (r Result) MarshalJSON() ([]byte, error) {
 
 // Failed reports whether the command did not succeed.
 func (r *Result) Failed() bool { return r == nil || r.Err != nil || r.ExitCode != 0 }
+
+// Check returns nil for a command that succeeded, and otherwise why it
+// failed, as an error that carries its exit code. An error the transport
+// coded itself, such as ssh's own exit 255 or an interrupt, is returned as it
+// is, and one that came without an exit status is a transport failure. Any
+// other failure is that of a host that answered: it exits 1, and what the
+// command printed on standard error is the reason, its lines joined into
+// one, or else the first line it printed on standard output. The reason is
+// escaped, because the host wrote it. program names what ran, for the
+// message; it may be empty.
+func (r *Result) Check(program string) error {
+	switch {
+	case !r.Failed():
+		return nil
+	case exitcode.Has(r.Err):
+		return r.Err
+	case r.Err != nil && r.ExitCode <= 0:
+		return exitcode.Wrap(exitcode.Transport, r.Err)
+	}
+	what := r.Target.String()
+	if program != "" {
+		what = program + " on " + what
+	}
+	said := lines(r.Stderr)
+	if len(said) == 0 {
+		said = lines(r.Stdout)
+		said = said[:min(1, len(said))]
+	}
+	if len(said) == 0 {
+		return exitcode.Errorf(exitcode.TargetFailed, "%s exited %d", what, r.ExitCode)
+	}
+	return exitcode.Errorf(exitcode.TargetFailed, "%s exited %d: %s", what, r.ExitCode,
+		output.EscapeCell(strings.Join(said, "; ")))
+}
+
+// lines returns the lines of s that say something, without the spaces around
+// them.
+func lines(s string) []string {
+	var out []string
+	for line := range strings.SplitSeq(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
 
 // Output returns the standard output with trailing newlines removed.
 func (r *Result) Output() string { return strings.TrimRight(r.Stdout, "\n") }

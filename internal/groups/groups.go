@@ -31,7 +31,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
-	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -464,27 +463,10 @@ func (r *Resolver) run(target transport.Target, command []string) (string, error
 	if err != nil {
 		return "", err
 	}
-	if result.Failed() {
-		var coded *exitcode.Error
-		if errors.As(result.Err, &coded) {
-			return "", result.Err
-		}
-		return "", exitcode.Errorf(exitcode.TargetFailed, "%s: %s exited %d: %s",
-			target, command[0], result.ExitCode, output.EscapeCell(firstLine(result.Stderr, result.Stdout)))
+	if err := result.Check(command[0]); err != nil {
+		return "", err
 	}
 	return strings.Join(fields(result.Stdout), ","), nil
-}
-
-// firstLine returns the first line that says something.
-func firstLine(candidates ...string) string {
-	for _, c := range candidates {
-		for line := range strings.SplitSeq(c, "\n") {
-			if line = strings.TrimSpace(line); line != "" {
-				return line
-			}
-		}
-	}
-	return "the command failed without saying why"
 }
 
 // fields splits command output on whitespace and commas, which is how the

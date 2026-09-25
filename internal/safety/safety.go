@@ -110,11 +110,7 @@ func (g *Gate) Protected() (*nodeset.NodeSet, error) {
 				// A group source that could not be reached has said so
 				// with a code of its own; anything else is the
 				// configuration's fault.
-				var coded *exitcode.Error
-				if !errors.As(err, &coded) {
-					err = exitcode.Wrap(exitcode.Usage, err)
-				}
-				g.protectedErr = err
+				g.protectedErr = exitcode.Default(exitcode.Usage, err)
 				return
 			}
 			protected = protected.Union(ns)

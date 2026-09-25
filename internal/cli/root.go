@@ -328,12 +328,7 @@ func suggest(cmd *cobra.Command, word string) string {
 func usageArgs(cmd *cobra.Command) {
 	if check := cmd.Args; check != nil {
 		cmd.Args = func(c *cobra.Command, args []string) error {
-			err := check(c, args)
-			var coded *exitcode.Error
-			if err == nil || errors.As(err, &coded) {
-				return err
-			}
-			return exitcode.Wrap(exitcode.Usage, err)
+			return exitcode.Default(exitcode.Usage, check(c, args))
 		}
 	}
 	for _, sub := range cmd.Commands() {
