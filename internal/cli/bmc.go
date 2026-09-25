@@ -439,7 +439,7 @@ func classifySlurmState(state string) slurmVerdict {
 		return slurmStrange
 	}
 	verdict := slurmIdle
-	for _, part := range strings.Split(base, "+") {
+	for part := range strings.SplitSeq(base, "+") {
 		switch part {
 		case "allocated", "alloc", "mixed", "mix", "completing", "comp",
 			"draining", "drng", "failing", "failg":

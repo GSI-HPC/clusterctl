@@ -43,7 +43,7 @@ func Check(name string) error {
 	if len(trimmed) > maxName {
 		return fmt.Errorf("%q is not a host name: it is longer than %d characters", name, maxName)
 	}
-	for _, label := range strings.Split(trimmed, ".") {
+	for label := range strings.SplitSeq(trimmed, ".") {
 		if err := checkLabel(label); err != nil {
 			return fmt.Errorf("%q is not a host name: %w", name, err)
 		}

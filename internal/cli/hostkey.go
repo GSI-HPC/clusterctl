@@ -80,9 +80,7 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 		}
 
 		sem <- struct{}{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			entries, err := scanHost(a.Context(), scanner, host)
 			mu.Lock()
@@ -92,7 +90,7 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 				return
 			}
 			found[host] = entries
-		}()
+		})
 	}
 	wg.Wait()
 	return found, failed
@@ -123,7 +121,7 @@ func jumpHops(a *app.App, host string) []string {
 			return nil
 		}
 		var hops []string
-		for _, hop := range strings.Split(role.ProxyJump, ",") {
+		for hop := range strings.SplitSeq(role.ProxyJump, ",") {
 			hop = strings.TrimSpace(hop)
 			if jump, ok := a.Spec.Hosts[hop]; ok && jump.Host != "" {
 				hop = jump.Host

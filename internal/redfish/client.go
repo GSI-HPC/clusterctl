@@ -14,6 +14,7 @@ package redfish
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -92,10 +93,7 @@ func (c *Client) base() (*url.URL, error) {
 }
 
 func (c *Client) system() string {
-	if c.SystemPath != "" {
-		return c.SystemPath
-	}
-	return DefaultSystemPath
+	return cmp.Or(c.SystemPath, DefaultSystemPath)
 }
 
 // httpClient builds the HTTP client, pinning the certificate unless full

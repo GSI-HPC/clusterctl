@@ -127,11 +127,10 @@ func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, c
 			continue
 		}
 		calls[i].sent = true
-		wg.Add(1)
-		go func(call *redfishCall[T]) {
-			defer func() { <-sem; wg.Done() }()
-			call.send(ctx, changes, do)
-		}(&calls[i])
+		wg.Go(func() {
+			defer func() { <-sem }()
+			calls[i].send(ctx, changes, do)
+		})
 	}
 	wg.Wait()
 	return calls

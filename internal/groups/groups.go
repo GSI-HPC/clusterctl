@@ -11,6 +11,7 @@
 package groups
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -225,9 +226,7 @@ func (r *Resolver) resolveIn(name, group string) (string, error) {
 
 // All implements nodeset.Resolver.
 func (r *Resolver) All(source string) (string, error) {
-	if source == "" {
-		source = r.def
-	}
+	source = cmp.Or(source, r.def)
 	src, ok := r.sources[source]
 	if !ok {
 		return "", fmt.Errorf("unknown group source %q (known: %s)", source, strings.Join(r.Sources(), ", "))
@@ -267,9 +266,7 @@ func (r *Resolver) All(source string) (string, error) {
 
 // List implements nodeset.Resolver.
 func (r *Resolver) List(source string) ([]string, error) {
-	if source == "" {
-		source = r.def
-	}
+	source = cmp.Or(source, r.def)
 	src, ok := r.sources[source]
 	if !ok {
 		return nil, fmt.Errorf("unknown group source %q (known: %s)", source, strings.Join(r.Sources(), ", "))

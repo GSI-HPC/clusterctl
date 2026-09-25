@@ -233,9 +233,9 @@ func (r *Resolver) path(p string) string {
 	if p == "" || strings.HasPrefix(p, "/") {
 		return p
 	}
-	if strings.HasPrefix(p, "~") {
+	if after, ok := strings.CutPrefix(p, "~"); ok {
 		if home, err := os.UserHomeDir(); err == nil {
-			return home + strings.TrimPrefix(p, "~")
+			return home + after
 		}
 	}
 	if r.BaseDir == "" {

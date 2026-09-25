@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net"
@@ -504,10 +505,10 @@ the command.`,
 					}
 					continue
 				}
-				s := state{Address: address, BootPath: orNone(links[address])}
+				s := state{Address: address, BootPath: cmp.Or(links[address], "none")}
 				row := []string{node, address, output.EscapeCell(s.BootPath)}
 				if suffix != "" {
-					s.Persistent = orNone(links[address+suffix])
+					s.Persistent = cmp.Or(links[address+suffix], "none")
 					row = append(row, output.EscapeCell(s.Persistent))
 				}
 				object[node] = s
@@ -521,13 +522,6 @@ the command.`,
 			}
 			return nil
 		}))
-}
-
-func orNone(s string) string {
-	if s == "" {
-		return "none"
-	}
-	return s
 }
 
 func newBootSetCommand(r *root) *cobra.Command {

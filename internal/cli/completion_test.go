@@ -66,7 +66,7 @@ func TestCompletionOfTheBuiltins(t *testing.T) {
 				t.Fatalf("completion failed: %v", err)
 			}
 			words := map[string]bool{}
-			for _, line := range strings.Split(h.out.String(), "\n") {
+			for line := range strings.SplitSeq(h.out.String(), "\n") {
 				word, _, _ := strings.Cut(line, "\t")
 				words[word] = true
 			}

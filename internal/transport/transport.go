@@ -16,6 +16,7 @@ package transport
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -166,7 +167,7 @@ func (r *Result) Output() string { return strings.TrimRight(r.Stdout, "\n") }
 // Lines returns the standard output split into non-empty lines.
 func (r *Result) Lines() []string {
 	var out []string
-	for _, line := range strings.Split(r.Stdout, "\n") {
+	for line := range strings.SplitSeq(r.Stdout, "\n") {
 		if line = strings.TrimRight(line, "\r"); line != "" {
 			out = append(out, line)
 		}
@@ -234,18 +235,12 @@ func (c *Client) ConfigPath() (string, error) {
 
 // Binary returns the ssh client to run.
 func (c *Client) Binary() string {
-	if c.spec.Binary != "" {
-		return c.spec.Binary
-	}
-	return "ssh"
+	return cmp.Or(c.spec.Binary, "ssh")
 }
 
 // ScpBinary returns the scp client to run.
 func (c *Client) ScpBinary() string {
-	if c.spec.ScpBinary != "" {
-		return c.spec.ScpBinary
-	}
-	return "scp"
+	return cmp.Or(c.spec.ScpBinary, "scp")
 }
 
 // Command returns ssh with the generated configuration, the part of every
@@ -559,9 +554,7 @@ func exited(target Target, code int, stderr string) error {
 		return nil
 	case sshConnectionFailed:
 		detail := strings.TrimSpace(lastLine(stderr))
-		if detail == "" {
-			detail = "ssh reported a connection failure"
-		}
+		detail = cmp.Or(detail, "ssh reported a connection failure")
 		return exitcode.Wrap(exitcode.Transport, fmt.Errorf("%s: %s", target, detail))
 	default:
 		return fmt.Errorf("%s: command exited %d", target, code)

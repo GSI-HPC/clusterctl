@@ -18,6 +18,7 @@
 package mcpserver
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -96,9 +97,7 @@ type Server struct {
 // New resolves the configuration once, pins the context it names and builds
 // the server.
 func New(ctx context.Context, opts Options) (*Server, error) {
-	if opts.Confirm == "" {
-		opts.Confirm = ConfirmElicit
-	}
+	opts.Confirm = cmp.Or(opts.Confirm, ConfirmElicit)
 	switch opts.Confirm {
 	case ConfirmElicit, ConfirmApproval:
 	default:

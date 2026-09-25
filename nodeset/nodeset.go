@@ -4,6 +4,7 @@
 package nodeset
 
 import (
+	"maps"
 	"sort"
 	"strings"
 )
@@ -77,9 +78,7 @@ func (ns *NodeSet) IsEmpty() bool { return len(ns.nodes) == 0 }
 // Clone returns an independent copy.
 func (ns *NodeSet) Clone() *NodeSet {
 	out := &NodeSet{nodes: make(map[string]node, len(ns.nodes)), autostep: ns.autostep}
-	for k, v := range ns.nodes {
-		out.nodes[k] = v
-	}
+	maps.Copy(out.nodes, ns.nodes)
 	return out
 }
 

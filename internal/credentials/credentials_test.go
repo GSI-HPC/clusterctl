@@ -177,7 +177,7 @@ func TestPasswordIsReadOncePerProcess(t *testing.T) {
 			return "typed", nil
 		},
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := r.Get(context.Background(), "bmc"); err != nil {
 			t.Fatal(err)
 		}
@@ -255,15 +255,13 @@ func TestConcurrentLookupsReadOnce(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			cred, err := r.Get(context.Background(), "bmc")
 			if err != nil || cred.Password() != "typed" {
 				t.Errorf("Get = %v, %v", cred, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if asked != 1 {

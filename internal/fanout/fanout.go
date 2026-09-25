@@ -10,6 +10,7 @@
 package fanout
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -80,12 +81,10 @@ func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, buil
 			continue
 		}
 
-		wg.Add(1)
-		go func(i int, target transport.Target) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			results[i] = e.runOne(ctx, target, build)
-		}(i, target)
+		})
 	}
 	wg.Wait()
 	return results
@@ -185,10 +184,7 @@ func GroupByOutput(results []*transport.Result) ([]Group, error) {
 			g = &Group{Nodes: nodeset.New(), Output: k.output, ExitCode: k.code, Status: k.status}
 			index[k] = g
 		}
-		name := r.Target.Name
-		if name == "" {
-			name = r.Target.Host
-		}
+		name := cmp.Or(r.Target.Name, r.Target.Host)
 		if err := hostname.Check(name); err != nil {
 			return nil, fmt.Errorf("the output of %q cannot be grouped: %w", name, err)
 		}

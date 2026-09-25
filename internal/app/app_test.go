@@ -153,7 +153,7 @@ func TestRemoteFileIsCached(t *testing.T) {
 	}}
 	a := newApp(t, rec)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		data, err := a.RemoteFile(context.Background(), "dhcp", "/etc/dhcp/dhcpd.conf", time.Minute)
 		if err != nil {
 			t.Fatalf("RemoteFile failed: %v", err)

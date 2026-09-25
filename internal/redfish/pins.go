@@ -85,7 +85,7 @@ func (s *PinStore) Set(ctx context.Context, host, pin string) error {
 	}
 	return fileutil.Update(ctx, s.Path, 0o600, func(current []byte) ([]byte, error) {
 		pins := map[string]string{}
-		for _, line := range strings.Split(string(current), "\n") {
+		for line := range strings.SplitSeq(string(current), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
@@ -122,7 +122,7 @@ func (s *PinStore) Remove(ctx context.Context, host string) error {
 	}
 	return fileutil.Update(ctx, s.Path, 0o600, func(current []byte) ([]byte, error) {
 		var b strings.Builder
-		for _, line := range strings.Split(string(current), "\n") {
+		for line := range strings.SplitSeq(string(current), "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" {
 				continue

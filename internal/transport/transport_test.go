@@ -143,8 +143,8 @@ func TestControlMasterOnlyForMarkedRoles(t *testing.T) {
 	t.Parallel()
 	cfg := generatedConfig(t)
 
-	blocks := strings.Split(cfg, "\nHost ")
-	for _, block := range blocks {
+	blocks := strings.SplitSeq(cfg, "\nHost ")
+	for block := range blocks {
 		if strings.HasPrefix(block, "login.hpc.example.org") && strings.Contains(block, "ControlMaster") {
 			t.Errorf("multiplexing was enabled for a role that did not ask for it:\n%s", block)
 		}

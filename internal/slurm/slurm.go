@@ -11,6 +11,7 @@
 package slurm
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -125,7 +126,7 @@ func keepCode(code int, err error) error {
 // its lines are joined with "; " and escaped with output.EscapeCell.
 func oneLine(s string) string {
 	var lines []string
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			lines = append(lines, line)
 		}
@@ -889,12 +890,7 @@ func (c *Client) Cluster(ctx context.Context) (string, error) {
 // Organization returns the organisation a new account gets when none is
 // given.
 func (c *Client) Organization(organization string) string {
-	if organization == "" {
-		organization = c.Spec.Organization
-	}
-	if organization == "" {
-		organization = "default"
-	}
+	organization = cmp.Or(organization, c.Spec.Organization, "default")
 	return organization
 }
 
@@ -904,9 +900,7 @@ func (c *Client) AddAccount(ctx context.Context, name, organization, description
 	if err != nil {
 		return err
 	}
-	if description == "" {
-		description = name
-	}
+	description = cmp.Or(description, name)
 	err = c.run(ctx, []string{"sacctmgr", "--immediate", "add", "account", name, "cluster=" + cluster,
 		"description=" + description, "organization=" + c.Organization(organization)})
 	return err
@@ -974,12 +968,7 @@ func (c *Client) PlanUserAdd(ctx context.Context, user, account, defaultAccount 
 	if err != nil {
 		return UserAddition{}, err
 	}
-	if account == "" {
-		account = c.Spec.DefaultAccount
-	}
-	if account == "" {
-		account = "default"
-	}
+	account = cmp.Or(account, c.Spec.DefaultAccount, "default")
 	lines, err := c.readLines(ctx, []string{"sacctmgr", "--noheader", "--parsable2", "show", "user", "withassoc",
 		"format=User,Account,DefaultAccount", "where", "name=" + user, "cluster=" + cluster})
 	if err != nil {
@@ -1002,9 +991,7 @@ func (c *Client) PlanUserAdd(ctx context.Context, user, account, defaultAccount 
 	if !u.Exists {
 		// A new user gets a default account, and an association with it.
 		u.DefaultAccount = defaultAccount
-		if u.DefaultAccount == "" {
-			u.DefaultAccount = account
-		}
+		u.DefaultAccount = cmp.Or(u.DefaultAccount, account)
 		u.associate = []string{account}
 		if u.DefaultAccount != account {
 			u.associate = append(u.associate, u.DefaultAccount)

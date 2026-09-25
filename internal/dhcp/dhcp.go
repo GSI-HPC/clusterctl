@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -471,10 +472,8 @@ func (p *parser) include(words []token) error {
 	if !path.IsAbs(file) {
 		return p.errorf(line, "include %q is relative; name the file by its absolute path", file)
 	}
-	for _, f := range append(p.chain, p.file) {
-		if f == file {
-			return p.errorf(line, "include %q includes itself", file)
-		}
+	if slices.Contains(append(p.chain, p.file), file) {
+		return p.errorf(line, "include %q includes itself", file)
 	}
 	*p.files++
 	if *p.files > maxFiles {
@@ -593,12 +592,10 @@ func matchName(name, node string) (MatchKind, bool) {
 
 func mentions(comments []string, node string) bool {
 	for _, comment := range comments {
-		for _, word := range strings.FieldsFunc(comment, func(r rune) bool {
+		if slices.Contains(strings.FieldsFunc(comment, func(r rune) bool {
 			return r == ' ' || r == '\t' || r == ',' || r == ':' || r == ';' || r == '(' || r == ')'
-		}) {
-			if word == node {
-				return true
-			}
+		}), node) {
+			return true
 		}
 	}
 	return false

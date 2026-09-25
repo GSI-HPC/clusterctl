@@ -675,11 +675,9 @@ func TestPinStoreFirstContactsRace(t *testing.T) {
 	errs := make([]error, contacts)
 	var wg sync.WaitGroup
 	for i := range contacts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			errs[i] = store.Set(context.Background(), "bmc1", fmt.Sprintf("sha256:%04d", i))
-		}()
+		})
 	}
 	wg.Wait()
 

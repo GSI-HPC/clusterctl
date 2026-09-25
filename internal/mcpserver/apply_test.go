@@ -44,7 +44,7 @@ func auditLines(t *testing.T, stateDir string) []map[string]any {
 		t.Fatal(err)
 	}
 	var out []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		var e map[string]any
 		if err := json.Unmarshal([]byte(line), &e); err != nil {
 			t.Fatalf("audit line %q: %v", line, err)

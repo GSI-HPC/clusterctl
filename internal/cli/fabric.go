@@ -211,7 +211,7 @@ func parsePortStates(entries []portState, out string) {
 	for i := range entries {
 		entries[i].State = portNoAnswer
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		f := strings.Split(strings.TrimRight(line, "\r"), "|")
 		if len(f) != 5 {
 			continue
@@ -350,7 +350,7 @@ func portLID(a *app.App, role, guid string) (int, error) {
 // LID out of what iblinkinfo --line printed.
 func findUplink(out string, lid int) (switchPort, error) {
 	var found []switchPort
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		m := iblinkinfoLine.FindStringSubmatch(line)
 		if m == nil {
 			continue

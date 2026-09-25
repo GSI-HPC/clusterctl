@@ -84,17 +84,15 @@ func TestUpdateSerialises(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, writers)
-	for i := 0; i < writers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range writers {
+		wg.Go(func() {
 			err := fileutil.Update(context.Background(), path, 0o600, func(current []byte) ([]byte, error) {
 				return append(append([]byte{}, current...), 'x'), nil
 			})
 			if err != nil {
 				errs <- err
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

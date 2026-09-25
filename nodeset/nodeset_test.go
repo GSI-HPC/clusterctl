@@ -5,6 +5,7 @@ package nodeset_test
 
 import (
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -570,10 +571,5 @@ func TestCanonicalReturnsAHeldName(t *testing.T) {
 }
 
 func contains(names []string, name string) bool {
-	for _, n := range names {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(names, name)
 }

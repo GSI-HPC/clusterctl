@@ -5,6 +5,7 @@ package config
 
 import (
 	"bytes"
+	"cmp"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -118,15 +119,9 @@ func Scaffold(opts ScaffoldOptions) ([]ScaffoldFile, error) {
 // withDefaults fills in what was left empty.
 func (o ScaffoldOptions) withDefaults() ScaffoldOptions {
 	d := ScaffoldDefaults()
-	if o.Site == "" {
-		o.Site = d.Site
-	}
-	if o.Cluster == "" {
-		o.Cluster = d.Cluster
-	}
-	if o.Domain == "" {
-		o.Domain = d.Domain
-	}
+	o.Site = cmp.Or(o.Site, d.Site)
+	o.Cluster = cmp.Or(o.Cluster, d.Cluster)
+	o.Domain = cmp.Or(o.Domain, d.Domain)
 	if o.Login == "" {
 		o.Login = "login." + o.Domain
 	}

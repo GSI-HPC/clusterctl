@@ -53,7 +53,7 @@ func sshResolve(t *testing.T, config, host string) map[string]string {
 		t.Fatalf("ssh -G -F %s %s failed: %v\n%s", config, host, err, out)
 	}
 	values := map[string]string{}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if key, value, ok := strings.Cut(line, " "); ok {
 			values[key] = value
 		}

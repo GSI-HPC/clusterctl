@@ -10,6 +10,7 @@
 package tunnel
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -99,10 +100,7 @@ func (m *Manager) Args(name string) ([]string, error) {
 		return nil, fmt.Errorf("tunnel %q: %w", name, err)
 	}
 
-	binary := m.Binary
-	if binary == "" {
-		binary = "sshuttle"
-	}
+	binary := cmp.Or(m.Binary, "sshuttle")
 	args := []string{binary}
 	if profile.DNS {
 		args = append(args, "--dns")

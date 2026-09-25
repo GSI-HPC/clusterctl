@@ -167,7 +167,7 @@ func TestAMultiLineDescriptionStaysAComment(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "StrictHostKeyChecking no") {
 			t.Errorf("a line of the description became a directive:\n%s", data)
 		}
