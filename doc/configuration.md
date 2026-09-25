@@ -41,27 +41,16 @@ the file is typed:
 
 ## Where files are read from
 
-`CLUSTERCTL_CONFIG` replaces the search path entirely and is a `PATH`-style
-list of files and directories, most general first. Without it, clusterctl reads
-`/etc/clusterctl` and then the user's configuration directory, usually
-`~/.config/clusterctl`. A directory contributes its `.yaml` and `.yml` files in
-name order, leaving out hidden files such as `.sops.yaml`. `--config` takes the
-same entries.
-
-A place missing from the built-in search path is skipped, because a site may
-use only one of them. An entry of `--config` or `CLUSTERCTL_CONFIG` that does
-not exist is a usage error: it is most likely misspelled, and without it the
-command would resolve to another context.
-
-Configuration names programs clusterctl runs on the workstation, such as
-`ssh.binary` and a password command, so it is held to what OpenSSH holds
-`~/.ssh/config` to. A configuration file, the directory it is read from, and
-the directory holding a file named on its own have to be owned by the user
-running clusterctl or by root and must not be writable by their group or by
-anyone else; otherwise the command refuses to run. A directory with the sticky
-bit set, such as `/tmp`, may hold a file named on its own. A site directory
-several administrators share is therefore owned by root, or kept in version
-control and checked out by each administrator; a group-writable one is refused.
+The search path, the files a directory contributes and the ownership rules
+are the manual's, in
+[Configuration](../site/content/docs/getting-started/configuration.md#where-files-are-read-from).
+Two decisions sit behind them. An entry of `--config` or `CLUSTERCTL_CONFIG`
+that does not exist is a usage error, because without it the command would
+resolve to another context; only a missing directory of the built-in search
+path is skipped. And the configuration names programs clusterctl runs, so it
+is held to what OpenSSH holds `~/.ssh/config` to: owned by the user or root,
+writable by nobody else, with a sticky directory such as `/tmp` allowed to hold
+a file named on its own.
 
 ## Starting a configuration
 
@@ -224,23 +213,10 @@ alone.
 
 ## Environment variables
 
-| Variable | Effect |
-| --- | --- |
-| `CLUSTERCTL_CONFIG` | Replaces the configuration search path |
-| `CLUSTERCTL_CONTEXT` | Selects the context, as `--context` does |
-| `CLUSTERCTL_NODES` | The node set commands act on when neither `-n` nor a node set argument is given; an empty `-n` is an error, never a fall-back to it |
-| `CLUSTERCTL_FANOUT` | `fanout.max` |
-| `CLUSTERCTL_CONNECT_TIMEOUT` | `ssh.connectTimeout` |
-| `CLUSTERCTL_COMMAND_TIMEOUT` | `fanout.commandTimeout` |
-| `CLUSTERCTL_KNOWN_HOSTS` | `ssh.knownHostsFile` |
-| `CLUSTERCTL_SSH_BINARY`, `CLUSTERCTL_SCP_BINARY` | The clients to run |
-| `CLUSTERCTL_SSHUTTLE_BINARY` | The sshuttle to run |
-| `CLUSTERCTL_SOPS_BINARY` | The sops that decrypts Secret documents |
-| `CLUSTERCTL_BROWSER` | The browser to use |
-
-A password is never one of these. It is named by the `Site` document as a
-source, and `BMC_PASSWORD` is read only because a credential says `fromEnv:
-BMC_PASSWORD`.
+The variables are listed in the manual's
+[Environment](../site/content/docs/reference/environment.md) reference. Those
+that set a configuration value are `config.envPaths`, merged as the
+environment layer; a password is never one of them.
 
 ## Secrets
 
@@ -368,20 +344,9 @@ without printing any of it.
 
 ## State and cache
 
-| Directory | Holds |
-| --- | --- |
-| `$XDG_STATE_HOME/clusterctl` | The generated `ssh_config-*` files, one per configuration, the multiplexing sockets, the service processor certificate pins, the tunnel process id files |
-| `$XDG_CACHE_HOME/clusterctl` | Fetched copies of remote files and resolved group listings |
-
-`$XDG_STATE_HOME` defaults to `~/.local/state` and `$XDG_CACHE_HOME` to
-`~/.cache`; a relative value is ignored, as the XDG specification requires.
-Without a home directory and without an absolute value, as under `env -i` or
-in a system unit without `User=`, a command that reads the configuration
-refuses to run: there is no fallback to a shared directory such as `/tmp`.
-
-Both are created with mode 0700. One that exists already has to be a
-directory, not a link to one, owned by the user running clusterctl and not
-writable by its group or anyone else; otherwise every command refuses to run
-and `doctor` names it. Whoever could write it could replace the `ssh_config`
-that `ssh -F` reads. Nothing in either is authoritative: deleting them costs
-one round trip.
+Where the state and the cache live, and what each holds, is in the manual's
+[Environment](../site/content/docs/reference/environment.md#where-files-live)
+reference. Both are refused unless they are directories the user owns and
+nobody else can write, and there is no fallback to a shared directory such as
+`/tmp`: whoever could write the state directory could replace the
+`ssh_config` that `ssh -F` reads. Nothing in either is authoritative.
