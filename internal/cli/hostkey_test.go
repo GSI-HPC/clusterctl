@@ -219,3 +219,73 @@ func TestHostkeyRefreshKeepsNotesAndRevocations(t *testing.T) {
 		}
 	}
 }
+
+// bmcAddressInventory gives exe0003 a bmcAddress, as a site does for a
+// service processor whose DNS record is missing or stale.
+func bmcAddressInventory(t *testing.T) string {
+	t.Helper()
+	return exampleWith(t, "inventory.yaml", func(s string) string {
+		return s + "    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n"
+	})
+}
+
+// TestHostkeyScanReachesTheInventoryBMCAddress: scan --bmc dialled the name
+// the naming rules derive, so the key recorded was not that of the service
+// processor the bmc commands reach.
+func TestHostkeyScanReachesTheInventoryBMCAddress(t *testing.T) {
+	host := startFakeHost(t)
+	var (
+		mu     sync.Mutex
+		dialed []string
+	)
+	scanDial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		mu.Lock()
+		dialed = append(dialed, address)
+		mu.Unlock()
+		return (&net.Dialer{}).DialContext(ctx, network, host.address)
+	}
+	t.Cleanup(func() { scanDial = nil })
+
+	h, err := run(t, harnessOptions{config: []string{bmcAddressInventory(t)}},
+		"hostkey", "scan", "--bmc", "-n", "exe[0003-0004]", "--timeout", "5s")
+	if err != nil {
+		t.Fatalf("hostkey scan --bmc failed: %v\n%s", err, h.out)
+	}
+	got := strings.Join(dialed, " ")
+	if !strings.Contains(got, "10.9.0.77:22") || strings.Contains(got, "exe0003") {
+		t.Errorf("dialled %q, want exe0003's service processor reached at 10.9.0.77", got)
+	}
+	if !strings.Contains(got, "exe0004.mgmt.hpc.example.org:22") {
+		t.Errorf("dialled %q, want exe0004's service processor reached by its derived name", got)
+	}
+	if !strings.Contains(h.out.String(), "10.9.0.77") {
+		t.Errorf("the key is not reported under 10.9.0.77:\n%s", h.out)
+	}
+}
+
+// TestHostkeyRemoveTakesTheInventoryBMCAddress: remove --bmc removed the
+// entry of the derived name, so the key recorded under the bmcAddress stayed.
+func TestHostkeyRemoveTakesTheInventoryBMCAddress(t *testing.T) {
+	known := filepath.Join(t.TempDir(), "known_hosts")
+	file := "10.9.0.77 ssh-ed25519 AAAArecorded\n" +
+		"exe0003.mgmt.hpc.example.org ssh-ed25519 AAAAderived\n"
+	if err := os.WriteFile(known, []byte(file), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h, err := run(t, harnessOptions{config: []string{bmcAddressInventory(t)}},
+		"--set", "ssh.knownHostsFile="+known, "hostkey", "remove", "--bmc", "-y", "-n", "exe0003")
+	if err != nil {
+		t.Fatalf("hostkey remove --bmc failed: %v\n%s", err, h.out)
+	}
+	data, err := os.ReadFile(known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); strings.Contains(got, "10.9.0.77") || !strings.Contains(got, "AAAAderived") {
+		t.Errorf("the file is now:\n%s\nwant only the entry of 10.9.0.77 removed", got)
+	}
+	if !strings.Contains(h.out.String(), "10.9.0.77") {
+		t.Errorf("the removal is not reported under 10.9.0.77:\n%s", h.out)
+	}
+}
