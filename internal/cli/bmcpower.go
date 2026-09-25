@@ -90,12 +90,12 @@ type redfishCall[T any] struct {
 }
 
 // redfishEach sends one request to every processor in parallel, bounded by
-// bmc.redfish.maxConcurrent, and reports the fan-out as the step it names,
-// with a target for each node, the way fanout.Map reports its work. It is
-// the Redfish fan-out of every command but bmc power and bmc status, whose
-// nodes may be tried over IPMI too and are reported across both
-// (bmcRun.redfish). Both send through the same call, so a failure is
-// classified the same way whichever command met it.
+// redfishLimit, and reports the fan-out as the step it names, with a target
+// for each node, the way fanout.Map reports its work. It is the Redfish
+// fan-out of every command but bmc power and bmc status, whose nodes may be
+// tried over IPMI too and are reported across both (bmcRun.redfish). Both
+// send through the same call, so a failure is classified the same way
+// whichever command met it.
 //
 // Once the command is interrupted, nothing more is sent, and the rest is
 // reported as not sent. A request that was already under way when the
@@ -117,7 +117,7 @@ func redfishEach[T any](ctx context.Context, a *app.App, step string, names []st
 	}
 	outcomes := fanout.Map(ctx, sendable, fanout.Options[int]{
 		Step:  step,
-		Limit: a.Spec.BMC.Redfish.MaxConcurrent,
+		Limit: redfishLimit(a),
 		Describe: func(i int) (node, host, role string) {
 			return calls[i].node, calls[i].client.Host, ""
 		},
@@ -133,6 +133,10 @@ func redfishEach[T any](ctx context.Context, a *app.App, step string, names []st
 	}
 	return calls
 }
+
+// redfishLimit is how many requests go to the processors at once:
+// bmc.redfish.maxConcurrent, or --fanout where that is lower.
+func redfishLimit(a *app.App) int { return a.Bound(a.Spec.BMC.Redfish.MaxConcurrent) }
 
 // newRedfishCalls pairs each node with its client.
 func newRedfishCalls[T any](names []string, clients []*redfish.Client) []redfishCall[T] {
@@ -621,15 +625,14 @@ func (r *bmcRun) runRedfish(ctx context.Context, a *app.App, names []string) []b
 }
 
 // redfish sends a request to the processor of every node, at most
-// bmc.redfish.maxConcurrent at a time and through the same call as
-// redfishEach, but under the run's targets rather than a step of its own:
-// a node's target is marked running as its request takes its place, and
-// ended as the answer comes in when that is the node's last. Every node
-// has a client.
+// redfishLimit at a time and through the same call as redfishEach, but
+// under the run's targets rather than a step of its own: a node's target
+// is marked running as its request takes its place, and ended as the
+// answer comes in when that is the node's last. Every node has a client.
 func (r *bmcRun) redfish(ctx context.Context, a *app.App, names []string, clients []*redfish.Client, changes bool,
 	do func(context.Context, string, *redfish.Client) (string, error)) []redfishCall[string] {
 	calls := newRedfishCalls[string](names, clients)
-	fanout.Each(ctx, len(calls), a.Spec.BMC.Redfish.MaxConcurrent, func(i int) {
+	fanout.Each(ctx, len(calls), redfishLimit(a), func(i int) {
 		t := r.targets[calls[i].node]
 		t.span.Run()
 		calls[i].sent = true

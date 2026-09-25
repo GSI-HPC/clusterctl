@@ -288,3 +288,45 @@ func TestRedfishClientCarriesTheVendorResetTypes(t *testing.T) {
 		t.Errorf("a node without a vendor list got reset types %v", c.ResetTypes)
 	}
 }
+
+// --fanout lowers a bound of its own, such as bmc.redfish.maxConcurrent,
+// where it is lower, and never raises one. fanout.max from --set or the
+// environment is configuration, as it is in a document, and leaves the
+// bound alone, though config explain reports the flag as fanout.max too.
+func TestFanoutLowersABoundOnlyFromTheFlag(t *testing.T) {
+	tests := []struct {
+		name   string
+		fanout int
+		env    map[string]string
+		set    map[string]string
+		flag   int
+		bounds map[int]int
+	}{
+		{"no flag", 0, nil, nil, 0, map[int]int{8: 8, 1: 1}},
+		{"a flag", 4, nil, nil, 4, map[int]int{8: 4, 4: 4, 2: 2}},
+		{"--set", 0, nil, map[string]string{"fanout.max": "1"}, 0, map[int]int{8: 8}},
+		{"the environment", 0, map[string]string{"CLUSTERCTL_FANOUT": "1"}, nil, 0, map[int]int{8: 8}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a, err := app.New(context.Background(), app.Streams{StateDir: t.TempDir(), CacheDir: t.TempDir()}, app.Options{
+				ConfigFiles: []string{exampleDir},
+				Env:         func(k string) string { return tc.env[k] },
+				Set:         tc.set,
+				Fanout:      tc.fanout,
+				Runner:      &transport.Recorder{},
+			})
+			if err != nil {
+				t.Fatalf("building the app: %v", err)
+			}
+			if got := a.FanoutFlag(); got != tc.flag {
+				t.Errorf("FanoutFlag() = %d, want %d", got, tc.flag)
+			}
+			for setting, want := range tc.bounds {
+				if got := a.Bound(setting); got != want {
+					t.Errorf("Bound(%d) = %d, want %d", setting, got, want)
+				}
+			}
+		})
+	}
+}

@@ -221,7 +221,8 @@ are about to do and ask before doing it.`),
 	flags.BoolVar(&r.dryRun, "dry-run", false, "report what would be done and change nothing")
 	flags.BoolVarP(&r.assumeYes, "yes", "y", false, "answer the confirmation prompts with yes")
 	flags.BoolVar(&r.force, "force", false, "allow protected hosts, and nodes the inventory does not know, to be touched")
-	flags.IntVar(&r.fanout, "fanout", 0, "how many hosts to work on at once, at least 1 (default: from the configuration)")
+	flags.IntVar(&r.fanout, "fanout", 0,
+		"how many hosts to work on at once, at least 1; caps the service processors asked at once too (default: from the configuration)")
 	r.fanoutGiven = func() bool { return flags.Changed("fanout") }
 
 	registerCompletions(cmd, r)

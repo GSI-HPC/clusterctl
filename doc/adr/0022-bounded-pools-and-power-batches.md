@@ -59,7 +59,10 @@ partly failed, and cutting a batch down to the pool's limit.
 - **`--fanout` lowers the other bounds and never raises them.** Given on the
   command line, it sets `fanout.max`, and it lowers the Redfish, IPMI and
   DNS bounds to its value where that is lower. `fanout.max` set in a
-  configuration does not change them. MCP does not take `--fanout`.
+  configuration does not change them, and neither does one set with `--set`
+  or `CLUSTERCTL_FANOUT`, which are configuration too; only the flag counts.
+  MCP does not take `--fanout` from an agent; the server's own, when it was
+  started with one, is the flag of every command it runs.
 - **Only a power-on and a power cycle are sent in batches.** The batch is
   `--batch`, or `safety.powerOnBatch`. The set is split evenly into as few
   batches as that allows, so ten nodes at 8 go as 5 and 5, not 8 and 2. The
