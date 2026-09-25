@@ -73,8 +73,8 @@ func TestCtrlCAtAPromptExits130(t *testing.T) {
 		// exec asks before it contacts anything; slurm node drain asks
 		// Slurm first, which the hanging ssh here would never answer.
 		{"confirmation", []string{"exec", "--confirm", "-n", "exe0001", "--", "uptime"}, "Continue? [y/N]"},
-		// The pdu credential asks on the terminal.
-		{"password", []string{"--set", "bmc.credential=pdu", "bmc", "status", "-n", "exe0001"}, "Password for admin@pdu:"},
+		// The bmc-prompt credential asks on the terminal.
+		{"password", []string{"--set", "bmc.credential=bmc-prompt", "bmc", "status", "-n", "exe0001"}, "Password for admin@bmc-prompt:"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -92,7 +92,7 @@ spec:
         secretRef:
           name: example
           key: bmc-password
-    pdu:
+    bmc-prompt:
       username: admin
       password:
         prompt: true
@@ -112,7 +112,6 @@ spec:
     pdu:
       nameFormat: "pdu%s-%s"
       domain: mgmt.example.org
-      credential: pdu
     vendors:
       vendor2:
         # This firmware rejects GracefulShutdown and only offers these.
