@@ -165,11 +165,7 @@ a node is not coming up. At most 10000 lines are shown.`,
 			}
 			// The log carries what the nodes sent, such as their host
 			// names, so control characters are shown rather than obeyed.
-			out := strings.Split(result.Output(), "\n")
-			for i, line := range out {
-				out[i] = output.EscapeText(line)
-			}
-			return say(cmd, "%s\n", strings.Join(out, "\n"))
+			return printLines(a, cmd, result.Output())
 		})
 	cmd.Flags().IntVarP(&lines, "lines", "l", 50, "how many log lines to show")
 	return cmd

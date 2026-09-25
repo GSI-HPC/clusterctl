@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -803,6 +804,33 @@ func TestTablesThatNameTheirColumnsRender(t *testing.T) {
 			if err != nil {
 				t.Errorf("%v -o %s: %v\n%s", tc.args, format, err, h.errOut)
 			}
+		}
+	}
+}
+
+// The commands that pass on what a host printed took no notice of -o: a
+// script asking for JSON got the raw text. They now give the lines as a
+// list in the machine formats.
+func TestRawOutputFollowsTheFormat(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, Stdout: "first\nsecond \x1b[2J\n"}, nil
+	}}
+	for _, args := range [][]string{
+		{"boot", "log"},
+		{"boot", "sync", "-y"},
+		{"dhcp", "log"},
+	} {
+		h, err := run(t, harnessOptions{recorder: rec}, append(args, "-o", "json")...)
+		if err != nil {
+			t.Fatalf("%v -o json: %v", args, err)
+		}
+		var lines []string
+		if err := json.Unmarshal(h.out.Bytes(), &lines); err != nil || len(lines) != 2 || lines[0] != "first" {
+			t.Errorf("%v -o json = %q (%v), want the two lines", args, h.out, err)
+		}
+		h, err = run(t, harnessOptions{recorder: rec}, args...)
+		if err != nil || h.out.String() != "first\nsecond \\x1b[2J\n" {
+			t.Errorf("%v = %q (%v), want the text, escaped", args, h.out, err)
 		}
 	}
 }

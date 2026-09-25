@@ -410,7 +410,7 @@ only that port is read. The switch and port are named on standard error.`,
 			if err != nil {
 				return err
 			}
-			return say(cmd, "%s\n", output.EscapeText(result.Output()))
+			return printLines(a, cmd, result.Output())
 		}))
 	cmd.Flags().BoolVar(&uplink, "uplink", false, "read the switch port instead of the node port")
 	return cmd

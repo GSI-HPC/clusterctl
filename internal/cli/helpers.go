@@ -72,6 +72,20 @@ func session(a *app.App, cmd *cobra.Command, target transport.Target, req transp
 	return a.SSH.Interactive(a.Context(), target, req)
 }
 
+// printLines prints what a host printed: as it came, escaped, in the table
+// formats, and as a list of its lines in the others, so that -o json and a
+// jq program read it too.
+func printLines(a *app.App, cmd *cobra.Command, text string) error {
+	if k := a.Format.Kind; k == output.FormatTable || k == output.FormatWide {
+		return say(cmd, "%s\n", output.EscapeText(text))
+	}
+	lines := []string{}
+	if text != "" {
+		lines = strings.Split(text, "\n")
+	}
+	return a.Print(output.Result{Object: lines})
+}
+
 // selection resolves the node set a command acts on, from its argument or
 // from -n, or else from CLUSTERCTL_NODES. An argument together with -n is a
 // usage error, as is an empty selection.

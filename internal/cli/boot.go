@@ -700,7 +700,7 @@ previewed and confirmed like any other change.`,
 			if err != nil {
 				return err
 			}
-			return say(cmd, "%s\n", output.EscapeText(result.Output()))
+			return printLines(a, cmd, result.Output())
 		}))
 }
 
@@ -734,8 +734,7 @@ for a boot configuration and does not get the expected one.`,
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), output.EscapeText(result.Output()))
-			return err
+			return printLines(a, cmd, result.Output())
 		})
 	cmd.Flags().IntVarP(&lines, "lines", "l", 50, fmt.Sprintf("how many log lines to show, at most %d", maxLogLines))
 	return cmd
