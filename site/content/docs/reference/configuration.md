@@ -100,7 +100,7 @@ contexts:
 | `tunnels` | sshuttle profiles: `remote`, `subnets`, `excludes`, `dns`, `method` |
 | `safety` | `protectedHosts`, `confirmAbove`, `slurmAware`, `powerOnBatch`, `powerOnStagger` |
 | `fanout` | `max`, `connectTimeout`, `commandTimeout` |
-| `services` | `dhcp`, `pxesrv`, `tftp`, `http`, `cinc`, `mail`, `fabric`, `dns` |
+| `services` | `dhcp`, `pxesrv`, `tftp`, `http`, `cinc`, `fabric`, `dns` |
 
 ### Naming templates
 
@@ -223,7 +223,6 @@ spec:
   identities: [~/.ssh/id_ed25519]
   sopsKeyTypes: [age]          # the kinds of key a Secret may be encrypted to
   browser: firefox
-  pager: less
   sshuttleBinary: sshuttle
   sopsBinary: sops             # the sops that decrypts a Secret, 3.10.0 or later
   overrides: {}

@@ -420,7 +420,7 @@ Print the value at a dotted path, the layer that set it and the line it was
 written on.
 
   clusterctl config explain fanout.max
-  clusterctl config explain bmc.ipmi.passwordTransport`,
+  clusterctl config explain bmc.ipmi.backend`,
 		cobra.ExactArgs(1),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			path := args[0]

@@ -236,7 +236,7 @@ alone.
 | `CLUSTERCTL_SSH_BINARY`, `CLUSTERCTL_SCP_BINARY` | The clients to run |
 | `CLUSTERCTL_SSHUTTLE_BINARY` | The sshuttle to run |
 | `CLUSTERCTL_SOPS_BINARY` | The sops that decrypts Secret documents |
-| `CLUSTERCTL_PAGER`, `CLUSTERCTL_BROWSER` | The pager and browser to use |
+| `CLUSTERCTL_BROWSER` | The browser to use |
 
 A password is never one of these. It is named by the `Site` document as a
 source, and `BMC_PASSWORD` is read only because a credential says `fromEnv:

@@ -181,11 +181,6 @@ type IPMISpec struct {
 	Backend string `json:"backend,omitempty" yaml:"backend,omitempty" jsonschema:"enum=ipmipower,enum=ipmitool"`
 	// Driver is the FreeIPMI driver name, LAN_2_0 for anything current.
 	Driver string `json:"driver,omitempty" yaml:"driver,omitempty"`
-	// PasswordTransport decides how the password reaches the backend. The
-	// only one implemented, file, streams it over stdin into a mode 0600
-	// file on the gateway, so that it never appears in the remote argv
-	// where ps would show it.
-	PasswordTransport string `json:"passwordTransport,omitempty" yaml:"passwordTransport,omitempty" jsonschema:"enum=file"`
 	// IpmipowerPath and IpmitoolPath override the backend locations.
 	IpmipowerPath string   `json:"ipmipowerPath,omitempty" yaml:"ipmipowerPath,omitempty" jsonschema:"minLength=1"`
 	IpmitoolPath  string   `json:"ipmitoolPath,omitempty" yaml:"ipmitoolPath,omitempty" jsonschema:"minLength=1"`
@@ -327,7 +322,6 @@ type ServicesSpec struct {
 	TFTP   TFTPService   `json:"tftp,omitempty" yaml:"tftp,omitempty"`
 	HTTP   HTTPService   `json:"http,omitempty" yaml:"http,omitempty"`
 	Cinc   CincService   `json:"cinc,omitempty" yaml:"cinc,omitempty"`
-	Mail   MailService   `json:"mail,omitempty" yaml:"mail,omitempty"`
 	Fabric FabricService `json:"fabric,omitempty" yaml:"fabric,omitempty"`
 	DNS    DNSService    `json:"dns,omitempty" yaml:"dns,omitempty"`
 }
@@ -372,20 +366,10 @@ type TFTPService struct {
 // HTTPService is the web server that hosts installation content.
 type HTTPService struct {
 	Role string `json:"role,omitempty" yaml:"role,omitempty"`
-	Root string `json:"root,omitempty" yaml:"root,omitempty"`
-	// BaseURL is how nodes reach that root.
-	BaseURL string `json:"baseUrl,omitempty" yaml:"baseUrl,omitempty"`
 }
 
 // CincService is the configuration management the nodes run.
 type CincService struct {
-	// ArchivePath is where configuration archives are published on the HTTP
-	// server.
-	ArchivePath string `json:"archivePath,omitempty" yaml:"archivePath,omitempty"`
-	// BaseCookbook is the git repository cloned into an archive.
-	BaseCookbook string `json:"baseCookbook,omitempty" yaml:"baseCookbook,omitempty"`
-	// RolesPath is the local directory holding the roles.
-	RolesPath string `json:"rolesPath,omitempty" yaml:"rolesPath,omitempty"`
 	// SoloConfigPath is the file on the node naming its archive and run
 	// list.
 	SoloConfigPath string `json:"soloConfigPath,omitempty" yaml:"soloConfigPath,omitempty" jsonschema:"minLength=1"`
@@ -427,24 +411,11 @@ type SecretKeyRef struct {
 // String renders the reference the way messages and tables print it.
 func (r SecretKeyRef) String() string { return r.Name + "/" + r.Key }
 
-// MailService is how a node warns its users before a reboot.
-type MailService struct {
-	Host string `json:"host,omitempty" yaml:"host,omitempty"`
-	From string `json:"from,omitempty" yaml:"from,omitempty"`
-	// Domain is appended to a local account to form the recipient.
-	Domain string `json:"domain,omitempty" yaml:"domain,omitempty"`
-	// SubjectPrefix is put in front of the subject.
-	SubjectPrefix string `json:"subjectPrefix,omitempty" yaml:"subjectPrefix,omitempty"`
-}
-
 // FabricService is the InfiniBand fabric.
 type FabricService struct {
 	// Role names the host the fabric tools run on, which needs access to the
 	// subnet manager.
 	Role string `json:"role,omitempty" yaml:"role,omitempty"`
-	// GUIDFormat builds an HCA GUID from a MAC address. The default,
-	// mellanox, inserts 0300 between the two halves of the address.
-	GUIDFormat string `json:"guidFormat,omitempty" yaml:"guidFormat,omitempty" jsonschema:"enum=mellanox"`
 }
 
 // DNSService is the resolver used for forward and reverse lookups.
@@ -609,10 +580,8 @@ type WorkstationSpec struct {
 	Host string `json:"host,omitempty" yaml:"host,omitempty"`
 	// Addresses are named local addresses the tunnel profiles refer to.
 	Addresses map[string]string `json:"addresses,omitempty" yaml:"addresses,omitempty"`
-	// Browser and Pager override the programs used to open a BMC web
-	// interface and to page long output.
+	// Browser overrides the program used to open a BMC web interface.
 	Browser string `json:"browser,omitempty" yaml:"browser,omitempty"`
-	Pager   string `json:"pager,omitempty" yaml:"pager,omitempty"`
 	// Identities are the age identities used to decrypt secrets.
 	Identities []string `json:"identities,omitempty" yaml:"identities,omitempty"`
 	// SopsKeyTypes are the kinds of master key a Secret document may be

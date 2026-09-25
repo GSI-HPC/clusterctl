@@ -9,15 +9,12 @@ import (
 	"testing"
 )
 
-// bmc.ipmi.passwordTransport accepted stdin and env, which nothing read, and
-// bmc.order accepted any word, which then meant Redfish.
+// bmc.ipmi.passwordTransport, which nothing read, is no setting any more,
+// and bmc.order accepted any word, which then meant Redfish.
 func TestBMCSettingsTheCodeDoesNotKeepAreRefused(t *testing.T) {
 	for _, edit := range []func(string) string{
 		func(s string) string {
-			return strings.Replace(s, "passwordTransport: file", "passwordTransport: stdin", 1)
-		},
-		func(s string) string {
-			return strings.Replace(s, "passwordTransport: file", "passwordTransport: env", 1)
+			return strings.Replace(s, "driver: LAN_2_0", "driver: LAN_2_0\n      passwordTransport: file", 1)
 		},
 		func(s string) string { return strings.Replace(s, "order: [redfish, ipmi]", "order: [impi]", 1) },
 	} {

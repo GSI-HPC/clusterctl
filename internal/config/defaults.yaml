@@ -17,9 +17,6 @@ bmc:
   ipmi:
     backend: ipmipower
     driver: LAN_2_0
-    # The password is written to a mode 0600 file on the gateway instead of
-    # being passed in argv, where ps would show it to every other user.
-    passwordTransport: file
     ipmipowerPath: /usr/sbin/ipmipower
     ipmitoolPath: /usr/bin/ipmitool
     timeout: 60s
@@ -84,14 +81,8 @@ services:
     root: /srv/tftp
     grubPath: /srv/tftp/grub
     logPath: /var/log/syslog
-  http:
-    root: /var/www/html
   cinc:
     soloConfigPath: /etc/cinc/solo
     binary: cinc-solo
-  fabric:
-    guidFormat: mellanox
   dns:
     timeout: 5s
-  mail:
-    subjectPrefix: "[cluster]"
