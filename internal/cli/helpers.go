@@ -69,6 +69,24 @@ func selection(a *app.App, args []string) (*nodeset.NodeSet, error) {
 	return a.Select(expr)
 }
 
+// oneNode resolves the one node a command's NODE argument names, the way a
+// selection is resolved: a name that is not a host name is refused, and any
+// spelling of a machine, in other case or padding or as its host name, is
+// the name the inventory uses for it.
+func oneNode(a *app.App, arg string) (string, error) {
+	if strings.TrimSpace(arg) == "" {
+		return "", exitcode.Errorf(exitcode.Usage, "no node was named")
+	}
+	ns, err := a.Select(arg)
+	if err != nil {
+		return "", err
+	}
+	if ns.Len() != 1 {
+		return "", exitcode.Errorf(exitcode.Usage, "%q names %d nodes; name one", arg, ns.Len())
+	}
+	return ns.Expand()[0], nil
+}
+
 // runOnNodes runs one request on a node set and prints a result table of
 // what each node answered.
 func runOnNodes(a *app.App, ns *nodeset.NodeSet, build func(node string) transport.Request) ([]*transport.Result, error) {

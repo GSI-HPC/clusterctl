@@ -219,7 +219,8 @@ what the out-of-band commands connect to.`,
 func newNodeGroupsCommand(r *root) *cobra.Command {
 	return leaf("groups [NODE]", "List the node groups, or the groups of one node", `
 Without an argument, list every group source and the groups it offers. With a
-node name, list the groups that node belongs to.
+node name, list the groups that node belongs to. The name is resolved the way
+-n is, so exe1, EXE0001 and the node's host name all find exe0001.
 
 A source that cannot be asked is named on the error stream and makes the
 command fail, after what the other sources answered has been printed.`,
@@ -230,7 +231,11 @@ command fail, after what the other sources answered has been printed.`,
 				return err
 			}
 			if len(args) == 1 {
-				memberships, groupErr := a.Groups.GroupsOf(args[0])
+				node, err := oneNode(a, args[0])
+				if err != nil {
+					return err
+				}
+				memberships, groupErr := a.Groups.GroupsOf(node)
 				t := output.NewTable(output.Cols("SOURCE", "GROUPS")...)
 				for _, source := range sortedMapKeys(memberships) {
 					t.Add(source, strings.Join(memberships[source], ", "))
@@ -238,7 +243,7 @@ command fail, after what the other sources answered has been printed.`,
 				if err := a.Print(output.Result{Table: t, Object: memberships}); err != nil {
 					return err
 				}
-				return groupsError(args[0], groupErr)
+				return groupsError(node, groupErr)
 			}
 
 			t := output.NewTable(

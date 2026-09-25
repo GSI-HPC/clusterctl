@@ -358,3 +358,45 @@ func TestExecGroupSourceRequiresARole(t *testing.T) {
 		t.Errorf("error %q does not name the missing role", err)
 	}
 }
+
+// node groups looked the name up as typed, so another spelling of the node
+// missed the memberships its inventory name has.
+func TestNodeGroupsFindsTheMachineOfAnySpelling(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "node", "groups", "exe0001", "-o", "json")
+	if err != nil {
+		t.Fatalf("node groups exe0001 failed: %v", err)
+	}
+	want := h.out.String()
+	if !strings.Contains(want, `"inventory"`) || !strings.Contains(want, `"rack"`) {
+		t.Fatalf("node groups exe0001 found no memberships:\n%s", want)
+	}
+
+	for _, spelling := range []string{"EXE0001", "exe1", "exe0001.", "exe0001.hpc.example.org"} {
+		h, err := run(t, harnessOptions{}, "node", "groups", spelling, "-o", "json")
+		if err != nil {
+			t.Errorf("node groups %s failed: %v", spelling, err)
+			continue
+		}
+		if got := h.out.String(); got != want {
+			t.Errorf("node groups %s = %s, want what exe0001 has: %s", spelling, got, want)
+		}
+	}
+}
+
+// NODE is one node, and a name that is not a host name is refused before
+// any source is asked about it.
+func TestNodeGroupsRefusesWhatIsNotOneNode(t *testing.T) {
+	for _, arg := range []string{"exe[0001-0002]", "-exe0001", "exe0001;id", " "} {
+		h, err := run(t, harnessOptions{}, "node", "groups", "--", arg)
+		if err == nil {
+			t.Errorf("node groups %q: accepted, output:\n%s", arg, h.out)
+			continue
+		}
+		if got := exitcode.From(err); got != exitcode.Usage {
+			t.Errorf("node groups %q: exit code = %d, want %d (%v)", arg, got, exitcode.Usage, err)
+		}
+		if calls := h.recorder.Calls(); len(calls) != 0 {
+			t.Errorf("node groups %q: sent %d commands, want none", arg, len(calls))
+		}
+	}
+}
