@@ -479,6 +479,8 @@ func TestErrorsKeepSlurmsMessageAndTheTransportsCode(t *testing.T) {
 		{"a refusal with no message", transport.Result{ExitCode: 1}, exitcode.TargetFailed, "scontrol on login exited 1"},
 		{"control characters in the message", transport.Result{ExitCode: 1, Stderr: "a\x1b[2Kb\nsecond line\n"},
 			exitcode.TargetFailed, `exited 1: a\x1b[2Kb; second line`},
+		{"bidirectional controls and bytes that are not UTF-8", transport.Result{ExitCode: 1, Stderr: "a\u202eb\u2028c\xff\n"},
+			exitcode.TargetFailed, `exited 1: a\u202eb\u2028c\xff`},
 		{"an unreachable login node", transport.Result{ExitCode: 255,
 			Err: exitcode.Wrap(exitcode.Transport, errors.New("login: Connection refused"))}, exitcode.Transport, "Connection refused"},
 		{"ssh could not run", transport.Result{ExitCode: -1, Err: errors.New("running ssh for login: not found")},

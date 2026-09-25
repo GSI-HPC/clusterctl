@@ -25,6 +25,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -124,7 +125,7 @@ func keepCode(code int, err error) error {
 }
 
 // oneLine makes what a client printed safe to put into one line of an error:
-// its lines are joined with "; " and control characters are escaped.
+// its lines are joined with "; " and escaped with output.EscapeCell.
 func oneLine(s string) string {
 	var lines []string
 	for _, line := range strings.Split(s, "\n") {
@@ -132,15 +133,7 @@ func oneLine(s string) string {
 			lines = append(lines, line)
 		}
 	}
-	var b strings.Builder
-	for _, r := range strings.Join(lines, "; ") {
-		if isControl(r) {
-			b.WriteString(strings.Trim(strconv.QuoteRune(r), "'"))
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return output.EscapeCell(strings.Join(lines, "; "))
 }
 
 // isControl reports the C0 and C1 control characters and DEL.

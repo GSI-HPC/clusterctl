@@ -138,7 +138,7 @@ error and makes the command fail; it is left out of the table and of -o json.`,
 			for _, node := range ns.Expand() {
 				guids, err := lookup.guids(node)
 				if err != nil {
-					a.Printf("clusterctl: %s: %v\n", node, err)
+					a.Printf("clusterctl: %s: %s\n", node, output.EscapeCell(err.Error()))
 					_ = failed.Add(node)
 					continue
 				}
@@ -437,7 +437,7 @@ only that port is read. The switch and port are named on standard error.`,
 			if err != nil {
 				return err
 			}
-			return say(cmd, "%s\n", result.Output())
+			return say(cmd, "%s\n", output.EscapeText(result.Output()))
 		})
 	cmd.Flags().BoolVar(&uplink, "uplink", false, "read the switch port instead of the node port")
 	return cmd

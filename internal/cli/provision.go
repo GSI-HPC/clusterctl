@@ -1044,7 +1044,7 @@ type reinstallNode struct {
 
 func (n *reinstallNode) note(what string, err error) {
 	if err != nil {
-		n.Errors = append(n.Errors, printable(what+": "+err.Error()))
+		n.Errors = append(n.Errors, output.EscapeCell(what+": "+err.Error()))
 	}
 }
 
@@ -1429,7 +1429,7 @@ func namedFailures(names []string, errs []error) error {
 		if err == nil {
 			continue
 		}
-		parts = append(parts, printable(fmt.Sprintf("%s: %v", names[i], err)))
+		parts = append(parts, output.EscapeCell(fmt.Sprintf("%s: %v", names[i], err)))
 		failed = append(failed, err)
 		c := exitcode.From(err)
 		if errors.Is(err, context.Canceled) {
@@ -1488,7 +1488,7 @@ func (s *provisionState) fail(err error) {
 	if s.Error != "" {
 		s.Error += "; "
 	}
-	s.Error += printable(err.Error())
+	s.Error += output.EscapeCell(err.Error())
 }
 
 func newProvisionStatusCommand(r *root) *cobra.Command {
@@ -1539,9 +1539,9 @@ credential, and 1 when a host refused.`,
 					s.fail(fmt.Errorf("reading the boot links on %s: %w", role, linkErr))
 					continue
 				}
-				s.BootPath = printable(orNone(links[address]))
+				s.BootPath = output.EscapeCell(orNone(links[address]))
 				if suffix != "" {
-					s.PersistentBootPath = printable(orNone(links[address+suffix]))
+					s.PersistentBootPath = output.EscapeCell(orNone(links[address+suffix]))
 				}
 			}
 
@@ -1564,7 +1564,7 @@ credential, and 1 when a host refused.`,
 				if powerErrs[i] != nil {
 					s.fail(powerErrs[i])
 				}
-				s.Power = printable(power[i])
+				s.Power = output.EscapeCell(power[i])
 			}
 
 			results, err := runOnNodes(a, ns, func(string) transport.Request {
@@ -1587,9 +1587,9 @@ credential, and 1 when a host refused.`,
 				case !ok:
 					s.SSHError = "not tried"
 				case res.Failed():
-					s.SSHError = printable(sshReason(res))
+					s.SSHError = output.EscapeCell(sshReason(res))
 				default:
-					s.SSH, s.Uptime = true, printable(res.Output())
+					s.SSH, s.Uptime = true, output.EscapeCell(res.Output())
 				}
 			}
 
