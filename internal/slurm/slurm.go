@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -555,6 +556,34 @@ type Job struct {
 	Reason    string `json:"reason,omitempty" yaml:"reason,omitempty"`
 	WorkDir   string `json:"workDir,omitempty" yaml:"workDir,omitempty"`
 	Command   string `json:"command,omitempty" yaml:"command,omitempty"`
+}
+
+// JobCount is the number of jobs of one user in one account and partition.
+type JobCount struct {
+	User      string `json:"user" yaml:"user"`
+	Account   string `json:"account" yaml:"account"`
+	Partition string `json:"partition" yaml:"partition"`
+	Jobs      int    `json:"jobs" yaml:"jobs"`
+}
+
+// CountJobs counts jobs per user, account and partition, most jobs first.
+// Equal counts are ordered by user, account and partition, so that the same
+// queue always reads the same, from the command line and from an agent.
+func CountJobs(jobs []Job) []JobCount {
+	counts := map[JobCount]int{}
+	for _, j := range jobs {
+		counts[JobCount{User: j.User, Account: j.Account, Partition: j.Partition}]++
+	}
+	out := make([]JobCount, 0, len(counts))
+	for c, n := range counts {
+		c.Jobs = n
+		out = append(out, c)
+	}
+	slices.SortFunc(out, func(a, b JobCount) int {
+		return cmp.Or(cmp.Compare(b.Jobs, a.Jobs), cmp.Compare(a.User, b.User),
+			cmp.Compare(a.Account, b.Account), cmp.Compare(a.Partition, b.Partition))
+	})
+	return out
 }
 
 // JobFilter selects which jobs to list.

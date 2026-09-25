@@ -6,6 +6,8 @@ package slurm_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -544,5 +546,27 @@ func TestStateGroups(t *testing.T) {
 		if len(groups[name]) == 0 {
 			t.Errorf("state group %q is empty", name)
 		}
+	}
+}
+
+// The summary of the command line and that of the MCP server broke ties
+// differently, the command line on the user alone and in random order.
+func TestCountJobsOrdersEqualCountsByUserAccountAndPartition(t *testing.T) {
+	t.Parallel()
+
+	jobs := []slurm.Job{
+		{User: "bob", Account: "a", Partition: "bc"},
+		{User: "bob", Account: "ab", Partition: "c"},
+		{User: "alice", Account: "x", Partition: "main"},
+		{User: "carol", Account: "x", Partition: "main"},
+		{User: "carol", Account: "x", Partition: "main"},
+	}
+	var got []string
+	for _, c := range slurm.CountJobs(jobs) {
+		got = append(got, fmt.Sprintf("%s/%s/%s=%d", c.User, c.Account, c.Partition, c.Jobs))
+	}
+	want := []string{"carol/x/main=2", "alice/x/main=1", "bob/a/bc=1", "bob/ab/c=1"}
+	if !slices.Equal(got, want) {
+		t.Errorf("CountJobs = %q, want %q", got, want)
 	}
 }
