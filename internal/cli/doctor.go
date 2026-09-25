@@ -43,7 +43,7 @@ func newDoctorCommand(r *root) *cobra.Command {
 	cmd := leaf("doctor", "Check that this installation can do its job", `
 Check the things that go wrong quietly: a configuration that does not resolve,
 a missing ssh client, a host key file that is not there, an unreadable age
-identity.
+identity, a sops too old to read the Secret documents.
 
 With --remote the infrastructure hosts are contacted as well and asked whether
 the tools the commands rely on are installed. The checks only read, so they
@@ -160,6 +160,16 @@ func localChecks(a *app.App) []check {
 		default:
 			checks = append(checks, check{"age identities", statusFail,
 				fmt.Sprintf("%d of %d cannot be read: %s", len(unreadable), len(paths), strings.Join(unreadable, "; "))})
+		}
+	}
+
+	// sops decrypts the Secret documents, and only them: a configuration
+	// without one does not need it.
+	if len(a.Resolved.Bundle.Secrets) > 0 {
+		if found, err := a.Sops().Find(a.Context()); err != nil {
+			checks = append(checks, check{"sops", statusFail, err.Error()})
+		} else {
+			checks = append(checks, check{"sops", statusOK, found.String()})
 		}
 	}
 

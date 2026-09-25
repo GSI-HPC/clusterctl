@@ -15,3 +15,8 @@ go = "1.26"
 
 # The major version .golangci.yml is written against.
 golangci-lint = "2"
+
+# The sops the tests encrypt and decrypt Secret documents with, the one CI
+# installs as SOPS_VERSION. clusterctl runs sops to read a Secret, so the tests
+# need it.
+sops = "3.13.3"

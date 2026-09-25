@@ -58,6 +58,7 @@ var envPaths = map[string]string{
 	"CLUSTERCTL_SSH_BINARY":      "ssh.binary",
 	"CLUSTERCTL_SCP_BINARY":      "ssh.scpBinary",
 	"CLUSTERCTL_SSHUTTLE_BINARY": "workstation.sshuttleBinary",
+	"CLUSTERCTL_SOPS_BINARY":     "workstation.sopsBinary",
 	"CLUSTERCTL_PAGER":           "workstation.pager",
 	"CLUSTERCTL_BROWSER":         "workstation.browser",
 }

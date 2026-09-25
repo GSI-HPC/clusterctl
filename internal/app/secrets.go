@@ -6,6 +6,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"filippo.io/age"
@@ -24,6 +25,7 @@ type secretStore struct {
 	idsErr error
 	idsSet bool
 	values map[string]map[string][]byte
+	sops   *secrets.Sops
 }
 
 // Identities loads the configured age identities, once.
@@ -83,12 +85,12 @@ func (a *App) SecretValues(name string) (map[string][]byte, error) {
 	// terminal: it can run SOPS_AGE_KEY_CMD or have gpg-agent ask for a
 	// passphrase, which under MCP or in a script nobody asked for.
 	keys := secrets.SopsKeys{Discover: a.IsTTY, Types: a.Spec.Workstation.SopsKeyTypes}
-	if len(a.Spec.Workstation.Identities) > 0 {
-		if keys.Identities, err = a.identitiesLocked(); err != nil {
-			return nil, err
+	if paths := a.IdentityPaths(); len(paths) > 0 {
+		if keys.Identities, err = secrets.IdentityFiles(paths); err != nil {
+			return nil, exitcode.Wrap(exitcode.Usage, err)
 		}
 	}
-	sections, err := secrets.DecryptSops(raw, keys, config.SecretSections())
+	sections, err := secrets.DecryptSops(a.Context(), a.sopsLocked(), raw, keys, config.SecretSections())
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, fmt.Errorf("the Secret %q (%s): %w", name, doc.File, err))
 	}
@@ -101,6 +103,28 @@ func (a *App) SecretValues(name string) (map[string][]byte, error) {
 	}
 	s.values[name] = values
 	return values, nil
+}
+
+// Sops is the sops command Secret documents are decrypted with:
+// workstation.sopsBinary, or sops in PATH.
+func (a *App) Sops() *secrets.Sops {
+	a.secrets.mu.Lock()
+	defer a.secrets.mu.Unlock()
+	return a.sopsLocked()
+}
+
+func (a *App) sopsLocked() *secrets.Sops {
+	s := &a.secrets
+	if s.sops == nil {
+		// A binary named by a path resolves against the site, as a
+		// credential helper does; a bare name is looked up in PATH.
+		binary := a.Spec.Workstation.SopsBinary
+		if strings.ContainsRune(binary, '/') {
+			binary = a.Path(binary)
+		}
+		s.sops = &secrets.Sops{Binary: binary}
+	}
+	return s.sops
 }
 
 // SecretContent decrypts one secret file of the site into memory, from its

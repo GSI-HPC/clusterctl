@@ -621,6 +621,9 @@ type WorkstationSpec struct {
 	// credentials, and that metadata is not authenticated, so a kind is
 	// used only when it is listed here.
 	SopsKeyTypes []string `json:"sopsKeyTypes,omitempty" yaml:"sopsKeyTypes,omitempty" jsonschema:"enum=age,enum=pgp,enum=kms,enum=gcp_kms,enum=azure_kv,enum=hc_vault,enum=hckms"`
+	// SopsBinary overrides where sops is found, which decrypts Secret
+	// documents.
+	SopsBinary string `json:"sopsBinary,omitempty" yaml:"sopsBinary,omitempty"`
 	// SshuttleBinary overrides where sshuttle is found.
 	SshuttleBinary string `json:"sshuttleBinary,omitempty" yaml:"sshuttleBinary,omitempty"`
 	// Overrides are applied on top of the cluster layer on this machine.

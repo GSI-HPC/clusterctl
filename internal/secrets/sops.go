@@ -4,8 +4,6 @@
 package secrets
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -13,19 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"filippo.io/age"
-	"github.com/getsops/sops/v3"
-	"github.com/getsops/sops/v3/aes"
-	sopsage "github.com/getsops/sops/v3/age"
-	"github.com/getsops/sops/v3/config"
-	"github.com/getsops/sops/v3/keyservice"
-	sopsyaml "github.com/getsops/sops/v3/stores/yaml"
-	"google.golang.org/grpc"
+	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/parser"
 )
-
-// errUnreadable is all that is said about a file whose data key opened but
-// whose values did not: what sops says then can quote a decrypted value.
-var errUnreadable = errors.New("the file could not be decrypted or was changed without sops")
 
 // sopsValue is how sops writes an encrypted value; it is the expression sops
 // itself matches a value with.
@@ -49,8 +37,9 @@ func SopsValueType(s string) (string, bool) {
 // SopsInfo describes a sops encrypted document, read without decrypting it.
 type SopsInfo struct {
 	// Keys are the master keys the data key is encrypted to, as sops names
-	// their type ("age", "pgp", "kms", "gcp_kms", "azure_kv", "hc_vault")
-	// and the key itself, for example an age recipient or a key ARN.
+	// their type ("age", "pgp", "kms", "gcp_kms", "azure_kv", "hc_vault",
+	// "hckms") and the key itself, for example an age recipient or a key
+	// ARN.
 	Keys []SopsKey
 	// Groups is the number of key groups, Threshold the number of them
 	// needed to recover the data key when there are several.
@@ -93,9 +82,12 @@ func (i SopsInfo) Summary() string {
 	return out
 }
 
+// ageKeyType is how sops names an age master key.
+const ageKeyType = "age"
+
 // DefaultSopsKeyTypes are the kinds of master key trusted when the
 // workstation names none: age, which needs nothing but a local identity.
-func DefaultSopsKeyTypes() []string { return []string{sopsage.KeyTypeIdentifier} }
+func DefaultSopsKeyTypes() []string { return []string{ageKeyType} }
 
 // CheckKeyTypes refuses a document encrypted to a kind of master key that is
 // not trusted here. The metadata that names the keys is not covered by the
@@ -121,146 +113,220 @@ func (i SopsInfo) CheckKeyTypes(trusted []string) error {
 		strings.Join(untrusted, " and "), strings.Join(trusted, ", "))
 }
 
-// SopsKeys says which keys may open a sops file.
-type SopsKeys struct {
-	// Identities are the age identities of workstation.identities. They
-	// are tried first.
-	Identities []age.Identity
-	// Discover lets sops look for keys itself as well: SOPS_AGE_KEY_FILE
-	// and its other variables, ~/.config/sops/age/keys.txt, a PGP agent,
-	// the credentials of a cloud key management service or Vault. That can
-	// run a program or ask for a passphrase, so it is for a terminal only.
-	Discover bool
-	// Types are the kinds of master key trusted, DefaultSopsKeyTypes when
-	// empty. A file encrypted to any other kind is refused.
-	Types []string
+// sopsMetadata is the sops mapping of an encrypted YAML file, as sops
+// v3.13.3 writes it (stores/stores.go). Only what clusterctl reports or
+// checks is read; checkFields refuses a field it does not know, so that a
+// kind of master key added to sops later cannot pass CheckKeyTypes unseen.
+type sopsMetadata struct {
+	Flat             sopsKeyGroup   `yaml:",inline"`
+	KeyGroups        []sopsKeyGroup `yaml:"key_groups"`
+	ShamirThreshold  int            `yaml:"shamir_threshold"`
+	LastModified     string         `yaml:"lastmodified"`
+	MAC              string         `yaml:"mac"`
+	EncryptedRegex   string         `yaml:"encrypted_regex"`
+	MACOnlyEncrypted bool           `yaml:"mac_only_encrypted"`
 }
 
-// decryptionOrder is the order sops tries the master keys of a group in:
-// the local kinds first, as the sops command does, so that a working age
-// identity is used before any service is contacted.
-var decryptionOrder = []string{sopsage.KeyTypeIdentifier, "pgp"}
+// sopsKeyGroup lists the master keys of one group, by type.
+type sopsKeyGroup struct {
+	KMS []struct {
+		ARN  string `yaml:"arn"`
+		Role string `yaml:"role"`
+	} `yaml:"kms"`
+	GCPKMS []struct {
+		ResourceID string `yaml:"resource_id"`
+	} `yaml:"gcp_kms"`
+	HCKMS []struct {
+		KeyID string `yaml:"key_id"`
+	} `yaml:"hckms"`
+	AzureKV []struct {
+		VaultURL string `yaml:"vault_url"`
+		Name     string `yaml:"name"`
+		Version  string `yaml:"version"`
+	} `yaml:"azure_kv"`
+	Vault []struct {
+		Address    string `yaml:"vault_address"`
+		EnginePath string `yaml:"engine_path"`
+		KeyName    string `yaml:"key_name"`
+	} `yaml:"hc_vault"`
+	PGP []struct {
+		Fingerprint string `yaml:"fp"`
+	} `yaml:"pgp"`
+	Age []struct {
+		Recipient string `yaml:"recipient"`
+	} `yaml:"age"`
+}
+
+// keys lists the master keys of a group in the order sops reads them into
+// one (stores.internalGroupFrom), named the way sops names them.
+func (g sopsKeyGroup) keys() []SopsKey {
+	var out []SopsKey
+	for _, k := range g.KMS {
+		id := k.ARN
+		if k.Role != "" {
+			id += "+" + k.Role
+		}
+		out = append(out, SopsKey{"kms", id})
+	}
+	for _, k := range g.GCPKMS {
+		out = append(out, SopsKey{"gcp_kms", k.ResourceID})
+	}
+	for _, k := range g.HCKMS {
+		out = append(out, SopsKey{"hckms", k.KeyID})
+	}
+	for _, k := range g.AzureKV {
+		out = append(out, SopsKey{"azure_kv", k.VaultURL + "/keys/" + k.Name + "/" + k.Version})
+	}
+	for _, k := range g.Vault {
+		out = append(out, SopsKey{"hc_vault", k.Address + "/v1/" + k.EnginePath + "/keys/" + k.KeyName})
+	}
+	for _, k := range g.PGP {
+		out = append(out, SopsKey{"pgp", k.Fingerprint})
+	}
+	for _, k := range g.Age {
+		out = append(out, SopsKey{ageKeyType, k.Recipient})
+	}
+	return out
+}
+
+// keyTypes are the fields of a key group, one per kind of master key.
+var keyTypes = []string{"kms", "gcp_kms", "hckms", "azure_kv", "hc_vault", "pgp", ageKeyType}
+
+// metadataFields are the other fields sops writes into its mapping.
+var metadataFields = []string{
+	"key_groups", "shamir_threshold", "lastmodified", "mac", "version", "mac_only_encrypted",
+	"unencrypted_suffix", "encrypted_suffix", "unencrypted_regex", "encrypted_regex",
+	"unencrypted_comment_regex", "encrypted_comment_regex",
+}
+
+// sopsDocument is a sops encrypted YAML file, read without decrypting it.
+type sopsDocument struct {
+	info SopsInfo
+	// values is the document without its sops mapping.
+	values map[string]any
+}
 
 // InspectSops reads the sops metadata of a YAML file without decrypting
 // anything, so that a damaged or hand edited file is reported when the
 // configuration loads rather than when a node is half way through a
-// reinstall.
+// reinstall. It needs neither a key nor sops.
 func InspectSops(data []byte) (SopsInfo, error) {
-	tree, err := loadSops(data)
+	doc, err := readSops(data)
 	if err != nil {
 		return SopsInfo{}, err
 	}
-	return inspect(tree)
+	return doc.info, nil
 }
 
-func inspect(tree sops.Tree) (SopsInfo, error) {
-	m := tree.Metadata
+func readSops(data []byte) (sopsDocument, error) {
+	file, err := parser.ParseBytes(data, 0)
+	if err != nil {
+		return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
+	}
+	docs := 0
+	for _, d := range file.Docs {
+		if d.Body != nil {
+			docs++
+		}
+	}
+	if docs != 1 {
+		return sopsDocument{}, fmt.Errorf("reading the sops metadata: the file holds %d documents, want 1", docs)
+	}
+	var values map[string]any
+	if err := yaml.Unmarshal(data, &values); err != nil {
+		return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
+	}
+	raw, ok := values["sops"].(map[string]any)
+	if !ok {
+		return sopsDocument{}, fmt.Errorf("reading the sops metadata: the file has no sops mapping; it is not encrypted")
+	}
+	delete(values, "sops")
+	var meta struct {
+		Sops sopsMetadata `yaml:"sops"`
+	}
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
+	}
+	info, err := inspect(meta.Sops)
+	if err != nil {
+		return sopsDocument{}, err
+	}
+	if err := checkFields(raw); err != nil {
+		return sopsDocument{}, err
+	}
+	return sopsDocument{info: info, values: values}, nil
+}
+
+// checkFields refuses a field of the sops mapping, or of one of its key
+// groups, that clusterctl does not know. The sops that decrypts can be
+// newer than clusterctl, and a kind of master key clusterctl does not list
+// is one CheckKeyTypes could not refuse.
+func checkFields(raw map[string]any) error {
+	for field, value := range raw {
+		if !slices.Contains(keyTypes, field) && !slices.Contains(metadataFields, field) {
+			return fmt.Errorf("the sops metadata has a field clusterctl does not know, %q; "+
+				"a kind of master key it cannot check is refused", field)
+		}
+		if field != "key_groups" {
+			continue
+		}
+		groups, _ := value.([]any)
+		for i, group := range groups {
+			g, _ := group.(map[string]any)
+			for f := range g {
+				if !slices.Contains(keyTypes, f) {
+					return fmt.Errorf("the sops metadata has a field clusterctl does not know, %q in key group %d; "+
+						"a kind of master key it cannot check is refused", f, i+1)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func inspect(m sopsMetadata) (SopsInfo, error) {
 	info := SopsInfo{
-		Groups:         len(m.KeyGroups),
 		Threshold:      m.ShamirThreshold,
-		LastModified:   m.LastModified,
 		EncryptedRegex: m.EncryptedRegex,
 	}
-	for _, group := range m.KeyGroups {
-		for _, k := range group {
-			info.Keys = append(info.Keys, SopsKey{Type: k.TypeToIdentifier(), ID: k.ToString()})
+	// sops reads the keys at the top of the mapping as one group and then
+	// ignores key_groups; a file that has both reads differently to
+	// whoever looks only at one of them.
+	flat := m.Flat.keys()
+	switch {
+	case len(flat) > 0 && len(m.KeyGroups) > 0:
+		return SopsInfo{}, fmt.Errorf("the sops metadata names master keys both in key_groups and outside it; sops would ignore key_groups")
+	case len(flat) > 0:
+		info.Groups = 1
+		info.Keys = flat
+	default:
+		info.Groups = len(m.KeyGroups)
+		for _, g := range m.KeyGroups {
+			info.Keys = append(info.Keys, g.keys()...)
 		}
 	}
 	if len(info.Keys) == 0 {
 		return SopsInfo{}, fmt.Errorf("the sops metadata names no key to decrypt with")
 	}
-	if m.MessageAuthenticationCode == "" {
+	if m.MAC == "" {
 		return SopsInfo{}, fmt.Errorf("the sops metadata has no message authentication code")
 	}
-	if err := checkMetadata(m); err != nil {
-		return SopsInfo{}, err
+	lastModified, err := time.Parse(time.RFC3339, m.LastModified)
+	if err != nil {
+		return SopsInfo{}, fmt.Errorf("the sops metadata has no readable lastmodified time")
+	}
+	info.LastModified = lastModified
+	if m.MACOnlyEncrypted {
+		return SopsInfo{}, fmt.Errorf("the sops metadata sets mac_only_encrypted, under which the kind and the name can be changed without a key; " +
+			"encrypt the file again without --mac-only-encrypted")
 	}
 	return info, nil
 }
 
-// checkMetadata refuses the settings of sops under which the message
-// authentication code does not cover the whole file.
-func checkMetadata(m sops.Metadata) error {
-	if m.MACOnlyEncrypted {
-		return fmt.Errorf("the sops metadata sets mac_only_encrypted, under which the kind and the name can be changed without a key; " +
-			"encrypt the file again without --mac-only-encrypted")
-	}
-	return nil
-}
-
-// DecryptSops decrypts a sops encrypted YAML file into memory and returns
-// the values of the given top level mappings, by key.
-//
-// A file encrypted to a kind of master key keys.Types does not trust is
-// refused before any key is tried. The data key is recovered with the age
-// identities of keys.Identities first, which are the ones
-// workstation.identities names, and then, with keys.Discover, with whatever
-// sops itself finds, age and PGP keys before any service. The integrity of
-// the whole file is verified before anything is returned.
-//
-// The values are read from the decrypted tree as sops holds it, never
-// written out and parsed again, and no error says anything of them.
-func DecryptSops(data []byte, keys SopsKeys, sections []string) (values map[string]map[string]string, err error) {
-	tree, err := loadSops(data)
-	if err != nil {
-		return nil, err
-	}
-	info, err := inspect(tree)
-	if err != nil {
-		return nil, err
-	}
-	if err := info.CheckKeyTypes(keys.Types); err != nil {
-		return nil, err
-	}
-	if err := checkValueTypes(tree.Branches); err != nil {
-		return nil, err
-	}
-	var attempts attempts
-	services := []keyservice.KeyServiceClient{}
-	if len(keys.Identities) > 0 {
-		services = append(services, recording{ageKeyService{identities: keys.Identities}, "workstation.identities", &attempts})
-	}
-	if keys.Discover {
-		services = append(services, recording{keyservice.NewLocalClient(), "sops", &attempts})
-	} else if len(keys.Identities) == 0 {
-		return nil, errors.New("no key is available without a terminal: set workstation.identities; " +
-			"sops looks for keys itself only at a terminal, where it may ask for a passphrase")
-	}
-
-	key, err := tree.Metadata.GetDataKeyWithKeyServices(services, decryptionOrder)
-	if err != nil {
-		// The error of sops only counts the key groups that failed; what
-		// was tried and why it failed is what an administrator can act on.
-		msg := fmt.Sprintf("no key available here opens it: %s", attempts)
-		if !keys.Discover {
-			msg += "; without a terminal only workstation.identities are tried"
-		}
-		return nil, errors.New(msg)
-	}
-
-	// From here on an error of sops may carry plaintext, and a panic in it
-	// is a file it could not read.
-	defer func() {
-		if recover() != nil {
-			values, err = nil, errUnreadable
-		}
-	}()
-	cipher := aes.NewCipher()
-	mac, err := tree.Decrypt(key, cipher)
-	if err != nil {
-		return nil, errUnreadable
-	}
-	stored, err := cipher.Decrypt(tree.Metadata.MessageAuthenticationCode, key,
-		tree.Metadata.LastModified.Format(time.RFC3339))
-	if err != nil || stored != mac {
-		return nil, errUnreadable
-	}
-	return sectionValues(tree.Branches, sections)
-}
-
 // checkValueTypes refuses an encrypted value sops would parse as anything
-// but a string, before anything is decrypted.
-func checkValueTypes(branches sops.TreeBranches) error {
+// but a string, before sops is run: sops parses the plaintext as the
+// unauthenticated type tag says, and its parser's error quotes the value.
+func checkValueTypes(values map[string]any) error {
 	var bad error
 	var walk func(path string, v any)
 	walk = func(path string, v any) {
@@ -269,11 +335,14 @@ func checkValueTypes(branches sops.TreeBranches) error {
 			if typ, ok := SopsValueType(v); ok && typ != "str" && bad == nil {
 				bad = fmt.Errorf("%s: the value was encrypted as type:%s; only text (type:str) is read", path, typ)
 			}
-		case sops.TreeBranch:
-			for _, item := range v {
-				if _, comment := item.Key.(sops.Comment); !comment {
-					walk(joinPath(path, fmt.Sprint(item.Key)), item.Value)
-				}
+		case map[string]any:
+			keys := make([]string, 0, len(v))
+			for k := range v {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				walk(joinPath(path, k), v[k])
 			}
 		case []any:
 			for i, e := range v {
@@ -281,9 +350,7 @@ func checkValueTypes(branches sops.TreeBranches) error {
 			}
 		}
 	}
-	for _, branch := range branches {
-		walk("", branch)
-	}
+	walk("", values)
 	return bad
 }
 
@@ -292,136 +359,4 @@ func joinPath(path, key string) string {
 		return key
 	}
 	return path + "." + key
-}
-
-// sectionValues reads the strings of the named top level mappings out of a
-// decrypted tree. An error names a key, never a value.
-func sectionValues(branches sops.TreeBranches, sections []string) (map[string]map[string]string, error) {
-	if len(branches) != 1 {
-		return nil, fmt.Errorf("the file holds %d documents, want 1", len(branches))
-	}
-	out := map[string]map[string]string{}
-	for _, item := range branches[0] {
-		section, ok := item.Key.(string)
-		if !ok || !slices.Contains(sections, section) {
-			continue
-		}
-		if _, dup := out[section]; dup {
-			return nil, fmt.Errorf("%s is given twice", section)
-		}
-		values := map[string]string{}
-		switch branch := item.Value.(type) {
-		case nil:
-		case sops.TreeBranch:
-			for _, e := range branch {
-				if _, comment := e.Key.(sops.Comment); comment {
-					continue
-				}
-				key, ok := e.Key.(string)
-				if !ok {
-					return nil, fmt.Errorf("%s: the key %v is not a string", section, e.Key)
-				}
-				if _, dup := values[key]; dup {
-					return nil, fmt.Errorf("%s.%s: the key is given twice", section, key)
-				}
-				value, ok := e.Value.(string)
-				if !ok {
-					return nil, fmt.Errorf("%s.%s: a value must be a string", section, key)
-				}
-				values[key] = value
-			}
-		default:
-			return nil, fmt.Errorf("%s: must be a mapping of keys to values", section)
-		}
-		out[section] = values
-	}
-	return out, nil
-}
-
-func newSopsStore() *sopsyaml.Store {
-	return sopsyaml.NewStore(&config.YAMLStoreConfig{})
-}
-
-func loadSops(data []byte) (sops.Tree, error) {
-	tree, err := newSopsStore().LoadEncryptedFile(data)
-	if err != nil {
-		return sops.Tree{}, fmt.Errorf("reading the sops metadata: %w", err)
-	}
-	return tree, nil
-}
-
-// errNotAge is how ageKeyService passes on a key that is not its to open.
-var errNotAge = errors.New("not an age key")
-
-// attempts records each master key a key service failed to open.
-type attempts []string
-
-func (a attempts) String() string {
-	if len(a) == 0 {
-		return "no key service was tried"
-	}
-	return strings.Join(a, "; ")
-}
-
-// recording is a key service that notes each failure of the one it wraps.
-type recording struct {
-	keyservice.KeyServiceClient
-	via string
-	log *attempts
-}
-
-func (r recording) Decrypt(ctx context.Context, req *keyservice.DecryptRequest, opts ...grpc.CallOption) (*keyservice.DecryptResponse, error) {
-	resp, err := r.KeyServiceClient.Decrypt(ctx, req, opts...)
-	if err != nil && !errors.Is(err, errNotAge) {
-		*r.log = append(*r.log, fmt.Sprintf("%s via %s: %v", keyName(req.GetKey()), r.via, err))
-	}
-	return resp, err
-}
-
-// keyName says which master key a request is for.
-func keyName(k *keyservice.Key) string {
-	switch t := k.GetKeyType().(type) {
-	case *keyservice.Key_AgeKey:
-		return "age " + t.AgeKey.GetRecipient()
-	case *keyservice.Key_PgpKey:
-		return "pgp " + t.PgpKey.GetFingerprint()
-	case *keyservice.Key_KmsKey:
-		return "kms " + t.KmsKey.GetArn()
-	case *keyservice.Key_GcpKmsKey:
-		return "gcp_kms " + t.GcpKmsKey.GetResourceId()
-	case *keyservice.Key_AzureKeyvaultKey:
-		return "azure_kv " + t.AzureKeyvaultKey.GetVaultUrl() + "/" + t.AzureKeyvaultKey.GetName()
-	case *keyservice.Key_VaultKey:
-		return "hc_vault " + t.VaultKey.GetVaultAddress() + "/" + t.VaultKey.GetKeyName()
-	case *keyservice.Key_HckmsKey:
-		return "hckms " + t.HckmsKey.GetKeyId()
-	default:
-		return fmt.Sprintf("%T", t)
-	}
-}
-
-// ageKeyService recovers a data key encrypted to an age recipient with the
-// identities clusterctl was given, so that the keys named by
-// workstation.identities, OpenSSH keys among them, open sops files as they
-// open every other secret.
-type ageKeyService struct {
-	identities []age.Identity
-}
-
-func (s ageKeyService) Decrypt(_ context.Context, req *keyservice.DecryptRequest, _ ...grpc.CallOption) (*keyservice.DecryptResponse, error) {
-	ak := req.GetKey().GetAgeKey()
-	if ak == nil {
-		return nil, errNotAge
-	}
-	mk := &sopsage.MasterKey{Recipient: ak.GetRecipient(), EncryptedKey: string(req.GetCiphertext())}
-	sopsage.ParsedIdentities(s.identities).ApplyToMasterKey(mk)
-	plain, err := mk.Decrypt()
-	if err != nil {
-		return nil, err
-	}
-	return &keyservice.DecryptResponse{Plaintext: plain}, nil
-}
-
-func (ageKeyService) Encrypt(context.Context, *keyservice.EncryptRequest, ...grpc.CallOption) (*keyservice.EncryptResponse, error) {
-	return nil, fmt.Errorf("clusterctl does not encrypt; use sops")
 }
