@@ -8,13 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -48,42 +48,25 @@ func TestRunKeepsTargetOrder(t *testing.T) {
 	}
 }
 
+// TestRunBoundsConcurrency: every call is held until one more than the limit
+// are under way, which an executor keeping to Max never allows, so exactly
+// Max run at once in every round.
 func TestRunBoundsConcurrency(t *testing.T) {
 	t.Parallel()
 
-	var (
-		mu      sync.Mutex
-		running int
-		peak    int
-	)
-	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
-		mu.Lock()
-		running++
-		if running > peak {
-			peak = running
-		}
-		mu.Unlock()
-		time.Sleep(5 * time.Millisecond)
-		mu.Lock()
-		running--
-		mu.Unlock()
-		return &transport.Result{Target: tg}, nil
-	}}
-
-	e := &fanout.Executor{Runner: rec, Max: 3}
+	calls := &fanouttest.InFlight{Hold: 4}
+	e := &fanout.Executor{Runner: calls.Runner(&transport.Recorder{}), Max: 3}
 	var all []transport.Target
-	for i := range 20 {
+	for i := range 9 {
 		all = append(all, transport.Target{Name: fmt.Sprintf("exe%d", i)})
 	}
 	e.Run(context.Background(), all, transport.Request{Argv: []string{"true"}})
 
-	mu.Lock()
-	defer mu.Unlock()
-	if peak > 3 {
-		t.Errorf("%d targets ran at once, want at most 3", peak)
+	if got := calls.Peak(); got != 3 {
+		t.Errorf("%d targets ran at once, want 3", got)
 	}
-	if peak < 2 {
-		t.Errorf("peak concurrency was %d; the work did not run in parallel", peak)
+	if got := calls.Started(); got != 9 {
+		t.Errorf("%d targets ran, want 9", got)
 	}
 }
 

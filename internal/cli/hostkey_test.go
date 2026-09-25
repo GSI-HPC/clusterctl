@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 )
 
 // fakeHost is an SSH server that presents one Ed25519 host key.
@@ -148,6 +149,29 @@ func TestHostkeyScanRunsHostsInParallel(t *testing.T) {
 	}
 	if got := strings.Count(h.out.String(), "ssh-ed25519"); got != 4 {
 		t.Errorf("%d keys collected, want 4:\n%s", got, h.out)
+	}
+}
+
+// TestHostkeyScanKeepsToTheFanOut: the scans are bounded like any fan-out.
+// Each is held until one more than --fanout are under way, which never
+// happens while the bound is kept, so exactly that many run at once.
+func TestHostkeyScanKeepsToTheFanOut(t *testing.T) {
+	host := startFakeHost(t)
+	calls := &fanouttest.InFlight{Hold: 3}
+	scanDial = calls.Dial(func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, host.address)
+	})
+	t.Cleanup(func() { scanDial = nil })
+
+	h, err := run(t, harnessOptions{}, "--fanout", "2", "hostkey", "scan", "-n", "exe[1-5]", "--timeout", "10s")
+	if err != nil {
+		t.Fatalf("hostkey scan failed: %v\n%s", err, h.out)
+	}
+	if got := calls.Peak(); got != 2 {
+		t.Errorf("%d hosts were scanned at once, want 2", got)
+	}
+	if got := calls.Started(); got != 5 {
+		t.Errorf("%d hosts were dialled, want 5", got)
 	}
 }
 
