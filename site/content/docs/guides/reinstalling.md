@@ -286,6 +286,10 @@ is touched, `--dry-run` included. The link is written relative to its
 directory, as `1.0/grub.cfg.install-exec` above, so that a TFTP server
 confined to its root follows it too.
 
+`boot grub log` shows what the TFTP server wrote into
+`services.tftp.logPath`, `/var/log/syslog` unless configured: whether the node
+asked for its file, and what it was given.
+
 ## When a node does not come up
 
 ```console
@@ -294,6 +298,7 @@ $ clusterctl dhcp log                    # did it ask
 $ clusterctl dhcp capture -i ib0         # is anything arriving at all
 $ clusterctl boot status -n exe0007      # is a boot path set
 $ clusterctl boot log                    # did the PXE service answer
+$ clusterctl boot grub log               # did TFTP serve its GRUB file
 $ clusterctl fabric state -n exe0007     # did its fabric link come up
 ```
 

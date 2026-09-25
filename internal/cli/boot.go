@@ -706,7 +706,7 @@ previewed and confirmed like any other change.`,
 		}))
 }
 
-// maxLogLines bounds boot log --lines and dhcp log --lines.
+// maxLogLines bounds --lines of boot log, boot grub log and dhcp log.
 const maxLogLines = 10000
 
 func newBootLogCommand(r *root) *cobra.Command {
@@ -850,7 +850,45 @@ which is the address in hexadecimal.`,
 
 	return group("grub", "Configure what a node loads over TFTP", `
 GRUB asks the TFTP service for a configuration named after the node's address
-in hexadecimal. These commands compute that name and set or remove the link.`, set, unset, show)
+in hexadecimal. These commands compute that name, set or remove the link, and
+show what the TFTP service logged.`, set, unset, show, newBootGrubLogCommand(r))
+}
+
+func newBootGrubLogCommand(r *root) *cobra.Command {
+	var lines int
+	cmd := leaf("log", "Show the TFTP service log", `
+Read the lines the TFTP server wrote into services.tftp.logPath, which say
+whether a node asked for its GRUB configuration and kernel, and what it was
+given. Lines are taken by the program that wrote them: in.tftpd, tftpd,
+atftpd or dnsmasq-tftp.`,
+		cobra.NoArgs,
+		func(cmd *cobra.Command, _ []string) error {
+			if lines < 1 || lines > maxLogLines {
+				return exitcode.Errorf(exitcode.Usage, "--lines is %d; give between 1 and %d", lines, maxLogLines)
+			}
+			a, err := r.App()
+			if err != nil {
+				return err
+			}
+			spec := a.Spec.Services.TFTP
+			if spec.Role == "" {
+				return exitcode.Errorf(exitcode.Usage, "no host role runs the TFTP service; set services.tftp.role")
+			}
+			// A pipeline exits with its last command, so a log that cannot
+			// be read is looked for first, rather than shown as empty.
+			result, err := a.RunOnRole(a.Context(), spec.Role, transport.Request{
+				Argv: []string{"sh", "-c",
+					`[ -r "$1" ] || { echo "$1 cannot be read" >&2; exit 1; }; ` +
+						`grep -a -E -e '(tftpd|dnsmasq-tftp)(\[[0-9]+\])?:' -- "$1" | tail -n "$2"`,
+					"sh", spec.LogPath, strconv.Itoa(lines)},
+			})
+			if err != nil {
+				return err
+			}
+			return printLines(a, cmd, result.Output())
+		})
+	cmd.Flags().IntVarP(&lines, "lines", "l", 50, fmt.Sprintf("how many log lines to show, at most %d", maxLogLines))
+	return cmd
 }
 
 // grubLink resolves the TFTP role, the one node named and the GRUB link
