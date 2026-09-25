@@ -41,7 +41,7 @@ func (s *Server) addCommandTool() {
 		Description: "Run one clusterctl command that only reads, for what the other tools do not cover. " +
 			"args are the words after clusterctl, for example [\"dhcp\", \"hosts\", \"-n\", \"exe[1-4]\"] or " +
 			"[\"fabric\", \"state\", \"-n\", \"@rack:R02\"]. Output is JSON unless -o asks for another format; " +
-			"-o jq=EXPR or -o jsonpath=EXPR filters it. Add --help to any command to read its options. " +
+			"-o jq=EXPR filters it. Add --help to any command to read its options. " +
 			"Commands that change something, prompt or keep running are refused. " +
 			"The commands offered are:\n" + s.readCommandList(),
 		Annotations: readOnly(),

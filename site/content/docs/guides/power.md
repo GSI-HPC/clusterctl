@@ -211,7 +211,7 @@ command stops and names where the service processor pointed.
 ```console
 $ clusterctl bmc redfish get /redfish/v1/Systems/1 -n exe0001
 $ clusterctl bmc redfish get /redfish/v1/Managers -n exe0001 \
-    -o jsonpath='{.exe0001.Members[*]}'
+    -o jq='.exe0001.Members[]'
 $ clusterctl bmc redfish post /redfish/v1/Systems/1/Actions/ComputerSystem.Reset \
     '{"ResetType":"ForceRestart"}' -n exe0001
 ```

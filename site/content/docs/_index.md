@@ -30,7 +30,7 @@ $ clusterctl [--context C] [-n NODESET] [-o FORMAT] [--dry-run] [-y] NOUN VERB
 | Flag | Meaning |
 | --- | --- |
 | `-n`, `--nodes` | The node set to act on |
-| `-o`, `--output` | `table`, `wide`, `json`, `yaml`, `nodeset`, `name`, `jsonpath=…`, `jq=…` |
+| `-o`, `--output` | `table`, `wide`, `json`, `yaml`, `nodeset`, `name`, `jq=…` |
 | `--context` | Which cluster to act on |
 | `--dry-run` | Say what would happen and change nothing |
 | `-y`, `--yes` | Answer the confirmations in advance |

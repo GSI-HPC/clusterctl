@@ -17,7 +17,6 @@ everywhere.
 | `yaml` | The same as YAML. |
 | `nodeset` | Just the node set, folded. |
 | `name` | One host name per line. |
-| `jsonpath=…` | A field or a template. |
 | `jq=…` | A jq program, embedded; no jq binary needed. |
 
 ```console
@@ -26,32 +25,15 @@ exe[0007,0042,0511]
 
 $ clusterctl node list -o json | jq '.[] | select(.rack == "R02") | .name'
 
-$ clusterctl bmc status -n '@rack:R02' -o jsonpath='{.[*].state}'
+$ clusterctl bmc status -n '@rack:R02' -o jq='[.[].state] | join(" ")'
 On On Off On
 
 $ clusterctl exec -n '@compute' -o jq='.[] | select(.exitCode != 0) | .target.name' -- true
 ```
 
-A `jsonpath` or `jq` expression is checked when the command line is read. A
-mistake in it exits 2 before anything has run, rather than after a command has
-changed something and has only its result left to print.
-
-### JSONPath
-
-The JSONPath templates take the part of the kubectl syntax a command line
-needs. Text outside braces is printed as it is; inside braces a path is written
-as `$.a.b`, `.a.b`, `['a']["b"]`, `[0]`, `[-1]`, `[*]` or `[1:3]`. Several
-values are joined with a space. A field name after a dot may hold letters,
-digits, `_` and `-`; any other name goes in brackets and quotes, as
-`['@odata.id']`.
-
-`range`, `end`, quoted literals such as `{"\n"}`, filters, recursive descent
-and functions are rejected with exit code 2 rather than matching nothing. Use
-`jq` for them:
-
-```console
-$ clusterctl exec -n '@compute' -o jq='.[] | "\(.target.name) \(.exitCode)"' -- true
-```
+A `jq` program is checked when the command line is read. A mistake in it exits
+2 before anything has run, rather than after a command has changed something
+and has only its result left to print.
 
 ### jq
 
@@ -59,13 +41,29 @@ A `jq` program runs inside clusterctl and stops when the command is
 interrupted. It cannot read the environment: `$ENV` and `env` are empty.
 A string result prints without quotes, as `jq -r` would print it.
 
+There is no `jsonpath` format; jq does what its templates do. jq prints each
+value on a line of its own, and `null` for one that is missing:
+
+| JSONPath | jq |
+| --- | --- |
+| `{.[*].name}` | `[.[].name] \| join(" ")` |
+| `{.[0].name}`, `{.[-1].name}` | `.[0].name`, `.[-1].name` |
+| `{.[1:3].name}` | `.[1:3][].name` |
+| `{range .[*]}{.name}{"\n"}{end}` | `.[].name` |
+| `node {.[0].name} in {.[0].rack}` | `"node \(.[0].name) in \(.[0].rack)"` |
+| `{.[?(@.rack=="R02")].name}` | `.[] \| select(.rack == "R02") \| .name` |
+
+```console
+$ clusterctl exec -n '@compute' -o jq='.[] | "\(.target.name) \(.exitCode)"' -- true
+```
+
 ### JSON and YAML
 
 Numbers print as they are: an exit code of 0 is `0`, not `0.0`, and a large
-PID keeps every digit, in YAML and in `jsonpath` and `jq` too. The YAML leaves
-a string unquoted only when no YAML reader could take it for anything else, so
-`yes`, `.inf`, `2026-09-24` and `10.0.0.1` come out quoted, and a control
-character is written as an escape.
+PID keeps every digit, in YAML and in `jq` too. The YAML leaves a string
+unquoted only when no YAML reader could take it for anything else, so `yes`,
+`.inf`, `2026-09-24` and `10.0.0.1` come out quoted, and a control character is
+written as an escape.
 
 The result of a remote command, as `exec`, `copy` and `provision` print it,
 looks like this; `error` appears only when the command failed:
@@ -97,8 +95,8 @@ U+FFFD. The `yaml` format escapes every other one of these characters in its
 own syntax. The `json` format escapes the C0 control characters and the line
 and paragraph separators, but leaves DEL, the C1 control characters and the
 direction controls in a string as they are, as JSON allows; a program that
-shows a string from it on a terminal has to escape it. `jsonpath` and `jq`
-print a selected string as it is, like `jq -r`.
+shows a string from it on a terminal has to escape it. `jq` prints a selected
+string as it is, like `jq -r`.
 
 ## Progress and errors go to stderr
 
