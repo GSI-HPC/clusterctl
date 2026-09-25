@@ -90,3 +90,24 @@ func TestResumePlanWarnsOnlyOfRealReasons(t *testing.T) {
 		t.Errorf("warnings = %q, want only the reason of exe0001", p.Warnings)
 	}
 }
+
+// 10.4: the server's own summary is the last thing read before the answer,
+// after the reason the agent wrote and the context line.
+func TestQuestionPutsTheSummaryNextToTheAnswer(t *testing.T) {
+	f := start(t, setup{answer: accept(map[string]any{"confirm": true})})
+	p := f.plan(t, map[string]any{"action": "drain", "nodes": "exe1", "reason": "ticket 4712"})
+	var out applyResult
+	f.call(t, "apply_plan", applyArgs(p), &out)
+	if len(f.asked) != 1 {
+		t.Fatalf("the user was asked %d questions, want 1", len(f.asked))
+	}
+	lines := strings.Split(strings.TrimSpace(f.asked[0]), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("the question has %d lines, want 4:\n%s", len(lines), f.asked[0])
+	}
+	for i, want := range []string{`reason: "ticket 4712"`, "Context ", "About to drain 1 host: exe0001", "Continue?"} {
+		if !strings.Contains(lines[i], want) {
+			t.Errorf("line %d = %q, want it to hold %q:\n%s", i+1, lines[i], want, f.asked[0])
+		}
+	}
+}

@@ -567,12 +567,17 @@ func (s *Server) confirm(req *mcp.CallToolRequest, p *plan, preview safety.Previ
 }
 
 // question is the elicitation that stands in for the gate's prompt.
+//
+// The detail may carry a reason the agent wrote, so it comes first and the
+// server's own summary last, next to the answer: whatever the reason says,
+// the line read just before answering is the one the server wrote.
 func (s *Server) question(preview safety.Preview, cluster string) *mcp.ElicitParams {
-	message := fmt.Sprintf("About to %s\n", preview.Summary())
+	var message string
 	if preview.Detail != "" {
-		message += "  " + preview.Detail + "\n"
+		message += preview.Detail + "\n"
 	}
 	message += fmt.Sprintf("Context %s, cluster %s.\n", s.context, cluster)
+	message += fmt.Sprintf("About to %s\n", preview.Summary())
 
 	if preview.CountRequired {
 		message += preview.Question()
