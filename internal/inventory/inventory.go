@@ -35,12 +35,6 @@ type Node struct {
 	BootPath   string            `json:"bootPath,omitempty" yaml:"bootPath,omitempty"`
 }
 
-// Attribute returns one attribute of the node.
-func (n Node) Attribute(key string) (string, bool) {
-	v, ok := n.Attributes[key]
-	return v, ok
-}
-
 // Inventory holds the nodes of a site, indexed by name.
 type Inventory struct {
 	nodes map[string]*Node
@@ -463,12 +457,6 @@ func (inv *Inventory) Select(ns *nodeset.NodeSet) (known []*Node, unknown []stri
 		known = append(known, n)
 	}
 	return known, unknown
-}
-
-// Resolve returns the name the inventory uses for a host, which may differ
-// from the name given only in padding.
-func (inv *Inventory) Resolve(name string) (string, bool) {
-	return inv.all.Canonical(name)
 }
 
 // AttributeValues lists the distinct values of an attribute, in sorted order.

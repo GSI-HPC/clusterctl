@@ -314,13 +314,3 @@ func (a *App) BMCTransports(node string) ([]string, error) {
 	}
 	return out, nil
 }
-
-// PreferredBMCTransport returns the first transport of the order, or
-// Redfish when the order is not valid.
-func (a *App) PreferredBMCTransport(node string) string {
-	order, err := a.BMCTransports(node)
-	if err != nil || len(order) == 0 {
-		return TransportRedfish
-	}
-	return order[0]
-}

@@ -27,12 +27,11 @@ func resolveScaffold(t *testing.T, opts config.ScaffoldOptions) (*config.Resolve
 			t.Fatal(err)
 		}
 	}
-	b, err := config.LoadDefault(func(k string) string {
-		if k == config.EnvConfig {
-			return dir
-		}
-		return ""
-	})
+	paths, err := config.ExpandEntries([]string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := config.Load(paths)
 	if err != nil {
 		t.Fatalf("loading the scaffold: %v", err)
 	}

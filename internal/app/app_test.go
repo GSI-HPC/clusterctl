@@ -188,8 +188,8 @@ func TestBMCOrderPrefersRedfish(t *testing.T) {
 
 	// IPMI over LAN ships disabled on current firmware, so trying it first
 	// only produces timeouts.
-	if got, want := a.PreferredBMCTransport("exe0001"), "redfish"; got != want {
-		t.Errorf("preferred transport = %q, want %q", got, want)
+	if order, err := a.BMCTransports("exe0001"); err != nil || order[0] != "redfish" {
+		t.Errorf("transport order = %q (%v), want redfish first", order, err)
 	}
 	profile := a.VendorProfile("exe0001")
 	if len(profile.ResetTypes) == 0 {

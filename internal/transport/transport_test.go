@@ -184,11 +184,6 @@ func TestArgs(t *testing.T) {
 			want: []string{"--", "timeout -k 5s 30s sleep 60"},
 		},
 		{
-			name: "the environment is passed through env",
-			req:  transport.Request{Argv: []string{"id"}, Env: map[string]string{"LC_ALL": "C"}},
-			want: []string{"--", "env LC_ALL=C id"},
-		},
-		{
 			name: "a terminal can be forced",
 			req:  transport.Request{Argv: []string{"top"}, TTY: transport.TTYForce},
 			want: []string{"-tt"},

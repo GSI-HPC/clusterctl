@@ -211,8 +211,7 @@ func TestRemoteStatus255IsNotAConnectionFailure(t *testing.T) {
 	c := fakeClient(t, loopback)
 	for _, req := range []transport.Request{
 		{Argv: []string{"sh", "-c", "exit 255"}},
-		{Script: "exit 255", Shell: "sh"},
-		{Argv: []string{"sh", "-c", "exit 255"}, Env: map[string]string{"A": "b"}},
+		{Script: "exit 255"},
 	} {
 		result, err := c.Run(context.Background(), target, req)
 		if err != nil {

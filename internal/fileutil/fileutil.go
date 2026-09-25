@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -368,13 +367,4 @@ func trustedOwner(path string, info fs.FileInfo) error {
 	}
 	return untrusted("%s is owned by uid %d, neither this user (uid %d) nor root",
 		path, uid, os.Geteuid())
-}
-
-// CopyTo copies a reader into a new file with the given permission.
-func CopyTo(path string, r io.Reader, perm os.FileMode) error {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return err
-	}
-	return WriteAtomic(path, data, perm)
 }

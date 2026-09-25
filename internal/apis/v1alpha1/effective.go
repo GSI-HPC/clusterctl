@@ -35,11 +35,3 @@ const (
 	LayerEnvironment = "environment"
 	LayerFlags       = "flags"
 )
-
-// Layers lists the merge layers in the order they are applied.
-func Layers() []string {
-	return []string{
-		LayerDefaults, LayerSite, LayerCluster,
-		LayerWorkstation, LayerContext, LayerEnvironment, LayerFlags,
-	}
-}

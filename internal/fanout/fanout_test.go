@@ -107,9 +107,6 @@ func TestRunReportsEveryTargetOnFailure(t *testing.T) {
 	if got, want := len(failures), 1; got != want {
 		t.Errorf("got %d failures, want %d", got, want)
 	}
-	if got, want := fanout.Succeeded(results).String(), "exe[1,3]"; got != want {
-		t.Errorf("Succeeded = %q, want %q", got, want)
-	}
 }
 
 func TestRunHonoursCancellation(t *testing.T) {

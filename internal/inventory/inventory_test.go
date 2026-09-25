@@ -321,9 +321,8 @@ func TestLookupDoesNotScaleWithTheInventory(t *testing.T) {
 	}
 	ns := nodeset.MustParse("exe1")
 	for name, f := range map[string]func(){
-		"Resolve": func() { _, _ = inv.Resolve("exe1") },
-		"Lookup":  func() { _, _ = inv.Lookup("exe1") },
-		"Select":  func() { _, _ = inv.Select(ns) },
+		"Lookup": func() { _, _ = inv.Lookup("exe1") },
+		"Select": func() { _, _ = inv.Select(ns) },
 	} {
 		// Rebuilding the set allocates for each of the 4,000 nodes.
 		if allocs := testing.AllocsPerRun(10, f); allocs > 100 {

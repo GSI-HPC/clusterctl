@@ -123,17 +123,6 @@ func Failures(results []*transport.Result) []*transport.Result {
 	return out
 }
 
-// Succeeded returns the node set whose targets succeeded.
-func Succeeded(results []*transport.Result) *nodeset.NodeSet {
-	ns := nodeset.New()
-	for _, r := range results {
-		if !r.Failed() {
-			_ = ns.Add(r.Target.Name)
-		}
-	}
-	return ns
-}
-
 // Status says in a word how a target ended: "ok", "exit N", "unreachable"
 // when the transport could not reach it, or "interrupted" when it was
 // cancelled.

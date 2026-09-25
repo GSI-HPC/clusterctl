@@ -182,11 +182,6 @@ func (n *Namer) FQDNSet(ns *nodeset.NodeSet) (*nodeset.NodeSet, error) {
 	return n.mapSet(ns, n.FQDN)
 }
 
-// BMCSet maps every node of a set to its service processor name.
-func (n *Namer) BMCSet(ns *nodeset.NodeSet) (*nodeset.NodeSet, error) {
-	return n.mapSet(ns, n.BMC)
-}
-
 func (n *Namer) mapSet(ns *nodeset.NodeSet, f func(string) (string, error)) (*nodeset.NodeSet, error) {
 	out := nodeset.New()
 	for _, node := range ns.Expand() {
