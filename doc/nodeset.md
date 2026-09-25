@@ -77,7 +77,10 @@ be one host to every command, so an inventory holding such a pair has to be
 rejected rather than one of them picked. The inventory also refuses an entry
 that names a host with other padding, or other case, than the entry that first
 named it: `exe1` after `exe[0001-0010]` could be a refinement of `exe0001` or a
-second machine, and which one was meant cannot be told.
+second machine, and which one was meant cannot be told. It refuses capitals
+outright: every lookup of a node lowercases the name it is given, and the node
+set does not fold case, so `EXE0001` would never be found and would lose its
+`bmcAddress` to the naming rules.
 
 Padding is still never thrown away. Each host keeps the spelling it was first
 given, and a set never shows a host under a name it was not given:

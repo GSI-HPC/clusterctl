@@ -481,3 +481,20 @@ func TestMalformedIdentifierKeepsTheParseError(t *testing.T) {
 		t.Errorf("error = %v, want the *net.AddrError of the MAC parser wrapped in it", err)
 	}
 }
+
+// Every lookup lowercases the name it is given, so a node kept as EXE0001
+// was never found, and lost its bmcAddress to the naming rules.
+func TestNamesWithCapitalsAreRejected(t *testing.T) {
+	t.Parallel()
+
+	for _, nodes := range []string{"EXE0001", "exe[0001-0002],Wlm01"} {
+		_, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{{Nodes: nodes}}})
+		if err == nil {
+			t.Errorf("%s: accepted, want capitals refused", nodes)
+			continue
+		}
+		if !strings.Contains(err.Error(), "write it") {
+			t.Errorf("%s: error = %v, want the spelling to use", nodes, err)
+		}
+	}
+}

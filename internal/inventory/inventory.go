@@ -85,7 +85,8 @@ func New(specs ...v1alpha1.NodeInventorySpec) (*Inventory, error) {
 // of a host's identity, so exe1, exe0001 and EXE1 are one machine; an entry
 // spelling a host differently from the entry that first named it would either
 // make a second record for the same machine or silently merge into the first,
-// and which one the author meant cannot be told, so it is refused.
+// and which one the author meant cannot be told, so it is refused. A name is
+// written in lower case, because that is how every lookup asks for it.
 func FromDocuments(docs ...Document) (*Inventory, error) {
 	inv := &Inventory{nodes: map[string]*Node{}}
 	b := &builder{
@@ -305,6 +306,13 @@ func (b *builder) claim(name, label string) error {
 				label, name, b.named[first], first, first)
 		}
 		return nil
+	}
+	// Every lookup of a node lowercases the name it is given, so a name
+	// kept with capitals would never be found and its node would lose its
+	// bmcAddress and vendor profile to the site's defaults.
+	if name != lower {
+		return fmt.Errorf("%s names %s; host names are not case sensitive, so write it %s",
+			label, name, lower)
 	}
 	if err := b.folded.Add(lower); err != nil {
 		return fmt.Errorf("%s: %w", label, err)
