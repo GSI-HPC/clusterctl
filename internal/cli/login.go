@@ -152,14 +152,7 @@ it was given, so globs, quotes and whitespace survive:
 			}
 			req := transport.Request{Argv: argv, TTY: tty}
 
-			if a.DryRun() {
-				line, err := a.SSH.Args(target, req)
-				if err != nil {
-					return err
-				}
-				return say(cmd, "%s\n", strings.Join(line, " "))
-			}
-			return a.SSH.Interactive(a.Context(), target, req)
+			return session(a, cmd, target, req)
 		}))
 
 	f.register(cmd)

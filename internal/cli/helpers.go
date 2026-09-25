@@ -58,6 +58,20 @@ func say(cmd *cobra.Command, format string, args ...any) error {
 	return err
 }
 
+// session connects the terminal to a command on a remote host, or to a
+// shell there when req has none. A dry run prints the ssh command line
+// instead.
+func session(a *app.App, cmd *cobra.Command, target transport.Target, req transport.Request) error {
+	if a.DryRun() {
+		line, err := a.SSH.Args(target, req)
+		if err != nil {
+			return err
+		}
+		return say(cmd, "%s\n", strings.Join(line, " "))
+	}
+	return a.SSH.Interactive(a.Context(), target, req)
+}
+
 // selection resolves the node set a command acts on, from its argument or
 // from -n, or else from CLUSTERCTL_NODES. An argument together with -n is a
 // usage error, as is an empty selection.

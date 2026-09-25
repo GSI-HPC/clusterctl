@@ -1022,16 +1022,7 @@ Connect to the power distribution unit of a rack, or run one command on it.
 			}
 			target := transport.Target{Name: host, Host: host, User: user}
 			// A PDU's command line is its own, not sh.
-			req := transport.Request{Argv: argv, NoShell: true}
-			if a.DryRun() {
-				line, err := a.SSH.Args(target, req)
-				if err != nil {
-					return err
-				}
-				_, err = fmt.Fprintln(cmd.OutOrStdout(), strings.Join(line, " "))
-				return err
-			}
-			return a.SSH.Interactive(a.Context(), target, req)
+			return session(a, cmd, target, transport.Request{Argv: argv, NoShell: true})
 		}))
 }
 
