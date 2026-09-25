@@ -661,7 +661,7 @@ reached.`,
 				return err
 			}
 			path := a.Spec.Services.Cinc.SoloConfigPath
-			results, err := runOnNodes(a, ns, transport.Request{
+			results, err := runOnNodes(a.Context(), a, ns, transport.Request{
 				Script: cincReadScript(path),
 			})
 			if err != nil {
@@ -748,7 +748,7 @@ This changes the nodes, so it asks first.`,
 				return err
 			}
 
-			reads, err := runOnNodes(a, ns, transport.Request{
+			reads, err := runOnNodes(a.Context(), a, ns, transport.Request{
 				Script: cincReadScript(path),
 			})
 			if err != nil {
@@ -876,12 +876,12 @@ commands that remove it.
 			// Everything is resolved before the first change, so that a
 			// set with one node that cannot be reinstalled stops here
 			// rather than halfway through.
-			plan, err := planReinstall(a, ns, bootPath, keepKeys)
+			plan, err := planReinstall(a.Context(), a, ns, bootPath, keepKeys)
 			if err != nil {
 				return err
 			}
 			if !noReset {
-				if err := checkSlurmIdle(a, ns, ipmi.ActionReset, loseJobs); err != nil {
+				if err := checkSlurmIdle(a.Context(), a, ns, ipmi.ActionReset, loseJobs); err != nil {
 					return err
 				}
 			}
@@ -891,7 +891,7 @@ commands that remove it.
 			} else {
 				details = append(details, "then each machine is set to boot from the network once and reset through Redfish")
 			}
-			if err := checkBootLinks(a, plan.role, plan.root, plan.links); err != nil {
+			if err := checkBootLinks(a.Context(), a, plan.role, plan.root, plan.links); err != nil {
 				return err
 			}
 			action.Detail = strings.Join(details, "\n  ")
@@ -899,7 +899,7 @@ commands that remove it.
 				return err
 			}
 
-			err = plan.run(a, noReset)
+			err = plan.run(a.Context(), a, noReset)
 			t := output.NewTable(output.Cols("NODE", "BOOT PATH", "BOOT LINK", "BOOT ONCE", "RESET", "STATE").
 				Wide("BOOT PATH")...)
 			for _, n := range plan.nodes {
@@ -1002,12 +1002,12 @@ type reinstallPlan struct {
 // boot link, its service processor, its BMC credential and the names its
 // host keys are filed under. Nothing is changed, and nothing is sent to a
 // node or a service processor.
-func planReinstall(a *app.App, ns *nodeset.NodeSet, explicit string, keepKeys bool) (*reinstallPlan, error) {
+func planReinstall(ctx context.Context, a *app.App, ns *nodeset.NodeSet, explicit string, keepKeys bool) (*reinstallPlan, error) {
 	role, err := pxeRole(a)
 	if err != nil {
 		return nil, err
 	}
-	links, err := resolveBootLinks(a, ns, explicit, false)
+	links, err := resolveBootLinks(ctx, a, ns, explicit, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1041,11 +1041,11 @@ func planReinstall(a *app.App, ns *nodeset.NodeSet, explicit string, keepKeys bo
 			if n.BMC, err = a.BMCHost(l.Node); err != nil {
 				return nil, err
 			}
-			if _, err := a.BMCCredential(a.Context(), l.Node); err != nil {
+			if _, err := a.BMCCredential(ctx, l.Node); err != nil {
 				return nil, fmt.Errorf("%s: %w", l.Node, err)
 			}
 		} else {
-			if n.client, err = provisionClient(a, a.Context(), l.Node); err != nil {
+			if n.client, err = provisionClient(a, ctx, l.Node); err != nil {
 				return nil, fmt.Errorf("%s: %w", l.Node, err)
 			}
 			n.BMC = n.client.Host
@@ -1066,8 +1066,8 @@ func planReinstall(a *app.App, ns *nodeset.NodeSet, explicit string, keepKeys bo
 // forgets the host keys and resets the machines. The host keys, which
 // cannot be put back, go only once every machine is armed. When a step
 // fails, every node that was not reset is disarmed again.
-func (p *reinstallPlan) run(a *app.App, noReset bool) error {
-	err := writeBootLinks(a, p.role, p.root, p.links)
+func (p *reinstallPlan) run(ctx context.Context, a *app.App, noReset bool) error {
+	err := writeBootLinks(ctx, a, p.role, p.root, p.links)
 	for i, l := range p.links {
 		p.nodes[i].BootLink = l.Result
 		if l.Error != "" {
@@ -1075,10 +1075,10 @@ func (p *reinstallPlan) run(a *app.App, noReset bool) error {
 		}
 	}
 	if err != nil {
-		return p.fail(a, "configuring the network boot", err, p.nodes)
+		return p.fail(ctx, a, "configuring the network boot", err, p.nodes)
 	}
 
-	errs := sendToBMCs(a, p.nodes, func(ctx context.Context, c *redfish.Client) error {
+	errs := sendToBMCs(ctx, a, p.nodes, func(ctx context.Context, c *redfish.Client) error {
 		return c.SetBootOverride(ctx, "Pxe", false)
 	})
 	for i, n := range p.nodes {
@@ -1086,11 +1086,11 @@ func (p *reinstallPlan) run(a *app.App, noReset bool) error {
 		n.note("boot once", errs[i])
 	}
 	if err := nodeFailures(p.nodes, errs); err != nil {
-		return p.fail(a, "setting the machines to boot from the network once", err, p.nodes)
+		return p.fail(ctx, a, "setting the machines to boot from the network once", err, p.nodes)
 	}
 
 	if p.knownHosts != "" {
-		err := hostkeys.Modify(a.Context(), p.knownHosts, func(f *hostkeys.File) error {
+		err := hostkeys.Modify(ctx, p.knownHosts, func(f *hostkeys.File) error {
 			for _, n := range p.nodes {
 				for _, name := range n.hostNames {
 					f.Remove(name)
@@ -1099,7 +1099,7 @@ func (p *reinstallPlan) run(a *app.App, noReset bool) error {
 			return nil
 		})
 		if err != nil {
-			return p.fail(a, "forgetting the host keys", err, p.nodes)
+			return p.fail(ctx, a, "forgetting the host keys", err, p.nodes)
 		}
 		p.keysForgotten = true
 	}
@@ -1108,7 +1108,7 @@ func (p *reinstallPlan) run(a *app.App, noReset bool) error {
 		p.settle()
 		return nil
 	}
-	errs = sendToBMCs(a, p.nodes, func(ctx context.Context, c *redfish.Client) error {
+	errs = sendToBMCs(ctx, a, p.nodes, func(ctx context.Context, c *redfish.Client) error {
 		return c.Reset(ctx, redfish.ResetForceRestart)
 	})
 	// A node whose reset failed is disarmed with the rest, even though a
@@ -1124,7 +1124,7 @@ func (p *reinstallPlan) run(a *app.App, noReset bool) error {
 		}
 	}
 	if err := nodeFailures(p.nodes, errs); err != nil {
-		return p.fail(a, "resetting the machines", err, left)
+		return p.fail(ctx, a, "resetting the machines", err, left)
 	}
 	p.settle()
 	return nil
@@ -1132,13 +1132,13 @@ func (p *reinstallPlan) run(a *app.App, noReset bool) error {
 
 // sendToBMCs sends one change to the processor of each node, through the
 // Redfish fan-out, and returns the error of each.
-func sendToBMCs(a *app.App, nodes []*reinstallNode, do func(context.Context, *redfish.Client) error) []error {
+func sendToBMCs(ctx context.Context, a *app.App, nodes []*reinstallNode, do func(context.Context, *redfish.Client) error) []error {
 	names := make([]string, len(nodes))
 	clients := make([]*redfish.Client, len(nodes))
 	for i, n := range nodes {
 		names[i], clients[i] = n.Node, n.client
 	}
-	calls := redfishEach(a, names, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (struct{}, error) {
+	calls := redfishEach(ctx, a, names, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (struct{}, error) {
 		return struct{}{}, do(ctx, c)
 	})
 	errs := make([]error, len(calls))
@@ -1168,14 +1168,14 @@ func (p *reinstallPlan) settle() {
 // override that may have been set and removes each boot link that may have
 // been written. It returns the error of the step, followed by what became
 // of the set and, for whatever is still armed, the commands that disarm it.
-func (p *reinstallPlan) fail(a *app.App, step string, stepErr error, left []*reinstallNode) error {
+func (p *reinstallPlan) fail(ctx context.Context, a *app.App, step string, stepErr error, left []*reinstallNode) error {
 	var overridden []*reinstallNode
 	for _, n := range left {
 		if n.overridden() {
 			overridden = append(overridden, n)
 		}
 	}
-	errs := sendToBMCs(a, overridden, func(ctx context.Context, c *redfish.Client) error {
+	errs := sendToBMCs(ctx, a, overridden, func(ctx context.Context, c *redfish.Client) error {
 		return c.ClearBootOverride(ctx)
 	})
 	for i, n := range overridden {
@@ -1194,7 +1194,7 @@ func (p *reinstallPlan) fail(a *app.App, step string, stepErr error, left []*rei
 		}
 	}
 	if len(links) > 0 {
-		_ = removeBootLinks(a, p.role, p.root, links)
+		_ = removeBootLinks(ctx, a, p.role, p.root, links)
 		for i, n := range linked {
 			if links[i].Result == stepRemoved {
 				n.BootLink = stepRemoved
@@ -1377,9 +1377,9 @@ credential, and 1 when a host refused.`,
 
 			// One listing answers for every node.
 			suffix := a.Spec.Services.PXESrv.StaticSuffix
-			links, linkErr := readBootLinks(a, role, root)
+			links, linkErr := readBootLinks(a.Context(), a, role, root)
 			for _, s := range states {
-				address, err := nodeAddress(a, s.Node)
+				address, err := nodeAddress(a.Context(), a, s.Node)
 				if err != nil {
 					s.fail(err)
 					continue
@@ -1412,7 +1412,7 @@ credential, and 1 when a host refused.`,
 				}
 				clients[i], s.BMC = c, c.Host
 			}
-			calls := redfishEach(a, nodes, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+			calls := redfishEach(a.Context(), a, nodes, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				return c.PowerState(ctx)
 			})
 			for i, s := range states {
@@ -1422,7 +1422,7 @@ credential, and 1 when a host refused.`,
 				s.Power = output.EscapeCell(calls[i].value)
 			}
 
-			results, err := runOnNodes(a, ns, transport.Request{
+			results, err := runOnNodes(a.Context(), a, ns, transport.Request{
 				Argv:    []string{"uptime", "-p"},
 				Timeout: 30 * time.Second,
 			})

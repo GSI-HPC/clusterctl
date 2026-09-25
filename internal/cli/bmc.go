@@ -80,7 +80,7 @@ Read the power state of each node's service processor.
 			if err != nil {
 				return err
 			}
-			return bmcPowerState(a, nodes, useIPMI)
+			return bmcPowerState(a.Context(), a, nodes, useIPMI)
 		}))
 	cmd.Flags().BoolVar(&useIPMI, "ipmi", false, "ask over IPMI only, whatever bmc.order says")
 	return cmd
@@ -134,7 +134,7 @@ that Slurm reports running a job, or cannot say about, is refused unless
 				return err
 			}
 			if action == ipmi.ActionStatus {
-				return bmcPowerState(a, nodes, useIPMI)
+				return bmcPowerState(a.Context(), a, nodes, useIPMI)
 			}
 			plan, err := planBMC(a, nodes, useIPMI)
 			if err != nil {
@@ -151,13 +151,13 @@ that Slurm reports running a job, or cannot say about, is refused unless
 			if err := a.Gate.Check(gated); err != nil {
 				return err
 			}
-			if err := checkSlurmIdle(a, nodes, action, loseJobs); err != nil {
+			if err := checkSlurmIdle(a.Context(), a, nodes, action, loseJobs); err != nil {
 				return err
 			}
-			if err := confirmResolved(a, gated, func() error { return plan.resolve(a) }); err != nil {
+			if err := confirmResolved(a, gated, func() error { return plan.resolve(a.Context(), a) }); err != nil {
 				return err
 			}
-			return printBMCResults(a, runPower(a, plan, action, batch, stagger))
+			return printBMCResults(a, runPower(a.Context(), a, plan, action, batch, stagger))
 		}))
 
 	cmd.Flags().BoolVar(&useIPMI, "ipmi", false, "act over IPMI only, whatever bmc.order says")
@@ -209,15 +209,15 @@ func powerBatching(cmd *cobra.Command, a *app.App, batch int, stagger time.Durat
 
 // bmcPowerState reads the power state of every node, over the transports of
 // its order, falling back to the next when one fails.
-func bmcPowerState(a *app.App, nodes *nodeset.NodeSet, useIPMI bool) error {
+func bmcPowerState(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, useIPMI bool) error {
 	plan, err := planBMC(a, nodes, useIPMI)
 	if err != nil {
 		return err
 	}
-	if err := plan.resolve(a); err != nil {
+	if err := plan.resolve(ctx, a); err != nil {
 		return err
 	}
-	return printBMCResults(a, plan.run(a, nodes.Expand(), ipmi.ActionStatus))
+	return printBMCResults(a, plan.run(ctx, a, nodes.Expand(), ipmi.ActionStatus))
 }
 
 // resetTypeFor maps a power action to the Redfish reset type.
@@ -253,7 +253,7 @@ func addLoseJobsFlag(cmd *cobra.Command, loseJobs *bool) {
 // a node Slurm did not report and a Slurm that cannot be asked all refuse
 // the action, unless loseJobs is set. It asks Slurm even in a dry run, so
 // that the dry run refuses what the real run would.
-func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs bool) error {
+func checkSlurmIdle(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, action string, loseJobs bool) error {
 	if action == ipmi.ActionStatus || action == ipmi.ActionOn {
 		return nil
 	}
@@ -269,7 +269,7 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs 
 	c, err := a.Slurm()
 	var jobs slurm.JobState
 	if err == nil {
-		jobs, err = c.JobCheck(a.Context(), nodes)
+		jobs, err = c.JobCheck(ctx, nodes)
 	}
 	if err != nil {
 		if loseJobs {
@@ -326,12 +326,12 @@ machine reinstalling in a loop, so --persistent has to be asked for.
 				Targets: nodes,
 				Detail:  fmt.Sprintf("to %s, %s", target, mode),
 			}, func() (err error) {
-				clients, err = redfishClients(a, nodes.Expand())
+				clients, err = redfishClients(a.Context(), a, nodes.Expand())
 				return err
 			}); err != nil {
 				return err
 			}
-			calls := redfishEach(a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+			calls := redfishEach(a.Context(), a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				return target + " " + mode, c.SetBootOverride(ctx, target, persistent)
 			})
 			return printBMCResults(a, callResults(calls, true, func(s string) string { return s }))
@@ -349,12 +349,12 @@ Remove the boot source override, so the nodes boot their usual way again.`,
 			var clients []*redfish.Client
 			if err := confirmResolved(a, safety.Action{Verb: "clear the boot source override of", Targets: nodes},
 				func() (err error) {
-					clients, err = redfishClients(a, nodes.Expand())
+					clients, err = redfishClients(a.Context(), a, nodes.Expand())
 					return err
 				}); err != nil {
 				return err
 			}
-			calls := redfishEach(a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+			calls := redfishEach(a.Context(), a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				return "cleared", c.ClearBootOverride(ctx)
 			})
 			return printBMCResults(a, callResults(calls, true, func(s string) string { return s }))
@@ -369,11 +369,11 @@ accepts.`,
 			if err != nil {
 				return err
 			}
-			clients, err := redfishClients(a, nodes.Expand())
+			clients, err := redfishClients(a.Context(), a, nodes.Expand())
 			if err != nil {
 				return err
 			}
-			calls := redfishEach(a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
+			calls := redfishEach(a.Context(), a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
 				return c.System(ctx)
 			})
 			t := output.NewTable(output.Cols("NODE", "SOURCE", "MODE", "ACCEPTS", "ERROR").Wide("ACCEPTS")...)
@@ -418,7 +418,7 @@ comes back.
 			if err != nil {
 				return err
 			}
-			return redfishRequest(a, nodes, "GET", args[0], nil)
+			return redfishRequest(a.Context(), a, nodes, "GET", args[0], nil)
 		}))
 
 	var loseJobs bool
@@ -447,14 +447,14 @@ reset asks Slurm first, as bmc power does, and --lose-jobs overrides that.`,
 				if err := a.Gate.Check(gated); err != nil {
 					return err
 				}
-				if err := checkSlurmIdle(a, nodes, ipmi.ActionReset, loseJobs); err != nil {
+				if err := checkSlurmIdle(a.Context(), a, nodes, ipmi.ActionReset, loseJobs); err != nil {
 					return err
 				}
 			}
 			if err := a.Gate.Confirm(gated); err != nil {
 				return err
 			}
-			return redfishRequest(a, nodes, "POST", args[0], body)
+			return redfishRequest(a.Context(), a, nodes, "POST", args[0], body)
 		}))
 	addLoseJobsFlag(post, &loseJobs)
 
@@ -467,11 +467,11 @@ the power state and the reset types the firmware accepts.`,
 			if err != nil {
 				return err
 			}
-			clients, err := redfishClients(a, nodes.Expand())
+			clients, err := redfishClients(a.Context(), a, nodes.Expand())
 			if err != nil {
 				return err
 			}
-			calls := redfishEach(a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
+			calls := redfishEach(a.Context(), a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
 				return c.System(ctx)
 			})
 			t := output.NewTable(output.Cols(
@@ -512,13 +512,13 @@ func resetsHost(path string) bool {
 	return strings.Contains(strings.ToLower(path), "reset")
 }
 
-func redfishRequest(a *app.App, nodes *nodeset.NodeSet, method, path string, body any) error {
-	clients, err := redfishClients(a, nodes.Expand())
+func redfishRequest(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, method, path string, body any) error {
+	clients, err := redfishClients(ctx, a, nodes.Expand())
 	if err != nil {
 		return err
 	}
 	changes := method != "GET"
-	calls := redfishEach(a, nodes.Expand(), clients, changes, func(ctx context.Context, _ string, c *redfish.Client) (map[string]any, error) {
+	calls := redfishEach(ctx, a, nodes.Expand(), clients, changes, func(ctx context.Context, _ string, c *redfish.Client) (map[string]any, error) {
 		return c.Do(ctx, method, path, body)
 	})
 	object := map[string]any{}
@@ -838,7 +838,7 @@ Connect to the power distribution unit of a rack, or run one command on it.
 			}
 			target := transport.Target{Name: host, Host: host, User: user}
 			// A PDU's command line is its own, not sh.
-			return session(a, cmd, target, transport.Request{Argv: argv, NoShell: true})
+			return session(a.Context(), a, cmd, target, transport.Request{Argv: argv, NoShell: true})
 		}))
 }
 

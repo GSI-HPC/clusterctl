@@ -75,7 +75,7 @@ are made under --dry-run too.
 			)
 			checks = append(checks, localChecks(a)...)
 			if remote {
-				checks = append(checks, remoteChecks(a)...)
+				checks = append(checks, remoteChecks(a.Context(), a)...)
 			}
 			return printChecks(a, a.Format, streams, checks)
 		})
@@ -294,7 +294,7 @@ func nonEmptyLines(s string) []string {
 	return out
 }
 
-func remoteChecks(a *app.App) []check {
+func remoteChecks(ctx context.Context, a *app.App) []check {
 	var checks []check
 	tools := remoteTools(a)
 
@@ -309,7 +309,7 @@ func remoteChecks(a *app.App) []check {
 		// stands in for the hosts, which answers every request with
 		// success.
 		ping := a.Collect(transport.Request{Argv: []string{"true"}, Timeout: 20 * time.Second})
-		result, err := a.ReadRunner.Run(a.Context(), target, ping)
+		result, err := a.ReadRunner.Run(ctx, target, ping)
 		if err != nil || result.Failed() {
 			detail := "unreachable"
 			if err != nil {
@@ -335,7 +335,7 @@ func remoteChecks(a *app.App) []check {
 			script.WriteString(toolCheck(tool))
 		}
 		probe := a.Collect(transport.Request{Script: script.String(), Timeout: 30 * time.Second})
-		missing, err := a.ReadRunner.Run(a.Context(), target, probe)
+		missing, err := a.ReadRunner.Run(ctx, target, probe)
 		switch {
 		case err != nil:
 			checks = append(checks, check{"tools on " + role, statusWarn, err.Error()})

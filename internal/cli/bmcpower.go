@@ -66,10 +66,10 @@ var redfishClientFor = func(a *app.App, ctx context.Context, node string) (*redf
 // redfishClients builds the client of every node before anything is sent, so
 // that a missing credential or processor name stops the command as a usage
 // error instead of turning up as one failed row per node.
-func redfishClients(a *app.App, names []string) ([]*redfish.Client, error) {
+func redfishClients(ctx context.Context, a *app.App, names []string) ([]*redfish.Client, error) {
 	clients := make([]*redfish.Client, len(names))
 	for i, node := range names {
-		c, err := redfishClientFor(a, a.Context(), node)
+		c, err := redfishClientFor(a, ctx, node)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", node, err)
 		}
@@ -105,9 +105,8 @@ type redfishCall[T any] struct {
 // still sent. Each client closes its connections once its request is
 // answered: a processor has few to give, and a command that talks to it
 // again, as a reinstall does in its next step, is a fan-out away.
-func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, changes bool,
+func redfishEach[T any](ctx context.Context, a *app.App, names []string, clients []*redfish.Client, changes bool,
 	do func(context.Context, string, *redfish.Client) (T, error)) []redfishCall[T] {
-	ctx := a.Context()
 	limit := a.Spec.BMC.Redfish.MaxConcurrent
 	calls := make([]redfishCall[T], len(names))
 	for i, node := range names {
@@ -383,15 +382,15 @@ func (p *bmcPlan) describe(a *app.App) string {
 // resolve resolves the account of every node, and builds what the first
 // transport of each needs, before anything is sent. A missing credential or
 // IPMI host role stops the command as a usage error.
-func (p *bmcPlan) resolve(a *app.App) error {
+func (p *bmcPlan) resolve(ctx context.Context, a *app.App) error {
 	for _, node := range p.nodes.Expand() {
 		switch p.order[node][0] {
 		case app.TransportRedfish:
-			if _, err := p.client(a, node); err != nil {
+			if _, err := p.client(ctx, a, node); err != nil {
 				return err
 			}
 		case app.TransportIPMI:
-			if _, err := p.backend(a, node); err != nil {
+			if _, err := p.backend(ctx, a, node); err != nil {
 				return err
 			}
 		}
@@ -399,11 +398,11 @@ func (p *bmcPlan) resolve(a *app.App) error {
 	return nil
 }
 
-func (p *bmcPlan) client(a *app.App, node string) (*redfish.Client, error) {
+func (p *bmcPlan) client(ctx context.Context, a *app.App, node string) (*redfish.Client, error) {
 	if c, ok := p.clients[node]; ok {
 		return c, nil
 	}
-	c, err := redfishClientFor(a, a.Context(), node)
+	c, err := redfishClientFor(a, ctx, node)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", node, err)
 	}
@@ -413,12 +412,12 @@ func (p *bmcPlan) client(a *app.App, node string) (*redfish.Client, error) {
 
 // backend returns the IPMI backend for the account of a node. Nodes with the
 // same account share one, so a set is sent to the backend once per account.
-func (p *bmcPlan) backend(a *app.App, node string) (*ipmi.Backend, error) {
+func (p *bmcPlan) backend(ctx context.Context, a *app.App, node string) (*ipmi.Backend, error) {
 	credential := a.BMCCredentialName(node)
 	if b, ok := p.backends[credential]; ok {
 		return b, nil
 	}
-	b, err := a.IPMIBackend(a.Context(), node)
+	b, err := a.IPMIBackend(ctx, node)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", node, err)
 	}
@@ -431,7 +430,7 @@ func (p *bmcPlan) backend(a *app.App, node string) (*ipmi.Backend, error) {
 // is tried again over the next; an action only when the request provably
 // never reached the processor, because an action that may have been carried
 // out is never sent twice.
-func (p *bmcPlan) run(a *app.App, names []string, action string) []bmcResult {
+func (p *bmcPlan) run(ctx context.Context, a *app.App, names []string, action string) []bmcResult {
 	results := map[string]bmcResult{}
 	pending := names
 	for step := 0; len(pending) > 0; step++ {
@@ -448,9 +447,9 @@ func (p *bmcPlan) run(a *app.App, names []string, action string) []bmcResult {
 			}
 			var rows []bmcResult
 			if transport == app.TransportIPMI {
-				rows = p.runIPMI(a, nodes, action)
+				rows = p.runIPMI(ctx, a, nodes, action)
 			} else {
-				rows = p.runRedfish(a, nodes, action)
+				rows = p.runRedfish(ctx, a, nodes, action)
 			}
 			for _, row := range rows {
 				if earlier, ok := results[row.Node]; ok && row.err != nil {
@@ -458,7 +457,7 @@ func (p *bmcPlan) run(a *app.App, names []string, action string) []bmcResult {
 				}
 				results[row.Node] = row
 				order := p.order[row.Node]
-				if row.err == nil || step+1 >= len(order) || !mayFallBack(action, transport, row.err) || a.Context().Err() != nil {
+				if row.err == nil || step+1 >= len(order) || !mayFallBack(action, transport, row.err) || ctx.Err() != nil {
 					continue
 				}
 				// The error may carry what the processor said, so it is
@@ -498,14 +497,14 @@ func mayFallBack(action, transport string, err error) bool {
 }
 
 // runRedfish carries out a power action over Redfish.
-func (p *bmcPlan) runRedfish(a *app.App, names []string, action string) []bmcResult {
+func (p *bmcPlan) runRedfish(ctx context.Context, a *app.App, names []string, action string) []bmcResult {
 	var (
 		sendable []string
 		clients  []*redfish.Client
 		rows     []bmcResult
 	)
 	for _, node := range names {
-		c, err := p.client(a, node)
+		c, err := p.client(ctx, a, node)
 		if err != nil {
 			row := bmcResult{Node: node, BMC: p.bmc[node], Via: app.TransportRedfish}
 			row.fail(err)
@@ -517,7 +516,7 @@ func (p *bmcPlan) runRedfish(a *app.App, names []string, action string) []bmcRes
 	}
 
 	if action == ipmi.ActionStatus {
-		calls := redfishEach(a, sendable, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+		calls := redfishEach(ctx, a, sendable, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 			return c.PowerState(ctx)
 		})
 		return append(rows, callResults(calls, false, func(s string) string { return s })...)
@@ -531,15 +530,14 @@ func (p *bmcPlan) runRedfish(a *app.App, names []string, action string) []bmcRes
 		}
 		return rows
 	}
-	calls := redfishEach(a, sendable, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+	calls := redfishEach(ctx, a, sendable, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 		return resetType + " sent", c.Reset(ctx, resetType)
 	})
 	return append(rows, callResults(calls, true, func(s string) string { return s })...)
 }
 
 // runIPMI carries out a power action over IPMI, one backend run per account.
-func (p *bmcPlan) runIPMI(a *app.App, names []string, action string) []bmcResult {
-	ctx := a.Context()
+func (p *bmcPlan) runIPMI(ctx context.Context, a *app.App, names []string, action string) []bmcResult {
 	var (
 		accounts []string
 		groups   = map[string][]string{}
@@ -566,7 +564,7 @@ func (p *bmcPlan) runIPMI(a *app.App, names []string, action string) []bmcResult
 			fail(errNotSent(), outcomeNotSent, "not sent")
 			continue
 		}
-		backend, err := p.backend(a, nodes[0])
+		backend, err := p.backend(ctx, a, nodes[0])
 		if err != nil {
 			fail(err, outcomeSent, "")
 			continue
@@ -633,16 +631,15 @@ func batched(action string) bool {
 // breaker the batching is there to protect; the nodes of the later batches
 // are reported as not tried. An interrupt stops it too, and what was not
 // sent is reported as such.
-func runPower(a *app.App, p *bmcPlan, action string, batch int, stagger time.Duration) []bmcResult {
+func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch int, stagger time.Duration) []bmcResult {
 	if !batched(action) || batch <= 0 || p.nodes.Len() <= batch {
-		return p.run(a, p.nodes.Expand(), action)
+		return p.run(ctx, a, p.nodes.Expand(), action)
 	}
 
 	verb := "powering on"
 	if action == ipmi.ActionCycle {
 		verb = "power cycling"
 	}
-	ctx := a.Context()
 	chunks := p.nodes.Split((p.nodes.Len() + batch - 1) / batch)
 	var results []bmcResult
 	skip := func(from int, outcome bmcOutcome, state string, err error) {
@@ -673,7 +670,7 @@ func runPower(a *app.App, p *bmcPlan, action string, batch int, stagger time.Dur
 			}
 		}
 		a.Printf("%s %s (%d of %d)\n", verb, chunk, i+1, len(chunks))
-		results = append(results, p.run(a, chunk.Expand(), action)...)
+		results = append(results, p.run(ctx, a, chunk.Expand(), action)...)
 	}
 	return results
 }

@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -149,7 +150,7 @@ escapes rather than passed to the terminal.`,
 
 			var results []*transport.Result
 			if stdin {
-				results = runWithPayload(a, targets, req, payload)
+				results = runWithPayload(a.Context(), a, targets, req, payload)
 			} else {
 				results = a.Executor().Run(a.Context(), targets, req)
 			}
@@ -168,8 +169,8 @@ escapes rather than passed to the terminal.`,
 }
 
 // runWithPayload sends the same standard input to every node.
-func runWithPayload(a *app.App, targets []transport.Target, req transport.Request, payload []byte) []*transport.Result {
-	return a.Executor().RunEach(a.Context(), targets, func(transport.Target) transport.Request {
+func runWithPayload(ctx context.Context, a *app.App, targets []transport.Target, req transport.Request, payload []byte) []*transport.Result {
+	return a.Executor().RunEach(ctx, targets, func(transport.Target) transport.Request {
 		out := req
 		out.Stdin = bytes.NewReader(payload)
 		return out

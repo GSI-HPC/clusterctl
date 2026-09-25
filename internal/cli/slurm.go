@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -123,7 +124,7 @@ Slurm does not read as exactly the node named is refused.
 				return exitcode.Errorf(exitcode.Usage,
 					"the reason %q names nodes; give the reason first and quote it, then the nodes", reason)
 			}
-			c, ns, err := slurmNodes(a, args[1:])
+			c, ns, err := slurmNodes(a.Context(), a, args[1:])
 			if err != nil {
 				return err
 			}
@@ -149,7 +150,7 @@ Set the nodes to resume so that jobs are scheduled on them again.
 The nodes are checked against Slurm before anything is shown, as for drain.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
-			c, ns, err := slurmNodes(a, args)
+			c, ns, err := slurmNodes(a.Context(), a, args)
 			if err != nil {
 				return err
 			}
@@ -168,7 +169,7 @@ The nodes are checked against Slurm before anything is shown, as for drain.`,
 // reads them as exactly those nodes, before the gate shows them.
 //
 // Nodes named both as arguments and with -n are refused by App.Select.
-func slurmNodes(a *app.App, args []string) (*slurm.Client, *nodeset.NodeSet, error) {
+func slurmNodes(ctx context.Context, a *app.App, args []string) (*slurm.Client, *nodeset.NodeSet, error) {
 	c, err := a.Slurm()
 	if err != nil {
 		return nil, nil, err
@@ -177,7 +178,7 @@ func slurmNodes(a *app.App, args []string) (*slurm.Client, *nodeset.NodeSet, err
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := c.CheckNodes(a.Context(), ns); err != nil {
+	if err := c.CheckNodes(ctx, ns); err != nil {
 		return nil, nil, err
 	}
 	return c, ns, nil
@@ -421,7 +422,7 @@ a list and brackets as a range, so proj[1-100] would create a hundred accounts.`
 			if err != nil {
 				return err
 			}
-			if err := confirmAccounting(a, c, fmt.Sprintf("create the Slurm account %s of the organisation %s",
+			if err := confirmAccounting(a.Context(), a, c, fmt.Sprintf("create the Slurm account %s of the organisation %s",
 				args[0], c.Organization(org))); err != nil {
 				return err
 			}
@@ -474,7 +475,7 @@ cluster whose login node the clients run on.`,
 				return err
 			}
 			if len(args) == 2 {
-				if err := confirmAccounting(a, c, fmt.Sprintf("set the fair share of %s to %s", args[0], args[1])); err != nil {
+				if err := confirmAccounting(a.Context(), a, c, fmt.Sprintf("set the fair share of %s to %s", args[0], args[1])); err != nil {
 					return err
 				}
 				if err := c.SetFairShare(a.Context(), args[0], args[1]); err != nil {
@@ -590,7 +591,7 @@ whose login node the clients run on.`,
 			if err != nil {
 				return err
 			}
-			if err := confirmAccounting(a, c, fmt.Sprintf("set the default account of %s to %s", args[0], args[1])); err != nil {
+			if err := confirmAccounting(a.Context(), a, c, fmt.Sprintf("set the default account of %s to %s", args[0], args[1])); err != nil {
 				return err
 			}
 			if err := c.SetDefaultAccount(a.Context(), args[0], args[1]); err != nil {
@@ -630,8 +631,8 @@ they offer.`,
 
 // confirmAccounting asks before a change to the accounting database that
 // applies to one cluster, and names that cluster.
-func confirmAccounting(a *app.App, c *slurm.Client, what string) error {
-	cluster, err := c.Cluster(a.Context())
+func confirmAccounting(ctx context.Context, a *app.App, c *slurm.Client, what string) error {
+	cluster, err := c.Cluster(ctx)
 	if err != nil {
 		return err
 	}

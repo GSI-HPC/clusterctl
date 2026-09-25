@@ -52,11 +52,11 @@ type guidLookup struct {
 func newGUIDLookup(a *app.App) *guidLookup { return &guidLookup{a: a} }
 
 // load reads the DHCP configuration, which the command reads only once.
-func (l *guidLookup) load() error {
+func (l *guidLookup) load(ctx context.Context) error {
 	if l.a.Spec.Services.DHCP.Role == "" {
 		return nil
 	}
-	cfg, err := l.a.DHCPConfig(l.a.Context())
+	cfg, err := l.a.DHCPConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("reading the DHCP configuration: %w", err)
 	}
@@ -65,8 +65,8 @@ func (l *guidLookup) load() error {
 }
 
 // guids returns the adapter identifiers of one node.
-func (l *guidLookup) guids(node string) ([]string, error) {
-	if err := l.load(); err != nil {
+func (l *guidLookup) guids(ctx context.Context, node string) ([]string, error) {
+	if err := l.load(ctx); err != nil {
 		return nil, err
 	}
 	var macs []string
@@ -121,14 +121,14 @@ error and makes the command fail; it is left out of the table and of -o json.`,
 			lookup := newGUIDLookup(a)
 			// A DHCP server that cannot be read fails every node the same
 			// way, so it fails the command rather than each row.
-			if err := lookup.load(); err != nil {
+			if err := lookup.load(a.Context()); err != nil {
 				return err
 			}
 			t := output.NewTable(output.Cols("NODE", "GUID")...)
 			object := map[string][]string{}
 			failed := nodeset.New()
 			for _, node := range ns.Expand() {
-				guids, err := lookup.guids(node)
+				guids, err := lookup.guids(a.Context(), node)
 				if err != nil {
 					a.Printf("clusterctl: %s: %s\n", node, output.EscapeCell(err.Error()))
 					_ = failed.Add(node)
@@ -263,7 +263,7 @@ reason it stopped. It only reads, so --dry-run asks the fabric too.
 			var entries []portState
 			var guids []string
 			for _, node := range ns.Expand() {
-				nodeGUIDs, err := lookup.guids(node)
+				nodeGUIDs, err := lookup.guids(a.Context(), node)
 				if err != nil {
 					return err
 				}
@@ -338,8 +338,8 @@ var (
 )
 
 // portLID asks the subnet manager for the LID of a port.
-func portLID(a *app.App, role, guid string) (int, error) {
-	result, err := a.RunOnRole(a.Context(), role, transport.Request{
+func portLID(ctx context.Context, a *app.App, role, guid string) (int, error) {
+	result, err := a.RunOnRole(ctx, role, transport.Request{
 		Argv: []string{"ibaddr", "-G", guid},
 	})
 	if err != nil {
@@ -403,13 +403,13 @@ only that port is read. The switch and port are named on standard error.`,
 			if err != nil {
 				return err
 			}
-			guids, err := newGUIDLookup(a).guids(args[0])
+			guids, err := newGUIDLookup(a).guids(a.Context(), args[0])
 			if err != nil {
 				return err
 			}
 			argv := []string{"ibqueryerrors", "-G", guids[0], "--data"}
 			if uplink {
-				lid, err := portLID(a, role, guids[0])
+				lid, err := portLID(a.Context(), a, role, guids[0])
 				if err != nil {
 					return err
 				}
@@ -467,7 +467,7 @@ for dev in $(ibstat -l 2>/dev/null); do
   printf '%s|%s|%s|%s\n' "$dev" "$state" "$phys" "$rate"
 done
 `
-			results, err := runOnNodes(a, ns, transport.Request{Script: script})
+			results, err := runOnNodes(a.Context(), a, ns, transport.Request{Script: script})
 			if err != nil {
 				return err
 			}
@@ -509,7 +509,7 @@ mlxcables -q 2>/dev/null | awk -F': *' '
   /^Length/      {len=$2}
   END           {printf "%s|%s\n", part, len}'
 `
-			results, err := runOnNodes(a, ns, transport.Request{Script: script})
+			results, err := runOnNodes(a.Context(), a, ns, transport.Request{Script: script})
 			if err != nil {
 				return err
 			}
@@ -598,7 +598,7 @@ Read a firmware setting from the adapters of each node.
 			if err != nil {
 				return err
 			}
-			results, err := runOnNodes(a, ns, transport.Request{
+			results, err := runOnNodes(a.Context(), a, ns, transport.Request{
 				Argv: []string{"sh", "-c", "mlxconfig -e query 2>/dev/null | grep -F -- " + shellQuote(key)},
 			})
 			if err != nil {
@@ -662,7 +662,7 @@ goes through the confirmation gate.
 				fmt.Sprintf("%s=%s on every adapter", key, value))); err != nil {
 				return err
 			}
-			results, err := runOnNodes(a, ns, transport.Request{
+			results, err := runOnNodes(a.Context(), a, ns, transport.Request{
 				Script: hcaSetScript(key, value),
 			})
 			if err != nil {
@@ -711,7 +711,7 @@ for dev in $(ibstat -l 2>/dev/null); do
   printf '%s|%s\n' "$dev" "$fw"
 done
 `
-			results, err := runOnNodes(a, ns, transport.Request{Script: script})
+			results, err := runOnNodes(a.Context(), a, ns, transport.Request{Script: script})
 			if err != nil {
 				return err
 			}

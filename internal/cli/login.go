@@ -152,7 +152,7 @@ it was given, so globs, quotes and whitespace survive:
 			}
 			req := transport.Request{Argv: argv, TTY: tty}
 
-			return session(a, cmd, target, req)
+			return session(a.Context(), a, cmd, target, req)
 		}))
 
 	f.register(cmd)

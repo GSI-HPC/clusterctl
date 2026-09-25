@@ -5,6 +5,7 @@ package cli
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -60,7 +61,7 @@ func say(cmd *cobra.Command, format string, args ...any) error {
 // session connects the terminal to a command on a remote host, or to a
 // shell there when req has none. A dry run prints the ssh command line
 // instead.
-func session(a *app.App, cmd *cobra.Command, target transport.Target, req transport.Request) error {
+func session(ctx context.Context, a *app.App, cmd *cobra.Command, target transport.Target, req transport.Request) error {
 	if a.DryRun() {
 		line, err := a.SSH.Args(target, req)
 		if err != nil {
@@ -68,7 +69,7 @@ func session(a *app.App, cmd *cobra.Command, target transport.Target, req transp
 		}
 		return say(cmd, "%s\n", strings.Join(line, " "))
 	}
-	return a.SSH.Interactive(a.Context(), target, req)
+	return a.SSH.Interactive(ctx, target, req)
 }
 
 // printLines prints what a host printed: as it came, escaped, in the table
@@ -117,12 +118,12 @@ func oneNode(a *app.App, arg string) (string, error) {
 // runOnNodes runs one request on a node set and returns what each node
 // answered. The request gets no terminal, and the configured command
 // timeout unless it sets one.
-func runOnNodes(a *app.App, ns *nodeset.NodeSet, req transport.Request) ([]*transport.Result, error) {
+func runOnNodes(ctx context.Context, a *app.App, ns *nodeset.NodeSet, req transport.Request) ([]*transport.Result, error) {
 	targets, err := a.NodeTargets(ns)
 	if err != nil {
 		return nil, err
 	}
-	return a.Executor().Run(a.Context(), targets, a.Collect(req)), nil
+	return a.Executor().Run(ctx, targets, a.Collect(req)), nil
 }
 
 // resultsTable renders what each node answered, one row per node.
