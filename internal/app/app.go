@@ -185,6 +185,7 @@ type App struct {
 	credentials     *credentials.Resolver
 	credentialsOnce sync.Once
 	secrets         secretStore
+	dhcp            dhcpMemo
 
 	machinesOnce sync.Once
 	machines     *machines

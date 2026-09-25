@@ -57,7 +57,7 @@ func nodeAddress(a *app.App, node string) (string, error) {
 	if entry, ok := a.Inventory.Lookup(node); ok && entry.Address != "" {
 		address = entry.Address
 	} else {
-		cfg, err := dhcpConfig(a)
+		cfg, err := a.DHCPConfig(a.Context())
 		if err != nil {
 			return "", err
 		}
