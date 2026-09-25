@@ -198,7 +198,8 @@ type RedfishSpec struct {
 	PinStore string `json:"pinStore,omitempty" yaml:"pinStore,omitempty" jsonschema:"description=File recording the certificate fingerprint of each BMC"`
 	// MinTLSVersion allows old firmware to be reached, "1.0" through "1.3".
 	MinTLSVersion string `json:"minTlsVersion,omitempty" yaml:"minTlsVersion,omitempty" jsonschema:"enum=1.0,enum=1.1,enum=1.2,enum=1.3"`
-	// Timeout bounds one request.
+	// Timeout bounds one request, and how long a connection to a BMC is
+	// kept idle.
 	Timeout Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	// MaxConcurrent bounds how many BMCs are talked to at once.
 	MaxConcurrent int `json:"maxConcurrent,omitempty" yaml:"maxConcurrent,omitempty" jsonschema:"minimum=1"`
