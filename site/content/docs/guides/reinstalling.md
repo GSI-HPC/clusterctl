@@ -308,4 +308,8 @@ $ clusterctl fabric state -n exe0007     # did its fabric link come up
 `fabric state` works before the node has booted: the port is identified by the
 adapter identifier derived from the hardware address DHCP knows. A port is up
 only when its link state is `Active`; one that is physically linked but still
-`Initialize` or `Armed` is reported down, with both states shown.
+`Initialize` or `Armed` is reported down, with both states shown. When the
+fabric host stops before it has answered for every port, at the command's
+timeout or because the connection dropped, the ports it answered for are
+still shown, the others read `no answer`, and the command fails with the
+reason. `--dry-run` asks the fabric too, since `fabric state` only reads.

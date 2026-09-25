@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -192,6 +193,90 @@ func TestFabricStateReportsAPortWithoutAnswer(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "no answer") {
 		t.Errorf("the port is not reported as unanswered:\n%s", h.out)
+	}
+}
+
+// fabricAnswers answers the fabric's script with stdout and the exit status
+// given, the way the transport would, and the DHCP server with the example
+// configuration, where exe0002's hardware address comes from.
+func fabricAnswers(stdout string, code int, stderr string) *transport.Recorder {
+	dhcp := dhcpServer("10.0.2")
+	return &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if tg.Role == "fabric" {
+			return transport.ExitResult(tg, code, stdout, stderr), nil
+		}
+		return dhcp(tg, req)
+	}}
+}
+
+// fabric state failed without a row when its script did not finish, so the
+// ports the fabric had answered for were lost with the one that held it up.
+// A script that stopped early is read for what it printed, and the command
+// fails with the reason it stopped; one that printed nothing still fails
+// with nothing to show.
+func TestFabricStateKeepsThePortsThatAnswered(t *testing.T) {
+	const answered = "0|Active|LinkUp|4X|10.0 Gbps\n1|"
+	for _, tc := range []struct {
+		name, stdout, stderr string
+		status, code         int
+		detail               string
+	}{
+		{"the script ran out of time", answered, "", 124, exitcode.TargetFailed, "command exited 124"},
+		{"the connection dropped", answered, "Connection to fabric closed by remote host.\n", 255, exitcode.Transport, "closed by remote host"},
+		{"the fabric host could not be reached", "", "ssh: connect to host fabric port 22: No route to host\n", 255, exitcode.Transport, "No route to host"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := fabricAnswers(tc.stdout, tc.status, tc.stderr)
+			h, err := run(t, harnessOptions{recorder: rec}, "fabric", "state", "-n", "exe0001,exe0002", "-o", "json")
+			wantCode(t, err, tc.code)
+			if err == nil || !strings.Contains(err.Error(), tc.detail) {
+				t.Errorf("error = %v, want it to say %q", err, tc.detail)
+			}
+			if tc.stdout == "" {
+				if h.out.Len() != 0 {
+					t.Errorf("a fabric host that printed nothing gave rows:\n%s", h.out)
+				}
+				return
+			}
+			var got []portState
+			if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+				t.Fatalf("output is not JSON: %v\n%s", err, h.out)
+			}
+			if len(got) != 2 || got[0].Node != "exe0001" || got[0].State != portUp || got[1].State != portNoAnswer {
+				t.Errorf("ports = %+v, want exe0001 up and exe0002 without an answer", got)
+			}
+		})
+	}
+}
+
+// An interrupt while the fabric answers prints no table: the ports not yet
+// asked would read as if they had not answered. The command exits 130.
+func TestFabricStatePrintsNothingOnceInterrupted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		cancel()
+		return &transport.Result{Target: tg, Stdout: "0|Active|LinkUp|4X|10.0 Gbps\n", ExitCode: 255,
+			Err: exitcode.Wrap(exitcode.Interrupted, context.Canceled)}, nil
+	}}
+	h, err := run(t, harnessOptions{ctx: ctx, recorder: rec}, "fabric", "state", "-n", "exe0001,exe0002", "-o", "json")
+	wantCode(t, err, exitcode.Interrupted)
+	if h.out.Len() != 0 {
+		t.Errorf("an interrupted fabric state printed:\n%s", h.out)
+	}
+}
+
+// fabric state ran its script through the runner a dry run records into, so
+// a dry run reported every port without an answer and failed. It only reads,
+// and a dry run asks the fabric as the real run does.
+func TestFabricStateAsksTheFabricInADryRun(t *testing.T) {
+	rec := fabricAnswers("0|Active|LinkUp|4X|10.0 Gbps\n", 0, "")
+	h, err := run(t, harnessOptions{recorder: rec}, "fabric", "state", "-n", "exe0001", "--dry-run")
+	if err != nil {
+		t.Fatalf("fabric state --dry-run failed: %v\n%s", err, h.out)
+	}
+	if !strings.Contains(h.out.String(), "Active") {
+		t.Errorf("the dry run did not show what the fabric said:\n%s", h.out)
 	}
 }
 
