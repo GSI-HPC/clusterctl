@@ -312,12 +312,7 @@ a value that came from a file, the line it was written on.`,
 			// The value comes last and unpadded: a naming rule or a list of
 			// secrets is long, and a wide VALUE column would push the layer
 			// off the screen for every other row.
-			t := output.NewTable(
-				output.Column{Name: "PATH"},
-				output.Column{Name: "LAYER"},
-				output.Column{Name: "SOURCE", Wide: true},
-				output.Column{Name: "VALUE"},
-			)
+			t := output.NewTable(output.Cols("PATH", "LAYER", "SOURCE", "VALUE").Wide("SOURCE")...)
 			origins := a.Resolved.Tree.Origins()
 			paths := a.Resolved.Tree.Paths()
 			for _, path := range paths {

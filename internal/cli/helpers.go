@@ -114,12 +114,7 @@ func runOnNodes(a *app.App, ns *nodeset.NodeSet, req transport.Request) ([]*tran
 
 // resultsTable renders what each node answered, one row per node.
 func resultsTable(results []*transport.Result) *output.Table {
-	t := output.NewTable(
-		output.Column{Name: "NODE"},
-		output.Column{Name: "STATUS"},
-		output.Column{Name: "OUTPUT"},
-		output.Column{Name: "ERROR", Wide: true},
-	)
+	t := output.NewTable(output.Cols("NODE", "STATUS", "OUTPUT", "ERROR").Wide("ERROR")...)
 	for _, r := range results {
 		status, detail := fanout.Status(r), failureDetail(r)
 		t.Add(r.Target.Name, status, firstLine(r.Output()), detail)

@@ -215,13 +215,7 @@ func callResults[T any](calls []redfishCall[T], changes bool, state func(T) stri
 // printBMCResults prints the rows of a command once, and returns the error
 // the command exits with.
 func printBMCResults(a *app.App, results []bmcResult) error {
-	t := output.NewTable(
-		output.Column{Name: "NODE"},
-		output.Column{Name: "BMC", Wide: true},
-		output.Column{Name: "VIA", Wide: true},
-		output.Column{Name: "STATE"},
-		output.Column{Name: "ERROR"},
-	)
+	t := output.NewTable(output.Cols("NODE", "BMC", "VIA", "STATE", "ERROR").Wide("BMC", "VIA")...)
 	for _, r := range results {
 		t.Add(r.Node, r.BMC, r.Via, r.State, r.Error)
 	}
