@@ -478,7 +478,9 @@ type ClusterSpec struct {
 	// from. The first match wins, and a node matching two rules is an error.
 	BootPaths []BootPathRule `json:"bootPaths,omitempty" yaml:"bootPaths,omitempty"`
 	// Inventories names the NodeInventory documents that describe this
-	// cluster's nodes. Empty means every inventory that is loaded.
+	// cluster's nodes. Empty means the inventories of its own site: every
+	// loaded inventory while one site is loaded, and an error when several
+	// are, since an inventory does not say which site it belongs to.
 	Inventories []string `json:"inventories,omitempty" yaml:"inventories,omitempty"`
 	// Overrides are applied on top of the site layer for this cluster.
 	Overrides map[string]any `json:"overrides,omitempty" yaml:"overrides,omitempty" jsonschema:"description=Dotted path overrides applied for this cluster"`

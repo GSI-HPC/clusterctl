@@ -10,8 +10,8 @@ metadata:
 spec:
   site: {{yaml .Site}}
   # The NodeInventory documents that hold this cluster's nodes. Without this
-  # list the cluster takes every inventory that is loaded, those of other
-  # sites read with this one included.
+  # list the cluster takes every inventory that is loaded, and it is refused
+  # once another site is read with this one.
   inventories:
     - {{yaml .Site}}
 

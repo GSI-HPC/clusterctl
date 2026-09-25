@@ -148,7 +148,7 @@ spec:
   bootPaths:
     - nodes: exe[0001-1024]
       path: /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2
-  inventories: []       # empty means every loaded NodeInventory
+  inventories: []       # empty: every NodeInventory, refused when several sites are loaded
   overrides: {}
 ```
 

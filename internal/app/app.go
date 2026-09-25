@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -371,33 +372,15 @@ func (a *App) absoluteCommandLinePaths() error {
 }
 
 // loadInventory builds the node inventory from the documents the cluster
-// names, or from every one that was loaded when it names none.
+// names, or, when it names none, from the inventories of its own site.
 func (a *App) loadInventory(bundle *config.Bundle) (*inventory.Inventory, error) {
-	wanted := a.Resolved.Bundle.Clusters[a.Resolved.ClusterName]
-	var names []string
-	if wanted != nil {
-		var spec struct {
-			Spec struct {
-				Inventories []string `json:"inventories"`
-			} `json:"spec"`
-		}
-		_ = decode(wanted.Data, &spec)
-		names = spec.Spec.Inventories
+	names, err := clusterInventories(bundle, a.Resolved.ClusterName)
+	if err != nil {
+		return nil, err
 	}
-	if len(names) == 0 {
-		for name := range bundle.Inventories {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-	}
-
 	docs := make([]inventory.Document, 0, len(names))
 	for _, name := range names {
-		doc, ok := bundle.Inventories[name]
-		if !ok {
-			return nil, fmt.Errorf("cluster %q names inventory %q, which no document defines",
-				a.Resolved.ClusterName, name)
-		}
+		doc := bundle.Inventories[name]
 		var inv v1alpha1.NodeInventory
 		if err := decode(doc.Data, &inv); err != nil {
 			return nil, fmt.Errorf("%s: %w", doc.File, err)
@@ -408,6 +391,63 @@ func (a *App) loadInventory(bundle *config.Bundle) (*inventory.Inventory, error)
 		}})
 	}
 	return inventory.FromDocuments(docs...)
+}
+
+// clusterInventories returns the names of the NodeInventory documents a
+// cluster reads.
+//
+// A cluster that names none reads the inventories of its own site. A
+// NodeInventory does not say which site it belongs to, so that is every
+// loaded inventory only while one site is loaded; with several, a cluster
+// naming none is refused rather than handed the nodes of another site, which
+// its naming rules would then resolve as its own.
+func clusterInventories(bundle *config.Bundle, cluster string) ([]string, error) {
+	doc := bundle.Clusters[cluster]
+	var spec v1alpha1.Cluster
+	if doc != nil {
+		if err := decode(doc.Data, &spec); err != nil {
+			return nil, fmt.Errorf("%s: cluster %q: %w", doc.Position("spec.inventories"), cluster, err)
+		}
+	}
+	names := spec.Spec.Inventories
+	for _, name := range names {
+		if _, ok := bundle.Inventories[name]; !ok {
+			return nil, fmt.Errorf("cluster %q names inventory %q, which no document defines", cluster, name)
+		}
+	}
+	if len(names) > 0 {
+		return names, nil
+	}
+
+	if len(bundle.Sites) > 1 {
+		sites := slices.Sorted(maps.Keys(bundle.Sites))
+		where := ""
+		if doc != nil {
+			where = doc.Position("spec").String() + ": "
+		}
+		err := fmt.Errorf("%scluster %q names no inventories, and the sites %s are loaded together; "+
+			"a NodeInventory does not say which site it belongs to, so list this cluster's under spec.inventories",
+			where, cluster, strings.Join(sites, ", "))
+		if _, ok := bundle.Inventories[spec.Spec.Site]; ok && spec.Spec.Site != "" {
+			err = fmt.Errorf("%w, for example [%s]", err, config.QuoteYAML(spec.Spec.Site))
+		}
+		return nil, err
+	}
+	names = slices.Sorted(maps.Keys(bundle.Inventories))
+	return names, nil
+}
+
+// CheckClusters checks what every Cluster document reads, not only the one
+// the current context names, so that config validate reports a cluster that
+// no command has used yet.
+func (a *App) CheckClusters() error {
+	bundle := a.Resolved.Bundle
+	for _, name := range slices.Sorted(maps.Keys(bundle.Clusters)) {
+		if _, err := clusterInventories(bundle, name); err != nil {
+			return exitcode.Wrap(exitcode.Usage, err)
+		}
+	}
+	return nil
 }
 
 // Path resolves a configured path against the directory of the site

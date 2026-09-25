@@ -384,3 +384,80 @@ func TestFieldsNothingReadsAreRefused(t *testing.T) {
 		}
 	}
 }
+
+// Review 9.6, second half: a hand-written or older Cluster that names no
+// inventories took every one that was loaded, another site's included, and
+// resolved its nodes through its own naming rules. With two sites loaded it
+// is refused instead, by the commands and by config validate.
+func TestClusterNamingNoInventoryNeverReadsAnotherSite(t *testing.T) {
+	a := filepath.Join(t.TempDir(), "a")
+	b := filepath.Join(t.TempDir(), "b")
+	if _, err := run(t, harnessOptions{bare: true, config: []string{a}},
+		"config", "init", a, "--site", "sitea", "--cluster", "alpha", "--domain", "a.example.org"); err != nil {
+		t.Fatalf("config init failed: %v", err)
+	}
+	if _, err := run(t, harnessOptions{bare: true, config: []string{b}},
+		"config", "init", b, "--site", "siteb", "--cluster", "beta", "--domain", "b.example.org"); err != nil {
+		t.Fatalf("config init failed: %v", err)
+	}
+	edit := func(file, from, to string) {
+		t.Helper()
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), from) {
+			t.Fatalf("%s has no %q", file, from)
+		}
+		if err := os.WriteFile(file, []byte(strings.Replace(string(data), from, to, 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edit(filepath.Join(b, "inventory.yaml"), "  nodes: []",
+		"  nodes:\n    - nodes: gpu[01-04]\n      attributes: {class: compute}")
+	// Cluster alpha as it was written before config init pinned it.
+	edit(filepath.Join(a, "cluster.yaml"), "  inventories:\n    - \"sitea\"\n", "")
+
+	both := harnessOptions{bare: true, config: []string{a, b}}
+	for _, args := range [][]string{
+		{"--context", "alpha", "node", "fqdn", "-n", "@compute"},
+		{"--context", "alpha", "bmc", "power", "off", "-n", "@compute", "--dry-run"},
+		// The current context is fine; alpha is reported all the same.
+		{"--context", "beta", "config", "validate"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			h, err := run(t, both, args...)
+			if err == nil {
+				t.Fatalf("accepted a cluster that names no inventory with two sites loaded:\n%s%s", h.out, h.errOut)
+			}
+			for _, want := range []string{`cluster "alpha" names no inventories`, "spec.inventories", `["sitea"]`,
+				filepath.Join(a, "cluster.yaml")} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %v, want it to say %q", err, want)
+				}
+			}
+			if got, want := exitcode.From(err), exitcode.Usage; got != want {
+				t.Errorf("exit code = %d, want %d", got, want)
+			}
+			if strings.Contains(h.out.String()+h.errOut.String(), "gpu") {
+				t.Errorf("site b's nodes were reached:\n%s%s", h.out, h.errOut)
+			}
+			if calls := h.recorder.Calls(); len(calls) != 0 {
+				t.Errorf("sent %v", h.recorder.Commands())
+			}
+		})
+	}
+
+	// Loaded alone, site a is the only site, so every inventory is its own.
+	if _, err := run(t, harnessOptions{bare: true, config: []string{a}}, "config", "validate"); err != nil {
+		t.Errorf("config validate refused a single site whose cluster names no inventory: %v", err)
+	}
+	// beta names its inventory, so it keeps working next to alpha.
+	h, err := run(t, both, "--context", "beta", "node", "fqdn", "-n", "@compute")
+	if err != nil {
+		t.Fatalf("node fqdn on beta failed: %v", err)
+	}
+	if got, want := strings.TrimSpace(h.out.String()), "gpu[01-04].b.example.org"; got != want {
+		t.Errorf("beta: node fqdn = %q, want %q", got, want)
+	}
+}
