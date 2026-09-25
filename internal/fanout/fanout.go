@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -176,7 +177,12 @@ type Group struct {
 //
 // Groups come back largest first, and equally sized groups in node set order,
 // so two runs of the same command print the same thing.
-func GroupByOutput(results []*transport.Result) []Group {
+//
+// A group holds its targets as a node set, so a target whose name is not one
+// host name cannot be put into one: it would be read as an expression, or
+// lost. GroupByOutput then returns an error naming it rather than groups
+// that drop or miscount it.
+func GroupByOutput(results []*transport.Result) ([]Group, error) {
 	type key struct {
 		output string
 		status string
@@ -194,10 +200,11 @@ func GroupByOutput(results []*transport.Result) []Group {
 		if name == "" {
 			name = r.Target.Host
 		}
+		if err := hostname.Check(name); err != nil {
+			return nil, fmt.Errorf("the output of %q cannot be grouped: %w", name, err)
+		}
 		if err := g.Nodes.Add(name); err != nil {
-			// A name that is not a host name still has to appear somewhere,
-			// so it becomes its own group rather than being dropped.
-			g.Output = k.output
+			return nil, fmt.Errorf("the output of %q cannot be grouped: %w", name, err)
 		}
 	}
 
@@ -211,5 +218,5 @@ func GroupByOutput(results []*transport.Result) []Group {
 		}
 		return out[i].Nodes.String() < out[j].Nodes.String()
 	})
-	return out
+	return out, nil
 }
