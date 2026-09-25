@@ -282,7 +282,7 @@ func checkSlurmIdle(a *app.App, nodes *nodeset.NodeSet, action string, loseJobs 
 	jobs, err := slurmJobs(a, nodes)
 	if err != nil {
 		if loseJobs {
-			a.Printf("could not ask Slurm whether %s run jobs (%v); going ahead because --lose-jobs was given\n", nodes, err)
+			a.Printf("could not ask Slurm whether %s run jobs (%s); going ahead because --lose-jobs was given\n", nodes, output.EscapeCell(err.Error()))
 			return nil
 		}
 		var coded *exitcode.Error
@@ -746,7 +746,7 @@ func jsonOut(a *app.App, object any) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(a.Out, string(encoded))
+	_, err = fmt.Fprintln(a.Out, output.EscapeText(string(encoded)))
 	return err
 }
 

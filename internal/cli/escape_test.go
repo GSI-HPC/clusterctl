@@ -120,3 +120,52 @@ func TestReportKeepsLinesAndExitCode(t *testing.T) {
 		t.Errorf("stderr = %q, want %q", out.String(), want)
 	}
 }
+
+// Follow-up #79: boot sync, boot log and fabric counters printed what the
+// infrastructure host answered as it was. The PXE log records what booting
+// nodes asked for, and a node's root sets the description the fabric tools
+// print.
+func TestInfrastructureOutputIsEscaped(t *testing.T) {
+	const evil = "first \x1b]52;c;Zm9v\x07\u202e\nsecond\r\u2028\n"
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		out := evil
+		switch {
+		case len(req.Argv) > 0 && req.Argv[0] == "ibaddr":
+			out = "GID fe80::11:2203:33:4455 LID start 0x5 end 0x5\n"
+		case strings.Contains(strings.Join(req.Argv, " "), "dhcpd.conf"):
+			// fabric counters reads the DHCP configuration first.
+			out = ""
+		}
+		return &transport.Result{Target: tg, Stdout: out}, nil
+	}}
+	for _, args := range [][]string{
+		{"boot", "sync", "-y"},
+		{"boot", "log"},
+		{"fabric", "counters", "exe0001"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			h, err := run(t, harnessOptions{recorder: rec}, args...)
+			if err != nil {
+				t.Fatalf("failed: %v", err)
+			}
+			wantNoRaw(t, "stdout", h.out.String())
+			// The lines the host printed are kept.
+			if want := "first \\x1b]52;c;Zm9v\\x07\\u202e\nsecond\\r\\u2028\n"; !strings.Contains(h.out.String(), want) {
+				t.Errorf("stdout = %q, want %q", h.out, want)
+			}
+		})
+	}
+}
+
+// Follow-up #79: the default account sacctmgr reports for a user reached the
+// preview of slurm user add as it was.
+func TestSlurmUserAddPreviewEscapesWhatSlurmSaid(t *testing.T) {
+	cluster := newSlurmCluster()
+	cluster.associations = "alice|other|oth\x1b[2J\u202eer|1\n"
+	h, _ := run(t, harnessOptions{recorder: cluster.recorder()},
+		"slurm", "user", "add", "alice", "proj", "proj", "--dry-run")
+	wantNoRaw(t, "stderr", h.errOut.String())
+	if want := `instead of oth\x1b[2J\u202eer`; !strings.Contains(h.errOut.String(), want) {
+		t.Errorf("the preview says:\n%q\nwant %q", h.errOut, want)
+	}
+}

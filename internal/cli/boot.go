@@ -9,8 +9,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -77,7 +75,7 @@ func nodeAddress(a *app.App, node string) (string, error) {
 	if ip == nil {
 		return "", exitcode.Errorf(exitcode.Usage,
 			"%s has the address %q in %s, which is not an IP address; the boot link is named after it",
-			node, printable(address), source)
+			node, output.EscapeCell(address), source)
 	}
 	return ip.String(), nil
 }
@@ -401,7 +399,7 @@ func runLinkScript(a *app.App, role, script string, links []bootLink, done strin
 			case fields[0] == "ok" && len(fields) == 2:
 				links[i].Result, links[i].Error = done, ""
 			case fields[0] == "fail" && len(fields) == 3:
-				links[i].Result, links[i].Error = "failed", printable(fields[2])
+				links[i].Result, links[i].Error = "failed", output.EscapeCell(fields[2])
 			}
 		}
 	}
@@ -442,21 +440,6 @@ func fold(nodes []string) string {
 	return ns.String()
 }
 
-// printable escapes the control characters in text read from a host, so it
-// cannot move the cursor or forge a line of the output.
-func printable(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == utf8.RuneError, unicode.IsControl(r):
-			fmt.Fprintf(&b, "\\x%02x", r)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 func newBootStatusCommand(r *root) *cobra.Command {
 	return leaf("status [NODESET]", "Show which boot configuration each node is set to", `
 List the boot path configured on the PXE service for each node: the one-shot
@@ -491,7 +474,7 @@ the command.`,
 				t := output.NewTable(output.Cols("NODE", "ADDRESS", "BOOT PATH")...)
 				object := map[string]string{}
 				for name, target := range links {
-					t.Add("", printable(name), printable(target))
+					t.Add("", output.EscapeCell(name), output.EscapeCell(target))
 					object[name] = target
 				}
 				t.Caption = fmt.Sprintf("%d boot paths configured on %s", len(links), role)
@@ -529,10 +512,10 @@ the command.`,
 					continue
 				}
 				s := state{Address: address, BootPath: orNone(links[address])}
-				row := []string{node, address, printable(s.BootPath)}
+				row := []string{node, address, output.EscapeCell(s.BootPath)}
 				if suffix != "" {
 					s.Persistent = orNone(links[address+suffix])
-					row = append(row, printable(s.Persistent))
+					row = append(row, output.EscapeCell(s.Persistent))
 				}
 				object[node] = s
 				t.Add(row...)
@@ -769,7 +752,7 @@ previewed and confirmed like any other change.`,
 			if err != nil {
 				return err
 			}
-			return say(cmd, "%s\n", result.Output())
+			return say(cmd, "%s\n", output.EscapeText(result.Output()))
 		})
 }
 
@@ -808,7 +791,7 @@ for a boot configuration and does not get the expected one.`,
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output())
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), output.EscapeText(result.Output()))
 			return err
 		})
 	cmd.Flags().IntVarP(&lines, "lines", "l", 50, fmt.Sprintf("how many log lines to show, at most %d", maxLogLines))
