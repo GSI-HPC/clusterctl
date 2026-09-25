@@ -446,3 +446,60 @@ func TestGroupsOfKeepsWhatTheOtherSourcesFound(t *testing.T) {
 		}
 	}
 }
+
+// List ran the command of an exec source on every call, where Map and All
+// were cached; an exec source's groups now come from the same caches.
+func TestExecListIsCached(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	rec := answer("main,gpu")
+	r := testResolver(t, rec, dir)
+	for i := 0; i < 3; i++ {
+		got, err := r.List("slurm")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(got, ",") != "main,gpu" {
+			t.Fatalf("List = %q, want main,gpu", got)
+		}
+	}
+	if got := len(rec.Calls()); got != 1 {
+		t.Errorf("the groups were listed %d times, want 1", got)
+	}
+
+	// Another process within the TTL reads the list from disk.
+	again := answer("other")
+	got, err := testResolver(t, again, dir).List("slurm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "main,gpu" || len(again.Calls()) != 0 {
+		t.Errorf("List = %q after %d commands, want main,gpu from the cache", got, len(again.Calls()))
+	}
+}
+
+// Whether a group is not a source's is decided on a fresh listing: a cached
+// one that predates the group would pass the search on to another source's
+// group of the same name.
+func TestAStaleListDoesNotPassTheSearchOn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if _, err := testResolver(t, answer("main"), dir).List("slurm"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if strings.Contains(strings.Join(req.Argv, " "), "%R") {
+			return &transport.Result{Target: tg, Stdout: "main\ninfra\n"}, nil
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	got, err := testResolver(t, rec, dir).Resolve("", "infra")
+	if err == nil {
+		t.Fatalf("Resolve = %q, want the slurm source to stop the search", got)
+	}
+	if errors.Is(err, groups.ErrNotDefined) {
+		t.Errorf("error %v says the group is not defined, but the source lists it", err)
+	}
+}

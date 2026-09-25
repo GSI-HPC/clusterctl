@@ -159,7 +159,7 @@ spec:
 | `static` | A table: group name to node set expression |
 | `attribute` | One group per value of a node attribute |
 | `exec` | Commands run on a host role: `role` (required), `map`, `all`, `list`, `reverse` |
-| `cacheTtl` | How long a resolved group is reused |
+| `cacheTtl` | How long an `exec` answer is reused: a resolved group, `all` and `list` |
 
 `$GROUP` and `$NODE` in an `exec` vector are substituted as whole arguments.
 Each command is bounded by `fanout.commandTimeout`. A cached answer is keyed by

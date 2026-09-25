@@ -188,7 +188,9 @@ bounded by `fanout.commandTimeout` like every remote command.
 
 A cached answer is kept per site, cluster and context, per host and per exact
 command, so two clusters that both have a partition `main` never answer for
-each other.
+each other. The `list` answer is cached too, except when a bare `@group` search
+asks whether a group is a source's: that is asked again, so that a group added
+since does not send the search on to another source.
 
 ## A selection for a whole session
 
