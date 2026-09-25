@@ -841,11 +841,7 @@ anyone replacing it, find out why first: the next connection trusts whatever
 it is shown and sends the BMC account to it.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
-			path := a.Path(a.Spec.BMC.Redfish.PinStore)
-			if path == "" {
-				path = a.StatePath("bmc-pins")
-			}
-			store := &redfish.PinStore{Path: path}
+			store := a.PinStore()
 			pins, err := store.Load()
 			if err != nil {
 				return err
@@ -862,7 +858,7 @@ it is shown and sends the BMC account to it.`,
 			if err := a.Gate.Confirm(safety.Action{
 				Verb:    "forget the certificates of",
 				Targets: targets,
-				Detail:  "drops from " + path + ":\n    " + strings.Join(lines, "\n    "),
+				Detail:  "drops from " + store.Path + ":\n    " + strings.Join(lines, "\n    "),
 			}); err != nil {
 				return err
 			}
