@@ -306,7 +306,7 @@ func (s *Server) preparePlan(ctx context.Context, in planInput, entry *auditEntr
 		return nil, nil, err
 	}
 
-	a, _, err := s.app(ctx)
+	a, err := s.app(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -438,7 +438,7 @@ func (s *Server) apply(ctx context.Context, req *mcp.CallToolRequest, in applyIn
 	// same hosts, and the same commands sent to the same place. The gate is
 	// asked again too, so a host protected since the plan was made is
 	// refused, and the question is the one the gate asks now.
-	a, _, err := s.app(ctx)
+	a, err := s.app(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

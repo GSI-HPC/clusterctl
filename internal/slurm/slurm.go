@@ -52,13 +52,10 @@ type Client struct {
 	cluster string
 }
 
-// run executes a client that changes something and returns its lines.
-func (c *Client) run(ctx context.Context, argv []string) ([]string, error) {
-	result, err := c.exec(ctx, c.Runner, argv)
-	if err != nil {
-		return nil, err
-	}
-	return result.Lines(), nil
+// run executes a client that changes something.
+func (c *Client) run(ctx context.Context, argv []string) error {
+	_, err := c.exec(ctx, c.Runner, argv)
+	return err
 }
 
 // read executes a client that only reads and returns its output.
@@ -481,7 +478,7 @@ func (c *Client) Drain(ctx context.Context, ns *nodeset.NodeSet, reason string) 
 	if err := refuseAll(ns); err != nil {
 		return err
 	}
-	_, err := c.run(ctx, []string{"scontrol", "update",
+	err := c.run(ctx, []string{"scontrol", "update",
 		"nodename=" + ns.Hostlist(), "state=drain", "reason=" + reason})
 	if err != nil {
 		return c.readBack(ctx, ns, err, "drained with this reason", func(n Node) bool {
@@ -497,7 +494,7 @@ func (c *Client) Resume(ctx context.Context, ns *nodeset.NodeSet) error {
 	if err := refuseAll(ns); err != nil {
 		return err
 	}
-	_, err := c.run(ctx, []string{"scontrol", "update",
+	err := c.run(ctx, []string{"scontrol", "update",
 		"nodename=" + ns.Hostlist(), "state=resume"})
 	if err != nil {
 		return c.readBack(ctx, ns, err, "back in production", func(n Node) bool {
@@ -910,14 +907,14 @@ func (c *Client) AddAccount(ctx context.Context, name, organization, description
 	if description == "" {
 		description = name
 	}
-	_, err = c.run(ctx, []string{"sacctmgr", "--immediate", "add", "account", name, "cluster=" + cluster,
+	err = c.run(ctx, []string{"sacctmgr", "--immediate", "add", "account", name, "cluster=" + cluster,
 		"description=" + description, "organization=" + c.Organization(organization)})
 	return err
 }
 
 // SetCoordinators makes users coordinators of an account.
 func (c *Client) SetCoordinators(ctx context.Context, account string, users []string) error {
-	_, err := c.run(ctx, []string{"sacctmgr", "--immediate", "add", "coordinator",
+	err := c.run(ctx, []string{"sacctmgr", "--immediate", "add", "coordinator",
 		"account=" + account, "names=" + strings.Join(users, ",")})
 	return err
 }
@@ -928,7 +925,7 @@ func (c *Client) SetFairShare(ctx context.Context, account, value string) error 
 	if err != nil {
 		return err
 	}
-	_, err = c.run(ctx, []string{"sacctmgr", "--immediate", "modify", "account",
+	err = c.run(ctx, []string{"sacctmgr", "--immediate", "modify", "account",
 		"where", "name=" + account, "cluster=" + cluster, "set", "fairshare=" + value})
 	return err
 }
@@ -1070,12 +1067,12 @@ func and(words []string) string {
 // AddUser carries out an addition PlanUserAdd resolved.
 func (c *Client) AddUser(ctx context.Context, u UserAddition) error {
 	if !u.Exists {
-		_, err := c.run(ctx, []string{"sacctmgr", "--immediate", "add", "user", "names=" + u.User,
+		err := c.run(ctx, []string{"sacctmgr", "--immediate", "add", "user", "names=" + u.User,
 			"account=" + strings.Join(u.associate, ","), "defaultaccount=" + u.DefaultAccount, "cluster=" + u.Cluster})
 		return err
 	}
 	if len(u.associate) > 0 {
-		if _, err := c.run(ctx, []string{"sacctmgr", "--immediate", "add", "user", "names=" + u.User,
+		if err := c.run(ctx, []string{"sacctmgr", "--immediate", "add", "user", "names=" + u.User,
 			"account=" + strings.Join(u.associate, ","), "cluster=" + u.Cluster}); err != nil {
 			return err
 		}
@@ -1096,7 +1093,7 @@ func (c *Client) SetDefaultAccount(ctx context.Context, user, account string) er
 }
 
 func (c *Client) setDefaultAccount(ctx context.Context, user, account, cluster string) error {
-	_, err := c.run(ctx, []string{"sacctmgr", "--immediate", "modify", "user",
+	err := c.run(ctx, []string{"sacctmgr", "--immediate", "modify", "user",
 		"where", "name=" + user, "cluster=" + cluster, "set", "defaultaccount=" + account})
 	return err
 }

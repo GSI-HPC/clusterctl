@@ -18,7 +18,6 @@
 package mcpserver
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -120,7 +119,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 
 	s := &Server{opts: opts}
-	a, _, err := s.app(ctx)
+	a, err := s.app(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +163,7 @@ func (s *Server) Context() string { return s.context }
 // configuration afresh, so an edit to the inventory or the protected hosts
 // is seen without restarting, and every call gets its own streams, so that
 // nothing a command prints can reach the protocol on standard output.
-func (s *Server) app(ctx context.Context) (*app.App, *bytes.Buffer, error) {
-	notes := &bytes.Buffer{}
+func (s *Server) app(ctx context.Context) (*app.App, error) {
 	opts := s.opts.App
 	if s.context != "" {
 		opts.Context = s.context
@@ -176,11 +174,7 @@ func (s *Server) app(ctx context.Context) (*app.App, *bytes.Buffer, error) {
 	opts.DryRun = false
 	opts.AssumeYes = false
 	opts.Force = false
-	a, err := app.New(ctx, s.streams(notes), opts)
-	if err != nil {
-		return nil, nil, err
-	}
-	return a, notes, nil
+	return app.New(ctx, s.streams(io.Discard), opts)
 }
 
 // streams are what a call reads and writes. There is no terminal: a command

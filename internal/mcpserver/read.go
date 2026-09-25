@@ -88,7 +88,7 @@ type selectOutput struct {
 }
 
 func (s *Server) selectNodes(ctx context.Context, _ *mcp.CallToolRequest, in selectInput) (*mcp.CallToolResult, *selectOutput, error) {
-	a, _, err := s.app(ctx)
+	a, err := s.app(ctx)
 	if err != nil {
 		return nil, nil, callError(err)
 	}
@@ -166,7 +166,7 @@ func (s *Server) describeNodes(ctx context.Context, _ *mcp.CallToolRequest, in d
 	}
 	want := func(f string) bool { return slices.Contains(facets, f) }
 
-	a, _, err := s.app(ctx)
+	a, err := s.app(ctx)
 	if err != nil {
 		return nil, nil, callError(err)
 	}
@@ -300,7 +300,7 @@ func (s *Server) querySlurm(ctx context.Context, _ *mcp.CallToolRequest, in slur
 	}
 	limit = min(limit, maxRows)
 
-	a, _, err := s.app(ctx)
+	a, err := s.app(ctx)
 	if err != nil {
 		return nil, nil, callError(err)
 	}
