@@ -410,13 +410,7 @@ environment variable that selects a context for a single shell.`,
 				config.EnvContext, shellQuote(name), shellQuote(name), config.QuoteYAML(name))
 			return err
 		}))
-	cmd.ValidArgsFunction = func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		a, err := r.App()
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return a.Resolved.Bundle.ContextNames(), cobra.ShellCompDirectiveNoFileComp
-	}
+	cmd.ValidArgsFunction = completeContexts(r)
 	return cmd
 }
 

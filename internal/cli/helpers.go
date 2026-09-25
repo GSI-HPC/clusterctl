@@ -242,26 +242,30 @@ func registerCompletions(cmd *cobra.Command, r *root) {
 		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 			return output.Formats(), cobra.ShellCompDirectiveNoFileComp
 		})
-	_ = cmd.RegisterFlagCompletionFunc("context",
-		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-			a, err := completionApp(r)
-			if err != nil {
-				return nil, cobra.ShellCompDirectiveNoFileComp
-			}
-			return a.Resolved.Bundle.ContextNames(), cobra.ShellCompDirectiveNoFileComp
-		})
+	_ = cmd.RegisterFlagCompletionFunc("context", completeContexts(r))
 	_ = cmd.RegisterFlagCompletionFunc("nodes", completeGroups(r))
 }
 
-// completeRoles offers the configured host roles.
-func completeRoles(r *root) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+// complete offers the words names returns for the command context, and none
+// when the configuration cannot be read.
+func complete(r *root, names func(*app.App) []string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		a, err := completionApp(r)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		return a.RoleNames(), cobra.ShellCompDirectiveNoFileComp
+		return names(a), cobra.ShellCompDirectiveNoFileComp
 	}
+}
+
+// completeContexts offers the configured contexts.
+func completeContexts(r *root) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return complete(r, func(a *app.App) []string { return a.Resolved.Bundle.ContextNames() })
+}
+
+// completeRoles offers the configured host roles.
+func completeRoles(r *root) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return complete(r, (*app.App).RoleNames)
 }
 
 // completeGroups offers the configured groups, which is what a node set
@@ -274,11 +278,7 @@ func completeRoles(r *root) func(*cobra.Command, []string, string) ([]string, co
 // could prompt for a passphrase in the middle of the command line, so its
 // groups are left out and have to be typed.
 func completeGroups(r *root) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-	return func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		a, err := completionApp(r)
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
+	return complete(r, func(a *app.App) []string {
 		var out []string
 		for _, source := range a.Groups.Sources() {
 			if a.Spec.Groups.Sources[source].Exec != nil {
@@ -293,8 +293,8 @@ func completeGroups(r *root) func(*cobra.Command, []string, string) ([]string, c
 			}
 		}
 		sort.Strings(out)
-		return out, cobra.ShellCompDirectiveNoFileComp
-	}
+		return out
+	})
 }
 
 // fixed offers a fixed list of words for completion.
