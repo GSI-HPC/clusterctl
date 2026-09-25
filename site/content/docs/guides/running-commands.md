@@ -124,6 +124,13 @@ $ clusterctl exec -n '@compute' --timeout 30s -- ./slow-check
 
 Without a flag, `fanout.commandTimeout` from the configuration applies.
 
+A node that stops answering cannot end its command, so clusterctl stops ssh
+itself when the command has not ended five seconds after its timeout plus the
+time reaching the node may take, and reports the node as unreachable, exit
+code 3. Reaching a node may take `ssh.connectionAttempts` attempts of
+`ssh.connectTimeout`, a second apart, 21 seconds with the defaults, and as
+long again for each jump host a role's `proxyJump` puts in front of it.
+
 ## How wide it goes
 
 ```console

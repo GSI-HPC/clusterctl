@@ -38,7 +38,7 @@ func fakeClientWith(t *testing.T, script string, opts transport.Options) *transp
 	// and is answered at once, whatever the script does otherwise.
 	version := "[ \"$1\" = -V ] && { echo OpenSSH_9.6p1 >&2; exit 0; }\n"
 	writeScript(t, binary, "#!/bin/sh\n"+version+script+"\n")
-	opts.SSH = v1alpha1.SSHSpec{Binary: binary, ScpBinary: binary}
+	opts.SSH.Binary, opts.SSH.ScpBinary = binary, binary
 	opts.StateDir = dir
 	opts.KnownHostsFile = filepath.Join(dir, "ssh-known-hosts")
 	return transport.New(opts)
@@ -145,6 +145,113 @@ func TestTheVersionQuestionStopsWithTheCommand(t *testing.T) {
 	}
 	if written, _ := filepath.Glob(filepath.Join(stateDir, "ssh_config-*")); len(written) > 0 {
 		t.Errorf("a configuration was written although the version was never told: %v", written)
+	}
+}
+
+// TestRunBoundsACommandWithATimeout checks that a command with a timeout is
+// bounded here as well as by timeout(1) on the host. A host that stopped
+// answering held Run until ssh's keepalives gave up, three minutes with the
+// defaults. ssh is stopped once the command has had its timeout, the kill
+// grace and the time reaching the host may take, which leaves a host that
+// answers late its own answer, and a host that did not is reported as
+// unreachable, not as interrupted.
+func TestRunBoundsACommandWithATimeout(t *testing.T) {
+	t.Parallel()
+	background := func(*testing.T) context.Context { return context.Background() }
+	for _, tc := range []struct {
+		name    string
+		script  string
+		ctx     func(*testing.T) context.Context
+		code    int
+		detail  string
+		atLeast time.Duration
+	}{
+		{"a host that stopped answering", "exec sleep 60", background,
+			exitcode.Transport, "no answer 6s after the command's 100ms timeout ran out", 6100 * time.Millisecond},
+		{"a host that answered after its timeout", "sleep 1; exit 124", background,
+			exitcode.TargetFailed, "command exited 124", time.Second},
+		{"an interrupt", "exec sleep 60", cancelSoon,
+			exitcode.Interrupted, "context canceled", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// One attempt of one second: reaching the host may take a
+			// second, the least the generated configuration can say.
+			c := fakeClientWith(t, tc.script, transport.Options{SSH: v1alpha1.SSHSpec{
+				ConnectTimeout: v1alpha1.Duration(100 * time.Millisecond), ConnectionAttempts: 1}})
+			start := time.Now()
+			result, err := c.Run(tc.ctx(t), target, transport.Request{Argv: []string{"true"}, Timeout: 100 * time.Millisecond})
+			elapsed := time.Since(start)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := exitcode.From(result.Err); got != tc.code {
+				t.Errorf("exit code = %d, want %d (error %v)", got, tc.code, result.Err)
+			}
+			if result.Err == nil || !strings.Contains(result.Err.Error(), tc.detail) {
+				t.Errorf("error = %v, want it to say %q", result.Err, tc.detail)
+			}
+			if tc.code != exitcode.Interrupted && errors.Is(result.Err, context.Canceled) {
+				t.Errorf("error = %v, which reads as an interrupt", result.Err)
+			}
+			if elapsed < tc.atLeast || elapsed > tc.atLeast+10*time.Second {
+				t.Errorf("Run returned after %v, want %v or a little more", elapsed, tc.atLeast)
+			}
+		})
+	}
+}
+
+// The time reaching a host may take is what the generated configuration
+// lets ssh spend: every attempt of ssh.connectTimeout, in the whole seconds
+// the file holds, with a second between attempts, and as much again for
+// each jump host ssh connects to first. A bound that left the jump hosts
+// out would stop ssh while a command behind a slow gateway still ran, and
+// one that left out what a role's options set would stop it while ssh
+// still spent the time they give.
+func TestTheTimeToReachAHostCountsEveryAttemptAndJump(t *testing.T) {
+	t.Parallel()
+	roles := map[string]v1alpha1.HostRole{
+		"mgmt":  {Host: "mgmt.example.org"},
+		"inner": {Host: "inner.example.org", ProxyJump: "mgmt"},
+		"dhcp":  {Host: "dhcp.example.org", ProxyJump: "mgmt"},
+		// ssh reaches inner with inner's own block, and gw2 with the rest
+		// of this chain rather than its own.
+		"deep": {Host: "deep.example.org", ProxyJump: "inner,gw2"},
+		"gw2":  {Host: "gw2.example.org", ProxyJump: "mgmt"},
+		// A role's own options come first in the file, and win.
+		"pdu":     {Host: "pdu.example.org", Options: map[string]string{"ConnectTimeout": "60", "connectionAttempts": "3"}},
+		"behind":  {Host: "behind.example.org", ProxyJump: "pdu"},
+		"proxied": {Host: "proxied.example.org", Options: map[string]string{"ProxyCommand": "nc -X connect -x proxy:3128 %h %p"}},
+	}
+	for _, tc := range []struct {
+		name string
+		ssh  v1alpha1.SSHSpec
+		host string
+		want time.Duration
+	}{
+		{"the defaults, directly", v1alpha1.SSHSpec{}, "exe0001.example.org", 10 * time.Second},
+		{"two attempts a second apart", v1alpha1.SSHSpec{ConnectTimeout: v1alpha1.Duration(10 * time.Second), ConnectionAttempts: 2},
+			"exe0001.example.org", 21 * time.Second},
+		{"a timeout in whole seconds", v1alpha1.SSHSpec{ConnectTimeout: v1alpha1.Duration(1500 * time.Millisecond)},
+			"exe0001.example.org", 2 * time.Second},
+		{"through a jump host", v1alpha1.SSHSpec{ConnectTimeout: v1alpha1.Duration(10 * time.Second), ConnectionAttempts: 2},
+			"dhcp.example.org", 42 * time.Second},
+		{"through a chain whose first hop has a jump host of its own", v1alpha1.SSHSpec{ConnectTimeout: v1alpha1.Duration(5 * time.Second)},
+			"deep.example.org", 20 * time.Second},
+		{"a role's own timeout and attempts", v1alpha1.SSHSpec{ConnectTimeout: v1alpha1.Duration(10 * time.Second), ConnectionAttempts: 2},
+			"pdu.example.org", 182 * time.Second},
+		{"through a jump host with a timeout of its own", v1alpha1.SSHSpec{ConnectTimeout: v1alpha1.Duration(10 * time.Second), ConnectionAttempts: 2},
+			"behind.example.org", 182*time.Second + 21*time.Second},
+		{"through a proxy command", v1alpha1.SSHSpec{ConnectTimeout: v1alpha1.Duration(10 * time.Second), ConnectionAttempts: 2},
+			"proxied.example.org", 42 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := transport.New(transport.Options{SSH: tc.ssh, Roles: roles})
+			if got := transport.Reach(c, transport.Target{Name: tc.host, Host: tc.host}); got != tc.want {
+				t.Errorf("reaching %s may take %v, want %v", tc.host, got, tc.want)
+			}
+		})
 	}
 }
 

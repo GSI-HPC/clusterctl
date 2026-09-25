@@ -106,7 +106,9 @@ type Request struct {
 	TTY TTY
 	// Timeout bounds the command. It is enforced on the target with
 	// timeout(1), because killing the local ssh leaves the remote process
-	// running.
+	// running. Run also stops ssh itself once the command has had its
+	// timeout, killGrace and the time reaching the target may take, for a
+	// host that stopped answering before timeout(1) could end the command.
 	Timeout time.Duration
 	// Stdin is fed to the command. Secrets travel this way so that they
 	// never appear in an argument vector, where ps shows them.
@@ -447,10 +449,27 @@ func duration(d time.Duration) string {
 }
 
 // Run executes a request and captures its output.
+//
+// A request with a timeout is bounded here as well as on the host. timeout(1)
+// ends the command only once it has reached the host, and only a host that
+// still answers can say so, so a connection that hangs while it is made, or
+// goes quiet while the command runs, would hold the caller for as long as ssh
+// waits, minutes with its keepalives. ssh is stopped once the command has had
+// its timeout, the grace timeout(1) gives it and the time the generated
+// configuration lets reaching the host take; a host that answered has ended
+// the command by then.
 func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, error) {
 	args, err := c.Args(target, req)
 	if err != nil {
 		return nil, err
+	}
+
+	runCtx, over := ctx, time.Duration(0)
+	if req.Timeout > 0 {
+		over = killGrace + c.reach(target)
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, req.Timeout+over)
+		defer cancel()
 	}
 
 	limit := req.MaxOutput
@@ -458,7 +477,7 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 		limit = DefaultMaxOutput
 	}
 	stdout, stderr := &capture{limit: limit}, &capture{limit: limit}
-	cmd := c.command(ctx, args)
+	cmd := c.command(runCtx, args)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Stdin = req.Stdin
@@ -477,6 +496,15 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 		Duration: time.Since(start),
 	}
 	result.ExitCode, result.Err = classify(ctx, target, runErr, result.Stderr)
+	if runErr != nil && ctx.Err() == nil && runCtx.Err() != nil {
+		// The caller's context is live, so this is no interrupt: the host
+		// did not stay reachable for as long as the command ran.
+		result.ExitCode = -1
+		result.Err = exitcode.Wrap(exitcode.Transport, fmt.Errorf(
+			"%s: no answer %s after the command's %s timeout ran out; the host stopped answering, "+
+				"or logging in took longer than ssh.connectTimeout and ssh.connectionAttempts let reaching it take: %w",
+			target, over, req.Timeout, runCtx.Err()))
+	}
 	result.Truncated = stdout.dropped > 0 || stderr.dropped > 0
 	if result.Truncated && result.Err == nil {
 		result.Err = fmt.Errorf("%s: the output was cut off at %d bytes, the most that is kept of one stream", target, limit)

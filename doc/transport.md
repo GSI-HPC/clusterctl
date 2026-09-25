@@ -216,6 +216,21 @@ otherwise keep running on the node with nothing watching it.
 Connection timeouts and attempts are ssh's own, set in the generated
 configuration.
 
+The command is bounded locally as well, since `timeout` on the host can end it
+only once it got there and only a host that still answers can say so. A
+connection that hangs while it is made, or goes quiet while the command runs,
+would otherwise hold its slot in the fan-out for as long as ssh waits, three
+minutes with the default keepalives. So ssh is stopped once the command has had
+its timeout, the five seconds `timeout -k` gives it to stop and the time the
+generated configuration lets reaching the host take: `ssh.connectionAttempts`
+attempts of `ssh.connectTimeout`, a second apart, and that again for each jump
+host of the role's `proxyJump` chain, since ssh connects to them one after the
+other. With the defaults that is 21 seconds, or 42 through one jump host. A jump
+host that only an included file or `ssh.options` names is not counted. A host
+that answered has ended the command by then; one that did not is reported as
+unreachable and exits 3, not as an interrupt. A request without a timeout, such
+as an interactive login, is not bounded.
+
 ## Without a terminal, nothing prompts
 
 When clusterctl's standard input is not a terminal, as under the MCP server or

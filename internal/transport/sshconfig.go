@@ -501,6 +501,94 @@ func (c *Client) roleByHost(host string) string {
 	return ""
 }
 
+// reach is how long reaching target may take before its command starts, as
+// the generated configuration bounds it: ssh makes ssh.connectionAttempts
+// attempts one second apart, each of ssh.connectTimeout in the whole seconds
+// the file is written with, and it does so for every jump host on the way,
+// one after the other, before the target itself. A host whose role sets
+// ConnectTimeout or ConnectionAttempts in its options is reached as they
+// say, since its block comes first and ssh keeps the first value it reads;
+// one whose role runs a ProxyCommand is given as long again for whatever
+// that command connects through.
+func (c *Client) reach(target Target) time.Duration {
+	var total time.Duration
+	for _, host := range append(c.JumpHosts(target.Host), target.Host) {
+		options := c.roles[c.roleByHost(host)].Options
+		attempts := max(1, c.spec.ConnectionAttempts)
+		if n, ok := intOption(options, "connectionattempts"); ok {
+			attempts = max(1, n)
+		}
+		timeout := time.Duration(math.Ceil(c.spec.ConnectTimeout.Or(defaultConnectTimeout).Seconds())) * time.Second
+		if n, ok := intOption(options, "connecttimeout"); ok && n > 0 {
+			timeout = time.Duration(n) * time.Second
+		}
+		one := time.Duration(attempts)*timeout + time.Duration(attempts-1)*time.Second
+		total += one
+		if _, ok := option(options, "proxycommand"); ok {
+			total += one
+		}
+	}
+	return total
+}
+
+// option returns the value of the ssh keyword key in a role's options, as
+// ssh reads the keyword, without regard to case.
+func option(options map[string]string, key string) (string, bool) {
+	for k, v := range options {
+		if canonicalKeyword(k) == key {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// intOption returns an option whose value is a whole number.
+func intOption(options map[string]string, key string) (int, bool) {
+	v, ok := option(options, key)
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	return n, err == nil
+}
+
+// JumpHosts names the jump hosts ssh connects to on the way to host, each
+// of which a session to host opens a connection to as well: the proxyJump
+// chain of the role whose block matches host, and the chain of that chain's
+// first hop, which ssh reaches with the hop's own block. The later hops are
+// handed the rest of the chain instead of their own. It is empty when ssh
+// connects to host directly. A jump host that only an included file or
+// ssh.options names is not known here.
+func (c *Client) JumpHosts(host string) []string {
+	var out []string
+	for seen := map[string]bool{}; !seen[host]; {
+		seen[host] = true
+		jump := c.roles[c.roleByHost(host)].ProxyJump
+		if jump == "" {
+			break
+		}
+		// A value that does not resolve is refused with the configuration.
+		chain, _, err := c.resolveJumps(jump)
+		if err != nil {
+			break
+		}
+		var hops []string
+		for element := range strings.SplitSeq(chain, ",") {
+			hop, err := parseHop(element)
+			if err != nil {
+				break
+			}
+			hops = append(hops, hop.host)
+		}
+		if len(hops) == 0 {
+			break
+		}
+		out = append(out, hops...)
+		host = hops[0]
+	}
+	return out
+}
+
 // Validate checks everything the generated ssh configuration is built from.
 //
 // Each value is written into a line of the file, so a line break in one

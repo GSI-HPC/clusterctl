@@ -41,7 +41,10 @@ clusterctl does. The node set goes before --, or in -n, but not in both.
 The argument vector is quoted once and reassembled by the remote shell, so it
 arrives exactly as it was typed. A timeout is enforced on the node with
 timeout(1), because killing the local ssh would leave the remote process
-running.
+running. A node that has not answered five seconds after the timeout, plus the
+time ssh.connectTimeout and ssh.connectionAttempts let reaching it take, has
+stopped answering: ssh is stopped here, and the node is reported as
+unreachable.
 
   clusterctl exec -n @slurm:main -- uptime
   clusterctl exec exe[1-10] --dedup -- uname -r
