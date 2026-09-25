@@ -157,20 +157,6 @@ func TestRunStartsNothingOnceCancelled(t *testing.T) {
 	})
 }
 
-func TestOnResultIsCalledForEveryTarget(t *testing.T) {
-	t.Parallel()
-
-	var seen atomic.Int32
-	e := &fanout.Executor{
-		Runner:   &transport.Recorder{},
-		OnResult: func(*transport.Result) { seen.Add(1) },
-	}
-	e.Run(context.Background(), targets("exe1", "exe2"), transport.Request{Argv: []string{"true"}})
-	if got, want := seen.Load(), int32(2); got != want {
-		t.Errorf("OnResult was called %d times, want %d", got, want)
-	}
-}
-
 func TestGroupByOutput(t *testing.T) {
 	t.Parallel()
 
@@ -252,33 +238,31 @@ func TestGroupByOutputKeepsApartWhatEndedDifferently(t *testing.T) {
 func TestRunTurnsAPanicIntoThatTargetsFailure(t *testing.T) {
 	t.Parallel()
 
+	request := func(transport.Target) transport.Request { return transport.Request{Argv: []string{"true"}} }
 	for _, tc := range []struct {
-		name  string
-		setup func(*fanout.Executor)
+		name   string
+		runner transport.Runner
+		build  func(transport.Target) transport.Request
 	}{
-		{"in the runner", func(e *fanout.Executor) {
-			e.Runner = &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
-				if tg.Name == "exe2" {
-					panic("index out of range [3] with length 3")
-				}
-				return &transport.Result{Target: tg, Stdout: "ok\n"}, nil
-			}}
-		}},
-		{"in OnResult", func(e *fanout.Executor) {
-			e.OnResult = func(r *transport.Result) {
-				if r.Target.Name == "exe2" {
-					panic("index out of range [3] with length 3")
-				}
+		{"in the runner", &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+			if tg.Name == "exe2" {
+				panic("index out of range [3] with length 3")
 			}
+			return &transport.Result{Target: tg, Stdout: "ok\n"}, nil
+		}}, request},
+		{"in building the request", &transport.Recorder{}, func(tg transport.Target) transport.Request {
+			if tg.Name == "exe2" {
+				panic("index out of range [3] with length 3")
+			}
+			return request(tg)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var log strings.Builder
-			e := &fanout.Executor{Runner: &transport.Recorder{}, Max: 2, PanicLog: &log}
-			tc.setup(e)
+			e := &fanout.Executor{Runner: tc.runner, Max: 2, PanicLog: &log}
 
-			results := e.Run(context.Background(), targets("exe1", "exe2", "exe3"), transport.Request{Argv: []string{"true"}})
+			results := e.RunEach(context.Background(), targets("exe1", "exe2", "exe3"), tc.build)
 			if len(results) != 3 {
 				t.Fatalf("got %d results, want 3", len(results))
 			}

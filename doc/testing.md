@@ -79,8 +79,8 @@ round tripper sends and the connections a host key scan dials. A fake that
 answers at once rarely has two calls under way together, so each call is held
 until one more than the limit are, which a fan-out that keeps to its limit
 never allows: the test sees exactly the limit in flight, and one call too many
-when the limit is broken. The executor, the Redfish fan-out and the host key
-scans are tested this way.
+when the limit is broken. `fanout.Map`, the executor, the Redfish fan-out and
+the host key scans are tested this way.
 
 **Command tests** drive the real command tree end to end and assert on what
 would be sent, not on whether the code compiles: that a glob and an apostrophe
