@@ -6,51 +6,15 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 )
 
 // These tests are the cases of the adversarial review, section 9, in which a
 // layer of the configuration took a protection away without a word.
-
-// writeFiles writes files into a new directory and returns it.
-func writeFiles(t *testing.T, files map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
-
-// copyExample copies the example configuration into a new directory, leaving
-// out the files named, and returns it.
-func copyExample(t *testing.T, leaveOut ...string) string {
-	t.Helper()
-	items, err := os.ReadDir(exampleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	for _, item := range items {
-		if item.IsDir() || slices.Contains(leaveOut, item.Name()) {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(exampleDir, item.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, item.Name()), data, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
 
 // contextOverride is a Config document that gives context cluster2 the
 // overrides written in body, indented under overrides.
@@ -74,7 +38,7 @@ func wantProtected(t *testing.T, opts harnessOptions, args ...string) {
 // Review 9.1: an override in the nested form merges key by key, like every
 // other mapping, instead of replacing the whole section.
 func TestOverrideMappingMergesKeyByKey(t *testing.T) {
-	dir := writeFiles(t, map[string]string{
+	dir := configtest.WriteFiles(t, map[string]string{
 		"override.yaml": contextOverride("      safety: {confirmAbove: 4}\n"),
 	})
 	opts := harnessOptions{config: []string{dir}}
@@ -121,7 +85,7 @@ func TestOverrideValueIsValidated(t *testing.T) {
 		"scalar in map": "      fanout: 4\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			dir := writeFiles(t, map[string]string{"override.yaml": contextOverride(body)})
+			dir := configtest.WriteFiles(t, map[string]string{"override.yaml": contextOverride(body)})
 			_, err := run(t, harnessOptions{config: []string{dir}}, "config", "validate")
 			if err == nil {
 				t.Fatal("config validate accepted the override")
@@ -137,7 +101,7 @@ func TestOverrideValueIsValidated(t *testing.T) {
 // Review 9.2: an override key that differs from a field only in case is
 // refused, not matched without regard to case or dropped.
 func TestOverrideKeysAreCaseSensitive(t *testing.T) {
-	dir := writeFiles(t, map[string]string{
+	dir := configtest.WriteFiles(t, map[string]string{
 		"override.yaml": contextOverride("      safety.protectedhosts: []\n      fanout.Max: 2\n"),
 	})
 	// Every context is checked, not only the current one.
@@ -162,7 +126,7 @@ func TestOverrideKeysAreCaseSensitive(t *testing.T) {
 
 	// The unknown path of an override is reported where it was written,
 	// with the field that was probably meant.
-	dir = writeFiles(t, map[string]string{
+	dir = configtest.WriteFiles(t, map[string]string{
 		"override.yaml": contextOverride("      safety.confirmAbov: 2\n"),
 	})
 	_, err = run(t, harnessOptions{config: []string{dir}}, "config", "validate")
@@ -174,7 +138,7 @@ func TestOverrideKeysAreCaseSensitive(t *testing.T) {
 // Review 9.3: a second document of the same kind and name is an error that
 // names both, rather than replacing the first.
 func TestDuplicateDocumentsAreRefused(t *testing.T) {
-	dir := copyExample(t)
+	dir := configtest.CopyDir(t, exampleDir)
 	site, err := os.ReadFile(filepath.Join(dir, "site.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +164,7 @@ func TestDuplicateDocumentsAreRefused(t *testing.T) {
 // Review 9.3: only a later Config document may redefine a context; one
 // document that names a context twice is a mistake.
 func TestContextNamedTwiceInOneDocumentIsRefused(t *testing.T) {
-	dir := writeFiles(t, map[string]string{"extra.yaml": "apiVersion: clusterctl/v1alpha1\nkind: Config\ncontexts:\n" +
+	dir := configtest.WriteFiles(t, map[string]string{"extra.yaml": "apiVersion: clusterctl/v1alpha1\nkind: Config\ncontexts:\n" +
 		"  - name: lab\n    cluster: cluster1\n  - name: lab\n    cluster: cluster2\n"})
 	_, err := run(t, harnessOptions{config: []string{dir}}, "config", "validate")
 	if err == nil || !strings.Contains(err.Error(), `a second context "lab"`) {
@@ -252,7 +216,7 @@ func TestConfigInitPinsTheInventory(t *testing.T) {
 // /etc/clusterctl.
 func TestConfigInitRefusesToShadowTheSearchPath(t *testing.T) {
 	user := isolateHome(t)
-	team := copyExample(t)
+	team := configtest.CopyDir(t, exampleDir)
 	saved := configDirs
 	configDirs = func() []string { return []string{team, user} }
 	t.Cleanup(func() { configDirs = saved })
@@ -306,7 +270,7 @@ func TestConfigExplainCoversFlagsAndContexts(t *testing.T) {
 // Review 9.11: a key with a dot in it, such as a static group rack.R01,
 // stays one key when the layers are merged.
 func TestDottedKeysStayOneKey(t *testing.T) {
-	dir := copyExample(t)
+	dir := configtest.CopyDir(t, exampleDir)
 	cluster := filepath.Join(dir, "cluster.yaml")
 	data, err := os.ReadFile(cluster)
 	if err != nil {
@@ -331,7 +295,7 @@ func TestDottedKeysStayOneKey(t *testing.T) {
 
 // Review 9.11: use-context prints lines that can be pasted as they are.
 func TestConfigUseContextQuotesTheName(t *testing.T) {
-	dir := writeFiles(t, map[string]string{"extra.yaml": "apiVersion: clusterctl/v1alpha1\nkind: Config\n" +
+	dir := configtest.WriteFiles(t, map[string]string{"extra.yaml": "apiVersion: clusterctl/v1alpha1\nkind: Config\n" +
 		"contexts:\n  - name: \"it's; yes\"\n    cluster: cluster1\n"})
 	h, err := run(t, harnessOptions{config: []string{dir}}, "config", "use-context", "it's; yes")
 	if err != nil {

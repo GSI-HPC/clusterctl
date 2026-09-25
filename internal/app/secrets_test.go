@@ -7,7 +7,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -15,6 +14,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/app"
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -29,7 +29,7 @@ func withSecret(t *testing.T, env map[string]string, identities bool) (*app.App,
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := copyExample(t, "secrets.sops.yaml", "workstation.yaml")
+	dir := configtest.CopyDir(t, exampleDir, "secrets.sops.yaml", "workstation.yaml")
 	keyFile := filepath.Join(dir, ".identity")
 	if err := os.WriteFile(keyFile, []byte(id.String()+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -120,28 +120,4 @@ func TestSecretValueSaysWhatWasTried(t *testing.T) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
 	}
-}
-
-// copyExample copies the example configuration into a new directory, leaving
-// out the files named, and returns it.
-func copyExample(t *testing.T, leaveOut ...string) string {
-	t.Helper()
-	items, err := os.ReadDir(exampleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	for _, item := range items {
-		if item.IsDir() || slices.Contains(leaveOut, item.Name()) {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(exampleDir, item.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, item.Name()), data, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 )
 
@@ -116,7 +117,7 @@ func TestAMisspelledConfigIsReported(t *testing.T) {
 // directory with the given mode, its files with fileMode.
 func copyExampleWithModes(t *testing.T, mode, fileMode os.FileMode) string {
 	t.Helper()
-	dir := copyExample(t)
+	dir := configtest.CopyDir(t, exampleDir)
 	items, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
