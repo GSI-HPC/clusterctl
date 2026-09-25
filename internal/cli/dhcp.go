@@ -246,17 +246,12 @@ running by accident; --seconds must be at least 1.`,
 				Timeout: time.Duration(seconds) * time.Second,
 				TTY:     transport.TTYNone,
 			}
-			if a.DryRun() {
-				line, err := a.SSH.Args(target, req)
-				if err != nil {
-					return err
-				}
-				return say(cmd, "%s\n", strings.Join(line, " "))
+			if !a.DryRun() {
+				a.Printf("capturing on %s for %ds\n", device, seconds)
 			}
-			a.Printf("capturing on %s for %ds\n", device, seconds)
 			// The capture is watched live, so it is wired to the terminal
 			// rather than collected at the end.
-			return a.SSH.Interactive(a.Context(), target, req)
+			return session(a, cmd, target, req)
 		})
 	cmd.Flags().StringVarP(&iface, "interface", "i", "", "interface to capture on (default: from the configuration)")
 	cmd.Flags().IntVar(&seconds, "seconds", 60, "how long to capture")
@@ -281,13 +276,5 @@ func roleShell(r *root, cmd *cobra.Command, args []string, role func(*app.App) s
 	if at := cmd.ArgsLenAtDash(); at >= 0 {
 		argv = args[at:]
 	}
-	req := transport.Request{Argv: argv}
-	if a.DryRun() {
-		line, err := a.SSH.Args(target, req)
-		if err != nil {
-			return err
-		}
-		return say(cmd, "%s\n", strings.Join(line, " "))
-	}
-	return a.SSH.Interactive(a.Context(), target, req)
+	return session(a, cmd, target, transport.Request{Argv: argv})
 }
