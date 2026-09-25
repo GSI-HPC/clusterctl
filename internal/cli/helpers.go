@@ -4,7 +4,6 @@
 package cli
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"sort"
@@ -154,28 +153,12 @@ func failureDetail(r *transport.Result) string {
 }
 
 // failureError turns the failures of a fan-out into the error the process
-// exits with, with the code exitcode.Worst gives; a command that exited
-// non-zero is a target that failed. The errors of the targets are kept, not
-// their strings, so that the caller can still tell a cancellation from a
+// exits with, as fanout.FailureError sums them up: "k of n hosts failed",
+// with the code exitcode.Worst gives, and the errors of the targets kept
+// underneath, so that the caller can still tell a cancellation from a
 // failure.
 func failureError(results []*transport.Result) error {
-	failures := fanout.Failures(results)
-	if len(failures) == 0 {
-		return nil
-	}
-	names := nodeset.New()
-	var errs []error
-	for _, f := range failures {
-		_ = names.Add(f.Target.Name)
-		if f.Err != nil {
-			errs = append(errs, f.Err)
-		}
-	}
-	code := cmp.Or(exitcode.Worst(errs...), exitcode.TargetFailed)
-	return &exitcode.Error{Code: code, Err: &hostFailures{
-		message: fmt.Sprintf("%d of %d hosts failed: %s", len(failures), len(results), names),
-		errs:    errs,
-	}}
+	return fanout.FailureError(results)
 }
 
 // hostFailures is the summary of a fan-out that did not succeed everywhere,

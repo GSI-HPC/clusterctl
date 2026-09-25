@@ -139,6 +139,7 @@ two, so it is refused. Globs and ~ work in both.
 			}
 
 			executor := a.Executor()
+			executor.Step = "copy"
 			// scp draws its progress meter on the terminal, redrawing one
 			// line. Only one transfer at a time can have that line; the
 			// meters of several side by side would overwrite each other.

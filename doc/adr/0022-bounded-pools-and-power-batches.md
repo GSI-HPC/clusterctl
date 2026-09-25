@@ -38,10 +38,12 @@ partly failed, and cutting a batch down to the pool's limit.
   most `limit` calls at a time, none started once the context has ended,
   and a place taken as it ends is given back, since `select` picks either
   of two cases that are ready. It returns once every call has returned, and
-  the caller tells what was left out from what it did not record. Results
-  are kept in the order the targets were given. A panic in one call becomes
-  that target's failure, through `fanout.Recovered`, with its stack in the
-  front end's diagnostics.
+  the caller tells what was left out from what it did not record.
+  `fanout.Map` runs any kind of work on it, the executor's among them, and
+  returns what each item came to in the order the items were given, those
+  left out with the context's error. A panic in one call becomes that
+  item's failure, through `fanout.Recovered`, with its stack in the front
+  end's diagnostics.
 - **A bound for each kind of work.** One a site can set has a default of its
   own in `defaults.yaml`, not derived from `fanout.max`:
 
@@ -84,7 +86,9 @@ partly failed, and cutting a batch down to the pool's limit.
   running when it takes its place, and ended before it gives the place up,
   so no display counts more running than the limit; those never started
   ended as canceled, so the count reaches the Total; and the step ended once
-  the last has. Batches are spans too, all of them queued at the start, with
+  the last has, with the count and the node set of those that failed.
+  `fanout.Map` does all of it, so a pool on it reports without a line of
+  its own. Batches are spans too, all of them queued at the start, with
   a wait for each pause, and a batch that is not tried ends skipped and
   counts as its Total.
 - **One exit code.** The failures of a pool become the command's exit code

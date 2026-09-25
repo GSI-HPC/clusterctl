@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
-// Package fanout runs one request on many targets at once.
+// Package fanout works on many targets at once.
 //
 // The degree of parallelism is bounded and conservative by default: a
 // connection through a tunnel or a jump host is far more fragile than a local
@@ -20,6 +20,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -27,15 +28,21 @@ import (
 // DefaultMax is used when nothing configures the fan-out.
 const DefaultMax = 16
 
+// defaultStep names the step of an executor that names none.
+const defaultStep = "run"
+
 // Executor runs requests on many targets.
 type Executor struct {
 	// Runner performs one request; a Recorder stands in for a dry run.
 	Runner transport.Runner
 	// Max is how many targets are worked on at once.
 	Max int
-	// OnResult is called as each target finishes, in completion order, for
-	// progress output. It must be safe to call from several goroutines.
-	OnResult func(*transport.Result)
+	// Step names the step a display shows the targets under; empty is
+	// "run".
+	Step string
+	// Flags are given to that step, such as progress.ShowLines for a
+	// command whose output is the product.
+	Flags progress.Flags
 	// PanicLog receives the stack of a panic in a worker; nil is the
 	// process's standard error.
 	PanicLog io.Writer
@@ -51,24 +58,51 @@ func (e *Executor) Run(ctx context.Context, targets []transport.Target, req tran
 //
 // Results come back in the order the targets were given, whatever order they
 // finished in, so output is reproducible. A target that fails does not stop
-// the others: the point of a fan-out is to learn about every node.
+// the others: the point of a fan-out is to learn about every node. It runs
+// on Map, and is reported as Map reports its work. A panic in the runner or
+// in build becomes the target's failure rather than the end of the process.
 func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, build func(transport.Target) transport.Request) []*transport.Result {
-	results := make([]*transport.Result, len(targets))
-	limit := e.Max
-	if limit < 1 {
-		limit = DefaultMax
-	}
-	Each(ctx, len(targets), limit, func(i int) {
-		results[i] = e.runOne(ctx, targets[i], build)
+	outcomes := Map(ctx, targets, Options[transport.Target]{
+		Step:     cmp.Or(e.Step, defaultStep),
+		Flags:    e.Flags,
+		Limit:    e.Max,
+		Describe: describeTarget,
+		PanicLog: e.PanicLog,
+	}, func(ctx context.Context, target transport.Target) (*transport.Result, error) {
+		result, err := e.Runner.Run(ctx, target, build(target))
+		if result == nil {
+			result = &transport.Result{Target: target, ExitCode: -1}
+		}
+		if err != nil && result.Err == nil {
+			result.Err = err
+		}
+		return result, resultError(result)
 	})
-	for i, r := range results {
-		if r == nil {
-			// Whatever has not started is reported as cancelled rather than
-			// left as a nil result.
-			results[i] = &transport.Result{Target: targets[i], ExitCode: -1, Err: ctx.Err()}
+	results := make([]*transport.Result, len(targets))
+	for i, o := range outcomes {
+		results[i] = o.Value
+		if results[i] == nil {
+			// A target the runner panicked on, or one the context ended
+			// before, is reported with its error rather than left as a
+			// nil result.
+			results[i] = &transport.Result{Target: targets[i], ExitCode: -1, Err: o.Err}
 		}
 	}
 	return results
+}
+
+// describeTarget says what a display names a target by.
+func describeTarget(t transport.Target) (node, host, role string) {
+	return cmp.Or(t.Name, t.Host), t.Host, t.Role
+}
+
+// resultError is the error a target is reported with: the result's own, or
+// its exit status when it failed without one.
+func resultError(r *transport.Result) error {
+	if r.Err != nil || !r.Failed() {
+		return r.Err
+	}
+	return fmt.Errorf("%s: command exited %d", cmp.Or(r.Target.Name, r.Target.Host), r.ExitCode)
 }
 
 // Each calls work with every index below n, at most limit at a time, and
@@ -97,27 +131,6 @@ func Each(ctx context.Context, n, limit int, work func(i int)) {
 		})
 	}
 	wg.Wait()
-}
-
-// runOne works on one target. A panic in the runner, in build or in
-// OnResult becomes the target's failure rather than the end of the process.
-func (e *Executor) runOne(ctx context.Context, target transport.Target, build func(transport.Target) transport.Request) (result *transport.Result) {
-	defer func() {
-		if err := Recovered(e.PanicLog, target.Name, recover()); err != nil {
-			result = &transport.Result{Target: target, ExitCode: -1, Err: err}
-		}
-	}()
-	result, err := e.Runner.Run(ctx, target, build(target))
-	if result == nil {
-		result = &transport.Result{Target: target, ExitCode: -1}
-	}
-	if err != nil && result.Err == nil {
-		result.Err = err
-	}
-	if e.OnResult != nil {
-		e.OnResult(result)
-	}
-	return result
 }
 
 // Failures returns the results that did not succeed.

@@ -17,6 +17,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -152,7 +153,7 @@ escapes rather than passed to the terminal.`,
 			if stdin {
 				results = runWithPayload(a.Context(), a, targets, req, payload)
 			} else {
-				results = a.Executor().Run(a.Context(), targets, req)
+				results = execExecutor(a).Run(a.Context(), targets, req)
 			}
 			return printExec(a, cmd, results, dedup)
 		})
@@ -168,9 +169,17 @@ escapes rather than passed to the terminal.`,
 	return cmd
 }
 
+// execExecutor is the executor exec runs its command with. What the nodes
+// answer is what exec is for, so a display may show it as it arrives.
+func execExecutor(a *app.App) *fanout.Executor {
+	e := a.Executor()
+	e.Flags = progress.ShowLines
+	return e
+}
+
 // runWithPayload sends the same standard input to every node.
 func runWithPayload(ctx context.Context, a *app.App, targets []transport.Target, req transport.Request, payload []byte) []*transport.Result {
-	return a.Executor().RunEach(ctx, targets, func(transport.Target) transport.Request {
+	return execExecutor(a).RunEach(ctx, targets, func(transport.Target) transport.Request {
 		out := req
 		out.Stdin = bytes.NewReader(payload)
 		return out

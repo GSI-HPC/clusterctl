@@ -29,6 +29,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/secrets"
@@ -790,7 +791,11 @@ This changes the nodes, so it asks first.`,
 				index[res.Target.Name] = i
 				ready = append(ready, res.Target)
 			}
-			for _, res := range a.Executor().RunEach(a.Context(), ready, func(t transport.Target) transport.Request {
+			// What the run prints is what it is watched for, so a display
+			// may show it as it arrives.
+			executor := a.Executor()
+			executor.Flags = progress.ShowLines
+			for _, res := range executor.RunEach(a.Context(), ready, func(t transport.Target) transport.Request {
 				return a.Collect(transport.Request{Argv: argv[t.Name], Timeout: max(a.Timeout().Get(), cincRunTimeout)})
 			}) {
 				results[index[res.Target.Name]] = res

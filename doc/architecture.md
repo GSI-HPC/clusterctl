@@ -51,7 +51,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | --- | --- |
 | `internal/transport` | Driving the OpenSSH client, and generating the configuration it runs with. |
 | `internal/shellquote` | Rendering an argument vector so a remote shell reproduces it exactly. |
-| `internal/fanout` | Running one request on many targets, bounded and in order. |
+| `internal/fanout` | Working on many targets at once, bounded and in order, and reporting the work as it goes. |
 | `internal/progress` | Reporting the work under way: its steps, targets and calls as spans carried in the context, and every change to one as an event for a display or an agent. |
 | `internal/safety` | Deciding whether a destructive action may proceed. |
 | `internal/fileutil` | Writing files atomically and under a lock, and the cache on disk. |
@@ -148,12 +148,13 @@ MCP server works on two tool calls at once, so that an agent sending calls
 side by side does not multiply these bounds.
 
 Every such pool is one loop, `fanout.Each`, which starts nothing once the
-command is interrupted, and each kind of work has a bound of its own, which
+command is interrupted, and `fanout.Map` runs any kind of work on it, the
+executor's among them. Each kind of work has a bound of its own, which
 `fanout.max` in the configuration does not change
 ([ADR 0022](adr/0022-bounded-pools-and-power-batches.md)). A power-on and a
 power cycle are sent in batches, the set split evenly, one batch after the
-other with a pause between, and a batch with a failure stops the run. A pool
-reports its work as the spans of `internal/progress`: a step, with every
+other with a pause between, and a batch with a failure stops the run. A pool on
+`Map` reports its work as the spans of `internal/progress`: a step, with every
 target queued before the first one runs and each ended before it gives its
 place to the next, so that a display never counts more running than the
 bound, and has counted every target, those an interrupt left out among
