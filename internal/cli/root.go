@@ -59,14 +59,9 @@ func (r *root) App() (*app.App, error) {
 	if r.cached != nil {
 		return r.cached, nil
 	}
-	set := map[string]string{}
-	for _, assignment := range r.setValues {
-		key, value, ok := strings.Cut(assignment, "=")
-		if !ok {
-			return nil, exitcode.Errorf(exitcode.Usage,
-				"--set takes PATH=VALUE, got %q", assignment)
-		}
-		set[strings.TrimSpace(key)] = value
+	set, err := r.overrides()
+	if err != nil {
+		return nil, err
 	}
 
 	// Zero is what an absent --fanout reads as, so a given one below one
@@ -122,6 +117,19 @@ func (r *root) runSlurm(fn func(a *app.App, c *slurm.Client, cmd *cobra.Command,
 		}
 		return fn(a, c, cmd, args)
 	})
+}
+
+// overrides reads the --set flags into the values they override.
+func (r *root) overrides() (map[string]string, error) {
+	set := map[string]string{}
+	for _, assignment := range r.setValues {
+		key, value, ok := strings.Cut(assignment, "=")
+		if !ok {
+			return nil, exitcode.Errorf(exitcode.Usage, "--set takes PATH=VALUE, got %q", assignment)
+		}
+		set[strings.TrimSpace(key)] = value
+	}
+	return set, nil
 }
 
 // nodesFromFlagOrEnv returns the default node set and whether it came from

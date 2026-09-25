@@ -60,10 +60,9 @@ Register it with Claude Code:
 				return exitcode.Errorf(exitcode.Usage,
 					"mcp serve does not take --yes, --force, --dry-run or --nodes; the server never confirms or forces anything itself")
 			}
-			set := map[string]string{}
-			for _, assignment := range r.setValues {
-				key, value, _ := strings.Cut(assignment, "=")
-				set[strings.TrimSpace(key)] = value
+			set, err := r.overrides()
+			if err != nil {
+				return err
 			}
 			server, err := mcpserver.New(r.context(), mcpserver.Options{
 				App: app.Options{
