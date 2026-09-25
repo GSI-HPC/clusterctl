@@ -208,9 +208,36 @@ are about to do and ask before doing it.`),
 		newMCPCommand(r),
 		newVersionCommand(r),
 	)
+	builtins(cmd, streams)
 	annotateEffects(cmd)
 	usageArgs(cmd)
 	return cmd, r
+}
+
+// builtins adds cobra's help and completion commands to the tree now, rather
+// than when it runs, so that the argument checks below cover them: cobra's
+// own completion printed its help and succeeded for a shell it does not know,
+// and its help printed the root help and succeeded for a topic that names no
+// command.
+func builtins(cmd *cobra.Command, streams app.Streams) {
+	// The completion scripts are written to the output the root has when the
+	// command is made, not when it runs.
+	cmd.SetOut(streams.Out)
+	cmd.InitDefaultHelpCmd()
+	cmd.InitDefaultCompletionCmd()
+	for _, sub := range cmd.Commands() {
+		switch sub.Name() {
+		case "help":
+			sub.Args = helpTopic
+		case "completion":
+			// A group, like every other: without a function of its own
+			// cobra prints its help before any argument is looked at.
+			sub.Args = noSubcommand
+			sub.RunE = func(c *cobra.Command, _ []string) error {
+				return c.Help()
+			}
+		}
+	}
 }
 
 // noSubcommand is the argument check of a command that only holds
@@ -221,15 +248,37 @@ func noSubcommand(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return nil
 	}
+	return exitcode.Errorf(exitcode.Usage, "unknown command %q for %q%s",
+		args[0], cmd.CommandPath(), suggest(cmd, args[0]))
+}
+
+// helpTopic is the argument check of the help command. The topic has to name
+// a command, all of it: cobra's help prints the root help for a topic it
+// cannot find, and the help of the nearest command for one with words left
+// over, and succeeds either way.
+func helpTopic(cmd *cobra.Command, args []string) error {
+	found, rest, err := cmd.Root().Find(args)
+	if err == nil && found != nil && len(rest) == 0 {
+		return nil
+	}
+	topic := strings.Join(args, " ")
+	if err != nil || found == nil || len(rest) == 0 {
+		return exitcode.Errorf(exitcode.Usage, "unknown help topic %q", topic)
+	}
+	return exitcode.Errorf(exitcode.Usage, "unknown help topic %q: unknown command %q for %q%s",
+		topic, rest[0], found.CommandPath(), suggest(found, rest[0]))
+}
+
+// suggest names the subcommands of cmd that word is probably a misspelling
+// of, ready to append to a message.
+func suggest(cmd *cobra.Command, word string) string {
 	if cmd.SuggestionsMinimumDistance <= 0 {
 		cmd.SuggestionsMinimumDistance = 2
 	}
-	suggestion := ""
-	if found := cmd.SuggestionsFor(args[0]); len(found) > 0 {
-		suggestion = "; did you mean " + strings.Join(found, " or ") + "?"
+	if found := cmd.SuggestionsFor(word); len(found) > 0 {
+		return "; did you mean " + strings.Join(found, " or ") + "?"
 	}
-	return exitcode.Errorf(exitcode.Usage, "unknown command %q for %q%s",
-		args[0], cmd.CommandPath(), suggestion)
+	return ""
 }
 
 // usageArgs makes every argument check in the tree report a usage error.
