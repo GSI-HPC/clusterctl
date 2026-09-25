@@ -39,8 +39,25 @@ than as an unreachable host.
 
 When a command that works on many hosts sees several of these, it exits with
 the first that applies of `130` (a host was not tried because of an
-interrupt), `3` (a host could not be reached) and `1` (a host answered with a
-failure). A run in which one node refused and another was down exits `3`.
+interrupt), `3` (a host could not be reached), `2` (what a host needs is
+missing from the configuration, such as its service processor's credential)
+and `1` (a host answered with a failure). A run in which one node refused and
+another was down exits `3`, whichever command it was.
+
+## Commands that look for something
+
+A few commands exist to find something out. What they find is their result,
+so they exit `1` for it even when a host could not be asked as well:
+
+| Command | Exits `1` when | Exits `3` when |
+| --- | --- | --- |
+| `hostkey verify` | a host offers a revoked or changed key, or is not in the file | hosts did not answer, and nothing else was found |
+| `hostkey refresh` | a host offers a revoked key, which is not written | hosts did not answer, and none offered a revoked key |
+| `bmc ping` | a service processor does not answer | fping could not resolve a name as well |
+| `dns lookup`, `dns aliases` | a name does not resolve | never |
+
+A changed or revoked key matters more than a host that is down, and a script
+that reads `3` as "check the network" must not miss it.
 
 ## An interrupt is 130
 

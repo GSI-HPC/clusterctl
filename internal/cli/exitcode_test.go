@@ -5,6 +5,8 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -260,6 +262,72 @@ func TestNoTerminalRunsSshInBatchMode(t *testing.T) {
 		}
 		if got := strings.Contains(h.out.String(), "-o BatchMode=yes --"); got == tty {
 			t.Errorf("with a terminal %v, batch mode is %v:\n%s", tty, got, h.out)
+		}
+	}
+}
+
+// TestFanOutsAgreeOnTheExitCode covers the exit codes #90 found to disagree:
+// the commands that act on several hosts ranked the failures of their hosts
+// each in their own order, so that one refused and one unreachable node made
+// secrets push exit 1 and exec 3, and a node without a service processor
+// exited 2 from provision and 1 from exec.
+func TestFanOutsAgreeOnTheExitCode(t *testing.T) {
+	refused := func(name string) error { return fmt.Errorf("%s: command exited 1", name) }
+	unreachable := func(name string) error {
+		return exitcode.Wrap(exitcode.Transport, fmt.Errorf("%s: Connection refused", name))
+	}
+	interrupted := func(name string) error { return fmt.Errorf("%s: %w", name, context.Canceled) }
+	usage := func(name string) error { return exitcode.Errorf(exitcode.Usage, "%s: no host name", name) }
+
+	tests := []struct {
+		name  string
+		fails []func(string) error
+		want  int
+	}{
+		{"one refused", []func(string) error{refused}, exitcode.TargetFailed},
+		{"one unreachable", []func(string) error{unreachable}, exitcode.Transport},
+		{"refused and unreachable", []func(string) error{refused, unreachable}, exitcode.Transport},
+		{"interrupted and unreachable", []func(string) error{interrupted, unreachable}, exitcode.Interrupted},
+		{"interrupted and refused", []func(string) error{interrupted, refused}, exitcode.Interrupted},
+		{"a configuration problem and refused", []func(string) error{usage, refused}, exitcode.Usage},
+		{"a configuration problem and unreachable", []func(string) error{usage, unreachable}, exitcode.Transport},
+	}
+	for _, tc := range tests {
+		var (
+			results []*transport.Result
+			targets []transport.Target
+			failed  = map[string]error{}
+			names   []string
+			errs    []error
+			rows    []bmcResult
+		)
+		for i, fail := range tc.fails {
+			name := fmt.Sprintf("exe%04d", i+1)
+			err := fail(name)
+			tg := transport.Target{Name: name, Host: name}
+			results = append(results, &transport.Result{Target: tg, ExitCode: -1, Err: err})
+			targets = append(targets, tg)
+			failed[name] = err
+			names = append(names, name)
+			errs = append(errs, err)
+			row := bmcResult{Node: name}
+			row.fail(err)
+			rows = append(rows, row)
+		}
+		for aggregator, err := range map[string]error{
+			"exec, copy, cinc": failureError(results),
+			"secrets push":     pushFailures(targets, failed),
+			"provision":        namedFailures(names, errs),
+			"bmc":              bmcExit(rows),
+		} {
+			if got := exitcode.From(err); got != tc.want {
+				t.Errorf("%s: %s exits %d, want %d", tc.name, aggregator, got, tc.want)
+			}
+			for _, cause := range errs {
+				if !errors.Is(err, cause) && aggregator != "secrets push" {
+					t.Errorf("%s: %s lost the error %v", tc.name, aggregator, cause)
+				}
+			}
 		}
 	}
 }

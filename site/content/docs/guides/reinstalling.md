@@ -177,7 +177,7 @@ On the node, each file is written beside its target and moved into place only
 once all of it has arrived, so a dropped connection leaves the old file.
 
 A node that cannot be reached is named, is not tried again for the remaining
-secrets, and makes the push exit `3` when it is the only kind of failure.
+secrets, and makes the push exit `3`, even when another node refused.
 
 A secret can come from a sops encrypted `Secret` document instead of a file of
 its own:
