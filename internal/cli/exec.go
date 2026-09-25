@@ -143,6 +143,10 @@ escapes rather than passed to the terminal.`,
 				if err := a.Gate.Confirm(action); err != nil {
 					return err
 				}
+			} else if err := a.Gate.Announce(action); err != nil {
+				// Nothing is asked, but what --force lets through is
+				// still named.
+				return err
 			}
 
 			var results []*transport.Result

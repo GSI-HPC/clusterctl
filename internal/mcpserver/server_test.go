@@ -97,6 +97,8 @@ type setup struct {
 	// runner wraps the fake cluster, for a test that needs to see or delay
 	// what is sent.
 	runner func(transport.Runner) transport.Runner
+	// force starts the server with --force, which it must not pass on.
+	force bool
 }
 
 type fixture struct {
@@ -128,6 +130,7 @@ func start(t *testing.T, s setup) *fixture {
 		App: app.Options{
 			ConfigFiles: []string{config},
 			Runner:      runner,
+			Force:       s.force,
 		},
 		StateDir: f.stateDir,
 		CacheDir: filepath.Join(t.TempDir(), "cache"),

@@ -182,33 +182,64 @@ type Action struct {
 // does not know, unless the gate was forced. When the protected hosts cannot
 // be worked out, every action is refused: an entry that cannot be resolved
 // must not protect nothing. --force gets past that too, since it would get
-// past the protected hosts anyway, but says so.
+// past the protected hosts anyway.
+//
+// Check prints nothing. What --force lets through is named in the preview,
+// which Confirm prints, and by Announce, so that a forced run never touches
+// a protected or unknown host without saying which.
 func (g *Gate) Check(a Action) error {
+	_, err := g.check(a)
+	return err
+}
+
+// check is Check, returning also what --force let through, one sentence each.
+func (g *Gate) check(a Action) ([]string, error) {
 	if a.Targets == nil || a.Targets.IsEmpty() {
-		return exitcode.Errorf(exitcode.Usage, "no hosts were selected for %s", a.Verb)
+		return nil, exitcode.Errorf(exitcode.Usage, "no hosts were selected for %s", a.Verb)
 	}
+	var forced []string
 	hit, err := g.ProtectedIn(a.Targets)
-	if g.Force {
-		if err != nil {
-			g.printf("The protected hosts could not be worked out; going ahead because --force was given: %v\n", err)
-		}
-		return nil
-	}
 	if err != nil {
-		return fmt.Errorf("%s was refused, because the protected hosts could not be worked out: %w", a.Verb, err)
+		if !g.Force {
+			return nil, fmt.Errorf("%s was refused, because the protected hosts could not be worked out: %w", a.Verb, err)
+		}
+		forced = append(forced, fmt.Sprintf(
+			"The protected hosts could not be worked out; going ahead because --force was given: %v", err))
+		hit = nodeset.New()
 	}
 	if !hit.IsEmpty() {
-		return exitcode.Errorf(exitcode.Usage,
-			"%s would touch the protected host%s %s; pass --force to do it anyway",
-			a.Verb, plural(hit.Len()), hit)
+		if !g.Force {
+			return nil, exitcode.Errorf(exitcode.Usage,
+				"%s would touch the protected host%s %s; pass --force to do it anyway",
+				a.Verb, plural(hit.Len()), hit)
+		}
+		forced = append(forced, fmt.Sprintf("--force lets through the protected host%s %s", plural(hit.Len()), hit))
 	}
 	if g.Known != nil && !a.NotNodes {
-		if unknown := a.Targets.Difference(g.Known); !unknown.IsEmpty() {
-			return exitcode.Errorf(exitcode.Usage,
-				"%s would touch %s, which the inventory does not know, so the gate cannot tell whether "+
-					"%s protected; pass --force to do it anyway",
-				a.Verb, unknown, isAre(unknown.Len()))
+		// A name counted as protected is named once, as protected.
+		if unknown := a.Targets.Difference(g.Known).Difference(hit); !unknown.IsEmpty() {
+			if !g.Force {
+				return nil, exitcode.Errorf(exitcode.Usage,
+					"%s would touch %s, which the inventory does not know, so the gate cannot tell whether "+
+						"%s protected; pass --force to do it anyway",
+					a.Verb, unknown, isAre(unknown.Len()))
+			}
+			forced = append(forced, fmt.Sprintf("--force lets through %s, which the inventory does not know", unknown))
 		}
+	}
+	return forced, nil
+}
+
+// Announce runs the checks of the gate and, when --force lets the action
+// through, says so on the gate's output. It is for a command that goes ahead
+// without asking; Confirm does the same for one that asks.
+func (g *Gate) Announce(a Action) error {
+	forced, err := g.check(a)
+	if err != nil {
+		return err
+	}
+	for _, line := range forced {
+		g.printf("%s\n", line)
 	}
 	return nil
 }
@@ -233,12 +264,14 @@ func (g *Gate) Confirm(a Action) error {
 
 	if g.DryRun {
 		g.printf("Would %s\n", p.Summary())
-		if p.Detail != "" {
-			g.printf("  %s\n", p.Detail)
-		}
+		p.printDetail(g)
 		return ErrDryRun
 	}
 	if g.AssumeYes {
+		// Nothing is asked, but what --force lets through is still named.
+		for _, line := range p.Forced {
+			g.printf("%s\n", line)
+		}
 		return nil
 	}
 	if !g.Interactive {
@@ -247,9 +280,7 @@ func (g *Gate) Confirm(a Action) error {
 	}
 
 	g.printf("About to %s\n", p.Summary())
-	if p.Detail != "" {
-		g.printf("  %s\n", p.Detail)
-	}
+	p.printDetail(g)
 	g.printf("%s ", p.Question())
 	answer, err := g.read()
 	if err != nil {
@@ -271,6 +302,10 @@ type Preview struct {
 	Count int `json:"count"`
 	// Detail is the extra line shown before the question.
 	Detail string `json:"detail,omitempty"`
+	// Forced names what --force lets through, one sentence each: protected
+	// hosts, hosts the inventory does not know, and protected hosts that
+	// could not be worked out. It is shown with the detail.
+	Forced []string `json:"forced,omitempty"`
 	// CountRequired says that a yes is not enough: the host count has to be
 	// read off the preview and given back.
 	CountRequired bool `json:"countRequired"`
@@ -281,7 +316,8 @@ type Preview struct {
 // Preview runs the checks of the gate and describes the question it would
 // ask, without asking it.
 func (g *Gate) Preview(a Action) (Preview, error) {
-	if err := g.Check(a); err != nil {
+	forced, err := g.check(a)
+	if err != nil {
 		return Preview{}, err
 	}
 	count := a.Targets.Len()
@@ -290,6 +326,7 @@ func (g *Gate) Preview(a Action) (Preview, error) {
 		Targets: a.Targets.String(),
 		Count:   count,
 		Detail:  a.Detail,
+		Forced:  forced,
 		// Above the threshold a yes is too easy to give by reflex. At zero
 		// the count is always typed, which is what a cautious site means by
 		// it.
@@ -302,6 +339,17 @@ func (g *Gate) Preview(a Action) (Preview, error) {
 // exe[1-3]".
 func (p Preview) Summary() string {
 	return fmt.Sprintf("%s %d host%s: %s", p.Verb, p.Count, plural(p.Count), p.Targets)
+}
+
+// printDetail prints the detail and what --force lets through, under the
+// summary.
+func (p Preview) printDetail(g *Gate) {
+	if p.Detail != "" {
+		g.printf("  %s\n", p.Detail)
+	}
+	for _, line := range p.Forced {
+		g.printf("  %s\n", line)
+	}
 }
 
 // Question is what the administrator is asked.

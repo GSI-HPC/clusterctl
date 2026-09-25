@@ -354,3 +354,65 @@ func TestHostRoleMustBeAHostAndAUserName(t *testing.T) {
 		})
 	}
 }
+
+// --force lifted the protection without naming what it let through: the
+// question showed the verb, the count and the set, and with -y nothing
+// mentioned wlm01 at all.
+func TestForcedRunNamesTheProtectedHostItLetsThrough(t *testing.T) {
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	const named = "--force lets through the protected host wlm01"
+	power := append(noSlurm, "bmc", "power", "off", "--ipmi", "--force", "-n", "exe0001,wlm01")
+
+	t.Run("question", func(t *testing.T) {
+		h, err := run(t, harnessOptions{tty: true, stdin: "y\n", recorder: ipmiOK()}, power...)
+		if err != nil {
+			t.Fatalf("bmc power off failed: %v\n%s", err, h.errOut)
+		}
+		text := h.errOut.String()
+		at, question := strings.Index(text, named), strings.Index(text, "Continue?")
+		if at < 0 || question < 0 || at > question {
+			t.Errorf("the question does not name wlm01 before it is asked:\n%s", text)
+		}
+	})
+	t.Run("assume yes", func(t *testing.T) {
+		h, err := run(t, harnessOptions{recorder: ipmiOK()}, append(power, "-y")...)
+		if err != nil {
+			t.Fatalf("bmc power off failed: %v\n%s", err, h.errOut)
+		}
+		if !strings.Contains(h.errOut.String(), named) {
+			t.Errorf("-y went ahead without naming wlm01:\n%s", h.errOut)
+		}
+		if strings.Contains(h.out.String(), "--force lets") {
+			t.Errorf("the note reached standard output:\n%s", h.out)
+		}
+	})
+	t.Run("dry run", func(t *testing.T) {
+		h, err := run(t, harnessOptions{}, append(power, "--dry-run")...)
+		if err != nil {
+			t.Fatalf("bmc power off --dry-run failed: %v\n%s", err, h.errOut)
+		}
+		if !strings.Contains(h.errOut.String(), named) {
+			t.Errorf("the dry run does not name wlm01:\n%s", h.errOut)
+		}
+	})
+}
+
+// exec asks nothing without --confirm, so it has no preview to name the
+// hosts --force lets through in; it names them all the same.
+func TestForcedExecNamesWhatItLetsThrough(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "exec", "--force", "-n", "exe0001,wlm01,ghost1", "--", "true")
+	if err != nil {
+		t.Fatalf("exec --force failed: %v", err)
+	}
+	for _, want := range []string{
+		"--force lets through the protected host wlm01",
+		"--force lets through ghost1, which the inventory does not know",
+	} {
+		if !strings.Contains(h.errOut.String(), want) {
+			t.Errorf("standard error does not say %q:\n%s", want, h.errOut)
+		}
+	}
+	if calls := h.recorder.Calls(); len(calls) != 3 {
+		t.Errorf("sent %d commands, want three", len(calls))
+	}
+}

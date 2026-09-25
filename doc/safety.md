@@ -29,6 +29,23 @@ Everything that changes or destroys something goes through
    clusterctl: power off would touch the protected host wlm01; pass --force to do it anyway
    ```
 
+   `--force` lifts the protection but still names what it lets through: the
+   protected hosts, the hosts the inventory does not know (step 3), and the
+   fact that the protected hosts could not be worked out at all. The lines
+   are part of the preview, shown under it before the question and by a dry
+   run, and they are written to standard error when `-y` skips the question
+   or, as for `exec` without `--confirm`, there is none:
+
+   ```
+   About to power off 5 hosts: exe[0001-0004],wlm01
+     through Redfish, falling back to IPMI with the credential bmc
+     --force lets through the protected host wlm01
+   Continue? [y/N]
+   ```
+
+   The MCP server never forces, so a plan touching a protected host is
+   refused and names it.
+
    The comparison is by machine, not by spelling. `App.Select` maps every
    name to the one the inventory uses before the gate sees it: case and a
    final dot are dropped, other padding is resolved, and the host name and
