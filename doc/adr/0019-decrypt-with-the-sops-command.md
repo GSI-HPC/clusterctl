@@ -123,6 +123,15 @@ part of sops.
   file first, as it does for `ageFile` secrets, notes the recipients it opens,
   and runs sops once for each file that holds a recipient of the Secret, in
   the order configured. Then, at a terminal only, sops looks for a key itself.
+- **The identities are read once, in app.** `secrets.IdentityFiles` reads a
+  file into both forms, the identities it holds and its path, and `app` keeps
+  the result for the process: `ageFile` and `source` secrets take the
+  identities, sops the paths. Measure 19 of issue #90 changes the same code:
+  the credential resolver still reads `workstation.identities` for itself, and
+  the measure is to have it take them from `app`. That stays with the
+  measure, which issue #91 leaves out of scope; this change only makes sure
+  it adds no third reading of the files, and that `app` holds the one the
+  resolver can be given.
 - **The tests encrypt with sops**, pinned in `mise.toml` and CI, and run once
   more at the oldest sops supported. The library is not kept even for the
   tests: a test requirement is still a requirement in `go.mod`, and still one
@@ -189,7 +198,11 @@ Measured the same way.
 ## What that costs
 
 - **A requirement at run time.** A workstation that reads a Secret needs sops
-  3.10.0 or later. One that reads none does not.
+  3.10.0 or later. One that reads none does not. The binary itself stays
+  static, and requirement R69, no run-time dependencies of its own, holds as
+  it does for ssh: sops is the site's program, which clusterctl runs, as
+  [ADR 0004](0004-drive-openssh.md) has it run ssh. `doc/requirements.md`
+  says so.
 - **A version to check, and an interface to follow.** The command line of sops
   is now one clusterctl depends on: `decrypt` reading standard input, the flags
   above, `SOPS_AGE_KEY_FILE` and `SOPS_AGE_SSH_PRIVATE_KEY_FILE`, exit statuses
