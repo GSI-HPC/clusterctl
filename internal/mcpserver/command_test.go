@@ -5,6 +5,8 @@ package mcpserver_test
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -12,7 +14,10 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
 type commandResult struct {
@@ -141,6 +146,50 @@ func TestAPanicInAToolFailsOnlyThatCall(t *testing.T) {
 	msg := f.refused(t, "read_command", map[string]any{"args": []string{"probe"}})
 	if !strings.HasPrefix(msg, "failed:") || !strings.Contains(msg, "panic") {
 		t.Errorf("message = %q, want the panic reported as a failure", msg)
+	}
+	var out applyResult
+	f.call(t, "apply_plan", applyArgs(p), &out)
+	if !out.Applied {
+		t.Errorf("the plan made before the panic = %+v, want it applied", out)
+	}
+}
+
+// A panic in a fan-out worker is out of reach of the handler's recover,
+// since it happens in another goroutine, and it ended the server with
+// every plan it held. It is that node's failure now, the call fails, and
+// the server answers the next one.
+func TestAPanicInAFanOutFailsOnlyThatCall(t *testing.T) {
+	old := fanout.PanicLog
+	fanout.PanicLog = io.Discard
+	t.Cleanup(func() { fanout.PanicLog = old })
+	f := start(t, setup{
+		answer: accept(map[string]any{"confirm": true}),
+		runner: func(next transport.Runner) transport.Runner {
+			return runnerFunc(func(ctx context.Context, target transport.Target, req transport.Request) (*transport.Result, error) {
+				if target.Name == "exe0002" {
+					panic("index out of range [3] with length 3")
+				}
+				return next.Run(ctx, target, req)
+			})
+		},
+	})
+	p := f.plan(t, map[string]any{"action": "resume", "nodes": "exe1"})
+	var got commandResult
+	f.call(t, "read_command", map[string]any{"args": []string{"node", "hw", "-n", "exe[1-3]", "-o", "json"}}, &got)
+	if got.ExitCode != exitcode.TargetFailed {
+		t.Errorf("exit code = %d, want %d (%s)", got.ExitCode, exitcode.TargetFailed, got.Error)
+	}
+	rows, _ := got.Output.([]any)
+	status := map[string]any{}
+	for _, row := range rows {
+		if r, ok := row.(map[string]any); ok {
+			status[fmt.Sprint(r["node"])] = r["status"]
+		}
+	}
+	for node, want := range map[string]string{"exe0001": "ok", "exe0002": "failed", "exe0003": "ok"} {
+		if status[node] != want {
+			t.Errorf("%s: status %v, want %s; output: %v", node, status[node], want, got.Output)
+		}
 	}
 	var out applyResult
 	f.call(t, "apply_plan", applyArgs(p), &out)

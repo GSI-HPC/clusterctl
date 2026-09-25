@@ -117,6 +117,11 @@ so two runs of the same command produce the same output. Redfish requests are
 bounded separately by `bmc.redfish.maxConcurrent`, because a service processor
 is much slower than a node and a wide fan-out to them achieves nothing.
 
+A panic while one target is worked on is recovered in that target's worker,
+since `recover` only reaches its own goroutine, and becomes that target's
+failure, with the stack written to standard error. The other targets finish,
+and the command fails rather than the process ending.
+
 Cancellation travels through one `context.Context` from the signal handler in
 `main` down to every request. The first SIGINT or SIGTERM cancels it: no new
 target is started, the prompts and the `--stdin` read stop waiting, ssh is sent

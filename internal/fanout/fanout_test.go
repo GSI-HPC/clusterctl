@@ -256,3 +256,69 @@ func TestGroupByOutputKeepsApartWhatEndedDifferently(t *testing.T) {
 		}
 	}
 }
+
+// panicLog sends the stacks of recovered panics to a buffer for the rest of
+// the test. A test that uses it does not run in parallel, since the log is
+// shared by the process.
+func panicLog(t *testing.T) *strings.Builder {
+	t.Helper()
+	var log strings.Builder
+	old := fanout.PanicLog
+	fanout.PanicLog = &log
+	t.Cleanup(func() { fanout.PanicLog = old })
+	return &log
+}
+
+// A panic in the work for one target ended the process, and with it
+// clusterctl mcp and every plan it held: recover only catches a panic in
+// its own goroutine. It is now that target's failure, and the rest finish.
+func TestRunTurnsAPanicIntoThatTargetsFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*fanout.Executor)
+	}{
+		{"in the runner", func(e *fanout.Executor) {
+			e.Runner = &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+				if tg.Name == "exe2" {
+					panic("index out of range [3] with length 3")
+				}
+				return &transport.Result{Target: tg, Stdout: "ok\n"}, nil
+			}}
+		}},
+		{"in OnResult", func(e *fanout.Executor) {
+			e.OnResult = func(r *transport.Result) {
+				if r.Target.Name == "exe2" {
+					panic("index out of range [3] with length 3")
+				}
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := panicLog(t)
+			e := &fanout.Executor{Runner: &transport.Recorder{}, Max: 2}
+			tc.setup(e)
+
+			results := e.Run(context.Background(), targets("exe1", "exe2", "exe3"), transport.Request{Argv: []string{"true"}})
+			if len(results) != 3 {
+				t.Fatalf("got %d results, want 3", len(results))
+			}
+			for _, r := range results {
+				if r.Target.Name == "exe2" {
+					if !r.Failed() || exitcode.From(r.Err) != exitcode.TargetFailed {
+						t.Errorf("exe2 = %+v, want it failed with exit code 1", r)
+					}
+					if r.Err == nil || !strings.Contains(r.Err.Error(), "panicked") {
+						t.Errorf("exe2: error = %v, want it to say clusterctl panicked", r.Err)
+					}
+					continue
+				}
+				if r.Failed() {
+					t.Errorf("%s failed: %v", r.Target.Name, r.Err)
+				}
+			}
+			if !strings.Contains(log.String(), "exe2") || !strings.Contains(log.String(), "goroutine") {
+				t.Errorf("the log has no stack naming exe2:\n%s", log)
+			}
+		})
+	}
+}

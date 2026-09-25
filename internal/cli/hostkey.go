@@ -82,7 +82,7 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			entries, err := scanner.Scan(a.Context(), host)
+			entries, err := scanHost(a.Context(), scanner, host)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -94,6 +94,17 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 	}
 	wg.Wait()
 	return found, failed
+}
+
+// scanHost scans one host. A panic in the scan becomes the host's failure
+// rather than the end of the process.
+func scanHost(ctx context.Context, scanner *hostkeys.Scanner, host string) (entries []hostkeys.Entry, err error) {
+	defer func() {
+		if p := fanout.Recovered(host, recover()); p != nil {
+			entries, err = nil, p
+		}
+	}()
+	return scanner.Scan(ctx, host)
 }
 
 // jumpHops returns the jump hosts a host is reached through: those of the
