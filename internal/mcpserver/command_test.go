@@ -6,8 +6,8 @@ package mcpserver_test
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -15,7 +15,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -154,15 +153,33 @@ func TestAPanicInAToolFailsOnlyThatCall(t *testing.T) {
 	}
 }
 
+// lockedBuffer is a log that several goroutines may write to at once.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // A panic in a fan-out worker is out of reach of the handler's recover,
 // since it happens in another goroutine, and it ended the server with
 // every plan it held. It is that node's failure now, the call fails, and
-// the server answers the next one.
+// the server answers the next one. The stack goes to the server's log, not
+// to the agent.
 func TestAPanicInAFanOutFailsOnlyThatCall(t *testing.T) {
-	old := fanout.PanicLog
-	fanout.PanicLog = io.Discard
-	t.Cleanup(func() { fanout.PanicLog = old })
+	log := &lockedBuffer{}
 	f := start(t, setup{
+		log:    log,
 		answer: accept(map[string]any{"confirm": true}),
 		runner: func(next transport.Runner) transport.Runner {
 			return runnerFunc(func(ctx context.Context, target transport.Target, req transport.Request) (*transport.Result, error) {
@@ -190,6 +207,12 @@ func TestAPanicInAFanOutFailsOnlyThatCall(t *testing.T) {
 		if status[node] != want {
 			t.Errorf("%s: status %v, want %s; output: %v", node, status[node], want, got.Output)
 		}
+	}
+	if strings.Contains(got.Notes, "goroutine") {
+		t.Errorf("the stack of the panic reached the agent:\n%s", got.Notes)
+	}
+	if !strings.Contains(log.String(), "panic while working on exe0002") {
+		t.Errorf("the stack of the panic is not in the server's log:\n%s", log)
 	}
 	var out applyResult
 	f.call(t, "apply_plan", applyArgs(p), &out)

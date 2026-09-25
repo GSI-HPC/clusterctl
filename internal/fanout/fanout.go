@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"sync"
 
@@ -35,6 +36,9 @@ type Executor struct {
 	// OnResult is called as each target finishes, in completion order, for
 	// progress output. It must be safe to call from several goroutines.
 	OnResult func(*transport.Result)
+	// PanicLog receives the stack of a panic in a worker; nil is the
+	// process's standard error.
+	PanicLog io.Writer
 }
 
 // Run executes the same request on every target.
@@ -99,7 +103,7 @@ func Each(ctx context.Context, n, limit int, work func(i int)) {
 // OnResult becomes the target's failure rather than the end of the process.
 func (e *Executor) runOne(ctx context.Context, target transport.Target, build func(transport.Target) transport.Request) (result *transport.Result) {
 	defer func() {
-		if err := Recovered(target.Name, recover()); err != nil {
+		if err := Recovered(e.PanicLog, target.Name, recover()); err != nil {
 			result = &transport.Result{Target: target, ExitCode: -1, Err: err}
 		}
 	}()

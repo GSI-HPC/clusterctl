@@ -6,6 +6,7 @@ package mcpserver_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,6 +101,8 @@ type setup struct {
 	runner func(transport.Runner) transport.Runner
 	// force starts the server with --force, which it must not pass on.
 	force bool
+	// log receives the server's log; nil discards it.
+	log io.Writer
 }
 
 type fixture struct {
@@ -138,6 +141,7 @@ func start(t *testing.T, s setup) *fixture {
 		Command:  command,
 		Confirm:  s.confirm,
 		Version:  "test",
+		Log:      s.log,
 	})
 	if err != nil {
 		t.Fatalf("New failed: %v", err)

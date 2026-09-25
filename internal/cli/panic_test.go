@@ -11,27 +11,15 @@ import (
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
-
-// panicLog sends the stacks of recovered panics to a buffer for the rest of
-// the test, and returns it.
-func panicLog(t *testing.T) *strings.Builder {
-	t.Helper()
-	var log strings.Builder
-	old := fanout.PanicLog
-	fanout.PanicLog = &log
-	t.Cleanup(func() { fanout.PanicLog = old })
-	return &log
-}
 
 // A panic in the work for one node ended the whole process, because recover
 // only catches a panic in its own goroutine and the fan-out workers had
 // none. It is that node's failure now: the others are reported, and the
-// command does not exit 0.
+// command does not exit 0. The stack goes to the command's diagnostics,
+// which are its standard error unless the front end says otherwise.
 func TestAPanicOnOneNodeFailsOnlyThatNode(t *testing.T) {
-	log := panicLog(t)
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		if tg.Name == "exe0002" {
 			panic("index out of range [3] with length 3")
@@ -53,14 +41,13 @@ func TestAPanicOnOneNodeFailsOnlyThatNode(t *testing.T) {
 			t.Errorf("%s: status %q, want %q; rows: %v", node, status[node], want, rows)
 		}
 	}
-	if !strings.Contains(log.String(), "exe0002") {
-		t.Errorf("the stack of the panic was not written:\n%s", log)
+	if log := h.errOut.String(); !strings.Contains(log, "panic while working on exe0002") || !strings.Contains(log, "goroutine") {
+		t.Errorf("the stack of the panic was not written to standard error:\n%s", log)
 	}
 }
 
 // The host key scan runs its own workers, which had no recover either.
 func TestAPanicInAHostKeyScanFailsOnlyThatHost(t *testing.T) {
-	panicLog(t)
 	host := startFakeHost(t)
 	scanDial = func(ctx context.Context, network, address string) (net.Conn, error) {
 		if strings.HasPrefix(address, "exe0002.") {
@@ -79,5 +66,8 @@ func TestAPanicInAHostKeyScanFailsOnlyThatHost(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "panicked") {
 		t.Errorf("the output does not say exe0002 panicked:\n%s", h.out)
+	}
+	if !strings.Contains(h.errOut.String(), "panic while working on exe0002.") {
+		t.Errorf("the stack of the panic was not written to standard error:\n%s", h.errOut)
 	}
 }

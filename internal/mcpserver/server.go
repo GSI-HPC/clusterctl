@@ -174,12 +174,15 @@ func (s *Server) app(ctx context.Context) (*app.App, error) {
 }
 
 // streams are what a call reads and writes. There is no terminal: a command
-// that would prompt refuses instead.
+// that would prompt refuses instead. What a password helper says on its
+// standard error, and the stack of a panic, go to the server's log rather
+// than into the notes the agent reads.
 func (s *Server) streams(out io.Writer) app.Streams {
 	return app.Streams{
 		In:       strings.NewReader(""),
 		Out:      out,
 		Err:      out,
+		Diag:     s.opts.Log,
 		IsTTY:    false,
 		StateDir: s.opts.StateDir,
 		CacheDir: s.opts.CacheDir,

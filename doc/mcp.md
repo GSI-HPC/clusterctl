@@ -157,7 +157,9 @@ confirmation come with it.
 - **Fresh configuration per call.** Each call builds its own `app.App`, so
   an edit to the inventory or to the protected hosts takes effect without a
   restart. Each call also gets its own streams, and nothing a command prints
-  can reach the protocol on standard output.
+  can reach the protocol on standard output. What a command reports goes to
+  the call's `notes`; what a password helper writes on its standard error
+  goes to the server's log instead, as the stack of a panic does.
 - **No default node set.** `-n` and `CLUSTERCTL_NODES` do not apply, in the
   server's own tools and in the command tree `read_command` runs; a call
   names its nodes or selects nothing, as [safety.md](safety.md) requires.
