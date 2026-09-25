@@ -168,7 +168,13 @@ confirmation come with it.
   the client runs in. A sops encrypted Secret is opened with the keys of
   `workstation.identities` alone: sops' own key discovery can run
   `SOPS_AGE_KEY_CMD` or have gpg-agent ask for a passphrase, so it is used
-  only at a terminal.
+  only at a terminal. The `sops` command that decrypts is run only for an
+  identity file that holds a recipient of the Secret, in a session of its
+  own with no controlling terminal, with `HOME` and `XDG_CONFIG_HOME` pointed
+  at an empty directory and an environment of `PATH`, `LANG`, `LC_ALL`,
+  `LC_CTYPE`, `TMPDIR` and `TZ` alone, so neither `SOPS_AGE_KEY*` nor a key
+  service's credentials reach it, and over pipes of its own rather than the
+  protocol's streams ([ADR 0019](adr/0019-decrypt-with-the-sops-command.md)).
 - **The administrator's identity.** It runs as the user who started it, with
   their ssh agent. A shared server reachable over HTTP would change whose
   keys act on the cluster, so that is a separate decision.

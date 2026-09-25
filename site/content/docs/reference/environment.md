@@ -17,6 +17,7 @@ weight: 2
 | `CLUSTERCTL_SSH_BINARY` | The ssh client to run |
 | `CLUSTERCTL_SCP_BINARY` | The scp client to run |
 | `CLUSTERCTL_SSHUTTLE_BINARY` | The sshuttle to run |
+| `CLUSTERCTL_SOPS_BINARY` | The sops that decrypts Secret documents, `workstation.sopsBinary` |
 | `CLUSTERCTL_PAGER` | `workstation.pager` |
 | `CLUSTERCTL_BROWSER` | `workstation.browser` |
 

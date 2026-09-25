@@ -104,8 +104,17 @@ devel (a1b2c3d4e5f6) built 2026-09-22T14:42:30Z go1.26.8 linux/amd64
 
 clusterctl installs nothing on your hosts, but it does run programs there.
 
-**On your workstation:** an OpenSSH client, and `sshuttle` if the site uses
-tunnels.
+**On your workstation:** an OpenSSH client, `sshuttle` if the site uses
+tunnels, and [sops](https://getsops.io) 3.10.0 or later if the site keeps
+secrets in `Secret` documents. clusterctl runs `sops` to decrypt one, the way it
+runs `ssh`, so the sops that edits your secrets is the one that reads them.
+A command that uses no secret runs without it. `clusterctl doctor` says whether
+the one in `PATH` will do; `workstation.sopsBinary` names another. Install it
+from your distribution, or pin it next to clusterctl with mise:
+
+```console
+$ mise use -g sops
+```
 
 **On the infrastructure hosts**, depending on which roles a site configures:
 

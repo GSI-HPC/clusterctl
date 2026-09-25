@@ -195,7 +195,12 @@ Before a reinstall that needs them, check that you can open every one:
 $ clusterctl secrets check --decrypt
 SECRET   FILE                               KEYS  ENCRYPTED TO  USED  STATUS
 example  /etc/clusterctl/secrets.sops.yaml  2     3 age         2     decrypts
+
+1 Secret documents, decrypted with sops 3.13.3 at /usr/bin/sops
 ```
+
+The `sops` command decrypts them, so it has to be installed on your
+workstation; the caption names the one that did.
 
 ### Configuration management
 

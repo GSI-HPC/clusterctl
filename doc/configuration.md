@@ -235,6 +235,7 @@ alone.
 | `CLUSTERCTL_KNOWN_HOSTS` | `ssh.knownHostsFile` |
 | `CLUSTERCTL_SSH_BINARY`, `CLUSTERCTL_SCP_BINARY` | The clients to run |
 | `CLUSTERCTL_SSHUTTLE_BINARY` | The sshuttle to run |
+| `CLUSTERCTL_SOPS_BINARY` | The sops that decrypts Secret documents |
 | `CLUSTERCTL_PAGER`, `CLUSTERCTL_BROWSER` | The pager and browser to use |
 
 A password is never one of these. It is named by the `Site` document as a
@@ -285,15 +286,37 @@ credentials:
 ```
 
 Nothing is decrypted while the configuration loads. The names and keys of a
-Secret are readable without a key, so a reference to one that does not exist is
-reported at its line, and a command that uses no secret needs no key. When a
-command does use one, the document is decrypted into memory with the keys of
-`workstation.identities` first. At a terminal, sops then looks for a key
-itself: `SOPS_AGE_KEY_FILE` and its other variables, a PGP agent, the
-credentials of a cloud KMS or Vault, trying age and PGP keys before any
-service. Without a terminal, under MCP or in a script, only
-`workstation.identities` are used, because sops' own search can run a program
-or ask for a passphrase.
+Secret, and its sops metadata, are readable without a key, so a reference to
+one that does not exist is reported at its line, and a command that uses no
+secret needs neither a key nor sops. When a command does use one, the `sops`
+command decrypts the document into memory
+([ADR 0019](adr/0019-decrypt-with-the-sops-command.md)). It has to be sops
+3.10.0 or later, the first that reads the file from standard input and opens
+it with an OpenSSH key; `clusterctl doctor` checks it whenever the
+configuration holds a Secret, and `secrets check` names the one it uses. sops
+is looked up in `PATH`, as the ssh client is, unless `workstation.sopsBinary`
+or `CLUSTERCTL_SOPS_BINARY` names another.
+
+The keys of `workstation.identities` are tried first. sops opens them itself,
+by path: an age identity file through `SOPS_AGE_KEY_FILE`, an OpenSSH key
+through `SOPS_AGE_SSH_PRIVATE_KEY_FILE`, one file per run of sops and only a
+file that holds a recipient of the Secret, so no key is copied anywhere. Such
+a run gets an environment of `PATH`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TMPDIR`
+and `TZ` alone, `HOME`, `XDG_CONFIG_HOME` and `GNUPGHOME` pointed at an empty
+directory, and no controlling terminal: it finds no key it was not given, and
+cannot ask for a passphrase. At a terminal, sops then looks for a key itself,
+as `sops decrypt` would at the same prompt: `SOPS_AGE_KEY_FILE` and its other
+variables, `~/.config/sops/age/keys.txt`, `~/.ssh/id_ed25519`, a PGP agent,
+the credentials of a cloud KMS or Vault, trying age and PGP keys before any
+service. It gets clusterctl's environment then, except `SOPS_KEYSERVICE`,
+`SOPS_ENABLE_LOCAL_KEYSERVICE`, `SOPS_CONFIG` and `SOPS_DECRYPTION_ORDER`,
+which would change how the file is read. Without a terminal, under MCP or in a
+script, only `workstation.identities` are used, because sops' own search can
+run a program or ask for a passphrase.
+
+sops is always given an empty configuration (`--config /dev/null`), so no
+`.sops.yaml` above the working directory changes how a Secret is read; the
+`.sops.yaml` next to the documents is for editing them.
 
 The keys a file is encrypted to are listed in its sops metadata, which the
 message authentication code does not cover: anyone who can write the file can
@@ -307,7 +330,13 @@ kind: Workstation
 spec:
   identities: [~/.ssh/id_ed25519]
   sopsKeyTypes: [age, pgp]   # age, pgp, kms, gcp_kms, azure_kv, hc_vault, hckms
+  sopsBinary: /opt/sops/bin/sops   # sops in PATH when unset
 ```
+
+Every kind of key sops supports opens a Secret once it is trusted, since sops
+itself tries them. A sops mapping with a field clusterctl does not know is
+refused as well: it may name a kind of key a newer sops tries and this list
+cannot check.
 
 The loader also refuses what sops would not have written, and what it did
 write but clusterctl will not read:
@@ -328,7 +357,11 @@ clusterctl: secrets.sops.yaml is not valid:
   without a key.
 
 When a Secret cannot be decrypted, the error says which keys were tried and
-nothing of the values.
+nothing of the values: what sops printed is passed on, escaped, only when it
+could not open the data key, and then it lists the keys it tried. A file whose
+message authentication code does not match is reported as changed without
+sops; any other failure of sops is reported by its exit status alone, since
+its message can quote a decrypted value.
 
 `clusterctl secrets check --decrypt` proves this workstation opens every Secret
 without printing any of it.

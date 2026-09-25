@@ -23,9 +23,10 @@ A decision is superseded by a later record, never edited.
 | [0010](0010-public-nodeset-package.md) | Publish `nodeset`, keep the rest internal | accepted |
 | [0011](0011-installable-from-release-assets.md) | Release assets are consumable by a version manager | accepted |
 | [0012](0012-dependabot.md) | Dependabot proposes the dependency updates | accepted |
-| [0013](0013-sops-secret-documents.md) | Secrets live in sops encrypted Secret documents | accepted |
+| [0013](0013-sops-secret-documents.md) | Secrets live in sops encrypted Secret documents | superseded in part by [0019](0019-decrypt-with-the-sops-command.md) |
 | [0014](0014-mcp-plan-and-apply.md) | An MCP server of curated tools, where a person answers the gate | accepted |
 | [0015](0015-release-notes-in-the-tag.md) | Release notes are written in the signed tag | accepted |
 | [0016](0016-copyright-holder.md) | GSI holds the copyright, and every file says so | accepted |
 | [0017](0017-config-init-into-an-empty-directory.md) | `config init` writes only into an empty directory, where it is read | accepted |
 | [0018](0018-a-manual-for-every-release.md) | A manual for every release, the latest at the root | accepted |
+| [0019](0019-decrypt-with-the-sops-command.md) | Decrypt Secret documents with the sops command | accepted |

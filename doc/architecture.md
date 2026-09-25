@@ -59,7 +59,7 @@ every command rather than in the ones that remembered to implement them.
 | `internal/redfish` | The Redfish client, its certificate pinning and its reset semantics. |
 | `internal/ipmi` | The FreeIPMI and ipmitool backends, run on a host that can reach the service network. |
 | `internal/credentials` | Resolving an account and its password from a configured source. |
-| `internal/secrets` | Decrypting age encrypted files and sops encrypted Secret documents into memory. |
+| `internal/secrets` | Decrypting age encrypted files into memory, reading the sops metadata of a Secret document, and having the `sops` command decrypt it into memory. |
 | `internal/slurm` | Reading and changing the state of the workload manager. |
 | `internal/dhcp` | Parsing an ISC dhcpd configuration. |
 | `internal/hostkeys` | Reading, writing and collecting SSH host keys. |
@@ -97,7 +97,9 @@ clusterctl runs on an administrator's workstation. Almost everything it does
 happens somewhere else:
 
 - **On the workstation**: parsing, merging, node set arithmetic, naming, age
-  decryption, Redfish over HTTPS, and the ssh and sshuttle clients.
+  decryption, Redfish over HTTPS, the ssh and sshuttle clients, and `sops`,
+  which decrypts the Secret documents
+  ([ADR 0019](adr/0019-decrypt-with-the-sops-command.md)).
 - **On an infrastructure host**: the IPMI tools, the Slurm clients, the fabric
   diagnostics, the DHCP and PXE service files, and `fping`. These need a route
   into a network the workstation cannot reach, or a client it should not have

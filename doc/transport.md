@@ -281,6 +281,19 @@ value of a sops encrypted Secret document, is decrypted into memory on the
 workstation and written onto the node over standard input, so the plaintext
 never touches either disk.
 
+A Secret document is decrypted by the `sops` command, run the way the ssh
+client is ([ADR 0019](adr/0019-decrypt-with-the-sops-command.md)): the file
+goes in on its standard input, exactly the bytes clusterctl checked, and the
+plaintext comes back on its standard output, as JSON, into memory. sops gets
+pipes of its own for all three streams, never clusterctl's, which under `mcp
+serve` carry the protocol, and it is never given `--output`, `--in-place` or
+`--ignore-mac`. An interrupt sends it SIGTERM, and it is killed five seconds
+later if it is still there. Without a terminal it runs in a session of its own,
+with an environment built from an allowlist and an empty home directory, so it
+can neither prompt nor find a key it was not given; `configuration.md` has the
+rule. What sops prints is shown only when it could not open the data key, and
+escaped: after that point its messages can quote a decrypted value.
+
 ## Host keys
 
 One file is the site's trust anchor, kept in version control, and every

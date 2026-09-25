@@ -169,6 +169,8 @@ The rest is updated by hand:
 | The Hextra theme | `site/go.mod` | `hugo mod get -u github.com/imfing/hextra`, then `hugo mod tidy`, in `site/`. Never `go mod tidy`: it removes the requirement. |
 | Hugo | `site/hugo-version` | Change it there; CI and the Pages workflow build main's manual with it. Each release's manual keeps the Hugo its own tag names. |
 | The Go release line | `GO_VERSION` in the workflows, `go` in `mise.toml` | As described under [the Go toolchain](#the-go-toolchain). |
+| sops for the tests | `SOPS_VERSION` in `ci.yml` and `release.yml`, `sops` in `mise.toml` | Change all three to the new release; CI builds it from its tag. The sops that reads a site's secrets is the workstation's own ([ADR 0019](adr/0019-decrypt-with-the-sops-command.md)), updated by the distribution or the version manager that installed it. |
+| The oldest sops supported | `SOPS_MIN_VERSION` in `ci.yml`, `MinSopsVersion` in `internal/secrets` | Raise both together, with a line in the release notes, when clusterctl comes to need a newer sops. |
 
 golangci-lint and govulncheck need nothing, and neither does GoReleaser within
 its major version: the workflows take their latest release every time.
