@@ -62,7 +62,7 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 			err  error
 		)
 		if bmc {
-			host, err = a.Namer.BMC(node)
+			host, err = a.BMCHost(node)
 		} else {
 			host, err = a.Namer.FQDN(node)
 		}
@@ -397,7 +397,7 @@ that the key it comes back with can be collected cleanly.`,
 				for _, node := range ns.Expand() {
 					var name string
 					if bmc {
-						name, err = a.Namer.BMC(node)
+						name, err = a.BMCHost(node)
 					} else {
 						name, err = a.Namer.FQDN(node)
 					}
