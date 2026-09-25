@@ -33,7 +33,8 @@ updates:
   # of their actions is reviewed on its own release notes. The limit is above
   # the number of actions in use, so that none waits for another to merge.
   - package-ecosystem: github-actions
-    directory: /
+    # The workflows, and the setup action they share.
+    directories: [/, /.github/actions/setup-go]
     schedule:
       interval: weekly
     cooldown:

@@ -9,14 +9,15 @@
 # site/README.md says which version to install.
 
 [tools]
-# The Go release line CI and the release build with; mise takes its newest
-# patch, as they do. go.mod states the oldest version the code compiles with.
+# The Go release line CI and the release build with, which
+# .github/actions/setup-go reads from here; mise takes its newest patch, as
+# they do. go.mod states the oldest version the code compiles with.
 go = "1.26"
 
 # The major version .golangci.yml is written against.
 golangci-lint = "2"
 
-# The sops the tests encrypt and decrypt Secret documents with, the one CI
-# installs as SOPS_VERSION. clusterctl runs sops to read a Secret, so the tests
+# The sops the tests encrypt and decrypt Secret documents with, which CI
+# installs from here too. clusterctl runs sops to read a Secret, so the tests
 # need it.
 sops = "3.13.3"
