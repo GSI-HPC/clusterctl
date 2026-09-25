@@ -160,11 +160,5 @@ process id file is signalled; a stale file is removed.`,
 }
 
 func completeTunnels(r *root) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-	return func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		a, err := r.App()
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return manager(a).Names(), cobra.ShellCompDirectiveNoFileComp
-	}
+	return complete(r, func(a *app.App) []string { return manager(a).Names() })
 }

@@ -78,3 +78,32 @@ func TestCompletionOfTheBuiltins(t *testing.T) {
 		})
 	}
 }
+
+// TestCompletionOfConfiguredNames checks the arguments completed from the
+// configuration. The harness gives --config, which cobra parses twice while
+// completing: tunnel names and the context of use-context were read with
+// r.App, which then read every file twice and refused, and offered nothing.
+func TestCompletionOfConfiguredNames(t *testing.T) {
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"__complete", "tunnel", "start", ""}, []string{"ipmi", "internal"}},
+		{[]string{"__complete", "config", "use-context", ""}, []string{"cluster1", "cluster2"}},
+		{[]string{"__complete", "--context", ""}, []string{"cluster1", "cluster2"}},
+		{[]string{"__complete", "login", ""}, []string{"mgmt", "install"}},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args[1:], " "), func(t *testing.T) {
+			h, err := run(t, harnessOptions{}, tt.args...)
+			if err != nil {
+				t.Fatalf("completion failed: %v", err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(h.out.String(), want+"\n") {
+					t.Errorf("completion does not offer %s:\n%s", want, h.out)
+				}
+			}
+		})
+	}
+}
