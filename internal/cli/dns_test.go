@@ -205,3 +205,34 @@ func TestReverseNames(t *testing.T) {
 		}
 	}
 }
+
+// TestDNSLookupBMCTakesTheInventoryAddress: lookup --bmc resolved the name
+// the naming rules derive, which may be stale or missing, instead of the
+// bmcAddress the bmc commands reach. An address is shown as it is, and
+// marked as not looked up, since no server was asked about it.
+func TestDNSLookupBMCTakesTheInventoryAddress(t *testing.T) {
+	server := fakeDNS(t, map[string][]dnsmessage.Resource{
+		"exe0004.mgmt.hpc.example.org.": {aRR("exe0004.mgmt.hpc.example.org.", "10.9.0.4")},
+	})
+	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
+		return s + "    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n"
+	})
+	h, err := run(t, harnessOptions{config: []string{inventory}}, "dns", "lookup", "--bmc",
+		"-n", "exe[0003-0004]", "-o", "json", "--set", "services.dns.server="+server)
+	if err != nil {
+		t.Fatalf("dns lookup --bmc failed: %v\n%s%s", err, h.out, h.errOut)
+	}
+	var got map[string]dnsAnswer
+	if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, h.out)
+	}
+	if answer, ok := got["10.9.0.77"]; !ok || strings.Join(answer.Addresses, " ") != "10.9.0.77" || !answer.Literal {
+		t.Errorf("answers = %+v, want exe0003's service processor shown as 10.9.0.77, not looked up", got)
+	}
+	if answer := got["exe0004.mgmt.hpc.example.org"]; strings.Join(answer.Addresses, " ") != "10.9.0.4" || answer.Literal {
+		t.Errorf("answers = %+v, want exe0004's service processor resolved by its derived name", got)
+	}
+	if !strings.Contains(h.errOut.String(), "10.9.0.77") {
+		t.Errorf("no note says 10.9.0.77 was not looked up:\n%s", h.errOut)
+	}
+}

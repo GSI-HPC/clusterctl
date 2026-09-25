@@ -343,6 +343,8 @@ func checkAnswer(data []byte, id uint16, question dnsmessage.Question) (*dnsmess
 type dnsAnswer struct {
 	CNAMEs    []string `json:"cnames,omitempty" yaml:"cnames,omitempty"`
 	Addresses []string `json:"addresses" yaml:"addresses"`
+	// Literal says the host is an address, which was not looked up.
+	Literal bool `json:"literal,omitempty" yaml:"literal,omitempty"`
 }
 
 func newDNSLookupCommand(r *root) *cobra.Command {
@@ -351,6 +353,11 @@ func newDNSLookupCommand(r *root) *cobra.Command {
 	cmd := leaf("lookup [NODESET]", "Resolve the host names of a node set", `
 Resolve each node's host name and print every address that comes back, and
 every alias passed through on the way.
+
+With --bmc, each node's service processor is resolved instead: the
+bmcAddress the inventory records for it, else the name the naming rules
+give it, which is the host the bmc commands reach. A bmcAddress that is an
+address is shown as it is and not looked up.
 
   clusterctl dns lookup -n exe[1-4]
   clusterctl dns lookup -n exe[1-4] --bmc`,
@@ -375,12 +382,22 @@ every alias passed through on the way.
 			for _, node := range ns.Expand() {
 				var host string
 				if bmc {
-					host, err = a.Namer.BMC(node)
+					host, err = a.BMCHost(node)
 				} else {
 					host, err = a.Namer.FQDN(node)
 				}
 				if err != nil {
 					return exitcode.Wrap(exitcode.Usage, err)
+				}
+				// A bmcAddress may be an address rather than a name. It is
+				// what the bmc commands reach, so it is shown as it is; no
+				// server is asked, and the note says so, so that it is not
+				// taken for an answer.
+				if net.ParseIP(host) != nil {
+					a.Printf("%s: %s is an address, not a name; it was not looked up\n", node, host)
+					object[host] = dnsAnswer{Addresses: []string{host}, Literal: true}
+					t.Add(node, host, "", host)
+					continue
 				}
 				chain, addresses, err := res.lookupHost(a.Context(), host)
 				if err != nil {
@@ -402,7 +419,7 @@ every alias passed through on the way.
 			}
 			return nil
 		})
-	cmd.Flags().BoolVarP(&bmc, "bmc", "b", false, "resolve the service processor names instead")
+	cmd.Flags().BoolVarP(&bmc, "bmc", "b", false, "resolve the service processors instead")
 	return cmd
 }
 
