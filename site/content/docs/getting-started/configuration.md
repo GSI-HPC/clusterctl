@@ -248,7 +248,7 @@ credentials:
     username: admin
     password:
       ageFile: secrets/bmc.age   # an age encrypted file
-  pdu:
+  bmc-prompt:
     username: admin
     password:
       prompt: true               # ask on the terminal

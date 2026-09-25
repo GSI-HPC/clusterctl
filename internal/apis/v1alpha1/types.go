@@ -53,7 +53,7 @@ type SiteSpec struct {
 	// Networks maps a network name to a CIDR, used by the tunnels and by the
 	// BMC address checks.
 	Networks map[string]string `json:"networks,omitempty" yaml:"networks,omitempty" jsonschema:"description=Named CIDRs"`
-	// Credentials are the accounts used for BMCs and PDUs. A password is
+	// Credentials are the accounts used for service processors. A password is
 	// never written here, only where to read it from: a Secret document is
 	// one of the places.
 	Credentials map[string]Credential `json:"credentials,omitempty" yaml:"credentials,omitempty" jsonschema:"description=Named credentials; passwords are referenced, never inlined"`
@@ -213,8 +213,9 @@ type PDUSpec struct {
 	// printf format with two string verbs.
 	NameFormat string `json:"nameFormat,omitempty" yaml:"nameFormat,omitempty" jsonschema:"minLength=1,description=printf format taking the row and the rack"`
 	Domain     string `json:"domain,omitempty" yaml:"domain,omitempty"`
-	User       string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"pattern=^[A-Za-z0-9._][A-Za-z0-9._-]*$"`
-	Credential string `json:"credential,omitempty" yaml:"credential,omitempty"`
+	// User is the account ssh logs in as. ssh asks for its password, or
+	// uses a key, itself.
+	User string `json:"user,omitempty" yaml:"user,omitempty" jsonschema:"pattern=^[A-Za-z0-9._][A-Za-z0-9._-]*$"`
 }
 
 // VendorProfile overrides BMC handling for one hardware vendor.

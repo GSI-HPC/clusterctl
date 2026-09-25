@@ -247,6 +247,9 @@ $ clusterctl pdu shell 1 R02
 $ clusterctl pdu shell 1 R02 -- show outlets
 ```
 
+`pdu shell` logs in with ssh as `bmc.pdu.user`, and ssh asks for the PDU's
+password or uses your key, as it would for any other host.
+
 ## Which processors answer
 
 ```console
