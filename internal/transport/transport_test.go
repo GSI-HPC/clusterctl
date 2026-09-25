@@ -317,6 +317,88 @@ func TestRecorder(t *testing.T) {
 	}
 }
 
+// Under a fan-out the calls arrive in any order, so a prepared answer went to
+// whichever call came first. ByTarget keys an answer to a target; the calls
+// to the others take Responses in the order they arrive.
+func TestRecorderAnswersByTarget(t *testing.T) {
+	t.Parallel()
+	for _, order := range [][]string{
+		{"exe1", "exe2", "exe3"},
+		{"exe2", "exe3", "exe1"},
+		{"exe3", "exe1", "exe2"},
+	} {
+		t.Run(strings.Join(order, ","), func(t *testing.T) {
+			t.Parallel()
+			rec := &transport.Recorder{
+				ByTarget:  map[string]*transport.Result{"exe2": {Stdout: "two\n", ExitCode: 3}},
+				Responses: []*transport.Result{{Stdout: "first\n"}},
+			}
+			got := map[string]*transport.Result{}
+			for _, name := range order {
+				res, err := rec.Run(context.Background(), transport.Target{Name: name}, transport.Request{Argv: []string{"true"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				got[name] = res
+			}
+			if r := got["exe2"]; r.Stdout != "two\n" || r.ExitCode != 3 || r.Target.Name != "exe2" {
+				t.Errorf("exe2 got %+v, want its own answer", r)
+			}
+			var others []string
+			for _, name := range order {
+				if name != "exe2" {
+					others = append(others, name)
+				}
+			}
+			if got[others[0]].Stdout != "first\n" || got[others[1]].Stdout != "" {
+				t.Errorf("%s got %q and %s got %q; want the response for the first call without an answer of its own",
+					others[0], got[others[0]].Stdout, others[1], got[others[1]].Stdout)
+			}
+		})
+	}
+}
+
+// A target keyed to no result answers with an empty successful one, as a
+// target the Recorder has nothing for does, and takes none of Responses.
+func TestRecorderTakesANilAnswerAsAnEmptyOne(t *testing.T) {
+	t.Parallel()
+	rec := &transport.Recorder{
+		ByTarget:  map[string]*transport.Result{"exe1": nil},
+		Responses: []*transport.Result{{Stdout: "first\n"}},
+	}
+	res, err := rec.Run(context.Background(), transport.Target{Name: "exe1"}, transport.Request{Argv: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Stdout != "" || res.ExitCode != 0 || res.Target.Name != "exe1" {
+		t.Errorf("exe1 got %+v, want an empty successful result", res)
+	}
+}
+
+// A fan-out makes its calls in any order, so recorded calls are compared in
+// node set order, each target's own calls in the order they were made.
+func TestRecorderSortsCallsByTarget(t *testing.T) {
+	t.Parallel()
+	rec := &transport.Recorder{}
+	for _, call := range []struct{ target, command string }{
+		{"exe10", "a"}, {"login", "b"}, {"exe2", "c"}, {"bad name", "d"}, {"exe2", "e"}, {"exe1", "f"},
+	} {
+		if _, err := rec.Run(context.Background(), transport.Target{Name: call.target}, transport.Request{Argv: []string{call.command}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []string
+	for _, c := range rec.Sorted() {
+		got = append(got, c.Target.Name+":"+c.Command)
+	}
+	if want := "exe1:f exe2:c exe2:e exe10:a login:b bad name:d"; strings.Join(got, " ") != want {
+		t.Errorf("Sorted = %q, want %q", strings.Join(got, " "), want)
+	}
+	if got := rec.Calls()[0].Target.Name; got != "exe10" {
+		t.Errorf("Calls()[0] is %s; Sorted must not reorder what Calls returns", got)
+	}
+}
+
 func TestResultHelpers(t *testing.T) {
 	t.Parallel()
 

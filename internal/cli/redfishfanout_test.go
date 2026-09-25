@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 )
 
@@ -16,6 +17,31 @@ import (
 func processorOf(req *http.Request) string {
 	node, _, _ := strings.Cut(req.URL.Hostname(), ".")
 	return node
+}
+
+// bmc.redfish.maxConcurrent bounds the requests in flight to the processors.
+// Each request is held until one more than the limit are under way, which
+// never happens while the limit is kept, so exactly the limit run at once.
+func TestTheRedfishFanOutKeepsToItsLimit(t *testing.T) {
+	isolateHome(t)
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	calls := &fanouttest.InFlight{Hold: 3}
+	fakeRedfish(t, calls.RoundTripper(roundTrip(func(req *http.Request) (*http.Response, error) {
+		return answer(req, http.StatusOK, system), nil
+	})).RoundTrip)
+
+	h, err := run(t, harnessOptions{recorder: ipmiOK()},
+		append(noSlurm, "--set", "bmc.redfish.maxConcurrent=2", "--set", "bmc.order=[redfish]",
+			"bmc", "power", "status", "-n", "exe[0001-0005]")...)
+	if err != nil {
+		t.Fatalf("bmc power status failed: %v\n%s", err, h.errOut)
+	}
+	if got := calls.Peak(); got != 2 {
+		t.Errorf("%d requests were in flight at once, want 2", got)
+	}
+	if got := calls.Started(); got < 5 {
+		t.Errorf("%d requests were sent, want one for each of the 5 processors at least", got)
+	}
 }
 
 // A panic while a request went to one processor ended the process: the

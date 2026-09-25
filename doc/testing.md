@@ -61,9 +61,22 @@ the whole command tree can be driven without a cluster. A reply is handed the
 payload a command streamed on standard input, so a test can run the script a
 command sends in a real shell, in a temporary directory, and look at what it
 left behind: that is how `cinc config` is shown to write a file that is safe
-to source and never truncated. The command tests use
+to source and never truncated. A fan-out makes its calls in any order, so a
+test that prepares answers for several nodes keys each to its node with
+`ByTarget` rather than listing them in `Responses`, compares the recorded
+calls in node set order with `Sorted`, and writes a `Reply` that is safe to
+call from several goroutines at once. The command tests use
 the example configuration that ships with the documentation, which keeps the
 example honest.
+
+**Counting what runs at once.** `fanout/fanouttest` counts the calls a fake
+is in the middle of: the requests a runner is asked to run, those a Redfish
+round tripper sends and the connections a host key scan dials. A fake that
+answers at once rarely has two calls under way together, so each call is held
+until one more than the limit are, which a fan-out that keeps to its limit
+never allows: the test sees exactly the limit in flight, and one call too many
+when the limit is broken. The executor, the Redfish fan-out and the host key
+scans are tested this way.
 
 **Command tests** drive the real command tree end to end and assert on what
 would be sent, not on whether the code compiles: that a glob and an apostrophe
