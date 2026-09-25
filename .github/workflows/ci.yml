@@ -164,6 +164,28 @@ jobs:
           name: fuzz-corpus
           path: nodeset/testdata/fuzz/
 
+  fuzz-dhcp:
+    name: Fuzz the DHCP parser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      # The parser reads a file another host serves, so it must never
+      # panic, whatever that file holds.
+      - name: Fuzz
+        run: go test ./internal/dhcp/ -run '^$' -fuzz FuzzParse -fuzztime 60s
+
+      - name: Upload the failing input
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus-dhcp
+          path: internal/dhcp/testdata/fuzz/
+
   cross-build:
     name: Cross build
     runs-on: ubuntu-latest
