@@ -10,8 +10,10 @@ package inventory
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 
@@ -477,6 +479,8 @@ func (inv *Inventory) AttributeValues(key string) []string {
 			seen[v] = true
 		}
 	}
+	// Not slices.Sorted, which returns nil for no values: node attrs prints
+	// an attribute that has none as [], not null.
 	out := make([]string, 0, len(seen))
 	for v := range seen {
 		out = append(out, v)
@@ -493,12 +497,7 @@ func (inv *Inventory) AttributeKeys() []string {
 			seen[k] = true
 		}
 	}
-	out := make([]string, 0, len(seen))
-	for k := range seen {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // WithAttribute returns the nodes whose attribute has the given value. An

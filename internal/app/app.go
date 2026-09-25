@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -501,12 +500,7 @@ func (a *App) Role(name string) (transport.Target, error) {
 
 // RoleNames lists the configured host roles in sorted order.
 func (a *App) RoleNames() []string {
-	out := make([]string, 0, len(a.Spec.Hosts))
-	for name := range a.Spec.Hosts {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(a.Spec.Hosts))
 }
 
 // Node returns the target of a compute node, whose host name comes from the

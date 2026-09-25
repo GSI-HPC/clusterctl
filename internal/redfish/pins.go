@@ -9,8 +9,9 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
@@ -101,11 +102,7 @@ func (s *PinStore) Set(ctx context.Context, host, pin string) error {
 		}
 		pins[host] = pin
 
-		hosts := make([]string, 0, len(pins))
-		for h := range pins {
-			hosts = append(hosts, h)
-		}
-		sort.Strings(hosts)
+		hosts := slices.Sorted(maps.Keys(pins))
 
 		var b strings.Builder
 		b.WriteString("# Certificate fingerprints of the service processors, recorded by clusterctl.\n")

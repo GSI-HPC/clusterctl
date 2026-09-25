@@ -5,6 +5,7 @@ package secrets
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -66,11 +67,7 @@ func (i SopsInfo) Summary() string {
 	for _, k := range i.Keys {
 		counts[k.Type]++
 	}
-	types := make([]string, 0, len(counts))
-	for t := range counts {
-		types = append(types, t)
-	}
-	sort.Strings(types)
+	types := slices.Sorted(maps.Keys(counts))
 	parts := make([]string, 0, len(types))
 	for _, t := range types {
 		parts = append(parts, fmt.Sprintf("%d %s", counts[t], t))
@@ -336,12 +333,7 @@ func checkValueTypes(values map[string]any) error {
 				bad = fmt.Errorf("%s: the value was encrypted as type:%s; only text (type:str) is read", path, typ)
 			}
 		case map[string]any:
-			keys := make([]string, 0, len(v))
-			for k := range v {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
+			for _, k := range slices.Sorted(maps.Keys(v)) {
 				walk(joinPath(path, k), v[k])
 			}
 		case []any:

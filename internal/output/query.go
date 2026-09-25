@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -328,7 +330,7 @@ func (s pathStep) apply(value any) ([]any, error) {
 			return v, nil
 		case map[string]any:
 			out := make([]any, 0, len(v))
-			for _, k := range sortedKeys(v) {
+			for _, k := range slices.Sorted(maps.Keys(v)) {
 				out = append(out, v[k])
 			}
 			return out, nil

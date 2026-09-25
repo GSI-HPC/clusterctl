@@ -6,7 +6,9 @@ package config
 import (
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -66,7 +68,7 @@ func checkSecret(doc *Document) []string {
 	seen := map[string]string{}
 	for _, section := range secretSections {
 		values, _ := doc.Data[section].(map[string]any)
-		for _, key := range sortedKeys(values) {
+		for _, key := range slices.Sorted(maps.Keys(values)) {
 			path := section + "." + key
 			if other, dup := seen[key]; dup {
 				out = append(out, fmt.Sprintf("%s: %s: the key is also under %s; a key names one value", doc.Position(path), path, other))
@@ -128,7 +130,7 @@ func SecretKeys(doc *Document) []string {
 	var out []string
 	for _, section := range secretSections {
 		values, _ := doc.Data[section].(map[string]any)
-		out = append(out, sortedKeys(values)...)
+		out = append(out, slices.Sorted(maps.Keys(values))...)
 	}
 	sort.Strings(out)
 	return out
@@ -147,12 +149,7 @@ func SecretValues(file string, sections map[string]map[string]string) (map[strin
 	out := map[string][]byte{}
 	for _, section := range secretSections {
 		values := sections[section]
-		keys := make([]string, 0, len(values))
-		for key := range values {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
+		for _, key := range slices.Sorted(maps.Keys(values)) {
 			if _, dup := out[key]; dup {
 				return nil, fmt.Errorf("%s: %s.%s: the key is also in another section; a key names one value", file, section, key)
 			}
@@ -175,7 +172,7 @@ func SecretValues(file string, sections map[string]map[string]string) (map[strin
 // with what refers through it and the tree path its origin is recorded at.
 func secretRefs(spec v1alpha1.EffectiveSpec) []namedRef {
 	var out []namedRef
-	for _, name := range sortedCredentials(spec.Credentials) {
+	for _, name := range slices.Sorted(maps.Keys(spec.Credentials)) {
 		if ref := spec.Credentials[name].Password.SecretRef; ref != nil {
 			out = append(out, namedRef{
 				what: fmt.Sprintf("credential %q", name),
@@ -234,22 +231,4 @@ func (r *Resolved) checkSecretRefs() error {
 		return nil
 	}
 	return fmt.Errorf("the configuration refers to secrets that do not exist:\n  %s", strings.Join(problems, "\n  "))
-}
-
-func sortedKeys(m map[string]any) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedCredentials(m map[string]v1alpha1.Credential) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

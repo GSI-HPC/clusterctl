@@ -8,11 +8,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -305,12 +306,7 @@ plaintext. The caption of the table names the sops that decrypts.
 			objects := []map[string]any{}
 			failed := 0
 			bundle := a.Resolved.Bundle
-			names := make([]string, 0, len(bundle.Secrets))
-			for name := range bundle.Secrets {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			for _, name := range names {
+			for _, name := range slices.Sorted(maps.Keys(bundle.Secrets)) {
 				doc := bundle.Secrets[name]
 				keys := config.SecretKeys(doc)
 				status := "ok"

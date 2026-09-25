@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -174,12 +176,7 @@ func (s *Server) globalArgs() []string {
 	if s.context != "" {
 		args = append(args, "--context", s.context)
 	}
-	keys := make([]string, 0, len(s.opts.App.Set))
-	for key := range s.opts.App.Set {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
+	for _, key := range slices.Sorted(maps.Keys(s.opts.App.Set)) {
 		args = append(args, "--set", key+"="+s.opts.App.Set[key])
 	}
 	if s.opts.App.Fanout > 0 {

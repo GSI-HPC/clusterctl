@@ -6,7 +6,8 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -120,10 +121,10 @@ processor name and the groups it belongs to.`,
 			addIf(t, "cid", node.CID)
 			addIf(t, "macs", strings.Join(node.MACs, ", "))
 			addIf(t, "bootPath", node.BootPath)
-			for _, key := range sortedMapKeys(node.Attributes) {
+			for _, key := range slices.Sorted(maps.Keys(node.Attributes)) {
 				t.Add("attribute."+key, node.Attributes[key])
 			}
-			for _, source := range sortedMapKeys(memberships) {
+			for _, source := range slices.Sorted(maps.Keys(memberships)) {
 				t.Add("groups."+source, strings.Join(memberships[source], ", "))
 			}
 
@@ -237,7 +238,7 @@ command fail, after what the other sources answered has been printed.`,
 				}
 				memberships, groupErr := a.Groups.GroupsOf(node)
 				t := output.NewTable(output.Cols("SOURCE", "GROUPS")...)
-				for _, source := range sortedMapKeys(memberships) {
+				for _, source := range slices.Sorted(maps.Keys(memberships)) {
 					t.Add(source, strings.Join(memberships[source], ", "))
 				}
 				if err := a.Print(output.Result{Table: t, Object: memberships}); err != nil {
@@ -479,13 +480,4 @@ func addIf(t *output.Table, field, value string) {
 	if value != "" {
 		t.Add(field, value)
 	}
-}
-
-func sortedMapKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

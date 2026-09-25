@@ -129,15 +129,18 @@ func TestUnknownCredentialListsTheKnownOnes(t *testing.T) {
 	t.Parallel()
 
 	r := resolver(t, map[string]v1alpha1.Credential{
-		"bmc": {Username: "admin", Password: v1alpha1.PasswordSource{FromEnv: "X"}},
+		"pdu":  {Username: "admin", Password: v1alpha1.PasswordSource{FromEnv: "X"}},
+		"bmc":  {Username: "admin", Password: v1alpha1.PasswordSource{FromEnv: "X"}},
+		"ipmi": {Username: "admin", Password: v1alpha1.PasswordSource{FromEnv: "X"}},
 	}, map[string]string{"X": "y"})
 
 	_, err := r.Get(context.Background(), "nope")
 	if err == nil {
 		t.Fatal("an unknown credential should be reported")
 	}
-	if !strings.Contains(err.Error(), "bmc") {
-		t.Errorf("error = %v, want it to list the known credentials", err)
+	// In sorted order, so that the message is the same every time.
+	if !strings.Contains(err.Error(), "defines bmc, ipmi, pdu") {
+		t.Errorf("error = %v, want it to list the known credentials in order", err)
 	}
 	if _, err := r.Get(context.Background(), ""); err == nil {
 		t.Error("an empty name should be reported")

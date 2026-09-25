@@ -6,7 +6,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -71,12 +72,7 @@ func (t *Tree) Origins() map[string]Origin {
 
 // Paths returns the recorded paths in sorted order.
 func (t *Tree) Paths() []string {
-	out := make([]string, 0, len(t.origins))
-	for k := range t.origins {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(t.origins))
 }
 
 // MergeDocument merges the body of a document into the tree, attributing
@@ -150,12 +146,7 @@ func fixedOrigin(o Origin) originFunc {
 // it, a group called rack.R01, stays one key.
 func (t *Tree) mergeValue(layer string, from originFunc, srcPath string, dst []string, value any) {
 	if m, ok := value.(map[string]any); ok {
-		keys := make([]string, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
+		for _, k := range slices.Sorted(maps.Keys(m)) {
 			t.mergeValue(layer, from, joinPath(srcPath, k), append(dst[:len(dst):len(dst)], k), m[k])
 		}
 		return

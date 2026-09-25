@@ -12,12 +12,13 @@ package tunnel
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -55,12 +56,7 @@ type Manager struct {
 
 // Names lists the configured profiles in sorted order.
 func (m *Manager) Names() []string {
-	out := make([]string, 0, len(m.Profiles))
-	for name := range m.Profiles {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(m.Profiles))
 }
 
 // Args builds the sshuttle argument vector for a profile.

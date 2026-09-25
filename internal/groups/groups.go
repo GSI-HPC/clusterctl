@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -140,12 +141,7 @@ func (r *Resolver) DefaultSource() string { return r.def }
 
 // Sources lists the configured source names in sorted order.
 func (r *Resolver) Sources() []string {
-	out := make([]string, 0, len(r.sources))
-	for name := range r.sources {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(r.sources))
 }
 
 // Resolve implements nodeset.Resolver.
@@ -281,6 +277,8 @@ func (r *Resolver) List(source string) ([]string, error) {
 
 	switch {
 	case src.Static != nil:
+		// Not slices.Sorted, which returns nil for no groups: node groups
+		// prints a source that has none as [], not null.
 		out := make([]string, 0, len(src.Static))
 		for name := range src.Static {
 			out = append(out, name)

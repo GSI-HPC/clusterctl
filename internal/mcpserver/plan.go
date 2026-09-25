@@ -9,8 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,12 +118,7 @@ func planReason(ch change, reason string) (string, error) {
 }
 
 func changeNames() []string {
-	out := make([]string, 0, len(changes))
-	for name := range changes {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(changes))
 }
 
 // plan is an action resolved, previewed and waiting to be applied.

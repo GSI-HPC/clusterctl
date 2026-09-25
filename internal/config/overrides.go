@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -109,7 +111,7 @@ func checkDocumentOverrides(doc *Document) error {
 		if !ok {
 			return
 		}
-		for _, k := range sortedKeys(overrides) {
+		for _, k := range slices.Sorted(maps.Keys(overrides)) {
 			where := at + "." + k
 			if err := validatePath(k); err != nil {
 				problems = append(problems, fmt.Sprintf("%s: %s: %v", doc.Position(where), where, err))

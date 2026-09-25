@@ -21,8 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -388,7 +390,7 @@ func RemoteCommand(req Request) (string, error) {
 	}
 	if len(req.Env) > 0 {
 		parts = append(parts, "env")
-		for _, k := range sortedKeys(req.Env) {
+		for _, k := range slices.Sorted(maps.Keys(req.Env)) {
 			parts = append(parts, k+"="+req.Env[k])
 		}
 	}

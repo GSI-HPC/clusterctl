@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,17 +36,17 @@ func fakeSinfo(partitions map[string]string) func(transport.Target, transport.Re
 		case slices.Contains(argv, "-n"):
 			node := argv[len(argv)-1]
 			var in []string
-			for _, name := range sortedMapKeys(partitions) {
+			for _, name := range slices.Sorted(maps.Keys(partitions)) {
 				if strings.Contains(partitions[name], node) {
 					in = append(in, name)
 				}
 			}
 			return &transport.Result{Target: tg, Stdout: strings.Join(in, "\n") + "\n"}, nil
 		case slices.Contains(argv, "%R"):
-			return &transport.Result{Target: tg, Stdout: strings.Join(sortedMapKeys(partitions), "\n") + "\n"}, nil
+			return &transport.Result{Target: tg, Stdout: strings.Join(slices.Sorted(maps.Keys(partitions)), "\n") + "\n"}, nil
 		default:
 			var all []string
-			for _, name := range sortedMapKeys(partitions) {
+			for _, name := range slices.Sorted(maps.Keys(partitions)) {
 				all = append(all, partitions[name])
 			}
 			return &transport.Result{Target: tg, Stdout: strings.Join(all, ",") + "\n"}, nil
@@ -333,7 +334,7 @@ func TestHelpExamplesNameGroupsThatExist(t *testing.T) {
 	// The login node knows the example cluster's partitions and nothing
 	// else, so a Slurm state is not mistaken for a partition.
 	sinfo := fakeSinfo(map[string]string{"main": "exe[0001-0008]", "debug": "exe[0009-0010]"})
-	for _, ref := range sortedMapKeys(refs) {
+	for _, ref := range slices.Sorted(maps.Keys(refs)) {
 		t.Run(ref, func(t *testing.T) {
 			_, err := run(t, harnessOptions{recorder: &transport.Recorder{Reply: sinfo}}, "node", "select", ref)
 			if err != nil {
