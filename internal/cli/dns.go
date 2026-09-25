@@ -362,11 +362,7 @@ address is shown as it is and not looked up.
   clusterctl dns lookup -n exe[1-4]
   clusterctl dns lookup -n exe[1-4] --bmc`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -418,7 +414,7 @@ address is shown as it is and not looked up.
 				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d names did not resolve", failed, ns.Len())
 			}
 			return nil
-		})
+		}))
 	cmd.Flags().BoolVarP(&bmc, "bmc", "b", false, "resolve the service processors instead")
 	return cmd
 }
@@ -444,11 +440,7 @@ address at its end, and every name the reverse entry of that address lists.
 An alias that resolves to several machines is what a login pool looks like;
 this is how to see which machines are currently in it.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			aliases := a.Spec.Services.DNS.Aliases
 			if len(aliases) == 0 {
 				return exitcode.Errorf(exitcode.Usage,
@@ -502,5 +494,5 @@ this is how to see which machines are currently in it.`,
 				return exitcode.Errorf(exitcode.TargetFailed, "%d aliases did not resolve", failed)
 			}
 			return nil
-		})
+		}))
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
@@ -303,11 +304,7 @@ Print the configuration the current context resolves to.
 With --show-sources each value is listed with the layer that set it and, for
 a value that came from a file, the line it was written on.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			if !showSources {
 				return a.Print(output.Result{Object: a.Spec})
 			}
@@ -334,7 +331,7 @@ a value that came from a file, the line it was written on.`,
 			t.Caption = fmt.Sprintf("context %s, cluster %s, site %s",
 				a.Resolved.Context.Name, a.Resolved.ClusterName, a.Resolved.SiteName)
 			return a.Print(output.Result{Table: t})
-		})
+		}))
 	cmd.Flags().BoolVar(&showSources, "show-sources", false, "list each value with the layer and line that set it")
 	return cmd
 }
@@ -349,11 +346,7 @@ the file, the line and the path they were found at.
 This is what to run after editing the configuration and in a pipeline that
 publishes it.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			// Protected host entries that name a group are otherwise only
 			// resolved when a command is about to change something.
 			if _, err := a.Gate.Protected(); err != nil {
@@ -375,18 +368,14 @@ publishes it.`,
 			t.Caption = fmt.Sprintf("%d documents are valid; context %s resolves",
 				len(a.Resolved.Bundle.Documents), a.Resolved.Context.Name)
 			return a.Print(output.Result{Table: t})
-		})
+		}))
 }
 
 func newConfigContextsCommand(r *root) *cobra.Command {
 	return leaf("contexts", "List the configured contexts", `
 List the contexts this installation knows and mark the current one.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			t := output.NewTable(output.Cols("CURRENT", "NAME", "CLUSTER", "USER")...)
 			for _, ctx := range a.Resolved.Bundle.Config.Contexts {
 				marker := ""
@@ -396,7 +385,7 @@ List the contexts this installation knows and mark the current one.`,
 				t.Add(marker, ctx.Name, ctx.Cluster, ctx.User)
 			}
 			return a.Print(output.Result{Table: t})
-		})
+		}))
 }
 
 func newConfigUseContextCommand(r *root) *cobra.Command {
@@ -407,24 +396,20 @@ The configuration is a file the team keeps under version control, so this
 command does not edit it. It prints the one line to change, and the
 environment variable that selects a context for a single shell.`,
 		cobra.ExactArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			name := args[0]
 			if _, err := a.Resolved.Bundle.Context(name); err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			// Each line is meant to be pasted, so the name is quoted
 			// for where it goes.
-			_, err = fmt.Fprintf(cmd.OutOrStdout(),
+			_, err := fmt.Fprintf(cmd.OutOrStdout(),
 				"For this shell:\n  export %s=%s\n\n"+
 					"For one command:\n  clusterctl --context %s ...\n\n"+
 					"Permanently, in the Config document:\n  currentContext: %s\n",
 				config.EnvContext, shellQuote(name), shellQuote(name), config.QuoteYAML(name))
 			return err
-		})
+		}))
 	cmd.ValidArgsFunction = func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		a, err := r.App()
 		if err != nil {
@@ -443,11 +428,7 @@ written on.
   clusterctl config explain fanout.max
   clusterctl config explain bmc.ipmi.passwordTransport`,
 		cobra.ExactArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			path := args[0]
 			origin, ok := a.Resolved.Tree.Origin(path)
 			if !ok {
@@ -463,7 +444,7 @@ written on.
 				"line":   origin.Line,
 				"column": origin.Column,
 			}, Table: explainTable(path, value, origin)})
-		})
+		}))
 }
 
 func explainTable(path string, value any, origin config.Origin) *output.Table {

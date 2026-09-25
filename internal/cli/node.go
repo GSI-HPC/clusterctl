@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/groups"
@@ -40,11 +41,7 @@ func newNodeListCommand(r *root) *cobra.Command {
 	return leaf("list [NODESET]", "List the nodes the inventory knows", `
 List the nodes of the inventory, optionally limited to a node set.`,
 		cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			nodes := a.Inventory.All()
 			if len(args) > 0 || a.Format.Kind == output.FormatNodeset {
 				ns, err := a.SelectOptional(strings.Join(args, ","))
@@ -73,7 +70,7 @@ List the nodes of the inventory, optionally limited to a node set.`,
 			}
 			t.Caption = fmt.Sprintf("%d nodes", len(nodes))
 			return a.Print(output.Result{Table: t, Object: nodes})
-		})
+		}))
 }
 
 func newNodeDescribeCommand(r *root) *cobra.Command {
@@ -81,11 +78,7 @@ func newNodeDescribeCommand(r *root) *cobra.Command {
 Print the inventory entry of a node together with the host name, the service
 processor name and the groups it belongs to.`,
 		cobra.ExactArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			name := args[0]
 			node, ok := a.Inventory.Lookup(name)
 			if ok {
@@ -134,7 +127,7 @@ processor name and the groups it belongs to.`,
 				return err
 			}
 			return groupsError(name, groupErr)
-		})
+		}))
 }
 
 func newNodeSelectCommand(r *root) *cobra.Command {
@@ -152,11 +145,7 @@ evaluated, strictly from left to right.
   clusterctl node select '@slurm:main&@rack:R02' --expand
   clusterctl node select '@exe' --count`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -176,7 +165,7 @@ evaluated, strictly from left to right.
 			default:
 				return say(cmd, "%s\n", ns)
 			}
-		})
+		}))
 	cmd.Flags().BoolVarP(&expand, "expand", "e", false, "print one node per line instead of folding")
 	cmd.Flags().BoolVarP(&count, "count", "c", false, "print how many nodes the expression names")
 	cmd.ValidArgsFunction = completeGroups(r)
@@ -191,11 +180,7 @@ Apply the naming rules to a node set and print the result.
 With --bmc the names of the service processors are printed instead, which is
 what the out-of-band commands connect to.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -212,7 +197,7 @@ what the out-of-band commands connect to.`,
 				return a.Print(output.Result{Nodes: names, Object: names.Expand()})
 			}
 			return say(cmd, "%s\n", names)
-		})
+		}))
 	cmd.Flags().BoolVarP(&bmc, "bmc", "b", false, "print the service processor names")
 	return cmd
 }
@@ -226,11 +211,7 @@ node name, list the groups that node belongs to. The name is resolved the way
 A source that cannot be asked is named on the error stream and makes the
 command fail, after what the other sources answered has been printed.`,
 		cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
 				node, err := oneNode(a, args[0])
 				if err != nil {
@@ -281,7 +262,7 @@ command fail, after what the other sources answered has been printed.`,
 				return fmt.Errorf("some groups could not be read: %w", err)
 			}
 			return nil
-		})
+		}))
 }
 
 func newNodeAttrsCommand(r *root) *cobra.Command {
@@ -290,11 +271,7 @@ List the attribute names the inventory carries, or the values of one
 attribute together with the nodes that have them. This is what the genders
 file used to answer.`,
 		cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				t := output.NewTable(output.Cols("ATTRIBUTE", "VALUES")...)
 				object := map[string][]string{}
@@ -318,7 +295,7 @@ file used to answer.`,
 				return exitcode.Errorf(exitcode.Usage, "no node carries the attribute %q", key)
 			}
 			return a.Print(output.Result{Table: t, Object: object})
-		})
+		}))
 }
 
 func newNodeRackCommand(r *root) *cobra.Command {
@@ -326,11 +303,7 @@ func newNodeRackCommand(r *root) *cobra.Command {
 Without an argument, list every rack with the nodes in it. With a rack name,
 list that rack; with a node name, list the rack that node sits in.`,
 		cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			racks := a.Inventory.Racks()
 			if len(args) == 1 {
 				wanted := args[0]
@@ -361,7 +334,7 @@ list that rack; with a node name, list the rack that node sits in.`,
 				t.Add(rack, ns.String(), fmt.Sprint(ns.Len()))
 			}
 			return a.Print(output.Result{Table: t, Object: object})
-		})
+		}))
 }
 
 // hardwareScript reads the hardware identification a node exposes through
@@ -389,11 +362,7 @@ One script per node answers everything, so a node is contacted once. A node
 that fails is listed with its status and the error it failed with, in -o json
 and -o yaml too.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -465,7 +434,7 @@ and -o yaml too.`,
 				}
 			}
 			return failureError(results)
-		})
+		}))
 }
 
 // groupsError names the node whose group memberships are incomplete.

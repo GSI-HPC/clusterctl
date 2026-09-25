@@ -176,11 +176,7 @@ written: this is what to run before deciding whether a change is expected.
 The handshake is abandoned as soon as the key has been seen, so no
 credentials are involved.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -203,7 +199,7 @@ credentials are involved.`,
 				return exitcode.Errorf(exitcode.Transport, "%d of %d hosts did not answer", len(failed), ns.Len())
 			}
 			return nil
-		})
+		}))
 	cmd.Flags().BoolVarP(&bmc, "bmc", "b", false, "scan the service processors instead of the nodes")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "how long to wait for one host")
 	return cmd
@@ -221,11 +217,7 @@ A host whose key changed is reported and the command exits non-zero. That is
 either a reinstalled machine or something worth investigating, and it is not
 for this command to decide which.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			path, err := hostkeyFile(a)
 			if err != nil {
 				return err
@@ -282,7 +274,7 @@ for this command to decide which.`,
 				return exitcode.Errorf(exitcode.Transport, "%d hosts did not answer", len(failed))
 			}
 			return nil
-		})
+		}))
 	cmd.Flags().BoolVarP(&bmc, "bmc", "b", false, "verify the service processors instead of the nodes")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "how long to wait for one host")
 	return cmd
@@ -301,11 +293,7 @@ This rewrites the site's trust anchor, so it asks first. Run
 "clusterctl hostkey verify" beforehand and look at what changed: a key that
 changed without a reinstall is worth understanding before it is trusted.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			path, err := hostkeyFile(a)
 			if err != nil {
 				return err
@@ -368,7 +356,7 @@ changed without a reinstall is worth understanding before it is trusted.`,
 				return exitcode.Errorf(exitcode.Transport, "%d hosts did not answer", len(failed))
 			}
 			return nil
-		})
+		}))
 	cmd.Flags().BoolVarP(&bmc, "bmc", "b", false, "refresh the service processors instead of the nodes")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "how long to wait for one host")
 	return cmd
@@ -380,11 +368,7 @@ func newHostkeyRemoveCommand(r *root) *cobra.Command {
 Drop every entry for the named hosts. Use this before reinstalling a node, so
 that the key it comes back with can be collected cleanly.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			path, err := hostkeyFile(a)
 			if err != nil {
 				return err
@@ -431,7 +415,7 @@ that the key it comes back with can be collected cleanly.`,
 			}
 			t.Caption = fmt.Sprintf("%d entries removed from %s", removed, path)
 			return a.Print(output.Result{Table: t})
-		})
+		}))
 	cmd.Flags().BoolVarP(&bmc, "bmc", "b", false, "remove the service processors instead of the nodes")
 	return cmd
 }
@@ -440,11 +424,7 @@ func newHostkeyListCommand(r *root) *cobra.Command {
 	return leaf("list", "List the host key file", `
 Print the entries of the host key file.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			path, err := hostkeyFile(a)
 			if err != nil {
 				return err
@@ -459,7 +439,7 @@ Print the entries of the host key file.`,
 			}
 			t.Caption = fmt.Sprintf("%d entries in %s", len(file.Entries), path)
 			return a.Print(output.Result{Table: t, Object: file.Entries})
-		})
+		}))
 }
 
 // anyRevoked reports whether the file revokes a key a host offers.

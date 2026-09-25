@@ -445,11 +445,7 @@ link and, when services.pxesrv.staticSuffix is set, the persistent one.
 A node whose address cannot be resolved is listed with the reason and fails
 the command.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, err := pxeRole(a)
 			if err != nil {
 				return err
@@ -524,7 +520,7 @@ the command.`,
 				return fmt.Errorf("the boot configuration of %s is not known: %w", fold(failed), firstErr)
 			}
 			return nil
-		})
+		}))
 }
 
 func orNone(s string) string {
@@ -555,11 +551,7 @@ was not reported fails the command.
   clusterctl boot set -n exe[1-4]
   clusterctl boot set -n exe0001 /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, err := pxeRole(a)
 			if err != nil {
 				return err
@@ -603,7 +595,7 @@ was not reported fails the command.
 				err = printErr
 			}
 			return err
-		})
+		}))
 	cmd.Flags().BoolVar(&persistent, "persistent", false,
 		"keep the boot path after the first request (needs services.pxesrv.staticSuffix)")
 	return cmd
@@ -625,11 +617,7 @@ one.
 Every node is tried, and each one's result is listed; a node that failed or
 was not reported fails the command.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, err := pxeRole(a)
 			if err != nil {
 				return err
@@ -666,7 +654,7 @@ was not reported fails the command.`,
 				err = printErr
 			}
 			return err
-		})
+		}))
 }
 
 func newBootListCommand(r *root) *cobra.Command {
@@ -674,11 +662,7 @@ func newBootListCommand(r *root) *cobra.Command {
 List the boot configuration files available on the PXE service, which is what
 a boot path may point at.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			role, err := pxeRole(a)
 			if err != nil {
 				return err
@@ -701,7 +685,7 @@ a boot path may point at.`,
 			}
 			t.Caption = fmt.Sprintf("%d configurations under %s", t.Len(), path)
 			return a.Print(output.Result{Table: t, Object: result.Lines()})
-		})
+		}))
 }
 
 func newBootSyncCommand(r *root) *cobra.Command {
@@ -710,11 +694,7 @@ Pull the boot configuration repository on the PXE service, so the
 configurations it offers match what is in version control. The pull is
 previewed and confirmed like any other change.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			role, err := pxeRole(a)
 			if err != nil {
 				return err
@@ -748,7 +728,7 @@ previewed and confirmed like any other change.`,
 				return err
 			}
 			return say(cmd, "%s\n", output.EscapeText(result.Output()))
-		})
+		}))
 }
 
 // maxLogLines bounds boot log --lines and dhcp log --lines.
@@ -812,11 +792,7 @@ form: GRUB loads the target at every boot until "boot grub unset" removes it.
 
   clusterctl boot grub set exe0001 /srv/tftp/grub/1.0/grub.cfg.install-exec`,
 		cobra.ExactArgs(2),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, node, link, err := grubLink(a, args[0])
 			if err != nil {
 				return err
@@ -838,17 +814,13 @@ form: GRUB loads the target at every boot until "boot grub unset" removes it.
 			}
 			a.Printf("%s now loads %s at every boot, until \"clusterctl boot grub unset %s\"\n", node, args[1], node)
 			return nil
-		})
+		}))
 
 	unset := leaf("unset NODE", "Remove a node's GRUB configuration link", `
 Remove the link that points a node's GRUB configuration at a target, so GRUB
 no longer finds a configuration named after the node.`,
 		cobra.ExactArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, node, link, err := grubLink(a, args[0])
 			if err != nil {
 				return err
@@ -869,17 +841,13 @@ no longer finds a configuration named after the node.`,
 			}
 			a.Printf("removed the GRUB configuration of %s\n", node)
 			return nil
-		})
+		}))
 
 	show := leaf("show NODE", "Show the GRUB file name a node loads", `
 Print the address of a node and the GRUB configuration file name it asks for,
 which is the address in hexadecimal.`,
 		cobra.ExactArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			address, err := nodeAddress(a, args[0])
 			if err != nil {
 				return err
@@ -893,7 +861,7 @@ which is the address in hexadecimal.`,
 			return a.Print(output.Result{Table: t, Object: map[string]string{
 				"node": args[0], "address": address, "grubFile": "grub.cfg-" + hex,
 			}})
-		})
+		}))
 
 	return group("grub", "Configure what a node loads over TFTP", `
 GRUB asks the TFTP service for a configuration named after the node's address

@@ -75,17 +75,13 @@ Read the power state of each node's service processor.
   clusterctl bmc status -n exe[1-10]
   clusterctl bmc status -n @rack:R02 -o json`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			nodes, _, err := bmcSet(a, args)
 			if err != nil {
 				return err
 			}
 			return bmcPowerState(a, nodes, useIPMI)
-		})
+		}))
 	cmd.Flags().BoolVar(&useIPMI, "ipmi", false, "ask over IPMI only, whatever bmc.order says")
 	return cmd
 }
@@ -122,11 +118,7 @@ Slurm is asked first, because powering off a running job loses it. A node
 that Slurm reports running a job, or cannot say about, is refused unless
 --lose-jobs is given; --force gets past a protected host, not this check.`,
 		cobra.MinimumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			// The action is checked before anything is asked of Slurm or
 			// the credential store, so that a typo costs nothing.
 			action := strings.ToLower(args[0])
@@ -166,7 +158,7 @@ that Slurm reports running a job, or cannot say about, is refused unless
 				return dryRunOrError(err)
 			}
 			return printBMCResults(a, runPower(a, plan, action, batch, stagger))
-		})
+		}))
 
 	cmd.Flags().BoolVar(&useIPMI, "ipmi", false, "act over IPMI only, whatever bmc.order says")
 	cmd.Flags().IntVar(&batch, "batch", 0, "how many nodes to power on or cycle at once, at least 1 (default: from the configuration)")
@@ -474,11 +466,7 @@ machine reinstalling in a loop, so --persistent has to be asked for.
   clusterctl bmc boot set Pxe -n exe[1-4]
   clusterctl bmc boot set Hdd -n exe1 --persistent`,
 		cobra.MinimumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			target := args[0]
 			nodes, _, err := bmcSet(a, args[1:])
 			if err != nil {
@@ -503,17 +491,13 @@ machine reinstalling in a loop, so --persistent has to be asked for.
 				return target + " " + mode, c.SetBootOverride(ctx, target, persistent)
 			})
 			return printBMCResults(a, callResults(calls, true, func(s string) string { return s }))
-		})
+		}))
 	set.Flags().BoolVar(&persistent, "persistent", false, "keep the override until it is removed")
 
 	clear := leaf("unset [NODESET]", "Remove a boot source override", `
 Remove the boot source override, so the nodes boot their usual way again.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			nodes, _, err := bmcSet(a, args)
 			if err != nil {
 				return err
@@ -530,17 +514,13 @@ Remove the boot source override, so the nodes boot their usual way again.`,
 				return "cleared", c.ClearBootOverride(ctx)
 			})
 			return printBMCResults(a, callResults(calls, true, func(s string) string { return s }))
-		})
+		}))
 
 	show := leaf("show [NODESET]", "Show the current boot source override", `
 Report what each machine is set to boot next time, and what its firmware
 accepts.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			nodes, _, err := bmcSet(a, args)
 			if err != nil {
 				return err
@@ -581,7 +561,7 @@ accepts.`,
 				return err
 			}
 			return bmcExit(callResults(calls, false, func(*redfish.System) string { return "" }))
-		})
+		}))
 
 	return group("boot", "Read and set what a node boots next time", `
 Read and change the Redfish boot source override.`, set, clear, show)
@@ -595,17 +575,13 @@ comes back.
   clusterctl bmc redfish get /redfish/v1/Systems/1 -n exe1
   clusterctl bmc redfish get /redfish/v1/Managers -n exe1 -o jsonpath='{.exe1.Members[*].[\"@odata.id\"]}'`,
 		cobra.MinimumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			nodes, _, err := bmcSet(a, args[1:])
 			if err != nil {
 				return err
 			}
 			return redfishRequest(a, nodes, "GET", args[0], nil)
-		})
+		}))
 
 	var loseJobs bool
 	post := leaf("post PATH BODY [NODESET]", "Send an action to a Redfish resource", `
@@ -615,11 +591,7 @@ This can power off a machine, so it goes through the confirmation gate like
 any other destructive command, and it is never retried. A path that names a
 reset asks Slurm first, as bmc power does, and --lose-jobs overrides that.`,
 		cobra.MinimumNArgs(2),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			var body any
 			if err := json.Unmarshal([]byte(args[1]), &body); err != nil {
 				return exitcode.Errorf(exitcode.Usage, "the body is not JSON: %v", err)
@@ -645,18 +617,14 @@ reset asks Slurm first, as bmc power does, and --lose-jobs overrides that.`,
 				return dryRunOrError(err)
 			}
 			return redfishRequest(a, nodes, "POST", args[0], body)
-		})
+		}))
 	addLoseJobsFlag(post, &loseJobs)
 
 	info := leaf("info [NODESET]", "Summarise what the service processors report", `
 Read the computer system resource of each node and show the identification,
 the power state and the reset types the firmware accepts.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			nodes, _, err := bmcSet(a, args)
 			if err != nil {
 				return err
@@ -695,7 +663,7 @@ the power state and the reset types the firmware accepts.`,
 				return err
 			}
 			return bmcExit(callResults(calls, false, func(*redfish.System) string { return "" }))
-		})
+		}))
 
 	return group("redfish", "Talk to the Redfish interface directly", `
 Send requests to the Redfish interface of the service processors.
@@ -755,11 +723,7 @@ func newBMCWebCommand(r *root) *cobra.Command {
 Print the URL of a node's service processor, and open it in the browser when
 one is configured.`,
 		cobra.ExactArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			// The URL is opened in a browser, so the name is selected like
 			// every other node argument before it is put into one.
 			node, err := oneNode(a, args[0])
@@ -783,7 +747,7 @@ one is configured.`,
 				return exitcode.Errorf(exitcode.Usage, "opening %s with %s: %v", url, browser, err)
 			}
 			return nil
-		})
+		}))
 }
 
 func newBMCPingCommand(r *root) *cobra.Command {
@@ -791,11 +755,7 @@ func newBMCPingCommand(r *root) *cobra.Command {
 Sweep the service processors of a node set from the host that can reach the
 management network, and report which of them answer.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			_, bmcs, err := bmcSet(a, args)
 			if err != nil {
 				return err
@@ -864,7 +824,7 @@ management network, and report which of them answer.`,
 					"%d service processors did not answer", bmcs.Len()-alive.Len())
 			}
 			return nil
-		})
+		}))
 }
 
 func newBMCForgetCommand(r *root) *cobra.Command {
@@ -880,11 +840,7 @@ Run this after a certificate was replaced on purpose. If it changed without
 anyone replacing it, find out why first: the next connection trusts whatever
 it is shown and sends the BMC account to it.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			path := a.Path(a.Spec.BMC.Redfish.PinStore)
 			if path == "" {
 				path = a.StatePath("bmc-pins")
@@ -917,7 +873,7 @@ it is shown and sends the BMC account to it.`,
 				a.Printf("forgot the certificate of %s, %s\n", d.host, d.fingerprint)
 			}
 			return nil
-		})
+		}))
 }
 
 // pinToForget is a recorded certificate about to be dropped.
@@ -1051,11 +1007,7 @@ Connect to the power distribution unit of a rack, or run one command on it.
   clusterctl pdu shell 1 R02
   clusterctl pdu shell 1 R02 -- show outlets`,
 		cobra.MinimumNArgs(2),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			host, err := pduHost(a, args[0], args[1])
 			if err != nil {
 				return err
@@ -1080,7 +1032,7 @@ Connect to the power distribution unit of a rack, or run one command on it.
 				return err
 			}
 			return a.SSH.Interactive(a.Context(), target, req)
-		})
+		}))
 }
 
 func newPDUListCommand(r *root) *cobra.Command {
@@ -1090,11 +1042,7 @@ Derive the power distribution unit name of every rack in the inventory.
 The row is taken from the rack name where it carries one; racks whose name
 does not say which row they are in are listed without one.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			racks := a.Inventory.Racks()
 			sort.Strings(racks)
 			t := output.NewTable(output.Cols("RACK", "PDU", "NODES")...)
@@ -1106,7 +1054,7 @@ does not say which row they are in are listed without one.`,
 				t.Add(rack, host, a.Inventory.InRack(rack).String())
 			}
 			return a.Print(output.Result{Table: t})
-		})
+		}))
 }
 
 // rowOf reads the row out of a rack name such as "R02", falling back to the
