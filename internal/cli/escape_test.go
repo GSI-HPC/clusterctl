@@ -4,6 +4,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -71,5 +73,50 @@ func TestFailingGroupCommandEscapesItsMessage(t *testing.T) {
 	wantNoRaw(t, "stderr", h.errOut.String())
 	if want := `sinfo: \u202edenied\u2028\u2066 \xff\x1b[2J`; !strings.Contains(h.errOut.String(), want) {
 		t.Errorf("stderr = %q, want %q", h.errOut, want)
+	}
+}
+
+// Follow-up #79: report printed every error with %v, so text an error quoted
+// from a node, a BMC or a group source reached the terminal as it was.
+func TestReportEscapesTheError(t *testing.T) {
+	const osc52 = "\x1b]52;c;Zm9v\x07"
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		return nil, exitcode.Errorf(exitcode.Transport, "%s: ssh: %s\u202e\r", tg, osc52)
+	}}
+	h, code := exitCodeOf(t, harnessOptions{recorder: rec}, "node", "select", "@slurm:main")
+	if code != exitcode.Transport {
+		t.Errorf("exit code = %d, want %d", code, exitcode.Transport)
+	}
+	wantNoRaw(t, "stderr", h.errOut.String())
+	if want := `ssh: \x1b]52;c;Zm9v\x07\u202e\r`; !strings.Contains(h.errOut.String(), want) {
+		t.Errorf("stderr = %q, want %q", h.errOut, want)
+	}
+}
+
+// The escape keeps the lines clusterctl breaks a message into, such as the
+// list of problems of a configuration file, and keeps the exit code, also
+// when the command was interrupted.
+func TestReportKeepsLinesAndExitCode(t *testing.T) {
+	err := exitcode.Wrap(exitcode.Usage,
+		errors.New("site.yaml is not valid:\n  first \x1b[2J\n  second\u2028"))
+	var out strings.Builder
+	h, _ := build(t, harnessOptions{})
+	streams := h.streams
+	streams.Err = &out
+	if got, want := report(context.Background(), streams, err), exitcode.Usage; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	if want := "clusterctl: site.yaml is not valid:\n  first \\x1b[2J\n  second\\u2028\n"; out.String() != want {
+		t.Errorf("stderr = %q, want %q", out.String(), want)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	out.Reset()
+	if got, want := report(ctx, streams, errors.New("bmc: \x1b]0;title\x07")), exitcode.Interrupted; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	if want := "clusterctl: interrupted: bmc: \\x1b]0;title\\x07\n"; out.String() != want {
+		t.Errorf("stderr = %q, want %q", out.String(), want)
 	}
 }
