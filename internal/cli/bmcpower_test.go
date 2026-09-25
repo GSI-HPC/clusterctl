@@ -6,11 +6,16 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/http"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -317,5 +322,118 @@ func TestBMCInterruptBeforeSendingExits130(t *testing.T) {
 				t.Errorf("%v: state %v, want not sent", row["node"], row["state"])
 			}
 		}
+	}
+}
+
+// A node tried over Redfish and then over IPMI is one node: a counter of
+// the step reaches its total once every node has its last answer, whichever
+// transport gave it, and a node that fell back is not counted twice, nor a
+// node sent over IPMI alone left out. The failure over IPMI carries the one
+// over Redfish, as the table does.
+func TestBMCPowerReportsEachNodeOnceAcrossItsTransports(t *testing.T) {
+	isolateHome(t)
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	// exe0002's processor refuses the connection, which falls back to IPMI
+	// even for an action; exe0003's answers with an error, which falls
+	// back only for a read.
+	fakeRedfish(t, func(req *http.Request) (*http.Response, error) {
+		switch processorOf(req) {
+		case "exe0002":
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+		case "exe0003":
+			return answer(req, http.StatusInternalServerError, `{"error":{"message":"busy"}}`), nil
+		}
+		return answer(req, http.StatusOK, system), nil
+	})
+	// ipmiFailing answers every processor over IPMI with state, but
+	// exe0002's with a timeout.
+	ipmiFailing := func(state string) *transport.Recorder {
+		return &transport.Recorder{Reply: ipmiAnswer(func(bmc string) string {
+			if strings.HasPrefix(bmc, "exe0002.") {
+				return "connection timeout"
+			}
+			return state
+		})}
+	}
+
+	for _, tc := range []struct {
+		name     string
+		recorder *transport.Recorder
+		args     []string
+		want     string
+	}{
+		{"bmc status over Redfish alone", ipmiOK(),
+			[]string{"--set", "bmc.order=[redfish]", "bmc", "status", "-n", "exe[0001,0003-0004]"}, `
+step power status total=3 [fold]: failed (target): 1 of 3 service processors failed
+  target exe0003: failed (target): {}: Internal Server Error: busy
+  target exe[0001,0004]: ok
+`},
+		{"a read that falls back to IPMI and fails there too", ipmiFailing("on"),
+			[]string{"bmc", "status", "-n", "exe[0001-0003]"}, `
+step power status total=3 [fold]: failed (target): 1 of 3 service processors failed
+  target exe0002: failed (target): connection timeout; before that, Redfish failed: {}: dial tcp: connection refused
+  target exe[0001,0003]: ok
+`},
+		{"an action that falls back only where it was never sent", ipmiOK(),
+			[]string{"bmc", "power", "off", "-y", "-n", "exe[0001-0003]"}, `
+step power off total=3 [fold]: failed (target): 1 of 3 service processors failed
+  target exe0003: failed (target): {}: Internal Server Error: busy
+  target exe[0001-0002]: ok
+`},
+		{"IPMI alone", ipmiFailing("ok"),
+			[]string{"bmc", "power", "off", "--ipmi", "-y", "-n", "exe[0001-0003]"}, `
+step power off total=3 [fold]: failed (target): 1 of 3 service processors failed
+  target exe0002: failed (target): connection timeout
+  target exe[0001,0003]: ok
+`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, tree := watch(t)
+			_, err := run(t, harnessOptions{ctx: ctx, recorder: tc.recorder}, append(noSlurm, tc.args...)...)
+			wantCode(t, err, exitcode.TargetFailed)
+			if got := tree(); got != tc.want[1:] {
+				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
+			}
+		})
+	}
+}
+
+// A Redfish target ends as its processor answers, before the request gives
+// its place to the next, so a display counts no more nodes running than
+// bmc.redfish.maxConcurrent, rather than every node until the slowest
+// processor has answered.
+func TestBMCPowerEndsEachNodeAsItsProcessorAnswers(t *testing.T) {
+	isolateHome(t)
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	fakeRedfish(t, func(req *http.Request) (*http.Response, error) {
+		return answer(req, http.StatusOK, system), nil
+	})
+	c := &progresstest.Capture{}
+	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	_, err := run(t, harnessOptions{ctx: progress.WithBus(context.Background(), bus), recorder: ipmiOK()},
+		append(noSlurm, "--set", "bmc.redfish.maxConcurrent=2", "bmc", "power", "off", "-y", "-n", "exe[0001-0006]")...)
+	if err != nil {
+		t.Fatalf("bmc power off failed: %v", err)
+	}
+	bus.Close()
+	events := c.Events()
+	progresstest.Check(t, events)
+
+	running := map[progress.SpanID]bool{}
+	peak := 0
+	for _, e := range events {
+		if e.Kind != progress.KindTarget {
+			continue
+		}
+		switch e.Type {
+		case progress.TypeRun:
+			running[e.Span] = true
+			peak = max(peak, len(running))
+		case progress.TypeEnd:
+			delete(running, e.Span)
+		}
+	}
+	if peak > 2 {
+		t.Errorf("%d nodes were running at once, want the limit of 2 at most", peak)
 	}
 }

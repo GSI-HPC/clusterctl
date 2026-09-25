@@ -15,6 +15,8 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -106,6 +108,21 @@ func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.
 	h.streams = streams
 
 	return h, cmd
+}
+
+// watch returns a context whose Bus sends a command's progress events to a
+// capture, for harnessOptions.ctx. tree closes the Bus, checks every promise
+// the events make and returns their tree.
+func watch(t *testing.T) (ctx context.Context, tree func() string) {
+	t.Helper()
+	c := &progresstest.Capture{}
+	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	return progress.WithBus(context.Background(), bus), func() string {
+		t.Helper()
+		bus.Close()
+		progresstest.Check(t, c.Events())
+		return c.Tree()
+	}
 }
 
 // exampleFiles lists the files of the example configuration, leaving out

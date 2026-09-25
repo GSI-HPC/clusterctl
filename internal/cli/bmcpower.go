@@ -19,6 +19,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -89,40 +90,55 @@ type redfishCall[T any] struct {
 }
 
 // redfishEach sends one request to every processor in parallel, bounded by
-// the configured concurrency. It is the one Redfish fan-out: bmc and
-// provision both go through it, so a failure is classified the same way
-// whichever command met it.
+// bmc.redfish.maxConcurrent, and reports the fan-out as the step it names,
+// with a target for each node, the way fanout.Map reports its work. It is
+// the Redfish fan-out of every command but bmc power and bmc status, whose
+// nodes may be tried over IPMI too and are reported across both
+// (bmcRun.redfish). Both send through the same call, so a failure is
+// classified the same way whichever command met it.
 //
-// The context is checked before each request starts: once the command is
-// interrupted, nothing more is sent, and the rest is reported as not sent.
-// A request that was already under way when the interrupt came may or may
-// not have been carried out, so when it changes something (changes) it is
-// reported as an unknown outcome rather than as a failure to retry.
+// Once the command is interrupted, nothing more is sent, and the rest is
+// reported as not sent. A request that was already under way when the
+// interrupt came may or may not have been carried out, so when it changes
+// something (changes) it is reported as an unknown outcome rather than as a
+// failure to retry.
 //
-// A nil client is skipped: nothing is sent, and neither a value nor an
-// error is recorded, since the caller has said why already. A panic while
-// a request is under way becomes that node's failure, and the others are
-// still sent. Each client closes its connections once its request is
-// answered: a processor has few to give, and a command that talks to it
-// again, as a reinstall does in its next step, is a fan-out away.
-func redfishEach[T any](ctx context.Context, a *app.App, names []string, clients []*redfish.Client, changes bool,
+// A nil client is skipped: nothing is sent, the node is no target of the
+// step, and neither a value nor an error is recorded, since the caller has
+// said why already.
+func redfishEach[T any](ctx context.Context, a *app.App, step string, names []string, clients []*redfish.Client, changes bool,
 	do func(context.Context, string, *redfish.Client) (T, error)) []redfishCall[T] {
-	limit := a.Spec.BMC.Redfish.MaxConcurrent
+	calls := newRedfishCalls[T](names, clients)
+	var sendable []int
+	for i := range calls {
+		if calls[i].client != nil {
+			sendable = append(sendable, i)
+		}
+	}
+	outcomes := fanout.Map(ctx, sendable, fanout.Options[int]{
+		Step:  step,
+		Limit: a.Spec.BMC.Redfish.MaxConcurrent,
+		Describe: func(i int) (node, host, role string) {
+			return calls[i].node, calls[i].client.Host, ""
+		},
+		PanicLog: a.Diag,
+	}, func(ctx context.Context, i int) (struct{}, error) {
+		calls[i].send(ctx, a.Diag, changes, do)
+		return struct{}{}, calls[i].err
+	})
+	for k, i := range sendable {
+		if calls[i].sent = outcomes[k].Started; !calls[i].sent {
+			calls[i].err = errNotSent()
+		}
+	}
+	return calls
+}
+
+// newRedfishCalls pairs each node with its client.
+func newRedfishCalls[T any](names []string, clients []*redfish.Client) []redfishCall[T] {
 	calls := make([]redfishCall[T], len(names))
 	for i, node := range names {
 		calls[i] = redfishCall[T]{node: node, client: clients[i]}
-	}
-	fanout.Each(ctx, len(calls), limit, func(i int) {
-		if calls[i].client != nil {
-			calls[i].sent = true
-			calls[i].send(ctx, a.Diag, changes, do)
-			calls[i].client.CloseIdleConnections()
-		}
-	})
-	for i := range calls {
-		if calls[i].client != nil && !calls[i].sent {
-			calls[i].err = errNotSent()
-		}
 	}
 	return calls
 }
@@ -130,8 +146,11 @@ func redfishEach[T any](ctx context.Context, a *app.App, names []string, clients
 // send sends the request of one call. A panic in it is the call's failure,
 // with its stack written to log: the request may have been carried out, as
 // after any other failure that does not prove it never reached the
-// processor.
+// processor. The client closes its connections once the request is
+// answered: a processor has few to give, and a command that talks to it
+// again, as a reinstall does in its next step, is a fan-out away.
 func (call *redfishCall[T]) send(ctx context.Context, log io.Writer, changes bool, do func(context.Context, string, *redfish.Client) (T, error)) {
+	defer call.client.CloseIdleConnections()
 	defer func() {
 		if err := fanout.Recovered(log, call.node, recover()); err != nil {
 			call.err = err
@@ -425,18 +444,40 @@ func (p *bmcPlan) backend(ctx context.Context, a *app.App, node string) (*ipmi.B
 	return b, nil
 }
 
+// runStep runs the plan on some of its nodes as a step of its own, "power
+// <action>", whose targets are the nodes.
+func (p *bmcPlan) runStep(ctx context.Context, a *app.App, names []string, action string) []bmcResult {
+	ctx, step := progress.Start(ctx, progress.KindStep, "power "+action,
+		progress.WithFlags(progress.Fold), progress.Total(len(names)))
+	rows := p.run(ctx, a, names, action)
+	step.End(bmcExit(rows))
+	return rows
+}
+
 // run carries out a power action, or reads the power state, on some nodes of
 // the plan. Each node is tried over its first transport. A read that failed
 // is tried again over the next; an action only when the request provably
 // never reached the processor, because an action that may have been carried
 // out is never sent twice.
+//
+// Each node is reported as one target under the span ctx carries, however
+// many transports it is tried over: every target is queued before anything
+// is sent, marked running when the first request for its node goes out,
+// and ended with the node's last answer. The span above shows no limit,
+// since a node that falls back keeps its target from one transport to the
+// next, and IPMI asks for every processor of an account in one run.
 func (p *bmcPlan) run(ctx context.Context, a *app.App, names []string, action string) []bmcResult {
-	results := map[string]bmcResult{}
+	r := &bmcRun{plan: p, action: action, targets: map[string]bmcTarget{}, results: map[string]bmcResult{}}
+	for _, node := range names {
+		target, span := progress.Start(ctx, progress.KindTarget, node, progress.Queued(),
+			progress.Node(node), progress.Host(p.bmc[node]))
+		r.targets[node] = bmcTarget{ctx: target, span: span}
+	}
 	pending := names
-	for step := 0; len(pending) > 0; step++ {
+	for ; len(pending) > 0; r.step++ {
 		byTransport := map[string][]string{}
 		for _, node := range pending {
-			transport := p.order[node][step]
+			transport := p.order[node][r.step]
 			byTransport[transport] = append(byTransport[transport], node)
 		}
 		var next []string
@@ -447,23 +488,21 @@ func (p *bmcPlan) run(ctx context.Context, a *app.App, names []string, action st
 			}
 			var rows []bmcResult
 			if transport == app.TransportIPMI {
-				rows = p.runIPMI(ctx, a, nodes, action)
+				rows = r.runIPMI(ctx, a, nodes)
 			} else {
-				rows = p.runRedfish(ctx, a, nodes, action)
+				rows = r.runRedfish(ctx, a, nodes)
 			}
 			for _, row := range rows {
-				if earlier, ok := results[row.Node]; ok && row.err != nil {
-					row.fail(fmt.Errorf("%w; before that, %s failed: %s", row.err, transportTitle(earlier.Via), earlier.Error))
-				}
-				results[row.Node] = row
-				order := p.order[row.Node]
-				if row.err == nil || step+1 >= len(order) || !mayFallBack(action, transport, row.err) || ctx.Err() != nil {
+				row, again := r.settle(ctx, transport, row)
+				r.results[row.Node] = row
+				if !again {
+					r.targets[row.Node].span.End(row.err)
 					continue
 				}
 				// The error may carry what the processor said, so it is
 				// quoted to keep control characters off the terminal.
 				a.Printf("%s: %s failed (%s); trying %s\n", row.Node, transportTitle(transport),
-					strconv.Quote(row.Error), transportTitle(order[step+1]))
+					strconv.Quote(row.Error), transportTitle(p.order[row.Node][r.step+1]))
 				next = append(next, row.Node)
 			}
 		}
@@ -472,9 +511,53 @@ func (p *bmcPlan) run(ctx context.Context, a *app.App, names []string, action st
 
 	out := make([]bmcResult, len(names))
 	for i, node := range names {
-		out[i] = results[node]
+		out[i] = r.results[node]
 	}
 	return out
+}
+
+// bmcRun is one run of a plan over some of its nodes.
+type bmcRun struct {
+	plan   *bmcPlan
+	action string
+	// targets are what the nodes are reported by, one each across every
+	// transport it is tried over.
+	targets map[string]bmcTarget
+	// results holds the latest answer for each node. It is written between
+	// the runs of two transports, and only read while one is under way.
+	results map[string]bmcResult
+	// step is how many transports the nodes still pending were tried over.
+	step int
+}
+
+// bmcTarget is the target a node is reported by, and the context its
+// requests are sent under.
+type bmcTarget struct {
+	ctx  context.Context
+	span *progress.Span
+}
+
+// settle takes a node's answer over a transport: a failure carries the
+// failure over the transport before, where there was one, and settle says
+// whether the node is to be tried over the next.
+func (r *bmcRun) settle(ctx context.Context, transport string, row bmcResult) (bmcResult, bool) {
+	if earlier, ok := r.results[row.Node]; ok && row.err != nil {
+		row.fail(fmt.Errorf("%w; before that, %s failed: %s", row.err, transportTitle(earlier.Via), earlier.Error))
+	}
+	order := r.plan.order[row.Node]
+	again := row.err != nil && r.step+1 < len(order) && mayFallBack(r.action, transport, row.err) && ctx.Err() == nil
+	return row, again
+}
+
+// answered ends the target of a node as soon as its answer over a transport
+// is in, when that answer is the node's last, so that a display counts the
+// node done then rather than once the slowest processor has answered. run
+// settles every answer again when the transport's run is over, the same
+// way, and ends the targets still open; a span ends only once.
+func (r *bmcRun) answered(ctx context.Context, transport, node string, err error) {
+	if row, again := r.settle(ctx, transport, bmcResult{Node: node, err: err}); !again {
+		r.targets[node].span.End(row.err)
+	}
 }
 
 // mayFallBack says whether a failure over one transport may be tried again
@@ -497,7 +580,8 @@ func mayFallBack(action, transport string, err error) bool {
 }
 
 // runRedfish carries out a power action over Redfish.
-func (p *bmcPlan) runRedfish(ctx context.Context, a *app.App, names []string, action string) []bmcResult {
+func (r *bmcRun) runRedfish(ctx context.Context, a *app.App, names []string) []bmcResult {
+	p := r.plan
 	var (
 		sendable []string
 		clients  []*redfish.Client
@@ -515,13 +599,13 @@ func (p *bmcPlan) runRedfish(ctx context.Context, a *app.App, names []string, ac
 		clients = append(clients, c)
 	}
 
-	if action == ipmi.ActionStatus {
-		calls := redfishEach(ctx, a, sendable, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+	if r.action == ipmi.ActionStatus {
+		calls := r.redfish(ctx, a, sendable, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 			return c.PowerState(ctx)
 		})
 		return append(rows, callResults(calls, false, func(s string) string { return s })...)
 	}
-	resetType, err := resetTypeFor(action)
+	resetType, err := resetTypeFor(r.action)
 	if err != nil {
 		for _, node := range sendable {
 			row := bmcResult{Node: node, BMC: p.bmc[node], Via: app.TransportRedfish}
@@ -530,14 +614,40 @@ func (p *bmcPlan) runRedfish(ctx context.Context, a *app.App, names []string, ac
 		}
 		return rows
 	}
-	calls := redfishEach(ctx, a, sendable, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+	calls := r.redfish(ctx, a, sendable, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 		return resetType + " sent", c.Reset(ctx, resetType)
 	})
 	return append(rows, callResults(calls, true, func(s string) string { return s })...)
 }
 
-// runIPMI carries out a power action over IPMI, one backend run per account.
-func (p *bmcPlan) runIPMI(ctx context.Context, a *app.App, names []string, action string) []bmcResult {
+// redfish sends a request to the processor of every node, at most
+// bmc.redfish.maxConcurrent at a time and through the same call as
+// redfishEach, but under the run's targets rather than a step of its own:
+// a node's target is marked running as its request takes its place, and
+// ended as the answer comes in when that is the node's last. Every node
+// has a client.
+func (r *bmcRun) redfish(ctx context.Context, a *app.App, names []string, clients []*redfish.Client, changes bool,
+	do func(context.Context, string, *redfish.Client) (string, error)) []redfishCall[string] {
+	calls := newRedfishCalls[string](names, clients)
+	fanout.Each(ctx, len(calls), a.Spec.BMC.Redfish.MaxConcurrent, func(i int) {
+		t := r.targets[calls[i].node]
+		t.span.Run()
+		calls[i].sent = true
+		calls[i].send(t.ctx, a.Diag, changes, do)
+		r.answered(ctx, app.TransportRedfish, calls[i].node, calls[i].err)
+	})
+	for i := range calls {
+		if !calls[i].sent {
+			calls[i].err = errNotSent()
+		}
+	}
+	return calls
+}
+
+// runIPMI carries out a power action over IPMI, one backend run per account,
+// which marks the targets of all its nodes running at once.
+func (r *bmcRun) runIPMI(ctx context.Context, a *app.App, names []string) []bmcResult {
+	p, action := r.plan, r.action
 	var (
 		accounts []string
 		groups   = map[string][]string{}
@@ -574,6 +684,9 @@ func (p *bmcPlan) runIPMI(ctx context.Context, a *app.App, names []string, actio
 		for _, node := range nodes {
 			_ = bmcs.Add(p.bmc[node])
 			byBMC[p.bmc[node]] = append(byBMC[p.bmc[node]], node)
+		}
+		for _, node := range nodes {
+			r.targets[node].span.Run()
 		}
 		statuses, err := backend.Power(ctx, action, bmcs)
 		if err != nil {
@@ -633,7 +746,7 @@ func batched(action string) bool {
 // sent is reported as such.
 func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch int, stagger time.Duration) []bmcResult {
 	if !batched(action) || batch <= 0 || p.nodes.Len() <= batch {
-		return p.run(ctx, a, p.nodes.Expand(), action)
+		return p.runStep(ctx, a, p.nodes.Expand(), action)
 	}
 
 	verb := "powering on"
@@ -670,7 +783,7 @@ func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch 
 			}
 		}
 		a.Printf("%s %s (%d of %d)\n", verb, chunk, i+1, len(chunks))
-		results = append(results, p.run(ctx, a, chunk.Expand(), action)...)
+		results = append(results, p.runStep(ctx, a, chunk.Expand(), action)...)
 	}
 	return results
 }

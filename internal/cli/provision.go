@@ -1083,7 +1083,8 @@ func (p *reinstallPlan) run(ctx context.Context, a *app.App, noReset bool) error
 		return p.fail(ctx, a, "configuring the network boot", err, p.nodes)
 	}
 
-	errs := sendToBMCs(ctx, a, p.nodes, func(ctx context.Context, c *redfish.Client) error {
+	const bootOnce = "setting the machines to boot from the network once"
+	errs := sendToBMCs(ctx, a, bootOnce, p.nodes, func(ctx context.Context, c *redfish.Client) error {
 		return c.SetBootOverride(ctx, "Pxe", false)
 	})
 	for i, n := range p.nodes {
@@ -1091,7 +1092,7 @@ func (p *reinstallPlan) run(ctx context.Context, a *app.App, noReset bool) error
 		n.note("boot once", errs[i])
 	}
 	if err := nodeFailures(p.nodes, errs); err != nil {
-		return p.fail(ctx, a, "setting the machines to boot from the network once", err, p.nodes)
+		return p.fail(ctx, a, bootOnce, err, p.nodes)
 	}
 
 	if p.knownHosts != "" {
@@ -1113,7 +1114,8 @@ func (p *reinstallPlan) run(ctx context.Context, a *app.App, noReset bool) error
 		p.settle()
 		return nil
 	}
-	errs = sendToBMCs(ctx, a, p.nodes, func(ctx context.Context, c *redfish.Client) error {
+	const resetting = "resetting the machines"
+	errs = sendToBMCs(ctx, a, resetting, p.nodes, func(ctx context.Context, c *redfish.Client) error {
 		return c.Reset(ctx, redfish.ResetForceRestart)
 	})
 	// A node whose reset failed is disarmed with the rest, even though a
@@ -1129,21 +1131,25 @@ func (p *reinstallPlan) run(ctx context.Context, a *app.App, noReset bool) error
 		}
 	}
 	if err := nodeFailures(p.nodes, errs); err != nil {
-		return p.fail(ctx, a, "resetting the machines", err, left)
+		return p.fail(ctx, a, resetting, err, left)
 	}
 	p.settle()
 	return nil
 }
 
 // sendToBMCs sends one change to the processor of each node, through the
-// Redfish fan-out, and returns the error of each.
-func sendToBMCs(ctx context.Context, a *app.App, nodes []*reinstallNode, do func(context.Context, *redfish.Client) error) []error {
+// Redfish fan-out, as the step it names, and returns the error of each.
+// With no nodes there is nothing to send, and no step.
+func sendToBMCs(ctx context.Context, a *app.App, step string, nodes []*reinstallNode, do func(context.Context, *redfish.Client) error) []error {
+	if len(nodes) == 0 {
+		return nil
+	}
 	names := make([]string, len(nodes))
 	clients := make([]*redfish.Client, len(nodes))
 	for i, n := range nodes {
 		names[i], clients[i] = n.Node, n.client
 	}
-	calls := redfishEach(ctx, a, names, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (struct{}, error) {
+	calls := redfishEach(ctx, a, step, names, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (struct{}, error) {
 		return struct{}{}, do(ctx, c)
 	})
 	errs := make([]error, len(calls))
@@ -1180,7 +1186,7 @@ func (p *reinstallPlan) fail(ctx context.Context, a *app.App, step string, stepE
 			overridden = append(overridden, n)
 		}
 	}
-	errs := sendToBMCs(ctx, a, overridden, func(ctx context.Context, c *redfish.Client) error {
+	errs := sendToBMCs(ctx, a, "clearing the boot overrides", overridden, func(ctx context.Context, c *redfish.Client) error {
 		return c.ClearBootOverride(ctx)
 	})
 	for i, n := range overridden {
@@ -1417,7 +1423,7 @@ credential, and 1 when a host refused.`,
 				}
 				clients[i], s.BMC = c, c.Host
 			}
-			calls := redfishEach(a.Context(), a, nodes, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+			calls := redfishEach(a.Context(), a, "read the power state", nodes, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				return c.PowerState(ctx)
 			})
 			for i, s := range states {
