@@ -67,15 +67,6 @@ func TestDecrypt(t *testing.T) {
 	if got, want := string(data), "the munge key\n"; got != want {
 		t.Errorf("Decrypt = %q, want %q", got, want)
 	}
-
-	// A password file holds one line, and the newline is not part of it.
-	line, err := secrets.DecryptString(secretPath, ids)
-	if err != nil {
-		t.Fatalf("DecryptString failed: %v", err)
-	}
-	if got, want := line, "the munge key"; got != want {
-		t.Errorf("DecryptString = %q, want %q", got, want)
-	}
 }
 
 func TestDecryptWithTheWrongIdentity(t *testing.T) {

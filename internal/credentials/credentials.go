@@ -23,10 +23,7 @@ import (
 	"syscall"
 	"time"
 
-	"filippo.io/age"
-
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
-	"github.com/GSI-HPC/clusterctl/internal/secrets"
 )
 
 // Credential is a resolved account.
@@ -50,10 +47,12 @@ func (c Credential) String() string {
 type Resolver struct {
 	// Credentials are the configured entries.
 	Credentials map[string]v1alpha1.Credential
-	// BaseDir is what relative file paths resolve against.
-	BaseDir string
-	// Identities are the age identities used for an ageFile source.
-	Identities []string
+	// Path resolves a file the configuration names against the site; nil
+	// takes the name as it is.
+	Path func(string) string
+	// AgeFile decrypts an age encrypted file, named as the configuration
+	// names it, for an ageFile source.
+	AgeFile func(path string) ([]byte, error)
 	// Env reads environment variables; nil reads the process environment.
 	Env func(string) string
 	// Prompt asks the administrator for a password.
@@ -73,7 +72,6 @@ type Resolver struct {
 	reading sync.Mutex
 	mu      sync.Mutex
 	cache   map[string]Credential
-	ageIDs  []age.Identity
 }
 
 // Get resolves a credential by name, reading its password once per process.
@@ -149,15 +147,12 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		return firstLine(string(data)), nil
 
 	case src.AgeFile != "":
-		ids, err := r.identities()
+		data, err := r.AgeFile(src.AgeFile)
 		if err != nil {
 			return "", fmt.Errorf("credential %q: %w", name, err)
 		}
-		value, err := secrets.DecryptString(r.path(src.AgeFile), ids)
-		if err != nil {
-			return "", fmt.Errorf("credential %q: %w", name, err)
-		}
-		return value, nil
+		// The file holds one line, and its newline is not part of it.
+		return strings.TrimRight(string(data), "\r\n"), nil
 
 	case src.SecretRef != nil:
 		if r.Secret == nil {
@@ -211,37 +206,11 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 	}
 }
 
-func (r *Resolver) identities() ([]age.Identity, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.ageIDs != nil {
-		return r.ageIDs, nil
-	}
-	paths := make([]string, 0, len(r.Identities))
-	for _, p := range r.Identities {
-		paths = append(paths, r.path(p))
-	}
-	ids, err := secrets.Identities(paths)
-	if err != nil {
-		return nil, err
-	}
-	r.ageIDs = ids
-	return ids, nil
-}
-
 func (r *Resolver) path(p string) string {
-	if p == "" || strings.HasPrefix(p, "/") {
+	if r.Path == nil {
 		return p
 	}
-	if after, ok := strings.CutPrefix(p, "~"); ok {
-		if home, err := os.UserHomeDir(); err == nil {
-			return home + after
-		}
-	}
-	if r.BaseDir == "" {
-		return p
-	}
-	return r.BaseDir + "/" + p
+	return r.Path(p)
 }
 
 func firstLine(s string) string {

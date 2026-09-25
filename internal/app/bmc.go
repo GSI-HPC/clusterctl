@@ -31,9 +31,9 @@ func (a *App) Credentials() *credentials.Resolver {
 	a.credentialsOnce.Do(func() {
 		a.credentials = &credentials.Resolver{
 			Credentials: a.Spec.Credentials,
-			BaseDir:     a.Resolved.BaseDir,
+			Path:        a.Path,
+			AgeFile:     a.AgeFile,
 			Env:         a.opts.Env,
-			Identities:  a.Spec.Workstation.Identities,
 			Prompt:      a.promptPassword,
 			Secret:      a.SecretValue,
 			NoTerminal:  !a.IsTTY,
