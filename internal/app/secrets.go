@@ -21,7 +21,7 @@ import (
 // needs several keys of one Secret document asks for the key once.
 type secretStore struct {
 	mu     sync.Mutex
-	ids    []age.Identity
+	ids    []secrets.IdentityFile
 	idsErr error
 	idsSet bool
 	values map[string]map[string][]byte
@@ -33,13 +33,20 @@ func (a *App) Identities() ([]age.Identity, error) {
 	s := &a.secrets
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return a.identitiesLocked()
+	files, err := a.identityFilesLocked()
+	if err != nil {
+		return nil, err
+	}
+	return secrets.AgeIdentities(files), nil
 }
 
-func (a *App) identitiesLocked() ([]age.Identity, error) {
+// identityFilesLocked reads workstation.identities once, for both kinds of
+// secret: an age encrypted file is opened with the identities they hold, a
+// Secret document by sops, which is given their paths.
+func (a *App) identityFilesLocked() ([]secrets.IdentityFile, error) {
 	s := &a.secrets
 	if !s.idsSet {
-		s.ids, s.idsErr = secrets.Identities(a.IdentityPaths())
+		s.ids, s.idsErr = secrets.IdentityFiles(a.IdentityPaths())
 		if s.idsErr != nil {
 			s.idsErr = exitcode.Wrap(exitcode.Usage, s.idsErr)
 		}
@@ -85,9 +92,9 @@ func (a *App) SecretValues(name string) (map[string][]byte, error) {
 	// terminal: it can run SOPS_AGE_KEY_CMD or have gpg-agent ask for a
 	// passphrase, which under MCP or in a script nobody asked for.
 	keys := secrets.SopsKeys{Discover: a.IsTTY, Types: a.Spec.Workstation.SopsKeyTypes}
-	if paths := a.IdentityPaths(); len(paths) > 0 {
-		if keys.Identities, err = secrets.IdentityFiles(paths); err != nil {
-			return nil, exitcode.Wrap(exitcode.Usage, err)
+	if len(a.Spec.Workstation.Identities) > 0 {
+		if keys.Identities, err = a.identityFilesLocked(); err != nil {
+			return nil, err
 		}
 	}
 	sections, err := secrets.DecryptSops(a.Context(), a.sopsLocked(), raw, keys, config.SecretSections())

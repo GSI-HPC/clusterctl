@@ -24,28 +24,23 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Identities loads the age identities used to decrypt.
-//
-// A file may hold age identities or an OpenSSH private key; both are
-// accepted, because a site usually already has ssh keys and no reason to
-// issue a second kind.
+// Identities loads the age identities used to decrypt, as IdentityFiles
+// reads them.
 func Identities(paths []string) ([]age.Identity, error) {
+	files, err := IdentityFiles(paths)
+	if err != nil {
+		return nil, err
+	}
+	return AgeIdentities(files), nil
+}
+
+// AgeIdentities are the identities the files hold, in order.
+func AgeIdentities(files []IdentityFile) []age.Identity {
 	var out []age.Identity
-	for _, path := range paths {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("reading the identity %s: %w", path, err)
-		}
-		ids, err := parseIdentities(path, data)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, ids...)
+	for _, f := range files {
+		out = append(out, f.Identities...)
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no age identity is configured; set workstation.identities")
-	}
-	return out, nil
+	return out
 }
 
 func parseIdentities(path string, data []byte) ([]age.Identity, error) {
@@ -63,9 +58,12 @@ func parseIdentities(path string, data []byte) ([]age.Identity, error) {
 	return ids, nil
 }
 
-// IdentityFile is one file of workstation.identities, as sops is given it:
-// by its path, which sops opens itself, so that no key is copied anywhere.
+// IdentityFile is one file of workstation.identities: the identities it
+// holds, which open an age encrypted file, and its path, by which sops is
+// given it, since sops opens the file itself and no key is copied anywhere.
 type IdentityFile struct {
+	// Identities are the age identities the file holds.
+	Identities []age.Identity
 	// Path is the file, absolute, since sops runs in another directory.
 	Path string
 	// SSH is set for an OpenSSH private key, which sops reads from another
@@ -77,10 +75,13 @@ type IdentityFile struct {
 }
 
 // IdentityFiles reads the identities of workstation.identities and notes
-// which recipients each file opens. A file is read and checked here, the
-// way Identities reads it, before sops is pointed at it: sops would prompt
-// for the passphrase of an encrypted key, or run the plugin an identity
-// names.
+// which recipients each file opens. A file sops is pointed at is read and
+// checked here first: sops would prompt for the passphrase of an encrypted
+// key, or run the plugin an identity names.
+//
+// A file may hold age identities or an OpenSSH private key; both are
+// accepted, because a site usually already has ssh keys and no reason to
+// issue a second kind.
 func IdentityFiles(paths []string) ([]IdentityFile, error) {
 	out := make([]IdentityFile, 0, len(paths))
 	for _, path := range paths {
@@ -96,7 +97,7 @@ func IdentityFiles(paths []string) ([]IdentityFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		f := IdentityFile{Path: abs, SSH: isSSHKey(data)}
+		f := IdentityFile{Identities: ids, Path: abs, SSH: isSSHKey(data)}
 		if f.SSH {
 			signer, err := ssh.ParsePrivateKey(data)
 			if err != nil {
@@ -114,7 +115,7 @@ func IdentityFiles(paths []string) ([]IdentityFile, error) {
 		}
 		out = append(out, f)
 	}
-	if len(out) == 0 {
+	if len(AgeIdentities(out)) == 0 {
 		return nil, fmt.Errorf("no age identity is configured; set workstation.identities")
 	}
 	return out, nil
