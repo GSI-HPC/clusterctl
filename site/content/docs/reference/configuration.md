@@ -128,6 +128,11 @@ Exactly one per credential:
 | `command` | The first line a helper prints; a helper named by a relative path resolves against the `Site` document, a bare name is looked up in `PATH`. What it writes on standard error goes to clusterctl's standard error, or to the server's log under `clusterctl mcp` |
 | `prompt` | The terminal |
 
+A password is read once per command, however many nodes need it, and so is
+a failure: a helper that fails, a variable that is not set or a prompt
+answered with nothing is not tried again for the next node. Nothing is read
+after Ctrl-C.
+
 ## Cluster
 
 ```yaml

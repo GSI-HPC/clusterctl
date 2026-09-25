@@ -62,10 +62,10 @@ that reads `3` as "check the network" must not miss it.
 ## An interrupt is 130
 
 The first Ctrl-C, or a SIGTERM, stops the command: nothing new is started,
-a prompt stops waiting, and the command exits `130`, even when what it
-interrupted failed in some other way first. A second Ctrl-C ends the process
-at once. The commands already running on the nodes are not stopped; their
-timeout ends them.
+no password is asked for or read any more, a prompt stops waiting, and the
+command exits `130`, even when what it interrupted failed in some other way
+first. A second Ctrl-C ends the process at once. The commands already
+running on the nodes are not stopped; their timeout ends them.
 
 ## A declined confirmation is 130
 

@@ -5,6 +5,7 @@ package credentials_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/credentials"
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 )
 
 func resolver(t *testing.T, creds map[string]v1alpha1.Credential, env map[string]string) *credentials.Resolver {
@@ -304,6 +306,210 @@ func TestConcurrentLookupsReadOnce(t *testing.T) {
 	if asked != 1 {
 		t.Errorf("prompted %d times for 8 concurrent lookups, want once", asked)
 	}
+}
+
+// A read that failed was not remembered, and provision status builds a
+// client for every node and goes on after an error: a helper that failed ran
+// once per node, and an empty answer at the prompt was asked for again for
+// each. Every caller gets the one failure now, however many ask at once.
+func TestAFailedReadIsMadeOnce(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		src  v1alpha1.PasswordSource
+		// fail makes the source fail, calling read each time it is read.
+		fail func(r *credentials.Resolver, read func())
+	}{
+		{"a prompt answered with nothing", v1alpha1.PasswordSource{Prompt: true},
+			func(r *credentials.Resolver, read func()) {
+				r.Prompt = func(string) (string, error) { read(); return "", nil }
+			}},
+		{"a Secret that cannot be read", v1alpha1.PasswordSource{SecretRef: &v1alpha1.SecretKeyRef{Name: "vault", Key: "bmc"}},
+			func(r *credentials.Resolver, read func()) {
+				r.Secret = func(v1alpha1.SecretKeyRef) ([]byte, error) { read(); return nil, errors.New("no identity opens it") }
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var (
+				mu    sync.Mutex
+				reads int
+			)
+			r := resolver(t, map[string]v1alpha1.Credential{"bmc": {Username: "admin", Password: tc.src}}, nil)
+			tc.fail(r, func() {
+				mu.Lock()
+				reads++
+				mu.Unlock()
+				// Long enough for every other lookup to arrive meanwhile.
+				time.Sleep(20 * time.Millisecond)
+			})
+
+			errs := make([]error, 8)
+			var wg sync.WaitGroup
+			for i := range errs {
+				wg.Go(func() { _, errs[i] = r.Get(context.Background(), "bmc") })
+			}
+			wg.Wait()
+			for i, err := range errs {
+				if err == nil {
+					t.Errorf("lookup %d succeeded although the source failed", i)
+				}
+			}
+			if _, err := r.Get(context.Background(), "bmc"); err == nil || err.Error() != errs[0].Error() {
+				t.Errorf("a later lookup = %v, want the first failure again", err)
+			}
+			if reads != 1 {
+				t.Errorf("the source was read %d times for 9 lookups, want once", reads)
+			}
+		})
+	}
+}
+
+// A helper that fails is run once, however many lookups need it.
+func TestAFailingHelperRunsOnce(t *testing.T) {
+	t.Parallel()
+	runs := filepath.Join(t.TempDir(), "runs")
+	r := resolver(t, map[string]v1alpha1.Credential{
+		"bmc": {Username: "admin", Password: v1alpha1.PasswordSource{
+			Command: []string{"sh", "-c", `echo run >> "$1"; exit 1`, "sh", runs}}},
+	}, nil)
+	for i := range 3 {
+		if _, err := r.Get(context.Background(), "bmc"); err == nil || !strings.Contains(err.Error(), "the helper failed") {
+			t.Fatalf("lookup %d = %v, want the helper's failure", i, err)
+		}
+	}
+	data, err := os.ReadFile(runs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(data), "run"); got != 1 {
+		t.Errorf("the helper ran %d times for 3 lookups, want once", got)
+	}
+}
+
+// waitingPrompt answers a prompt the way the terminal does: it waits for
+// the answer, and gives up when its context ends.
+type waitingPrompt struct {
+	ctx    context.Context
+	answer chan string
+	// asking, when it is set, is sent to as the question is asked, so that
+	// a test interrupts a prompt that is waiting, not one not yet asked.
+	asking chan struct{}
+
+	mu    sync.Mutex
+	asked int
+}
+
+func (p *waitingPrompt) ask(string) (string, error) {
+	p.mu.Lock()
+	p.asked++
+	ctx := p.ctx
+	p.mu.Unlock()
+	if p.asking != nil {
+		select {
+		case p.asking <- struct{}{}:
+		default:
+		}
+	}
+	select {
+	case answer := <-p.answer:
+		return answer, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func (p *waitingPrompt) times() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.asked
+}
+
+// A Ctrl-C at the password prompt of provision status stopped nothing: the
+// command went on to the next node, which asked again, and so on for every
+// node, each leaving a read of the terminal behind. Once the context has
+// ended nothing is read, a lookup that waited for an interrupted one reads
+// nothing either, and an interrupted read is not taken for the source's
+// answer.
+func TestNothingIsReadOnceInterrupted(t *testing.T) {
+	t.Parallel()
+
+	promptResolver := func(t *testing.T, p *waitingPrompt) *credentials.Resolver {
+		r := resolver(t, map[string]v1alpha1.Credential{
+			"bmc": {Username: "admin", Password: v1alpha1.PasswordSource{Prompt: true}},
+		}, nil)
+		r.Prompt = p.ask
+		return r
+	}
+
+	t.Run("after the interrupt", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		p := &waitingPrompt{ctx: ctx}
+		_, err := promptResolver(t, p).Get(ctx, "bmc")
+		if !errors.Is(err, context.Canceled) || exitcode.From(err) != exitcode.Interrupted {
+			t.Errorf("error = %v (exit code %d), want an interrupt", err, exitcode.From(err))
+		}
+		if n := p.times(); n != 0 {
+			t.Errorf("asked %d times after the interrupt, want never", n)
+		}
+	})
+
+	t.Run("while others wait for the prompt", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		p := &waitingPrompt{ctx: ctx, asking: make(chan struct{}, 1)}
+		r := promptResolver(t, p)
+		errs := make([]error, 8)
+		var wg sync.WaitGroup
+		for i := range errs {
+			wg.Go(func() { _, errs[i] = r.Get(ctx, "bmc") })
+		}
+		// The interrupt comes while the first lookup asks; the others wait
+		// for it, or come after the interrupt, and ask nothing either way.
+		<-p.asking
+		cancel()
+		wg.Wait()
+		for i, err := range errs {
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("lookup %d = %v, want it interrupted", i, err)
+			}
+		}
+		if n := p.times(); n != 1 {
+			t.Errorf("asked %d times for 8 lookups interrupted at the prompt, want once", n)
+		}
+	})
+
+	t.Run("but asked afresh once more under a live context", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		p := &waitingPrompt{ctx: ctx, answer: make(chan string, 1), asking: make(chan struct{}, 1)}
+		r := promptResolver(t, p)
+		// The prompt is interrupted while it waits, so that its read is one
+		// the failure cache has to leave out.
+		go func() {
+			<-p.asking
+			cancel()
+		}()
+		if _, err := r.Get(ctx, "bmc"); !errors.Is(err, context.Canceled) {
+			t.Fatalf("the interrupted lookup = %v, want it interrupted", err)
+		}
+
+		p.mu.Lock()
+		p.ctx = context.Background()
+		p.mu.Unlock()
+		p.answer <- "typed"
+		cred, err := r.Get(context.Background(), "bmc")
+		if err != nil || cred.Password() != "typed" {
+			t.Errorf("Get = %v, %v; want the password asked for afresh", cred, err)
+		}
+		if n := p.times(); n != 2 {
+			t.Errorf("asked %d times, want once for the interrupted lookup and once afresh", n)
+		}
+	})
 }
 
 // A relative helper resolves against the site directory, as a relative file

@@ -44,10 +44,17 @@ func (a *App) Credentials() *credentials.Resolver {
 }
 
 // promptPassword reads a password from the terminal without echoing it.
+//
+// Once the command has been interrupted nothing is asked: a prompt would be
+// put on the terminal only to be withdrawn, and the read it starts could not
+// be stopped.
 func (a *App) promptPassword(prompt string) (string, error) {
 	if !a.IsTTY {
 		return "", exitcode.Errorf(exitcode.Usage,
 			"a password is needed but there is no terminal to ask on; configure another password source")
+	}
+	if err := a.Context().Err(); err != nil {
+		return "", exitcode.Wrap(exitcode.Interrupted, err)
 	}
 	fd := int(os.Stdin.Fd())
 	// ReadPassword turns echo off and cannot be cancelled. When an interrupt
@@ -177,7 +184,9 @@ func (a *App) BMCCredential(ctx context.Context, node string) (credentials.Crede
 	}
 	cred, err := a.Credentials().Get(ctx, name)
 	if err != nil {
-		return credentials.Credential{}, exitcode.Wrap(exitcode.Usage, err)
+		// A lookup that was interrupted says so with a code of its own;
+		// anything else is a problem with the configured source.
+		return credentials.Credential{}, exitcode.Default(exitcode.Usage, err)
 	}
 	return cred, nil
 }
