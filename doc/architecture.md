@@ -133,7 +133,9 @@ bounded separately by `bmc.redfish.maxConcurrent`, because a service processor
 is much slower than a node and a wide fan-out to them achieves nothing. A
 processor also has few connections to give, so a client closes its connection
 once its request is answered, and any it has left idle for as long as a
-request may take, rather than keep it for a request that may not come.
+request may take, rather than keep it for a request that may not come. The
+MCP server works on two tool calls at once, so that an agent sending calls
+side by side does not multiply these bounds.
 
 A panic while one target is worked on is recovered in that target's worker,
 since `recover` only reaches its own goroutine, and becomes that target's

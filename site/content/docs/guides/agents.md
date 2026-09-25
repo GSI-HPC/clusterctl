@@ -38,6 +38,11 @@ commands `read_command` runs reach only the site's own hosts: nodes in the
 inventory, and names in the site's `domains`. `CLUSTERCTL_NODES` does not
 apply to them, and `--fanout` cannot be given.
 
+The server works on two calls at a time, whichever tools they are. An agent
+that sends more at once is not refused: the rest wait their turn, so it never
+has more than two commands reaching the site at once. A question waiting for
+your answer does not take a turn.
+
 ## How a change is confirmed
 
 Ask the agent to drain a node, and it plans the change first:
