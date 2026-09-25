@@ -31,3 +31,5 @@ A decision is superseded by a later record, never edited.
 | [0018](0018-a-manual-for-every-release.md) | A manual for every release, the latest at the root | accepted |
 | [0019](0019-decrypt-with-the-sops-command.md) | Decrypt Secret documents with the sops command | accepted |
 | [0020](0020-one-exit-code-rule-for-many-hosts.md) | One exit code rule for a command on many hosts | accepted |
+| [0021](0021-progress-as-our-own-events.md) | Report progress as our own span-shaped events | accepted |
+| [0022](0022-bounded-pools-and-power-batches.md) | Bounded pools, and power actions in batches | accepted |

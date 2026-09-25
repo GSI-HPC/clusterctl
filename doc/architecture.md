@@ -93,12 +93,21 @@ subsystem imports `config`: `app` hands each the typed `v1alpha1` values it
 needs. And none imports `cli` or `app`, so a subsystem can be exercised in a
 test without a command tree.
 
+`progress` is a leaf that every layer may report through. It depends on
+nothing of clusterctl's but `exitcode`, and `output` for escaping, so
+`fanout`, `transport`, `redfish`, `credentials`, `safety` and `app` can each
+start and end the spans of their work without a cycle
+([ADR 0021](adr/0021-progress-as-our-own-events.md)).
+
 Text that came from a node, a BMC, Slurm, a group source or an agent is
 escaped with `output.EscapeText`, or `output.EscapeCell` where it has to stay
 on one line, before it reaches a terminal. There is no other escaper: a
 package that quotes such text in an error, as the group resolver does, uses
 the same helper, and `cli` escapes every error it prints once more on the way
-out, which changes nothing in text that is already escaped.
+out, which changes nothing in text that is already escaped. Every line of
+output and every error a progress display may draw goes through
+`progress.Sanitize`, which applies carriage returns the way a terminal would
+and then escapes what is left with `EscapeCell`.
 
 The transport is reached through the `transport.Runner` interface everywhere
 except in the commands that open an interactive session. That is what lets a
@@ -137,6 +146,18 @@ once its request is answered, and any it has left idle for as long as a
 request may take, rather than keep it for a request that may not come. The
 MCP server works on two tool calls at once, so that an agent sending calls
 side by side does not multiply these bounds.
+
+Every such pool is one loop, `fanout.Each`, which starts nothing once the
+command is interrupted, and each kind of work has a bound of its own, which
+`fanout.max` in the configuration does not change
+([ADR 0022](adr/0022-bounded-pools-and-power-batches.md)). A power-on and a
+power cycle are sent in batches, the set split evenly, one batch after the
+other with a pause between, and a batch with a failure stops the run. A pool
+reports its work as the spans of `internal/progress`: a step, with every
+target queued before the first one runs and each ended before it gives its
+place to the next, so that a display never counts more running than the
+bound, and has counted every target, those an interrupt left out among
+them, by the time the step ends.
 
 A panic while one target is worked on is recovered in that target's worker,
 since `recover` only reaches its own goroutine, and becomes that target's
