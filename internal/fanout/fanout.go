@@ -83,22 +83,32 @@ func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, buil
 		go func(i int, target transport.Target) {
 			defer wg.Done()
 			defer func() { <-sem }()
-
-			result, err := e.Runner.Run(ctx, target, build(target))
-			if result == nil {
-				result = &transport.Result{Target: target, ExitCode: -1}
-			}
-			if err != nil && result.Err == nil {
-				result.Err = err
-			}
-			results[i] = result
-			if e.OnResult != nil {
-				e.OnResult(result)
-			}
+			results[i] = e.runOne(ctx, target, build)
 		}(i, target)
 	}
 	wg.Wait()
 	return results
+}
+
+// runOne works on one target. A panic in the runner, in build or in
+// OnResult becomes the target's failure rather than the end of the process.
+func (e *Executor) runOne(ctx context.Context, target transport.Target, build func(transport.Target) transport.Request) (result *transport.Result) {
+	defer func() {
+		if err := Recovered(target.Name, recover()); err != nil {
+			result = &transport.Result{Target: target, ExitCode: -1, Err: err}
+		}
+	}()
+	result, err := e.Runner.Run(ctx, target, build(target))
+	if result == nil {
+		result = &transport.Result{Target: target, ExitCode: -1}
+	}
+	if err != nil && result.Err == nil {
+		result.Err = err
+	}
+	if e.OnResult != nil {
+		e.OnResult(result)
+	}
+	return result
 }
 
 // Failures returns the results that did not succeed.

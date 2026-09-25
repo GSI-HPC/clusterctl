@@ -177,7 +177,9 @@ confirmation come with it.
   cannot be recorded is refused; a refusal that cannot be recorded says so.
 - **A panic is a failed call.** A panic in a handler is recovered and
   reported as `failed:`, so it does not end the server and the plans waiting
-  in it.
+  in it. A panic in the work for one node of a fan-out, which the handler's
+  recover cannot reach, is that node's failure: the other nodes are
+  reported, the command exits 1, and the stack goes to the server's log.
 
 ## Errors
 
