@@ -4,6 +4,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -210,11 +211,7 @@ func (a *App) RedfishClient(ctx context.Context, node string) (*redfish.Client, 
 		minTLS = profile.MinTLSVersion
 	}
 
-	pinPath := a.Path(spec.PinStore)
-	if pinPath == "" {
-		pinPath = a.StatePath("bmc-pins")
-	}
-	pins := &redfish.PinStore{Path: pinPath}
+	pins := a.PinStore()
 	if !verify {
 		a.noteFirstContact(pins, host)
 	}
@@ -238,6 +235,12 @@ var noteMu sync.Mutex
 // processor yet. The client records whatever the host presents, and sends
 // the BMC account to it, so the administrator should know it trusted a
 // certificate nobody vouched for, and which host it came from.
+// PinStore is where the certificate fingerprints of the service processors
+// are recorded: bmc.redfish.pinStore, or a file in the state directory.
+func (a *App) PinStore() *redfish.PinStore {
+	return &redfish.PinStore{Path: cmp.Or(a.Path(a.Spec.BMC.Redfish.PinStore), a.StatePath("bmc-pins"))}
+}
+
 func (a *App) noteFirstContact(pins *redfish.PinStore, host string) {
 	if _, ok, err := pins.Get(host); err != nil || ok {
 		return
