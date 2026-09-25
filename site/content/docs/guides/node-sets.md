@@ -192,6 +192,12 @@ each other. The `list` answer is cached too, except when a bare `@group` search
 asks whether a group is a source's: that is asked again, so that a group added
 since does not send the search on to another source.
 
+One command asks a source about each group once, however often the group is
+named and however many lookups want it at the same time, and remembers a
+group a source does not have, so the fresh listing is made once per command.
+A source that could not be reached is asked again the next time a lookup
+needs it.
+
 ## A selection for a whole session
 
 ```console

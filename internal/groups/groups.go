@@ -76,9 +76,28 @@ type Resolver struct {
 	timeout   time.Duration
 	ctx       context.Context
 
-	mu    sync.Mutex
-	cache map[string]string
+	mu sync.Mutex
+	// cache holds the answers this resolver was given, and missing the
+	// groups a source said it does not have. flights holds the lookups
+	// under way, for a caller that asks meanwhile to wait for.
+	cache   map[string]string
+	missing map[string]error
+	flights map[string]*flight
 }
+
+// flight is one lookup under way.
+type flight struct {
+	done chan struct{}
+	expr string
+	err  error
+	// waiting counts the callers that wait for it, under the resolver's
+	// lock.
+	waiting int
+}
+
+// errAbandoned is what the callers waiting for a lookup are told when the
+// caller making it did not finish, which only a panic does.
+var errAbandoned = errors.New("the group lookup did not finish")
 
 // Options configure a resolver.
 type Options struct {
@@ -129,6 +148,8 @@ func New(opts Options) *Resolver {
 		timeout:   opts.Timeout,
 		ctx:       ctx,
 		cache:     map[string]string{},
+		missing:   map[string]error{},
+		flights:   map[string]*flight{},
 	}
 }
 
@@ -179,10 +200,13 @@ func (r *Resolver) resolveIn(name, group string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown group source %q (known: %s)", name, strings.Join(r.Sources(), ", "))
 	}
-	if expr, ok := r.cached(name, "map", group); ok {
-		return expr, nil
-	}
+	return r.lookup(cacheKey(name, "map", group), func() (string, error) {
+		return r.find(name, src, group)
+	})
+}
 
+// find asks one source for one group.
+func (r *Resolver) find(name string, src v1alpha1.GroupSource, group string) (string, error) {
 	var (
 		expr string
 		err  error
@@ -214,8 +238,6 @@ func (r *Resolver) resolveIn(name, group string) (string, error) {
 	default:
 		return "", fmt.Errorf("group source %q defines nothing", name)
 	}
-
-	r.store(name, "map", group, expr)
 	return expr, nil
 }
 
@@ -226,19 +248,14 @@ func (r *Resolver) All(source string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown group source %q (known: %s)", source, strings.Join(r.Sources(), ", "))
 	}
-	if expr, ok := r.cached(source, "all", ""); ok {
-		return expr, nil
-	}
-
-	var expr string
-	switch {
-	case src.Exec != nil && len(src.Exec.All) > 0:
-		out, err := r.execCached(source, src, src.Exec.All, nil)
-		if err != nil {
-			return "", fmt.Errorf("source %q: %w", source, err)
+	return r.lookup(cacheKey(source, "all", ""), func() (string, error) {
+		if src.Exec != nil && len(src.Exec.All) > 0 {
+			out, err := r.execCached(source, src, src.Exec.All, nil)
+			if err != nil {
+				return "", fmt.Errorf("source %q: %w", source, err)
+			}
+			return out, nil
 		}
-		expr = out
-	default:
 		// Without a command of its own, the union of every group is what
 		// the source knows.
 		names, err := r.List(source)
@@ -253,10 +270,8 @@ func (r *Resolver) All(source string) (string, error) {
 			}
 			parts = append(parts, one)
 		}
-		expr = strings.Join(parts, ",")
-	}
-	r.store(source, "all", "", expr)
-	return expr, nil
+		return strings.Join(parts, ","), nil
+	})
 }
 
 // List implements nodeset.Resolver.
@@ -283,14 +298,16 @@ func (r *Resolver) List(source string) ([]string, error) {
 		}
 		return r.inventory.AttributeValues(src.Attribute), nil
 	case src.Exec != nil && len(src.Exec.List) > 0:
-		if out, ok := r.cached(source, "list", ""); ok {
-			return fields(out), nil
-		}
-		out, err := r.execCached(source, src, src.Exec.List, nil)
+		out, err := r.lookup(cacheKey(source, "list", ""), func() (string, error) {
+			out, err := r.execCached(source, src, src.Exec.List, nil)
+			if err != nil {
+				return "", fmt.Errorf("source %q: %w", source, err)
+			}
+			return out, nil
+		})
 		if err != nil {
-			return nil, fmt.Errorf("source %q: %w", source, err)
+			return nil, err
 		}
-		r.store(source, "list", "", out)
 		return fields(out), nil
 	default:
 		return nil, &sentinelError{sentinel: ErrCannotList,
@@ -311,8 +328,13 @@ func (r *Resolver) execFailed(name, group string, err error) error {
 	}
 	// A cached listing may predate the group, and passing the search on to
 	// another source's group of the same name is worse than asking again.
+	// So the listing is asked for afresh, once for the resolver, however
+	// many groups it finds missing: one made during this command is as new
+	// as the answer that just failed, and only one that succeeded is kept.
 	src := r.sources[name]
-	out, listErr := r.exec(src.Exec, src.Exec.List, nil)
+	out, listErr := r.lookup(cacheKey(name, "fresh list", ""), func() (string, error) {
+		return r.exec(src.Exec, src.Exec.List, nil)
+	})
 	if listErr != nil || slices.Contains(fields(out), group) {
 		return err
 	}
@@ -477,17 +499,52 @@ func cacheKey(source, kind, group string) string {
 	return source + "\x00" + kind + "\x00" + group
 }
 
-func (r *Resolver) cached(source, kind, group string) (string, bool) {
+// lookup answers the lookup key names, running find for it at most once
+// however many callers ask.
+//
+// A caller that asks while find runs waits for its answer rather than
+// sending the command again, so the workers of a pool that all need one
+// group cost one command between them. What find answered is kept for the
+// resolver's life, which is one command, when it is a group's nodes or that
+// the source has no such group. Any other failure is handed to the callers
+// that waited for it and forgotten: a host that did not answer, or a
+// command that was interrupted, says nothing about the source's groups, and
+// the next caller asks again. find runs under the resolver's context, so it
+// ends with the command, and so does every wait for it.
+func (r *Resolver) lookup(key string, find func() (string, error)) (string, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	expr, ok := r.cache[cacheKey(source, kind, group)]
-	return expr, ok
-}
+	if expr, ok := r.cache[key]; ok {
+		r.mu.Unlock()
+		return expr, nil
+	}
+	if err, ok := r.missing[key]; ok {
+		r.mu.Unlock()
+		return "", err
+	}
+	if f, ok := r.flights[key]; ok {
+		f.waiting++
+		r.mu.Unlock()
+		<-f.done
+		return f.expr, f.err
+	}
+	f := &flight{done: make(chan struct{}), err: errAbandoned}
+	r.flights[key] = f
+	r.mu.Unlock()
 
-func (r *Resolver) store(source, kind, group string, expr string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.cache[cacheKey(source, kind, group)] = expr
+	defer func() {
+		r.mu.Lock()
+		delete(r.flights, key)
+		switch {
+		case f.err == nil:
+			r.cache[key] = f.expr
+		case errors.Is(f.err, ErrNotDefined):
+			r.missing[key] = f.err
+		}
+		r.mu.Unlock()
+		close(f.done)
+	}()
+	f.expr, f.err = find()
+	return f.expr, f.err
 }
 
 // diskKey identifies one command of one source on disk: the scope the

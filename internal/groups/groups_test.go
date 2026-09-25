@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -500,5 +502,95 @@ func TestAStaleListDoesNotPassTheSearchOn(t *testing.T) {
 	}
 	if errors.Is(err, groups.ErrNotDefined) {
 		t.Errorf("error %v says the group is not defined, but the source lists it", err)
+	}
+}
+
+// slowly makes a recorder take a while over every command and counts them,
+// so that callers who ask at the same time arrive while the first command
+// runs.
+func slowly(rec *transport.Recorder, calls *atomic.Int32) *transport.Recorder {
+	reply := rec.Reply
+	return &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		calls.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		return reply(tg, req)
+	}}
+}
+
+// The resolver locked its cache but not a lookup, so callers that asked for
+// the same group at once each sent the command. One lookup is made however
+// many ask; they all get its answer, a failure too, and a failure that says
+// nothing about the source's groups is asked again by the next caller.
+func TestAGroupIsLookedUpOnceHoweverManyAsk(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		rec   *transport.Recorder
+		code  int
+		after int32
+	}{
+		{"a source that answers", answer("exe1 exe2"), exitcode.OK, 1},
+		{"a source that cannot be reached", unreachable(), exitcode.Transport, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var calls atomic.Int32
+			r := testResolver(t, slowly(tc.rec, &calls), "")
+
+			exprs, errs := make([]string, 8), make([]error, 8)
+			var wg sync.WaitGroup
+			for i := range 8 {
+				wg.Go(func() { exprs[i], errs[i] = r.Resolve("slurm", "main") })
+			}
+			wg.Wait()
+			if n := calls.Load(); n != 1 {
+				t.Errorf("eight callers at once sent %d commands, want 1", n)
+			}
+			for i := range 8 {
+				if got := exitcode.From(errs[i]); got != tc.code || exprs[i] != exprs[0] {
+					t.Errorf("caller %d: %q, exit code %d (%v), want %q and %d", i, exprs[i], got, errs[i], exprs[0], tc.code)
+				}
+			}
+
+			if _, err := r.Resolve("slurm", "main"); exitcode.From(err) != tc.code {
+				t.Errorf("a later caller: %v, want exit code %d", err, tc.code)
+			}
+			if n := calls.Load(); n != tc.after {
+				t.Errorf("after a later caller, %d commands were sent, want %d", n, tc.after)
+			}
+		})
+	}
+}
+
+// A group an exec source did not have cost its map command and a fresh
+// listing on every search, and a second missing group listed the source
+// again. What a source lacks is remembered for the command, and it is listed
+// afresh once, however many of its groups the command finds missing.
+func TestWhatASourceLacksIsRemembered(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	r := testResolver(t, slowly(&transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if strings.Contains(strings.Join(req.Argv, " "), "%R") {
+			return &transport.Result{Target: tg, Stdout: "main\n"}, nil
+		}
+		return &transport.Result{Target: tg}, nil
+	}}, &calls), "")
+
+	for i := range 3 {
+		got, err := r.Resolve("", "infra")
+		if err != nil || got != "wlm01" {
+			t.Fatalf("search %d: Resolve = %q, %v, want the static source's wlm01", i, got, err)
+		}
+	}
+	if n := calls.Load(); n != 2 {
+		t.Errorf("three searches sent %d commands, want the map and one listing", n)
+	}
+
+	_, err := r.Resolve("slurm", "gpu")
+	if !errors.Is(err, groups.ErrNotDefined) {
+		t.Fatalf("Resolve(slurm, gpu) = %v, want the group not defined", err)
+	}
+	if n := calls.Load(); n != 3 {
+		t.Errorf("a second missing group took %d commands in all, want one more map and no listing", n)
 	}
 }
