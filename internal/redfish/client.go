@@ -48,7 +48,7 @@ type Client struct {
 	// accepts. When set, a reset is checked against them rather than
 	// against what the machine advertises.
 	ResetTypes []string
-	// Timeout bounds one request.
+	// Timeout bounds one request, and how long a connection is kept idle.
 	Timeout time.Duration
 	// Verify checks the certificate against the system roots instead of
 	// pinning it. Few sites can use this.
@@ -135,10 +135,26 @@ func (c *Client) httpClient(ctx context.Context) (*http.Client, error) {
 			DialContext:         c.DialContext,
 			// Actions must never be replayed, so nothing here retries.
 			DisableKeepAlives: false,
+			// A service processor has few connections to give. The
+			// requests of a command to one follow each other closely, so
+			// a connection left idle for as long as a request may take is
+			// not going to be used again, and is closed rather than kept
+			// for as long as the processor lets it be.
+			IdleConnTimeout: timeout,
 		}
 	}
 	c.client = &http.Client{Transport: rt, Timeout: timeout, CheckRedirect: refuseRedirect}
 	return c.client, nil
+}
+
+// CloseIdleConnections closes the connections the client keeps for its next
+// request. A caller that is done with the processor for now calls it, so
+// that the processor has the connection back at once. The next request, if
+// there is one, connects again.
+func (c *Client) CloseIdleConnections() {
+	if c.client != nil {
+		c.client.CloseIdleConnections()
+	}
 }
 
 // refuseRedirect refuses every redirect. Following one would send an action

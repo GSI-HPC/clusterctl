@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -105,5 +106,67 @@ func TestBMCActionThatReachedTheProcessorIsNotSentAgain(t *testing.T) {
 	}
 	if !strings.Contains(h.errOut.String(), "trying IPMI") {
 		t.Errorf("the fallback is not said:\n%s", h.errOut)
+	}
+}
+
+// closingTransport is a processor that also hears when its client lets go
+// of the connections it keeps.
+type closingTransport struct {
+	roundTrip
+	closed func()
+}
+
+func (c *closingTransport) CloseIdleConnections() { c.closed() }
+
+// Every Redfish client kept the connection of its last request, and nothing
+// closed it: the MCP server, which runs for days, held one to every
+// processor it had talked to, and a processor has few. The fan-out lets go
+// of each client's connections as soon as its request is answered.
+func TestTheRedfishFanOutLetsGoOfItsConnections(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"a read", []string{"bmc", "status"}, "GET, closed"},
+		{"an action", []string{"bmc", "power", "cycle", "-y"}, "GET, POST, closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateHome(t)
+			t.Setenv("BMC_PASSWORD", "s3cret")
+			var mu sync.Mutex
+			seen := map[string][]string{}
+			previous := redfishClientFor
+			t.Cleanup(func() { redfishClientFor = previous })
+			redfishClientFor = func(a *app.App, ctx context.Context, node string) (*redfish.Client, error) {
+				c, err := a.RedfishClient(ctx, node)
+				if err != nil {
+					return nil, err
+				}
+				note := func(event string) {
+					mu.Lock()
+					defer mu.Unlock()
+					seen[node] = append(seen[node], event)
+				}
+				c.Transport = &closingTransport{
+					roundTrip: func(req *http.Request) (*http.Response, error) {
+						note(req.Method)
+						return answer(req, http.StatusOK, system), nil
+					},
+					closed: func() { note("closed") },
+				}
+				return c, nil
+			}
+
+			args := append(append(noSlurm, "--set", "bmc.order=[redfish]"), tc.args...)
+			if _, err := run(t, harnessOptions{recorder: ipmiOK()}, append(args, "-n", "exe[0001-0003]")...); err != nil {
+				t.Fatal(err)
+			}
+			for _, node := range []string{"exe0001", "exe0002", "exe0003"} {
+				if got := strings.Join(seen[node], ", "); got != tc.want {
+					t.Errorf("%s heard %q, want %q", node, got, tc.want)
+				}
+			}
+		})
 	}
 }

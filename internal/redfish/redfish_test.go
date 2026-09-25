@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
@@ -741,5 +742,80 @@ func TestAClientDoesNotPrintItsPassword(t *testing.T) {
 				t.Errorf("Sprintf(%q) = %q, want the host and no password", verb, got)
 			}
 		}
+	}
+}
+
+// openConns counts the connections a server holds open.
+type openConns struct {
+	mu   sync.Mutex
+	open int
+}
+
+func (o *openConns) track(_ net.Conn, state http.ConnState) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	switch state {
+	case http.StateNew:
+		o.open++
+	case http.StateClosed, http.StateHijacked:
+		o.open--
+	}
+}
+
+func (o *openConns) count() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.open
+}
+
+// A client kept the connection of its last request open with nothing to
+// close it, and every client has its own: the MCP server, which runs for
+// days, held one to each processor it had talked to for as long as the
+// processor let it, and a processor has few. A client lets go of it when
+// told to, and of one it has left idle for as long as a request may take.
+func TestAClientLetsGoOfItsConnection(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		timeout time.Duration
+		done    func(*redfish.Client)
+	}{
+		{"when it is done with the processor", time.Minute, (*redfish.Client).CloseIdleConnections},
+		{"when the connection has been idle for as long as a request may take", 500 * time.Millisecond, func(*redfish.Client) {}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			conns := &openConns{}
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"PowerState":"On"}`))
+			}))
+			server.Config.ConnState = conns.track
+			server.StartTLS()
+			t.Cleanup(server.Close)
+			c := &redfish.Client{
+				Host:        "example.com",
+				Username:    "admin",
+				Password:    "secret",
+				Timeout:     tc.timeout,
+				Pins:        &redfish.PinStore{Path: filepath.Join(t.TempDir(), "pins")},
+				DialContext: dialTo(server.Listener.Addr().String()),
+			}
+
+			if _, err := c.PowerState(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if got := conns.count(); got != 1 {
+				t.Fatalf("%d connections are open after the request, want the one it used", got)
+			}
+			tc.done(c)
+			deadline := time.Now().Add(5 * time.Second)
+			for conns.count() > 0 && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if got := conns.count(); got != 0 {
+				t.Errorf("%d connections are still open, want none", got)
+			}
+		})
 	}
 }

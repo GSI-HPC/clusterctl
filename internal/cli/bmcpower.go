@@ -102,7 +102,9 @@ type redfishCall[T any] struct {
 // A nil client is skipped: nothing is sent, and neither a value nor an
 // error is recorded, since the caller has said why already. A panic while
 // a request is under way becomes that node's failure, and the others are
-// still sent.
+// still sent. Each client closes its connections once its request is
+// answered: a processor has few to give, and a command that talks to it
+// again, as a reinstall does in its next step, is a fan-out away.
 func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, changes bool,
 	do func(context.Context, string, *redfish.Client) (T, error)) []redfishCall[T] {
 	ctx := a.Context()
@@ -115,6 +117,7 @@ func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, c
 		if calls[i].client != nil {
 			calls[i].sent = true
 			calls[i].send(ctx, a.Diag, changes, do)
+			calls[i].client.CloseIdleConnections()
 		}
 	})
 	for i := range calls {
