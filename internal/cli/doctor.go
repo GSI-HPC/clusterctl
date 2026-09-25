@@ -314,11 +314,8 @@ func remoteChecks(a *app.App) []check {
 		// contacts the role for real rather than asking the recorder that
 		// stands in for the hosts, which answers every request with
 		// success.
-		result, err := a.ReadRunner.Run(a.Context(), target, transport.Request{
-			Argv:    []string{"true"},
-			Timeout: 20 * time.Second,
-			TTY:     transport.TTYNone,
-		})
+		ping := a.Collect(transport.Request{Argv: []string{"true"}, Timeout: 20 * time.Second})
+		result, err := a.ReadRunner.Run(a.Context(), target, ping)
 		if err != nil || result.Failed() {
 			detail := "unreachable"
 			if err != nil {
@@ -343,11 +340,8 @@ func remoteChecks(a *app.App) []check {
 			}
 			script.WriteString(toolCheck(tool))
 		}
-		missing, err := a.ReadRunner.Run(a.Context(), target, transport.Request{
-			Script:  script.String(),
-			Timeout: 30 * time.Second,
-			TTY:     transport.TTYNone,
-		})
+		probe := a.Collect(transport.Request{Script: script.String(), Timeout: 30 * time.Second})
+		missing, err := a.ReadRunner.Run(a.Context(), target, probe)
 		switch {
 		case err != nil:
 			checks = append(checks, check{"tools on " + role, statusWarn, err.Error()})

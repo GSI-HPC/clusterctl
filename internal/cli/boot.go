@@ -255,9 +255,7 @@ func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
 	}
 	script.WriteString("; do [ -f \"$p\" ] || printf '%s\\n' \"$p\"; done\n")
 	result, err := a.ReadOnRole(a.Context(), role, transport.Request{
-		Script:  script.String(),
-		Timeout: a.Timeout().Get(),
-		TTY:     transport.TTYNone,
+		Script: script.String(),
 	})
 	if err != nil {
 		return err
@@ -301,9 +299,7 @@ func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
 // call rather than one connection per node.
 func readBootLinks(a *app.App, role, root string) (map[string]string, error) {
 	result, err := a.ReadOnRole(a.Context(), role, transport.Request{
-		Argv:    []string{"find", root, "-maxdepth", "1", "-type", "l", "-printf", "%f\t%l\n"},
-		Timeout: a.Timeout().Get(),
-		TTY:     transport.TTYNone,
+		Argv: []string{"find", root, "-maxdepth", "1", "-type", "l", "-printf", "%f\t%l\n"},
 	})
 	if err != nil {
 		return nil, err
@@ -379,9 +375,7 @@ func runLinkScript(a *app.App, role, script string, links []bootLink, done strin
 		links[i].Result, links[i].Error = "unknown", "the PXE host did not report this link"
 	}
 	result, runErr := a.RunOnRole(a.Context(), role, transport.Request{
-		Script:  script,
-		Timeout: a.Timeout().Get(),
-		TTY:     transport.TTYNone,
+		Script: script,
 	})
 	if result != nil {
 		for _, line := range result.Lines() {
@@ -666,9 +660,7 @@ a boot path may point at.`,
 				path = "/srv/pxesrv/boot"
 			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Argv:    []string{"find", path, "-type", "f", "-name", "ipxe.*", "-o", "-type", "f", "-name", "grub.cfg*"},
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
+				Argv: []string{"find", path, "-type", "f", "-name", "ipxe.*", "-o", "-type", "f", "-name", "grub.cfg*"},
 			})
 			if err != nil {
 				return err
@@ -714,9 +706,7 @@ previewed and confirmed like any other change.`,
 				return err
 			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Argv:    []string{"git", "-C", path, "pull", "--ff-only"},
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
+				Argv: []string{"git", "-C", path, "pull", "--ff-only"},
 			})
 			if err != nil {
 				return err
@@ -753,9 +743,7 @@ for a boot configuration and does not get the expected one.`,
 				path = "/var/log/pxesrv.log"
 			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Argv:    []string{"tail", "-n", fmt.Sprint(lines), path},
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
+				Argv: []string{"tail", "-n", fmt.Sprint(lines), path},
 			})
 			if err != nil {
 				return err
@@ -800,9 +788,7 @@ form: GRUB loads the target at every boot until "boot grub unset" removes it.
 				return err
 			}
 			if _, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Argv:    []string{"ln", "-sfn", args[1], link},
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
+				Argv: []string{"ln", "-sfn", args[1], link},
 			}); err != nil {
 				return err
 			}
@@ -827,9 +813,7 @@ no longer finds a configuration named after the node.`,
 				return err
 			}
 			if _, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Argv:    []string{"rm", "-f", "--", link},
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
+				Argv: []string{"rm", "-f", "--", link},
 			}); err != nil {
 				return err
 			}
