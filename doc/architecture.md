@@ -21,11 +21,15 @@ cmd/clusterctl        the process: signals, exit code
     internal/output   the format the result is printed in
 ```
 
-A command never reads the configuration, builds an ssh command line or formats
-its own output. It asks the `app.App` it is given for a node set, for targets
-and for an executor, does its work, and hands one `output.Result` back. That is
-why `-o json`, `--dry-run` and the confirmation gate behave identically in
-every command rather than in the ones that remembered to implement them.
+A command never builds an ssh command line or formats its own output. It asks
+the `app.App` it is given for a node set, for targets, for an executor and for
+the clients of the subsystems, reads what else it needs from the resolved
+configuration, `a.Spec`, does its work, and hands one `output.Result` back.
+That is why `-o json`, `--dry-run` and the confirmation gate behave identically
+in every command rather than in the ones that remembered to implement them.
+
+`app` is the resolved context and a factory, not a facade: `cli` imports the
+subsystems it drives and calls them itself, with what `app` built.
 
 ## Packages
 
@@ -39,7 +43,7 @@ every command rather than in the ones that remembered to implement them.
 | `internal/inventory` | What is known about the nodes: attributes, racks, addresses, boot paths. |
 | `internal/naming` | Turning a short node name into a host name and a service processor name. |
 | `internal/hostname` | Deciding whether a name may be handed to ssh or put into a URL as a host. |
-| `internal/groups` | Resolving `@group` references from tables, node attributes or commands. |
+| `internal/exitcode` | The exit codes the command line contract fixes, which every layer that can fail uses to say which one it asks for. |
 
 ### Getting things done
 
@@ -49,8 +53,14 @@ every command rather than in the ones that remembered to implement them.
 | `internal/shellquote` | Rendering an argument vector so a remote shell reproduces it exactly. |
 | `internal/fanout` | Running one request on many targets, bounded and in order. |
 | `internal/safety` | Deciding whether a destructive action may proceed. |
-| `internal/fileutil` | Writing files atomically and under a lock. |
-| `internal/mcpserver` | Offering the commands to an AI agent over MCP, with changes only through plan and apply. |
+| `internal/fileutil` | Writing files atomically and under a lock, and the cache on disk. |
+
+### Front ends
+
+| Package | Owns |
+| --- | --- |
+| `internal/cli` | The command tree: flags, arguments, help, and the commands themselves. |
+| `internal/mcpserver` | Offering the commands to an AI agent over MCP, with changes only through plan and apply. It builds an `app.App` for each call and runs the command tree through a factory `cli` hands it, which keeps the import one way. |
 
 ### Subsystems
 
@@ -58,6 +68,7 @@ every command rather than in the ones that remembered to implement them.
 | --- | --- |
 | `internal/redfish` | The Redfish client, its certificate pinning and its reset semantics. |
 | `internal/ipmi` | The FreeIPMI and ipmitool backends, run on a host that can reach the service network. |
+| `internal/groups` | Resolving `@group` references from tables, node attributes or commands run on a host role, and caching what the commands answered. |
 | `internal/credentials` | Resolving an account and its password from a configured source. |
 | `internal/secrets` | Decrypting age encrypted files into memory, reading the sops metadata of a Secret document, and having the `sops` command decrypt it into memory. |
 | `internal/slurm` | Reading and changing the state of the workload manager. |
@@ -70,14 +81,16 @@ every command rather than in the ones that remembered to implement them.
 | Package | Owns |
 | --- | --- |
 | `internal/output` | Table, JSON, YAML, node set, name, JSONPath and jq rendering, and escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`). |
-| `internal/exitcode` | The exit codes the command line contract fixes. |
 | `internal/version` | The build provenance, which comes from the signed tag or the VCS stamps. |
 
 ## Dependency direction
 
-`cli` depends on `app`, `app` depends on everything else, and the subsystems
-depend only on `transport`, `config` and the model. No subsystem imports `cli`
-or `app`, so a subsystem can be exercised in a test without a command tree.
+`cli` and `mcpserver` depend on `app`, and `cli` on the subsystems it drives
+too; `app` depends on everything else. A subsystem depends on the model, on
+`transport` and on the helpers beside it, `output` for escaping among them. No
+subsystem imports `config`: `app` hands each the typed `v1alpha1` values it
+needs. And none imports `cli` or `app`, so a subsystem can be exercised in a
+test without a command tree.
 
 Text that came from a node, a BMC, Slurm, a group source or an agent is
 escaped with `output.EscapeText`, or `output.EscapeCell` where it has to stay
