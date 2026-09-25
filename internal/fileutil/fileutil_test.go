@@ -9,10 +9,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 )
@@ -451,5 +453,39 @@ func TestCheckTrustedRefusesAnotherUsersFile(t *testing.T) {
 	}
 	if err := fileutil.CheckTrusted(path); err != nil {
 		t.Errorf("root's file: %v", err)
+	}
+}
+
+func TestCacheKeepsAnAnswerForItsKeyAndTTL(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	key := map[string]string{"host": "dhcp", "path": "/etc/dhcp/dhcpd.conf"}
+	data := []byte("not UTF-8: \xff\n")
+	fileutil.WriteCache(dir, key, data)
+
+	if got, ok := fileutil.ReadCache(dir, key, time.Minute); !ok || string(got) != string(data) {
+		t.Errorf("ReadCache = %q, %v; want the bytes written", got, ok)
+	}
+	if _, ok := fileutil.ReadCache(dir, map[string]string{"host": "dhcp"}, time.Minute); ok {
+		t.Error("an entry was read back for another key")
+	}
+	if _, ok := fileutil.ReadCache(dir, key, time.Nanosecond); ok {
+		t.Error("a stale entry was read back")
+	}
+
+	// An entry dated in the future would never age.
+	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("cache files = %q (%v), want one", files, err)
+	}
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	raw, _ := os.ReadFile(files[0])
+	raw = regexp.MustCompile(`"at":"[^"]*"`).ReplaceAll(raw, []byte(`"at":"`+future+`"`))
+	if err := os.WriteFile(files[0], raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fileutil.ReadCache(dir, key, time.Minute); ok {
+		t.Error("an entry written in the future was trusted")
 	}
 }

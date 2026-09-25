@@ -6,12 +6,9 @@ package app
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -35,13 +32,19 @@ func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Durati
 	if err != nil {
 		return nil, err
 	}
-	cache := a.remoteCachePath(target, path)
-	if ttl > 0 {
-		if info, err := os.Stat(cache); err == nil && time.Since(info.ModTime()) < ttl {
-			if data, err := os.ReadFile(cache); err == nil && len(data) > 0 {
-				return data, nil
-			}
-		}
+	// The cache directory is shared by every configuration, context and the
+	// MCP server of one user, so the key holds everything that decides
+	// which file is read: the site, cluster and context, the host with its
+	// account and the way it is reached, and the path.
+	key := struct {
+		Scope  string            `json:"scope"`
+		Target transport.Target  `json:"target"`
+		Host   v1alpha1.HostRole `json:"host"`
+		Path   string            `json:"path"`
+	}{a.cacheScope(), target, a.Spec.Hosts[target.Role], path}
+	dir := filepath.Join(a.CacheDir, "remote")
+	if data, ok := fileutil.ReadCache(dir, key, ttl); ok && ttl > 0 {
+		return data, nil
 	}
 
 	result, err := a.ReadOnRole(ctx, role, transport.Request{Argv: []string{"cat", path}})
@@ -49,29 +52,10 @@ func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Durati
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	data := []byte(result.Stdout)
-	if ttl > 0 && len(data) > 0 {
-		// A cache that cannot be written is not worth failing the command
-		// over; the next call simply fetches again.
-		_ = fileutil.WriteAtomic(cache, data, 0o600)
+	if ttl > 0 {
+		fileutil.WriteCache(dir, key, data)
 	}
 	return data, nil
-}
-
-// remoteCachePath names the cached copy of one file on one host.
-//
-// The cache directory is shared by every configuration, context and the MCP
-// server of one user, so the key holds everything that decides which file
-// is read: the site, cluster and context, the host with its account and the
-// way it is reached, and the path.
-func (a *App) remoteCachePath(target transport.Target, path string) string {
-	key, _ := json.Marshal(struct {
-		Scope  string            `json:"scope"`
-		Target transport.Target  `json:"target"`
-		Host   v1alpha1.HostRole `json:"host"`
-		Path   string            `json:"path"`
-	}{a.cacheScope(), target, a.Spec.Hosts[target.Role], path})
-	sum := sha256.Sum256(key)
-	return filepath.Join(a.CacheDir, "remote", hex.EncodeToString(sum[:]))
 }
 
 // cacheScope names the site, cluster and context a command runs against,
