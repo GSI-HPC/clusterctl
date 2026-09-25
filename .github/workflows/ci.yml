@@ -16,17 +16,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Go and sops come from .github/actions/setup-go at the versions mise.toml
+# names. This is the oldest sops clusterctl supports (secrets.MinSopsVersion),
+# which one job tests with; doc/release.md says how to raise it.
 env:
-  # The Go release line clusterctl is built with. go.mod states the oldest
-  # version the code compiles with; CI and the release take the newest patch
-  # of this line instead, because that is the one carrying the standard
-  # library's security fixes.
-  GO_VERSION: '1.26'
-  # The sops the tests decrypt Secret documents with, the one mise.toml and
-  # release.yml pin, and the oldest clusterctl supports
-  # (secrets.MinSopsVersion). Dependabot updates neither; doc/release.md says
-  # how.
-  SOPS_VERSION: '3.13.3'
   SOPS_MIN_VERSION: '3.10.0'
 
 jobs:
@@ -39,17 +32,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go
         with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
-
-      # Built from its tagged source, which the Go checksum database vouches
-      # for, the same way on every runner.
-      - name: Install sops
-        run: |
-          go install "github.com/getsops/sops/v3/cmd/sops@v${SOPS_VERSION}"
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          sops: true
 
       - name: Build
         run: make build
@@ -106,17 +91,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go
         with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
-
-      # Built from its tagged source, which the Go checksum database vouches
-      # for, the same way on every runner.
-      - name: Install sops
-        run: |
-          go install "github.com/getsops/sops/v3/cmd/sops@v${SOPS_VERSION}"
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          sops: true
 
       - name: Measure coverage
         run: make cover
@@ -134,15 +111,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/setup-go
         with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
-
-      - name: Install sops
-        run: |
-          go install "github.com/getsops/sops/v3/cmd/sops@v${SOPS_MIN_VERSION}"
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          sops-version: ${{ env.SOPS_MIN_VERSION }}
 
       - name: Test
         run: |
@@ -154,10 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+      - uses: ./.github/actions/setup-go
 
       - name: Vet and check formatting
         run: make lint
@@ -177,10 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+      - uses: ./.github/actions/setup-go
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   fuzz:
@@ -188,10 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+      - uses: ./.github/actions/setup-go
 
       # Folding has to be idempotent: the printed form of a set must parse
       # back into the same set. A short run on every change catches a
@@ -211,10 +173,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+      - uses: ./.github/actions/setup-go
 
       # The parser reads a file another host serves, so it must never
       # panic, whatever that file holds.
@@ -233,10 +192,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+      - uses: ./.github/actions/setup-go
 
       # The release ships a static binary, so the release targets have to
       # build without cgo on every change rather than at tag time.
@@ -271,10 +227,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+      - uses: ./.github/actions/setup-go
 
       # The site as the Pages workflow publishes it, every release's manual
       # included, so a change that would break publishing fails here. The

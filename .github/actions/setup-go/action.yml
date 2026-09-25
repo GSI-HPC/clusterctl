@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+name: Set up Go
+description: >-
+  Go and, when asked, sops, at the versions mise.toml names, so that CI, the
+  release and a contributor's "mise install" use the same ones.
+
+inputs:
+  sops:
+    description: Install sops too, which the tests of Secret documents run.
+    default: 'false'
+  sops-version:
+    description: A sops other than the one mise.toml pins, such as the oldest supported.
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - id: versions
+      shell: bash
+      run: |
+        set -euo pipefail
+        go=$(sed -n 's/^go = "\([0-9.]*\)"$/\1/p' mise.toml)
+        sops=$(sed -n 's/^sops = "\([0-9.]*\)"$/\1/p' mise.toml)
+        # Without a version setup-go would quietly use the runner's own Go.
+        if [ -z "$go" ] || [ -z "$sops" ]; then
+          echo "::error::mise.toml names no go or no sops version"
+          exit 1
+        fi
+        echo "go=$go" >> "$GITHUB_OUTPUT"
+        echo "sops=${SOPS_VERSION:-$sops}" >> "$GITHUB_OUTPUT"
+      env:
+        SOPS_VERSION: ${{ inputs.sops-version }}
+
+    # The newest patch of the release line, because Go ships the standard
+    # library's security fixes as patch releases, and a binary is only as
+    # patched as the toolchain that linked it. go.mod states the oldest
+    # version the code compiles with.
+    - uses: actions/setup-go@v7
+      with:
+        go-version: ${{ steps.versions.outputs.go }}
+        check-latest: true
+
+    # Built from its tagged source, which the Go checksum database vouches
+    # for, the same way on every runner.
+    - if: inputs.sops == 'true' || inputs.sops-version != ''
+      shell: bash
+      env:
+        SOPS_VERSION: ${{ steps.versions.outputs.sops }}
+      run: |
+        go install "github.com/getsops/sops/v3/cmd/sops@v${SOPS_VERSION}"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
