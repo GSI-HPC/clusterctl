@@ -4,6 +4,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -43,11 +44,7 @@ func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Durati
 		}
 	}
 
-	result, err := a.ReadRunner.Run(ctx, target, transport.Request{
-		Argv:    []string{"cat", path},
-		Timeout: a.Timeout().Get(),
-		TTY:     transport.TTYNone,
-	})
+	result, err := a.ReadRunner.Run(ctx, target, a.Collect(transport.Request{Argv: []string{"cat", path}}))
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Transport, err)
 	}
@@ -100,8 +97,18 @@ func (a *App) cacheScope() string {
 	return string(scope)
 }
 
+// Collect fills in what a request whose output is collected, rather than
+// shown on a terminal, leaves out: no terminal, and the configured command
+// timeout unless it sets one.
+func (a *App) Collect(req transport.Request) transport.Request {
+	req.TTY = transport.TTYNone
+	req.Timeout = cmp.Or(req.Timeout, a.Timeout().Get())
+	return req
+}
+
 // RunOnRole runs one command on an infrastructure host and returns the
-// result, failing the command when it did not succeed.
+// result, failing the command when it did not succeed. The request is
+// completed by Collect.
 func (a *App) RunOnRole(ctx context.Context, role string, req transport.Request) (*transport.Result, error) {
 	return a.runOnRole(ctx, a.Runner, role, req)
 }
@@ -118,7 +125,7 @@ func (a *App) runOnRole(ctx context.Context, runner transport.Runner, role strin
 	if err != nil {
 		return nil, err
 	}
-	result, err := runner.Run(ctx, target, req)
+	result, err := runner.Run(ctx, target, a.Collect(req))
 	if err != nil {
 		if hasCode(err) {
 			return nil, err

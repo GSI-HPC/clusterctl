@@ -176,8 +176,6 @@ a node is not coming up. At most 10000 lines are shown.`,
 			result, err := a.RunOnRole(a.Context(), spec.Role, transport.Request{
 				Argv: []string{"sh", "-c",
 					fmt.Sprintf("grep -a -e dhcpd -- %s | tail -n %d", shellquote.Quote(path), lines)},
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
 			})
 			if err != nil {
 				return err

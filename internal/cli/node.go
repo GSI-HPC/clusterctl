@@ -368,12 +368,8 @@ and -o yaml too.`,
 			if err != nil {
 				return err
 			}
-			results, err := runOnNodes(a, ns, func(string) transport.Request {
-				return transport.Request{
-					Script:  hardwareScript,
-					Timeout: a.Timeout().Get(),
-					TTY:     transport.TTYNone,
-				}
+			results, err := runOnNodes(a, ns, transport.Request{
+				Script: hardwareScript,
 			})
 			if err != nil {
 				return err

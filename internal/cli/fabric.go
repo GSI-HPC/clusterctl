@@ -273,9 +273,7 @@ port that is not up makes the command fail.
 			}
 
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Script:  portStateScript(guids),
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
+				Script: portStateScript(guids),
 			})
 			if err != nil {
 				return err
@@ -327,9 +325,7 @@ var (
 // portLID asks the subnet manager for the LID of a port.
 func portLID(a *app.App, role, guid string) (int, error) {
 	result, err := a.RunOnRole(a.Context(), role, transport.Request{
-		Argv:    []string{"ibaddr", "-G", guid},
-		Timeout: a.Timeout().Get(),
-		TTY:     transport.TTYNone,
+		Argv: []string{"ibaddr", "-G", guid},
 	})
 	if err != nil {
 		return 0, err
@@ -403,9 +399,7 @@ only that port is read. The switch and port are named on standard error.`,
 					return err
 				}
 				links, err := a.RunOnRole(a.Context(), role, transport.Request{
-					Argv:    []string{"iblinkinfo", "--line"},
-					Timeout: a.Timeout().Get(),
-					TTY:     transport.TTYNone,
+					Argv: []string{"iblinkinfo", "--line"},
 				})
 				if err != nil {
 					return err
@@ -418,9 +412,7 @@ only that port is read. The switch and port are named on standard error.`,
 				argv = []string{"perfquery", strconv.Itoa(sw.LID), strconv.Itoa(sw.Port)}
 			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
-				Argv:    argv,
-				Timeout: a.Timeout().Get(),
-				TTY:     transport.TTYNone,
+				Argv: argv,
 			})
 			if err != nil {
 				return err
@@ -460,9 +452,7 @@ for dev in $(ibstat -l 2>/dev/null); do
   printf '%s|%s|%s|%s\n' "$dev" "$state" "$phys" "$rate"
 done
 `
-			results, err := runOnNodes(a, ns, func(string) transport.Request {
-				return transport.Request{Script: script, Timeout: a.Timeout().Get(), TTY: transport.TTYNone}
-			})
+			results, err := runOnNodes(a, ns, transport.Request{Script: script})
 			if err != nil {
 				return err
 			}
@@ -504,9 +494,7 @@ mlxcables -q 2>/dev/null | awk -F': *' '
   /^Length/      {len=$2}
   END           {printf "%s|%s\n", part, len}'
 `
-			results, err := runOnNodes(a, ns, func(string) transport.Request {
-				return transport.Request{Script: script, Timeout: a.Timeout().Get(), TTY: transport.TTYNone}
-			})
+			results, err := runOnNodes(a, ns, transport.Request{Script: script})
 			if err != nil {
 				return err
 			}
@@ -595,12 +583,8 @@ Read a firmware setting from the adapters of each node.
 			if err != nil {
 				return err
 			}
-			results, err := runOnNodes(a, ns, func(string) transport.Request {
-				return transport.Request{
-					Argv:    []string{"sh", "-c", "mlxconfig -e query 2>/dev/null | grep -F -- " + shellQuote(key)},
-					Timeout: a.Timeout().Get(),
-					TTY:     transport.TTYNone,
-				}
+			results, err := runOnNodes(a, ns, transport.Request{
+				Argv: []string{"sh", "-c", "mlxconfig -e query 2>/dev/null | grep -F -- " + shellQuote(key)},
 			})
 			if err != nil {
 				return err
@@ -663,12 +647,8 @@ goes through the confirmation gate.
 				fmt.Sprintf("%s=%s on every adapter", key, value))); err != nil {
 				return err
 			}
-			results, err := runOnNodes(a, ns, func(string) transport.Request {
-				return transport.Request{
-					Script:  hcaSetScript(key, value),
-					Timeout: a.Timeout().Get(),
-					TTY:     transport.TTYNone,
-				}
+			results, err := runOnNodes(a, ns, transport.Request{
+				Script: hcaSetScript(key, value),
 			})
 			if err != nil {
 				return err
@@ -721,9 +701,7 @@ for dev in $(ibstat -l 2>/dev/null); do
   printf '%s|%s\n' "$dev" "$fw"
 done
 `
-			results, err := runOnNodes(a, ns, func(string) transport.Request {
-				return transport.Request{Script: script, Timeout: a.Timeout().Get(), TTY: transport.TTYNone}
-			})
+			results, err := runOnNodes(a, ns, transport.Request{Script: script})
 			if err != nil {
 				return err
 			}

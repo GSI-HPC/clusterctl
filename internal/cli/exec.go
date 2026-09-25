@@ -111,11 +111,7 @@ escapes rather than passed to the terminal.`,
 				}
 			}
 
-			limit := timeout
-			if limit == 0 {
-				limit = a.Timeout().Get()
-			}
-			req := transport.Request{Argv: argv, Script: script, Timeout: limit, TTY: transport.TTYNone}
+			req := a.Collect(transport.Request{Argv: argv, Script: script, Timeout: timeout})
 
 			action := safety.Action{Verb: "run a command on", Targets: ns, Detail: req.Script}
 			if action.Detail == "" {

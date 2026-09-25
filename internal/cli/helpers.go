@@ -101,17 +101,15 @@ func oneNode(a *app.App, arg string) (string, error) {
 	return ns.Expand()[0], nil
 }
 
-// runOnNodes runs one request on a node set and prints a result table of
-// what each node answered.
-func runOnNodes(a *app.App, ns *nodeset.NodeSet, build func(node string) transport.Request) ([]*transport.Result, error) {
+// runOnNodes runs one request on a node set and returns what each node
+// answered. The request gets no terminal, and the configured command
+// timeout unless it sets one.
+func runOnNodes(a *app.App, ns *nodeset.NodeSet, req transport.Request) ([]*transport.Result, error) {
 	targets, err := a.NodeTargets(ns)
 	if err != nil {
 		return nil, err
 	}
-	results := a.Executor().RunEach(a.Context(), targets, func(t transport.Target) transport.Request {
-		return build(t.Name)
-	})
-	return results, nil
+	return a.Executor().Run(a.Context(), targets, a.Collect(req)), nil
 }
 
 // resultsTable renders what each node answered, one row per node.

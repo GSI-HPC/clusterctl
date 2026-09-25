@@ -359,11 +359,8 @@ func slurmJobs(a *app.App, nodes *nodeset.NodeSet) (slurmJobState, error) {
 	if hostlist := nodes.Hostlist(); len(hostlist) <= sinfoHostlistLimit {
 		argv = append(argv, "-n", hostlist)
 	}
-	result, err := a.ReadRunner.Run(a.Context(), target, transport.Request{
-		Argv:    argv,
-		Timeout: 30 * time.Second,
-		TTY:     transport.TTYNone,
-	})
+	req := a.Collect(transport.Request{Argv: argv, Timeout: 30 * time.Second})
+	result, err := a.ReadRunner.Run(a.Context(), target, req)
 	if err != nil {
 		return slurmJobState{}, err
 	}
@@ -774,11 +771,7 @@ management network, and report which of them answer.`,
 			// that answered. The list follows --, so no name is read as an
 			// option.
 			argv := append([]string{"fping", "-a", "-q", "-r", "1", "--"}, bmcs.Expand()...)
-			result, err := a.Runner.Run(a.Context(), target, transport.Request{
-				Argv:    argv,
-				Timeout: 2 * time.Minute,
-				TTY:     transport.TTYNone,
-			})
+			result, err := a.Runner.Run(a.Context(), target, a.Collect(transport.Request{Argv: argv, Timeout: 2 * time.Minute}))
 			if err != nil {
 				return bmcError(a.Context(), exitcode.Wrap(exitcode.Transport, err), false)
 			}

@@ -142,12 +142,7 @@ This overwrites files on the nodes, so it asks first.
 				}
 				script := secretScript(file, len(contents[i]))
 				results := a.Executor().RunEach(a.Context(), live, func(transport.Target) transport.Request {
-					return transport.Request{
-						Script:  script,
-						Stdin:   bytes.NewReader(contents[i]),
-						Timeout: a.Timeout().Get(),
-						TTY:     transport.TTYNone,
-					}
+					return a.Collect(transport.Request{Script: script, Stdin: bytes.NewReader(contents[i])})
 				})
 				byName := map[string]*transport.Result{}
 				for _, res := range results {
@@ -650,12 +645,7 @@ new file is moved into place only once it has arrived complete.
 				return err
 			}
 			results := a.Executor().RunEach(a.Context(), targets, func(transport.Target) transport.Request {
-				return transport.Request{
-					Script:  script,
-					Stdin:   strings.NewReader(body),
-					Timeout: a.Timeout().Get(),
-					TTY:     transport.TTYNone,
-				}
+				return a.Collect(transport.Request{Script: script, Stdin: strings.NewReader(body)})
 			})
 			if err := a.Print(output.Result{Table: resultsTable(results), Object: results}); err != nil {
 				return err
@@ -690,12 +680,8 @@ reached.`,
 				return err
 			}
 			path := cincConfigPath(a)
-			results, err := runOnNodes(a, ns, func(string) transport.Request {
-				return transport.Request{
-					Script:  cincReadScript(path),
-					Timeout: a.Timeout().Get(),
-					TTY:     transport.TTYNone,
-				}
+			results, err := runOnNodes(a, ns, transport.Request{
+				Script: cincReadScript(path),
 			})
 			if err != nil {
 				return err
@@ -780,12 +766,8 @@ This changes the nodes, so it asks first.`,
 				return err
 			}
 
-			reads, err := runOnNodes(a, ns, func(string) transport.Request {
-				return transport.Request{
-					Script:  cincReadScript(path),
-					Timeout: a.Timeout().Get(),
-					TTY:     transport.TTYNone,
-				}
+			reads, err := runOnNodes(a, ns, transport.Request{
+				Script: cincReadScript(path),
 			})
 			if err != nil {
 				return err
@@ -827,11 +809,7 @@ This changes the nodes, so it asks first.`,
 				ready = append(ready, res.Target)
 			}
 			for _, res := range a.Executor().RunEach(a.Context(), ready, func(t transport.Target) transport.Request {
-				return transport.Request{
-					Argv:    argv[t.Name],
-					Timeout: a.Timeout().Or(30 * time.Minute),
-					TTY:     transport.TTYNone,
-				}
+				return a.Collect(transport.Request{Argv: argv[t.Name], Timeout: a.Timeout().Or(30 * time.Minute)})
 			}) {
 				results[index[res.Target.Name]] = res
 			}
@@ -1484,12 +1462,9 @@ credential, and 1 when a host refused.`,
 				s.Power = output.EscapeCell(calls[i].value)
 			}
 
-			results, err := runOnNodes(a, ns, func(string) transport.Request {
-				return transport.Request{
-					Argv:    []string{"uptime", "-p"},
-					Timeout: 30 * time.Second,
-					TTY:     transport.TTYNone,
-				}
+			results, err := runOnNodes(a, ns, transport.Request{
+				Argv:    []string{"uptime", "-p"},
+				Timeout: 30 * time.Second,
 			})
 			if err != nil {
 				return err
