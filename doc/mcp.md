@@ -186,7 +186,9 @@ A failed call starts with its kind, taken from the exit code: `rejected:`
 `failed:` (1). The agent can then tell its own mistake from a host that did
 not answer. `describe_nodes` reports a facet it could not read under
 `errors` and returns the rest, because it is often called precisely when
-something is down.
+something is down. It shows each node's service processor as the `bmc`
+commands reach it, the inventory's `bmcAddress` first, and a node it cannot
+name one for gets the reason under `bmcError` rather than an empty field.
 
 ## Size
 
