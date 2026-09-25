@@ -21,21 +21,20 @@ import (
 
 // The output formats -o accepts.
 const (
-	FormatTable    = "table"
-	FormatWide     = "wide"
-	FormatJSON     = "json"
-	FormatYAML     = "yaml"
-	FormatNodeset  = "nodeset"
-	FormatName     = "name"
-	FormatJSONPath = "jsonpath"
-	FormatJQ       = "jq"
+	FormatTable   = "table"
+	FormatWide    = "wide"
+	FormatJSON    = "json"
+	FormatYAML    = "yaml"
+	FormatNodeset = "nodeset"
+	FormatName    = "name"
+	FormatJQ      = "jq"
 )
 
 // Format is a parsed -o value.
 type Format struct {
 	// Kind is one of the format constants.
 	Kind string
-	// Arg is the expression of a jsonpath or jq format.
+	// Arg is the program of the jq format.
 	Arg string
 }
 
@@ -43,12 +42,12 @@ type Format struct {
 // completion.
 func Formats() []string {
 	return []string{FormatTable, FormatWide, FormatJSON, FormatYAML,
-		FormatNodeset, FormatName, FormatJSONPath + "=", FormatJQ + "="}
+		FormatNodeset, FormatName, FormatJQ + "="}
 }
 
-// ParseFormat reads a -o value. A jsonpath or jq expression is compiled here,
-// so that a mistake in it is reported before a command has acted rather than
-// when its result is printed.
+// ParseFormat reads a -o value. A jq program is compiled here, so that a
+// mistake in it is reported before a command has acted rather than when its
+// result is printed.
 func ParseFormat(s string) (Format, error) {
 	if s == "" {
 		return Format{Kind: FormatTable}, nil
@@ -60,17 +59,11 @@ func ParseFormat(s string) (Format, error) {
 			return Format{}, fmt.Errorf("the %s output format takes no argument", kind)
 		}
 		return Format{Kind: kind}, nil
-	case FormatJSONPath, FormatJQ:
+	case FormatJQ:
 		if !hasArg || arg == "" {
 			return Format{}, fmt.Errorf("the %s output format needs an expression, as -o %s='...'", kind, kind)
 		}
-		var err error
-		if kind == FormatJQ {
-			_, err = compileJQ(arg)
-		} else {
-			_, err = compileJSONPath(arg)
-		}
-		if err != nil {
+		if _, err := compileJQ(arg); err != nil {
 			return Format{}, err
 		}
 		return Format{Kind: kind, Arg: arg}, nil
@@ -102,8 +95,8 @@ func (f Format) IsMachine() bool {
 type Result struct {
 	// Table is rendered by the table and wide formats.
 	Table *Table
-	// Object is rendered by the json, yaml, jsonpath and jq formats. When it
-	// is nil the table is converted to a list of objects.
+	// Object is rendered by the json, yaml and jq formats. When it is nil the
+	// table is converted to a list of objects.
 	Object any
 	// Nodes is rendered by the nodeset and name formats. When it is nil
 	// those formats fall back to the first column of the table.
@@ -131,8 +124,6 @@ func (f Format) WriteContext(ctx context.Context, w io.Writer, r Result) error {
 		return writeNodeset(w, r)
 	case FormatName:
 		return writeNames(w, r)
-	case FormatJSONPath:
-		return writeJSONPath(w, f.Arg, r.object())
 	case FormatJQ:
 		return writeJQ(ctx, w, f.Arg, r.object())
 	default:

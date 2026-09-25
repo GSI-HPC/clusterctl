@@ -102,7 +102,7 @@ hardware, and **deferred** when it is deliberately not done.
 | R60 | Validate each layer before merging, at the line it was written | `config/schema.go` | met |
 | R61 | Say which layer set each value | `config.Tree` | met |
 | R62 | Publish a JSON Schema for editors | `cli/config.go` | met |
-| R63 | One output layer: table, wide, json, yaml, nodeset, name, jsonpath, jq | `output` | met |
+| R63 | One output layer: table, wide, json, yaml, nodeset, name, jq | `output` | met |
 | R64 | Fixed exit codes | `exitcode` | met |
 | R65 | Preview, confirm and dry run for everything destructive | `safety` | met |
 | R66 | Protected hosts | `safety` | met |

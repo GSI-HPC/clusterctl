@@ -47,7 +47,6 @@ func TestParseFormat(t *testing.T) {
 		"wide":           {Kind: output.FormatWide},
 		"json":           {Kind: output.FormatJSON},
 		"nodeset":        {Kind: output.FormatNodeset},
-		"jsonpath={.a}":  {Kind: output.FormatJSONPath, Arg: "{.a}"},
 		"jq=.[] | .node": {Kind: output.FormatJQ, Arg: ".[] | .node"},
 	}
 	for spec, want := range good {
@@ -61,7 +60,7 @@ func TestParseFormat(t *testing.T) {
 		}
 	}
 
-	for _, spec := range []string{"xml", "json=x", "jsonpath", "jsonpath=", "jq"} {
+	for _, spec := range []string{"xml", "json=x", "jsonpath={.a}", "jq"} {
 		if _, err := output.ParseFormat(spec); err == nil {
 			t.Errorf("ParseFormat(%q) should fail", spec)
 		}
@@ -138,66 +137,6 @@ func TestNodesetAndName(t *testing.T) {
 	}
 }
 
-func TestJSONPath(t *testing.T) {
-	t.Parallel()
-
-	object := map[string]any{
-		"nodes": []any{
-			map[string]any{"name": "exe0001", "state": "idle", "jobs": 0},
-			map[string]any{"name": "exe0002", "state": "drained", "jobs": 12},
-		},
-		"total": 2,
-	}
-	r := output.Result{Object: object}
-
-	tests := []struct {
-		spec string
-		want string
-	}{
-		{"jsonpath={.total}", "2\n"},
-		{"jsonpath={.nodes[0].name}", "exe0001\n"},
-		{"jsonpath={.nodes[*].name}", "exe0001 exe0002\n"},
-		{"jsonpath={.nodes[1]['state']}", "drained\n"},
-		{"jsonpath={.nodes[0:1].name}", "exe0001\n"},
-		{"jsonpath=total: {.total}", "total: 2\n"},
-		{"jsonpath={.missing}", "\n"},
-		{"jsonpath={.nodes[*]['name']}", "exe0001 exe0002\n"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.spec, func(t *testing.T) {
-			if got := render(t, tc.spec, r); got != tc.want {
-				t.Errorf("%s = %q, want %q", tc.spec, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestJSONPathOverATopLevelArray covers the shape a command result usually
-// has: a list, not an object with a list in it.
-func TestJSONPathOverATopLevelArray(t *testing.T) {
-	t.Parallel()
-
-	r := output.Result{Object: []any{
-		map[string]any{"name": "exe0001"},
-		map[string]any{"name": "exe0002"},
-	}}
-	for _, spec := range []string{"jsonpath={.[*].name}", "jsonpath={[*].name}"} {
-		if got, want := render(t, spec, r), "exe0001 exe0002\n"; got != want {
-			t.Errorf("%s = %q, want %q", spec, got, want)
-		}
-	}
-}
-
-func TestJSONPathRejectsBadExpressions(t *testing.T) {
-	t.Parallel()
-
-	for _, spec := range []string{"jsonpath={.a", "jsonpath={.a[}", "jsonpath={.a[x]}", "jsonpath={..}"} {
-		if _, err := output.ParseFormat(spec); err == nil {
-			t.Errorf("%s should fail", spec)
-		}
-	}
-}
-
 func TestJQ(t *testing.T) {
 	t.Parallel()
 
@@ -218,7 +157,7 @@ func TestIsMachine(t *testing.T) {
 	for spec, want := range map[string]bool{
 		"table": false, "wide": false,
 		"json": true, "yaml": true, "nodeset": true, "name": true,
-		"jsonpath={.a}": true, "jq=.": true,
+		"jq=.": true,
 	} {
 		f, err := output.ParseFormat(spec)
 		if err != nil {

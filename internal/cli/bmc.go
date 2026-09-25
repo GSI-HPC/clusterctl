@@ -411,7 +411,7 @@ Send a GET to the Redfish interface of each service processor and print what
 comes back.
 
   clusterctl bmc redfish get /redfish/v1/Systems/1 -n exe1
-  clusterctl bmc redfish get /redfish/v1/Managers -n exe1 -o jsonpath='{.exe1.Members[*].[\"@odata.id\"]}'`,
+  clusterctl bmc redfish get /redfish/v1/Managers -n exe1 -o jq='.exe1.Members[]."@odata.id"'`,
 		cobra.MinimumNArgs(1),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			nodes, _, err := bmcSet(a, args[1:])

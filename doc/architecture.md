@@ -80,7 +80,7 @@ subsystems it drives and calls them itself, with what `app` built.
 
 | Package | Owns |
 | --- | --- |
-| `internal/output` | Table, JSON, YAML, node set, name, JSONPath and jq rendering, and escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`). |
+| `internal/output` | Table, JSON, YAML, node set, name and jq rendering, and escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`). |
 | `internal/version` | The build provenance, which comes from the signed tag or the VCS stamps. |
 
 ## Dependency direction
