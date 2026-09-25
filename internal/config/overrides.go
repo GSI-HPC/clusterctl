@@ -4,8 +4,6 @@
 package config
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -35,36 +33,16 @@ var (
 )
 
 func buildEffectiveSchema() {
-	r := &jsonschema.Reflector{
-		AllowAdditionalProperties:  false,
-		RequiredFromJSONSchemaTags: true,
-	}
-	s := r.Reflect(&v1alpha1.EffectiveSpec{})
-	// An override sets part of a value that the layers before it complete,
-	// so no field of it is required on its own. The merged result is
-	// checked as a whole when it is decoded.
-	s.Required = nil
-	for _, def := range s.Definitions {
-		def.Required = nil
-	}
-	effectiveSchema = s
-
-	raw, err := json.Marshal(s)
-	if err != nil {
-		effectiveErr = fmt.Errorf("generating the schema of the merged configuration: %w", err)
-		return
-	}
-	doc, err := validator.UnmarshalJSON(strings.NewReader(string(raw)))
-	if err != nil {
-		effectiveErr = fmt.Errorf("reading the schema of the merged configuration: %w", err)
-		return
-	}
-	c := validator.NewCompiler()
-	if err := c.AddResource("schema://effective", doc); err != nil {
-		effectiveErr = fmt.Errorf("compiling the schema of the merged configuration: %w", err)
-		return
-	}
-	effectiveCompiled, effectiveErr = c.Compile("schema://effective")
+	effectiveSchema, effectiveCompiled, effectiveErr = compileSchema(&v1alpha1.EffectiveSpec{},
+		"the schema of the merged configuration", func(s *jsonschema.Schema) {
+			// An override sets part of a value that the layers before it
+			// complete, so no field of it is required on its own. The
+			// merged result is checked as a whole when it is decoded.
+			s.Required = nil
+			for _, def := range s.Definitions {
+				def.Required = nil
+			}
+		})
 }
 
 // checkOverride checks one override against the schema of the merged
@@ -87,15 +65,7 @@ func checkOverride(path string, value any, at Origin) []string {
 	at.Layer = ""
 	doc := &Document{File: at.File, Data: tree.(map[string]any), Positions: map[string]Origin{keys[0]: at}}
 
-	problems := unknownKeys(effectiveSchema, effectiveSchema, doc, doc.Data, "")
-	if err := effectiveCompiled.Validate(toJSON(doc.Data)); err != nil {
-		var verr *validator.ValidationError
-		if errors.As(err, &verr) {
-			problems = append(problems, describe(doc, verr)...)
-		} else {
-			problems = append(problems, err.Error())
-		}
-	}
+	problems := validate(effectiveSchema, effectiveCompiled, doc)
 	problems = dedup(problems)
 	sort.Strings(problems)
 	return problems

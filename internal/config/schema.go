@@ -4,11 +4,10 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,45 +49,44 @@ func kindTypes() map[string]any {
 func buildSchemas() {
 	schemas = map[string]*jsonschema.Schema{}
 	compiled = map[string]*validator.Schema{}
-
 	for kind, obj := range kindTypes() {
-		r := &jsonschema.Reflector{
-			// Unknown fields are rejected, so that a misspelled key is
-			// reported instead of silently ignored.
-			AllowAdditionalProperties: false,
-			// Only fields tagged required are required.
-			RequiredFromJSONSchemaTags: true,
-			DoNotReference:             false,
-			ExpandedStruct:             false,
-		}
-		s := r.Reflect(obj)
-		s.ID = jsonschema.ID(schemaID + strings.ToLower(kind) + ".json")
-		s.Title = "clusterctl " + kind
-		schemas[kind] = s
-
-		raw, err := json.Marshal(s)
+		s, sch, err := compileSchema(obj, "the "+kind+" schema", func(s *jsonschema.Schema) {
+			s.ID = jsonschema.ID(schemaID + strings.ToLower(kind) + ".json")
+			s.Title = "clusterctl " + kind
+		})
 		if err != nil {
-			schemaErr = fmt.Errorf("generating the %s schema: %w", kind, err)
+			schemaErr = err
 			return
 		}
-		doc, err := validator.UnmarshalJSON(strings.NewReader(string(raw)))
-		if err != nil {
-			schemaErr = fmt.Errorf("reading the %s schema: %w", kind, err)
-			return
-		}
-		c := validator.NewCompiler()
-		url := "schema://" + strings.ToLower(kind)
-		if err := c.AddResource(url, doc); err != nil {
-			schemaErr = fmt.Errorf("compiling the %s schema: %w", kind, err)
-			return
-		}
-		sch, err := c.Compile(url)
-		if err != nil {
-			schemaErr = fmt.Errorf("compiling the %s schema: %w", kind, err)
-			return
-		}
-		compiled[kind] = sch
+		schemas[kind], compiled[kind] = s, sch
 	}
+}
+
+// compileSchema reflects the schema of a Go type, lets adjust change it, and
+// compiles it for validation. Unknown fields are rejected, so that a
+// misspelled key is reported instead of silently ignored, and only the
+// fields tagged required are required.
+func compileSchema(obj any, what string, adjust func(*jsonschema.Schema)) (*jsonschema.Schema, *validator.Schema, error) {
+	r := &jsonschema.Reflector{AllowAdditionalProperties: false, RequiredFromJSONSchemaTags: true}
+	s := r.Reflect(obj)
+	adjust(s)
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generating %s: %w", what, err)
+	}
+	doc, err := validator.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading %s: %w", what, err)
+	}
+	c := validator.NewCompiler()
+	if err := c.AddResource("schema://clusterctl", doc); err != nil {
+		return nil, nil, fmt.Errorf("compiling %s: %w", what, err)
+	}
+	sch, err := c.Compile("schema://clusterctl")
+	if err != nil {
+		return nil, nil, fmt.Errorf("compiling %s: %w", what, err)
+	}
+	return s, sch, nil
 }
 
 func loadSchemas() error {
@@ -125,21 +123,7 @@ func ValidateDocument(doc *Document) error {
 		return err
 	}
 
-	var problems []string
-	// Unknown keys are checked first and separately, because the schema
-	// knows the keys that were expected and can suggest the closest one.
-	root := schemas[doc.Kind]
-	problems = append(problems, unknownKeys(root, root, doc, doc.Data, "")...)
-
-	if err := compiled[doc.Kind].Validate(toJSON(doc.Data)); err != nil {
-		var verr *validator.ValidationError
-		if errors.As(err, &verr) {
-			problems = append(problems, describe(doc, verr)...)
-		} else {
-			problems = append(problems, err.Error())
-		}
-	}
-
+	problems := validate(schemas[doc.Kind], compiled[doc.Kind], doc)
 	problems = append(problems, checkSecret(doc)...)
 
 	problems = dedup(problems)
@@ -153,102 +137,51 @@ func ValidateDocument(doc *Document) error {
 // printer renders validation messages in English.
 var printer = message.NewPrinter(language.English)
 
-// describe turns a validation error tree into one message per leaf cause.
-func describe(doc *Document, err *validator.ValidationError) []string {
+// validate checks a document against a compiled schema, root being the
+// schema it was compiled from, and returns one message per problem.
+func validate(root *jsonschema.Schema, sch *validator.Schema, doc *Document) []string {
+	err := sch.Validate(toJSON(doc.Data))
+	var verr *validator.ValidationError
+	if errors.As(err, &verr) {
+		return describe(root, doc, verr)
+	}
+	if err != nil {
+		return []string{err.Error()}
+	}
+	return nil
+}
+
+// describe turns a validation error tree into one message per leaf cause. An
+// unknown key is reported with the field that was probably meant, which the
+// schema the error points into knows.
+func describe(root *jsonschema.Schema, doc *Document, err *validator.ValidationError) []string {
 	if len(err.Causes) == 0 {
-		// Unknown keys are reported by unknownKeys, which can suggest the
-		// field that was probably meant.
-		if _, ok := err.ErrorKind.(*kind.AdditionalProperties); ok {
-			return nil
+		path := instancePath(doc.Data, err.InstanceLocation)
+		unknown, ok := err.ErrorKind.(*kind.AdditionalProperties)
+		if !ok {
+			return []string{fmt.Sprintf("%s: %s: %s",
+				doc.Position(path), displayPath(path), err.ErrorKind.LocalizedString(printer))}
 		}
-		path := instancePath(err.InstanceLocation)
-		return []string{fmt.Sprintf("%s: %s: %s",
-			doc.Position(path), displayPath(path), err.ErrorKind.LocalizedString(printer))}
+		// Every object whose keys are checked is one of the definitions.
+		_, name, _ := strings.Cut(err.SchemaURL, "#/$defs/")
+		known := propertyNames(root.Definitions[name])
+		var out []string
+		for _, k := range unknown.Properties {
+			child := joinPath(path, k)
+			out = append(out, fmt.Sprintf("%s: %s: unknown field %q%s",
+				doc.Position(child), displayPath(child), k, suggest(k, known)))
+		}
+		return out
 	}
 	var out []string
 	for _, c := range err.Causes {
-		out = append(out, describe(doc, c)...)
+		out = append(out, describe(root, doc, c)...)
 	}
 	return out
 }
 
-// unknownKeys walks the document against the schema and reports every key the
-// schema does not define, suggesting the closest one it does.
-func unknownKeys(root, schema *jsonschema.Schema, doc *Document, value any, path string) []string {
-	if schema == nil {
-		return nil
-	}
-	resolved := resolveRef(root, schema)
-	switch v := value.(type) {
-	case map[string]any:
-		var out []string
-		for _, k := range slices.Sorted(maps.Keys(v)) {
-			child := joinPath(path, k)
-			if resolved.Properties != nil {
-				if prop, ok := resolved.Properties.Get(k); ok {
-					out = append(out, unknownKeys(root, prop, doc, v[k], child)...)
-					continue
-				}
-			}
-			// The key is not a declared field. Either the object is a map,
-			// in which case additionalProperties describes its values, or
-			// the key is a typo.
-			add := resolved.AdditionalProperties
-			switch {
-			case add == nil:
-				continue
-			case isFalseSchema(add):
-				out = append(out, fmt.Sprintf("%s: %s: unknown field %q%s",
-					doc.Position(child), displayPath(child), k,
-					suggest(k, propertyNames(resolved))))
-			default:
-				out = append(out, unknownKeys(root, add, doc, v[k], child)...)
-			}
-		}
-		return out
-	case []any:
-		items := resolved.Items
-		if items == nil {
-			return nil
-		}
-		var out []string
-		for i, e := range v {
-			out = append(out, unknownKeys(root, items, doc, e, fmt.Sprintf("%s[%d]", path, i))...)
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-// resolveRef follows a $ref into the definitions of the root schema.
-func resolveRef(root, s *jsonschema.Schema) *jsonschema.Schema {
-	for i := 0; s != nil && s.Ref != "" && i < 16; i++ {
-		name := strings.TrimPrefix(s.Ref, "#/$defs/")
-		next, ok := root.Definitions[name]
-		if !ok {
-			return s
-		}
-		s = next
-	}
-	return s
-}
-
-// isFalseSchema reports whether a subschema is the literal false, which is
-// how "no other properties are allowed" is spelled.
-func isFalseSchema(s *jsonschema.Schema) bool {
-	if s == nil {
-		return false
-	}
-	if s == jsonschema.FalseSchema {
-		return true
-	}
-	data, err := json.Marshal(s)
-	return err == nil && string(data) == "false"
-}
-
 func propertyNames(s *jsonschema.Schema) []string {
-	if s.Properties == nil {
+	if s == nil || s.Properties == nil {
 		return nil
 	}
 	var out []string
@@ -306,20 +239,25 @@ func editDistance(a, b string) int {
 	return prev[len(b)]
 }
 
-// instancePath turns a JSON pointer location into a dotted path.
-func instancePath(loc []string) string {
-	var b strings.Builder
+// instancePath turns a JSON pointer location in data into the dotted path
+// positions are recorded under: an index of a list in brackets, and a key of
+// a mapping after a dot, even one that is a number.
+func instancePath(data any, loc []string) string {
+	path := ""
 	for _, part := range loc {
-		if _, err := strconv.Atoi(part); err == nil {
-			fmt.Fprintf(&b, "[%s]", part)
+		if list, ok := data.([]any); ok {
+			path += "[" + part + "]"
+			data = nil
+			if i, err := strconv.Atoi(part); err == nil && i >= 0 && i < len(list) {
+				data = list[i]
+			}
 			continue
 		}
-		if b.Len() > 0 {
-			b.WriteByte('.')
-		}
-		b.WriteString(part)
+		m, _ := data.(map[string]any)
+		data = m[part]
+		path = joinPath(path, part)
 	}
-	return b.String()
+	return path
 }
 
 // displayPath names the root of a document in messages.
