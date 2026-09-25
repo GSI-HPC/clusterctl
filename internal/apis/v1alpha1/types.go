@@ -361,7 +361,7 @@ type TFTPService struct {
 	Role     string `json:"role,omitempty" yaml:"role,omitempty"`
 	Root     string `json:"root,omitempty" yaml:"root,omitempty" jsonschema:"minLength=1"`
 	GrubPath string `json:"grubPath,omitempty" yaml:"grubPath,omitempty" jsonschema:"minLength=1"`
-	LogPath  string `json:"logPath,omitempty" yaml:"logPath,omitempty"`
+	LogPath  string `json:"logPath,omitempty" yaml:"logPath,omitempty" jsonschema:"minLength=1"`
 }
 
 // HTTPService is the web server that hosts installation content.

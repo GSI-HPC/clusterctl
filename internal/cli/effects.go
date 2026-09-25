@@ -30,6 +30,7 @@ var effects = map[string]safety.Effect{
 	"bmc redfish post":          safety.EffectChange,
 	"bmc status":                safety.EffectRead,
 	"bmc web":                   safety.EffectInteractive,
+	"boot grub log":             safety.EffectRead,
 	"boot grub set":             safety.EffectChange,
 	"boot grub show":            safety.EffectRead,
 	"boot grub unset":           safety.EffectChange,

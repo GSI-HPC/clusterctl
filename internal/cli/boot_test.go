@@ -514,6 +514,59 @@ func TestBootGrubSetChecksTheTarget(t *testing.T) {
 	}
 }
 
+// TestBootGrubLogShowsWhatTheTFTPServiceLogged covers services.tftp.logPath,
+// which #90 found unread: no command showed whether a node had asked the
+// TFTP service for its GRUB configuration. The command runs in a real shell
+// against a log in a temporary directory.
+func TestBootGrubLogShowsWhatTheTFTPServiceLogged(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "syslog")
+	mustWrite(t, log, `Sep 25 10:00:01 tftp in.tftpd[101]: RRQ from 10.0.2.1 filename grub/grub.cfg-0A000201
+Sep 25 10:00:02 tftp cron[7]: (root) CMD (true)
+Sep 25 10:00:03 tftp in.tftpd[102]: RRQ from 10.0.2.2 filename grub/grub.cfg-0A000202
+Sep 25 10:00:04 tftp in.tftpd[103]: RRQ from 10.0.2.3 filename grub/grub.cfg-0A000203
+Sep 25 10:00:05 tftp tftpd-watch[8]: not the server
+Sep 25 10:00:06 tftp dnsmasq-tftp[9]: sent /srv/tftp/grub/grub.cfg-0A000204 to 10.0.2.4
+`)
+	p := newPXEHost(t, pxeOptions{})
+	logAt := func(path string, args ...string) (*harness, error) {
+		return p.run(t, harnessOptions{}, append([]string{"--set", "services.tftp.logPath=" + path, "boot", "grub", "log"}, args...)...)
+	}
+
+	h, err := logAt(log, "--lines", "2")
+	if err != nil {
+		t.Fatalf("boot grub log: %v\n%s", err, h.errOut)
+	}
+	if got, want := h.out.String(), "Sep 25 10:00:04 tftp in.tftpd[103]: RRQ from 10.0.2.3 filename grub/grub.cfg-0A000203\n"+
+		"Sep 25 10:00:06 tftp dnsmasq-tftp[9]: sent /srv/tftp/grub/grub.cfg-0A000204 to 10.0.2.4\n"; got != want {
+		t.Errorf("boot grub log --lines 2 printed\n%s\nwant\n%s", got, want)
+	}
+	if calls := p.rec.Calls(); len(calls) != 1 || calls[0].Target.Name != "tftp" {
+		t.Errorf("the log was read from %v, want the tftp role", calls)
+	}
+
+	h, err = logAt(log, "-o", "json")
+	if err != nil {
+		t.Fatalf("boot grub log -o json: %v", err)
+	}
+	var lines []string
+	if err := json.Unmarshal(h.out.Bytes(), &lines); err != nil || len(lines) != 4 {
+		t.Errorf("boot grub log -o json = %s (%v), want the 4 lines of the TFTP server", h.out, err)
+	}
+
+	_, err = logAt(filepath.Join(t.TempDir(), "nosuch"))
+	wantCode(t, err, exitcode.TargetFailed)
+	if err == nil || !strings.Contains(err.Error(), "cannot be read") {
+		t.Errorf("a log that is not there: %v, want it named", err)
+	}
+
+	calls := len(p.rec.Calls())
+	_, err = logAt(log, "--lines", "0")
+	wantCode(t, err, exitcode.Usage)
+	if len(p.rec.Calls()) != calls {
+		t.Error("boot grub log --lines 0 contacted the host")
+	}
+}
+
 // 5.9: the question has to show every boot path that will be written.
 func TestBootSetPreviewListsEveryPath(t *testing.T) {
 	h, err := run(t, harnessOptions{}, "--force", "--dry-run", "boot", "set", "-n", "dbm01,exe0001")
