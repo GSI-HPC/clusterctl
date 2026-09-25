@@ -61,7 +61,6 @@ safety:
 
 fanout:
   max: 16
-  connectTimeout: 30s
   commandTimeout: 10m
 
 slurm:
