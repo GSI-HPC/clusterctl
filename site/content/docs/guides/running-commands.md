@@ -183,9 +183,10 @@ last line it wrote to standard error, for example
 `exe0006: unreachable: ssh: connect to host exe0006 port 22: Connection refused`.
 
 Exit code 1 means clusterctl worked and a target failed. Exit code 3 means a
-host could not be reached at all, and 130 that the run was interrupted before
-every node had answered. When several of these happen in one run, the exit code
-is the first of 130, 3 and 1 that applies.
+host could not be reached at all, 2 that the configuration lacks something a
+node needs, and 130 that the run was interrupted before every node had
+answered. When several of these happen in one run, the exit code is the first
+of 130, 3, 2 and 1 that applies.
 
 What a node prints is its own, so control characters in it are shown as escapes
 such as `\x1b`, `\r` or `\u202e` rather than passed to your terminal, where they

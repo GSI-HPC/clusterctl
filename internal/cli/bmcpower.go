@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -225,12 +226,10 @@ func printBMCResults(a *app.App, results []bmcResult) error {
 	return bmcExit(results)
 }
 
-// bmcExit derives the error a command exits with from its rows.
-//
-// The code says the worst thing that happened, in this order: an interrupt
-// exits 130, a processor that could not be resolved, reached or trusted 3, a
-// configuration problem 2, and a processor that refused 1. Nodes left out
-// after a failed batch, or because of the interrupt, are counted and named.
+// bmcExit derives the error a command exits with from its rows, with the
+// code exitcode.Worst gives; a request the interrupt kept from being sent
+// makes it 130. Nodes left out after a failed batch, or because of the
+// interrupt, are counted and named.
 func bmcExit(results []bmcResult) error {
 	var (
 		failed      int
@@ -238,7 +237,6 @@ func bmcExit(results []bmcResult) error {
 		notSent     = nodeset.New()
 		interrupted = nodeset.New()
 		errs        []error
-		code        = exitcode.TargetFailed
 	)
 	for _, r := range results {
 		switch r.outcome {
@@ -247,23 +245,18 @@ func bmcExit(results []bmcResult) error {
 			continue
 		case outcomeNotSent:
 			_ = notSent.Add(r.Node)
-			code = exitcode.Interrupted
 			continue
 		}
 		if r.err == nil {
 			continue
 		}
 		errs = append(errs, r.err)
-		c := codeOf(r.err)
-		if c == exitcode.Interrupted {
+		if exitcode.Worst(r.err) == exitcode.Interrupted {
 			// The interrupt is not the processor's failure, so it is
 			// counted apart from the failures.
 			_ = interrupted.Add(r.Node)
 		} else {
 			failed++
-		}
-		if rank(c) > rank(code) {
-			code = c
 		}
 	}
 	if failed == 0 && notTried.IsEmpty() && notSent.IsEmpty() && interrupted.IsEmpty() {
@@ -285,29 +278,12 @@ func bmcExit(results []bmcResult) error {
 	if !notSent.IsEmpty() {
 		parts = append(parts, fmt.Sprintf("%d not sent: %s", notSent.Len(), notSent))
 	}
+	// Rows left out on purpose carry no error, and still fail the command.
+	code := cmp.Or(exitcode.Worst(errs...), exitcode.TargetFailed)
+	if !notSent.IsEmpty() {
+		code = exitcode.Interrupted
+	}
 	return &exitcode.Error{Code: code, Err: &bmcFailures{message: strings.Join(parts, ", "), errs: errs}}
-}
-
-// codeOf is the exit code an error of one processor stands for.
-func codeOf(err error) int {
-	if errors.Is(err, context.Canceled) {
-		return exitcode.Interrupted
-	}
-	return exitcode.From(err)
-}
-
-// rank orders the exit codes by how much they tell.
-func rank(code int) int {
-	switch code {
-	case exitcode.Interrupted:
-		return 4
-	case exitcode.Transport:
-		return 3
-	case exitcode.Usage:
-		return 2
-	default:
-		return 1
-	}
 }
 
 // bmcFailures is the summary of a command that did not succeed on every
@@ -501,7 +477,7 @@ func (p *bmcPlan) run(a *app.App, names []string, action string) []bmcResult {
 // over the next.
 func mayFallBack(action, transport string, err error) bool {
 	var pin *redfish.PinMismatchError
-	switch code := codeOf(err); {
+	switch code := exitcode.Worst(err); {
 	case code == exitcode.Interrupted, code == exitcode.Usage:
 		return false
 	case errors.As(err, &pin):

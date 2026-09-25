@@ -4,8 +4,7 @@
 package cli
 
 import (
-	"context"
-	"errors"
+	"cmp"
 	"fmt"
 	"sort"
 	"strings"
@@ -154,33 +153,24 @@ func failureDetail(r *transport.Result) string {
 }
 
 // failureError turns the failures of a fan-out into the error the process
-// exits with.
-//
-// The code says the worst thing that happened, in this order: a target that
-// was interrupted exits 130, one that could not be reached 3, and one that
-// answered with a failure 1. The errors of the targets are kept, not their
-// strings, so that the caller can still tell a cancellation from a failure.
+// exits with, with the code exitcode.Worst gives; a command that exited
+// non-zero is a target that failed. The errors of the targets are kept, not
+// their strings, so that the caller can still tell a cancellation from a
+// failure.
 func failureError(results []*transport.Result) error {
 	failures := fanout.Failures(results)
 	if len(failures) == 0 {
 		return nil
 	}
 	names := nodeset.New()
-	code := exitcode.TargetFailed
 	var errs []error
 	for _, f := range failures {
 		_ = names.Add(f.Target.Name)
-		if f.Err == nil {
-			continue
-		}
-		errs = append(errs, f.Err)
-		switch {
-		case errors.Is(f.Err, context.Canceled):
-			code = exitcode.Interrupted
-		case code != exitcode.Interrupted && exitcode.From(f.Err) == exitcode.Transport:
-			code = exitcode.Transport
+		if f.Err != nil {
+			errs = append(errs, f.Err)
 		}
 	}
+	code := cmp.Or(exitcode.Worst(errs...), exitcode.TargetFailed)
 	return &exitcode.Error{Code: code, Err: &hostFailures{
 		message: fmt.Sprintf("%d of %d hosts failed: %s", len(failures), len(results), names),
 		errs:    errs,

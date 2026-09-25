@@ -8,6 +8,7 @@
 package exitcode
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
@@ -79,4 +80,39 @@ func From(err error) int {
 		return coded.Code
 	}
 	return TargetFailed
+}
+
+// Worst reports the code a command exits with when it met every one of
+// errs, as on several hosts. The first that applies wins: Interrupted, which
+// a cancellation counts as however it was wrapped, then Transport, Usage and
+// TargetFailed. It is OK when every error is nil.
+func Worst(errs ...error) int {
+	code := OK
+	for _, err := range errs {
+		c := From(err)
+		if errors.Is(err, context.Canceled) {
+			c = Interrupted
+		}
+		if precedence(c) > precedence(code) {
+			code = c
+		}
+	}
+	return code
+}
+
+// precedence orders the codes for Worst: one that tells more about why the
+// command did not succeed wins.
+func precedence(code int) int {
+	switch code {
+	case OK:
+		return 0
+	case Usage:
+		return 2
+	case Transport:
+		return 3
+	case Interrupted:
+		return 4
+	default:
+		return 1
+	}
 }

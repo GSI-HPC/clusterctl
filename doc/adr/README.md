@@ -30,3 +30,4 @@ A decision is superseded by a later record, never edited.
 | [0017](0017-config-init-into-an-empty-directory.md) | `config init` writes only into an empty directory, where it is read | accepted |
 | [0018](0018-a-manual-for-every-release.md) | A manual for every release, the latest at the root | accepted |
 | [0019](0019-decrypt-with-the-sops-command.md) | Decrypt Secret documents with the sops command | accepted |
+| [0020](0020-one-exit-code-rule-for-many-hosts.md) | One exit code rule for a command on many hosts | accepted |

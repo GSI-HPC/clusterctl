@@ -235,16 +235,15 @@ func nodeUnreachable(err error) bool {
 	return exitcode.From(err) == exitcode.Transport || errors.Is(err, context.Canceled)
 }
 
-// pushFailures names the nodes a push failed on. It exits 3 when none of
-// them could be reached and 1 when one of them answered, and keeps the
-// first failure wrapped, an interrupt before anything else, so that it
-// still reads as one.
+// pushFailures names the nodes a push failed on, with the code
+// exitcode.Worst gives, and keeps the first failure wrapped, an interrupt
+// before anything else, so that it still reads as one.
 func pushFailures(targets []transport.Target, failed map[string]error) error {
 	if len(failed) == 0 {
 		return nil
 	}
 	names := nodeset.New()
-	code := exitcode.Transport
+	var errs []error
 	var cause error
 	for _, tg := range targets {
 		err, ok := failed[tg.Name]
@@ -252,14 +251,12 @@ func pushFailures(targets []transport.Target, failed map[string]error) error {
 			continue
 		}
 		_ = names.Add(tg.Name)
-		if !nodeUnreachable(err) {
-			code = exitcode.TargetFailed
-		}
+		errs = append(errs, err)
 		if cause == nil || (errors.Is(err, context.Canceled) && !errors.Is(cause, context.Canceled)) {
 			cause = err
 		}
 	}
-	return exitcode.Wrap(code, fmt.Errorf("%d of %d nodes failed: %s: %w", len(failed), len(targets), names, cause))
+	return exitcode.Wrap(exitcode.Worst(errs...), fmt.Errorf("%d of %d nodes failed: %s: %w", len(failed), len(targets), names, cause))
 }
 
 func newSecretsCheckCommand(r *root) *cobra.Command {
@@ -581,21 +578,6 @@ func cincRefused(target transport.Target, err error) *transport.Result {
 	return &transport.Result{Target: target, ExitCode: -1, Err: err}
 }
 
-// cincFailureError is failureError, except that a node that could not be
-// reached makes it exit with the transport code, as the contract promises.
-func cincFailureError(results []*transport.Result) error {
-	err := failureError(results)
-	if err == nil {
-		return nil
-	}
-	for _, res := range results {
-		if res.Failed() && exitcode.From(res.Err) == exitcode.Transport {
-			return exitcode.Wrap(exitcode.Transport, err)
-		}
-	}
-	return err
-}
-
 func newCincConfigCommand(r *root) *cobra.Command {
 	var runList string
 
@@ -643,7 +625,7 @@ new file is moved into place only once it has arrived complete.
 			if err := a.Print(output.Result{Table: resultsTable(results), Object: results}); err != nil {
 				return err
 			}
-			return cincFailureError(results)
+			return failureError(results)
 		}))
 	cmd.Flags().StringVarP(&runList, "run-list", "R", "", "run list to write alongside the archive URL")
 	return cmd
@@ -715,7 +697,7 @@ reached.`,
 			if err := a.Print(output.Result{Table: t, Object: rows}); err != nil {
 				return err
 			}
-			return cincFailureError(outcomes)
+			return failureError(outcomes)
 		}))
 }
 
@@ -807,7 +789,7 @@ This changes the nodes, so it asks first.`,
 			if err := a.Print(output.Result{Table: resultsTable(results), Object: results}); err != nil {
 				return err
 			}
-			return cincFailureError(results)
+			return failureError(results)
 		}))
 	cmd.Flags().StringVarP(&runList, "run-list", "R", "", "run list to use for this run only")
 	return cmd
@@ -1296,9 +1278,8 @@ func stepOutcome(err error, done string) string {
 	}
 }
 
-// nodeFailures names the nodes whose request failed. It exits with the
-// code that tells the most: an interrupt, then a host that could not be
-// reached, then a configuration problem, then a refusal.
+// nodeFailures names the nodes whose request failed, with the code
+// exitcode.Worst gives.
 func nodeFailures(nodes []*reinstallNode, errs []error) error {
 	names := make([]string, len(nodes))
 	for i, n := range nodes {
@@ -1310,40 +1291,17 @@ func nodeFailures(nodes []*reinstallNode, errs []error) error {
 func namedFailures(names []string, errs []error) error {
 	var parts []string
 	var failed []error
-	code := exitcode.OK
 	for i, err := range errs {
 		if err == nil {
 			continue
 		}
 		parts = append(parts, output.EscapeCell(fmt.Sprintf("%s: %v", names[i], err)))
 		failed = append(failed, err)
-		c := exitcode.From(err)
-		if errors.Is(err, context.Canceled) {
-			c = exitcode.Interrupted
-		}
-		if codeWeight(c) > codeWeight(code) {
-			code = c
-		}
 	}
 	if len(failed) == 0 {
 		return nil
 	}
-	return &exitcode.Error{Code: code, Err: &hostFailures{message: strings.Join(parts, "; "), errs: failed}}
-}
-
-func codeWeight(code int) int {
-	switch code {
-	case exitcode.OK:
-		return 0
-	case exitcode.Interrupted:
-		return 4
-	case exitcode.Transport:
-		return 3
-	case exitcode.Usage:
-		return 2
-	default:
-		return 1
-	}
+	return &exitcode.Error{Code: exitcode.Worst(failed...), Err: &hostFailures{message: strings.Join(parts, "; "), errs: failed}}
 }
 
 // provisionState is where the reinstallation of one node stands.
