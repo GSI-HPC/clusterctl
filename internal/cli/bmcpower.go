@@ -5,16 +5,12 @@ package cli
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -174,7 +170,9 @@ func errNotSent() error {
 	return &exitcode.Error{Code: exitcode.Interrupted, Err: errRequestNotSent}
 }
 
-// bmcError classifies what went wrong with a request to a processor.
+// bmcError is the error of a request to a processor. One the interrupt came
+// during exits 130. The clients have already marked a processor that could not
+// be reached, trusted or heard to the end as a transport failure.
 func bmcError(ctx context.Context, err error, changes bool) error {
 	if ctx.Err() != nil {
 		if changes {
@@ -183,41 +181,7 @@ func bmcError(ctx context.Context, err error, changes bool) error {
 		}
 		return &exitcode.Error{Code: exitcode.Interrupted, Err: fmt.Errorf("interrupted: %w", err)}
 	}
-	var coded *exitcode.Error
-	if errors.As(err, &coded) {
-		return err
-	}
-	if bmcUnreachable(err) {
-		return exitcode.Wrap(exitcode.Transport, err)
-	}
 	return err
-}
-
-// bmcUnreachable says whether an error means that the processor could not be
-// resolved, reached or trusted, as opposed to one that answered with a
-// refusal.
-func bmcUnreachable(err error) bool {
-	var (
-		pin       *redfish.PinMismatchError
-		opErr     *net.OpError
-		dnsErr    *net.DNSError
-		netErr    net.Error
-		record    tls.RecordHeaderError
-		alert     tls.AlertError
-		authority x509.UnknownAuthorityError
-		hostname  x509.HostnameError
-		invalid   x509.CertificateInvalidError
-	)
-	switch {
-	case errors.As(err, &pin), errors.As(err, &opErr), errors.As(err, &dnsErr),
-		errors.As(err, &record), errors.As(err, &alert),
-		errors.As(err, &authority), errors.As(err, &hostname), errors.As(err, &invalid):
-		return true
-	case errors.As(err, &netErr) && netErr.Timeout():
-		return true
-	}
-	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) ||
-		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET)
 }
 
 // neverSent says whether an error proves that a Redfish request never
