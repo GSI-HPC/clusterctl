@@ -29,6 +29,10 @@ variety. Size is a separate test, which folds sets of a quarter of a million
 hosts and would take more than a minute if folding were quadratic. A second
 target checks that the DHCP parser never panics on any input. CI runs it for a
 minute on every change, and `go test ./internal/dhcp/ -fuzz FuzzParse` runs it
+locally. A third checks `progress.Sanitize`, which every remote line and error
+passes through before a display may draw it: whatever the input, what comes
+out holds nothing a terminal would act on and keeps to its bound. CI runs it
+for a minute too, and `go test ./internal/progress/ -fuzz FuzzSanitize` runs it
 locally.
 
 **A differential corpus** holds node set expressions with the answer

@@ -187,6 +187,26 @@ jobs:
           name: fuzz-corpus-dhcp
           path: internal/dhcp/testdata/fuzz/
 
+  fuzz-progress:
+    name: Fuzz the progress sanitiser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go
+
+      # Every line a node prints and every error reaches a live display
+      # through Sanitize, so no input may leave anything in what it returns
+      # that a terminal would act on, or make it longer than its bound.
+      - name: Fuzz
+        run: go test ./internal/progress/ -run '^$' -fuzz FuzzSanitize -fuzztime 60s
+
+      - name: Upload the failing input
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus-progress
+          path: internal/progress/testdata/fuzz/
+
   cross-build:
     name: Cross build
     runs-on: ubuntu-latest
