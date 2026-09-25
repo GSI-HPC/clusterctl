@@ -162,6 +162,11 @@ The nodes are copied in parallel, as many at once as `fanout.max` or
 `fanout.commandTimeout` and, when that is unset too, to 30 minutes; a transfer
 that runs over is reported as failed and the other nodes carry on.
 
+scp draws its progress meter on standard error only when one transfer runs at
+a time, for one node or with `--fanout 1`. The meter redraws one line of the
+terminal, so the meters of transfers running side by side would overwrite each
+other; none is drawn then.
+
 A remote path must not hold whitespace, quotes or shell syntax such as `$`,
 `;` or `(`. The legacy scp protocol, which OpenSSH used by default before 9.0
 and RHEL 8 still does, hands the path to the remote shell, while SFTP takes it

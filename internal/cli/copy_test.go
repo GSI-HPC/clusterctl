@@ -110,6 +110,53 @@ exit 0`)
 	}
 }
 
+// TestCopyShowsAProgressMeterOnlyForOneTransferAtATime: scp's standard
+// output, where it draws its meter when that is a terminal, was the
+// process's standard error whatever the fan-out, so the meters of transfers
+// running side by side overwrote each other. It is the command's error
+// stream when one transfer runs at a time, and the null device otherwise,
+// where scp draws nothing.
+func TestCopyShowsAProgressMeterOnlyForOneTransferAtATime(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantMeter int
+	}{
+		{"one node", []string{"-n", "exe1"}, 1},
+		{"one node at a time", []string{"--fanout", "1", "-n", "exe[1-2]"}, 2},
+		{"nodes side by side", []string{"-n", "exe[1-2]"}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			binary, dir := fakeScp(t, `
+[ /dev/stdout -ef /dev/null ] && touch "$(dirname "$0")/discarded.$$"
+echo "hosts 100% 1024 1.0MB/s 00:00"
+exit 0`)
+			args := append([]string{"--set", "ssh.scpBinary=" + binary, "-y", "copy"}, tc.args...)
+			h, err := run(t, harnessOptions{}, append(args, "/etc/hosts", "/etc/hosts")...)
+			if err != nil {
+				t.Fatalf("copy failed: %v", err)
+			}
+			if got := strings.Count(h.errOut.String(), "hosts 100%"); got != tc.wantMeter {
+				t.Errorf("%d meters on the error stream, want %d:\n%s", got, tc.wantMeter, h.errOut)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			discarded := 0
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), "discarded.") {
+					discarded++
+				}
+			}
+			if want := len(scpCalls(t, dir)) - tc.wantMeter; discarded != want {
+				t.Errorf("scp's output went to the null device %d times, want %d", discarded, want)
+			}
+		})
+	}
+}
+
 // TestCopyGivesUpOnAStalledTransfer: a transfer stalled on a live connection
 // used to hold up every later node until Ctrl-C. The fake scp leaves a child
 // holding its standard error, as scp's own ssh does, which must not keep the

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -45,7 +46,8 @@ the same local path, the destination must be a directory; each node's files
 land in a directory of its own under it, named after the node.
 
 The nodes are copied in parallel, as many at once as the fan-out allows, and
-each transfer is bounded by --timeout.
+each transfer is bounded by --timeout. scp's progress meter is shown only when
+one transfer runs at a time, for one node or with --fanout 1.
 
 A remote path is read by a shell under the legacy scp protocol, which OpenSSH
 used by default before 9.0, and taken literally under SFTP. A remote path
@@ -137,6 +139,13 @@ two, so it is refused. Globs and ~ work in both.
 			}
 
 			executor := a.Executor()
+			// scp draws its progress meter on the terminal, redrawing one
+			// line. Only one transfer at a time can have that line; the
+			// meters of several side by side would overwrite each other.
+			var progress io.Writer
+			if len(targets) == 1 || executor.Max == 1 {
+				progress = a.Err
+			}
 			executor.Runner = copyRunner{
 				client:  a.SSH,
 				timeout: limit,
@@ -147,6 +156,7 @@ two, so it is refused. Globs and ~ work in both.
 						Upload:      !download,
 						Recursive:   recursive,
 						Preserve:    preserve,
+						Progress:    progress,
 					}
 				},
 			}
