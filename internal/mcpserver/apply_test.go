@@ -14,33 +14,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/mcpserver"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
-
-// copySite copies the example configuration, so that a test can edit it
-// while a server reads it.
-func copySite(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	entries, err := os.ReadDir(exampleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(exampleDir, e.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, e.Name()), data, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
 
 // edit replaces the first occurrence of old in a file of the configuration.
 func edit(t *testing.T, dir, file, old, replacement string) {
@@ -81,7 +58,7 @@ func auditLines(t *testing.T, stateDir string) []map[string]any {
 // while the plan waited. The user would have confirmed one cluster and the
 // change would have run on the other.
 func TestApplyRefusesAPlanWhoseClusterChanged(t *testing.T) {
-	dir := copySite(t)
+	dir := configtest.CopyDir(t, exampleDir)
 	f := start(t, setup{config: dir, answer: accept(map[string]any{"confirm": true})})
 	p := f.plan(t, map[string]any{"action": "resume", "nodes": "exe1"})
 
@@ -101,7 +78,7 @@ func TestApplyRefusesAPlanWhoseClusterChanged(t *testing.T) {
 // 10.1: the host the Slurm clients run on changed while the plan waited, so
 // what would be sent is no longer what the plan showed.
 func TestApplyRefusesAPlanWhoseCommandsChanged(t *testing.T) {
-	dir := copySite(t)
+	dir := configtest.CopyDir(t, exampleDir)
 	f := start(t, setup{config: dir, answer: accept(map[string]any{"confirm": true})})
 	p := f.plan(t, map[string]any{"action": "resume", "nodes": "exe1"})
 	if len(p.Commands) != 1 || !strings.HasPrefix(p.Commands[0], "login (login.hpc.example.org): ") {
@@ -124,7 +101,7 @@ func TestApplyRefusesAPlanWhoseCommandsChanged(t *testing.T) {
 // 10.10: safety.confirmAbove was lowered while the plan waited. The question
 // is the one the gate asks now, so a plain yes no longer does.
 func TestApplyAsksTheQuestionOfTheCurrentGate(t *testing.T) {
-	dir := copySite(t)
+	dir := configtest.CopyDir(t, exampleDir)
 	count := 4
 	f := start(t, setup{config: dir, answer: func(req *mcp.ElicitRequest) *mcp.ElicitResult {
 		if schema, _ := json.Marshal(req.Params.RequestedSchema); strings.Contains(string(schema), `"count"`) {

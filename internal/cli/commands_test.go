@@ -12,6 +12,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/GSI-HPC/clusterctl/internal/config"
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
@@ -719,7 +720,7 @@ func decryptableSecret(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := copyExample(t, "secrets.sops.yaml", "workstation.yaml")
+	dir := configtest.CopyDir(t, exampleDir, "secrets.sops.yaml", "workstation.yaml")
 	keyFile := filepath.Join(dir, ".identity")
 	secret := sopstest.Encrypt(t, "apiVersion: clusterctl/v1alpha1\nkind: Secret\nmetadata:\n  name: example\n"+
 		"data:\n  bmc-password: hunter2\nbinaryData:\n  munge-key: czNjcjN0LWtleQ==\n", id.Recipient().String())

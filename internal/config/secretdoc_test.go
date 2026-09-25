@@ -4,7 +4,6 @@
 package config_test
 
 import (
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/GSI-HPC/clusterctl/internal/config"
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 )
 
@@ -36,19 +36,8 @@ func sealed(t *testing.T, plaintext string) string {
 	return string(sopstest.Encrypt(t, plaintext, id.Recipient().String()))
 }
 
-func writeFiles(t *testing.T, files map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
-
 func TestSecretDocumentIsIndexedWithoutAKey(t *testing.T) {
-	dir := writeFiles(t, map[string]string{"secrets.sops.yaml": sealed(t, plainSecret)})
+	dir := configtest.WriteFiles(t, map[string]string{"secrets.sops.yaml": sealed(t, plainSecret)})
 	b, err := config.Load([]string{filepath.Join(dir, "secrets.sops.yaml")})
 	if err != nil {
 		t.Fatalf("an encrypted Secret was rejected: %v", err)
@@ -126,7 +115,7 @@ func TestSecretDocumentMistakesAreReportedWhereWritten(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := writeFiles(t, map[string]string{"secrets.sops.yaml": tt.file})
+			dir := configtest.WriteFiles(t, map[string]string{"secrets.sops.yaml": tt.file})
 			_, err := config.Load([]string{filepath.Join(dir, "secrets.sops.yaml")})
 			if err == nil {
 				t.Fatal("the document should be rejected")
@@ -145,7 +134,7 @@ func TestSecretDocumentMistakesAreReportedWhereWritten(t *testing.T) {
 
 func TestOnlyASecretMayBeEncrypted(t *testing.T) {
 	site := "apiVersion: clusterctl/v1alpha1\nkind: Site\nmetadata:\n  name: example\nspec:\n  domains:\n    hpc: example.org\n"
-	dir := writeFiles(t, map[string]string{"site.yaml": string(sopstest.EncryptWithRegex(t, site, "^spec$", mustRecipient(t)))})
+	dir := configtest.WriteFiles(t, map[string]string{"site.yaml": string(sopstest.EncryptWithRegex(t, site, "^spec$", mustRecipient(t)))})
 	_, err := config.Load([]string{filepath.Join(dir, "site.yaml")})
 	if err == nil || !strings.Contains(err.Error(), "only a Secret document may be") {
 		t.Errorf("an encrypted Site should be refused, got %v", err)
@@ -153,7 +142,7 @@ func TestOnlyASecretMayBeEncrypted(t *testing.T) {
 }
 
 func TestHiddenFilesAreNotConfiguration(t *testing.T) {
-	dir := writeFiles(t, map[string]string{
+	dir := configtest.WriteFiles(t, map[string]string{
 		".sops.yaml":        "creation_rules:\n  - encrypted_regex: ^(data|binaryData)$\n",
 		".site.yaml.swp":    "junk",
 		"secrets.sops.yaml": sealed(t, plainSecret),
@@ -253,7 +242,7 @@ func TestSecretValuesDecodesBinaryData(t *testing.T) {
 // encrypted Secret named vault.
 func resolveWithSecret(t *testing.T, spec string) (*config.Resolved, error) {
 	t.Helper()
-	dir := writeFiles(t, map[string]string{
+	dir := configtest.WriteFiles(t, map[string]string{
 		"config.yaml":       "apiVersion: clusterctl/v1alpha1\nkind: Config\ncontexts:\n  - name: c\n    cluster: c\n",
 		"cluster.yaml":      "apiVersion: clusterctl/v1alpha1\nkind: Cluster\nmetadata:\n  name: c\nspec:\n  site: s\n",
 		"site.yaml":         "apiVersion: clusterctl/v1alpha1\nkind: Site\nmetadata:\n  name: s\nspec:\n" + spec,

@@ -12,6 +12,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 )
 
@@ -42,7 +43,7 @@ func TestSecretsOpenWithTheWorkstationIdentitiesAlone(t *testing.T) {
 		{"without it", "", 1, "no key is available without a terminal"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := copySite(t)
+			dir := configtest.CopyDir(t, exampleDir)
 			if err := os.WriteFile(filepath.Join(dir, "secrets.sops.yaml"), secret, 0o600); err != nil {
 				t.Fatal(err)
 			}

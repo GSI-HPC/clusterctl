@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
@@ -27,7 +28,7 @@ func bmcApp(t *testing.T) (*app.App, *strings.Builder) {
 	}
 	// A copy of the example with the inventory changed: a second document
 	// of the same kind and name would be refused.
-	extra := copyExample(t, "inventory.yaml")
+	extra := configtest.CopyDir(t, exampleDir, "inventory.yaml")
 	doc := string(inventory) + "    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n"
 	if err := os.WriteFile(filepath.Join(extra, "inventory.yaml"), []byte(doc), 0o600); err != nil {
 		t.Fatal(err)

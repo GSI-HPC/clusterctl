@@ -18,6 +18,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/cli"
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/mcpserver"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -608,7 +609,7 @@ func TestDescribeNodesShowsTheBMCTheCommandsReach(t *testing.T) {
 		} `json:"items"`
 	}
 
-	dir := copySite(t)
+	dir := configtest.CopyDir(t, exampleDir)
 	edit(t, dir, "inventory.yaml", "    - nodes: exe0001\n",
 		"    - nodes: exe0003\n      bmcAddress: 10.9.0.77\n    - nodes: exe0001\n")
 	var out view
