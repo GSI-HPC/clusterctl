@@ -106,7 +106,6 @@ spec:
       via: mgmt
       backend: ipmipower
       driver: LAN_2_0
-      passwordTransport: file
     redfish:
       pinStore: ~/.local/state/clusterctl/bmc-pins
       minTlsVersion: "1.2"
@@ -167,12 +166,7 @@ spec:
       grubPath: /srv/tftp/grub
     http:
       role: install
-      root: /var/www/html
-      baseUrl: http://installer.hpc.example.org
     cinc:
-      archivePath: /var/www/html/cinc
-      baseCookbook: https://git.example.org/hpc/cluster/base-cookbook.git
-      rolesPath: ../cinc-roles
       secrets:
         # From the Secret document, instead of a file of its own.
         - secretRef: {name: example, key: munge-key}
@@ -183,10 +177,6 @@ spec:
         - source: secrets/nslcd.keytab.age
           target: /etc/nslcd.keytab
           mode: "0600"
-    mail:
-      host: smtp.example.org
-      domain: example.org
-      subjectPrefix: "[example]"
     fabric:
       role: fabric
     dns:
