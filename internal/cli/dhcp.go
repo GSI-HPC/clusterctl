@@ -194,7 +194,7 @@ a node is not coming up. At most 10000 lines are shown.`,
 			// names, so control characters are shown rather than obeyed.
 			out := strings.Split(result.Output(), "\n")
 			for i, line := range out {
-				out[i] = escapeControl(line)
+				out[i] = output.EscapeText(line)
 			}
 			return say(cmd, "%s\n", strings.Join(out, "\n"))
 		})

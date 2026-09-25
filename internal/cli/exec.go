@@ -9,7 +9,6 @@ import (
 	"io"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -234,7 +233,7 @@ func printExec(a *app.App, cmd *cobra.Command, results []*transport.Result, dedu
 			// Only the one newline that ends the output is dropped, so that
 			// groups that differ in blank lines at the end look different.
 			for _, line := range outputLines(strings.TrimSuffix(g.Output, "\n")) {
-				if _, err := fmt.Fprintf(out, "  %s\n", escapeControl(line)); err != nil {
+				if _, err := fmt.Fprintf(out, "  %s\n", output.EscapeText(line)); err != nil {
 					return err
 				}
 			}
@@ -242,7 +241,7 @@ func printExec(a *app.App, cmd *cobra.Command, results []*transport.Result, dedu
 	} else {
 		for _, res := range results {
 			for _, line := range outputLines(strings.TrimRight(res.Stdout, "\n")) {
-				if _, err := fmt.Fprintf(out, "%s: %s\n", res.Target.Name, escapeControl(line)); err != nil {
+				if _, err := fmt.Fprintf(out, "%s: %s\n", res.Target.Name, output.EscapeText(line)); err != nil {
 					return err
 				}
 			}
@@ -256,7 +255,7 @@ func printExec(a *app.App, cmd *cobra.Command, results []*transport.Result, dedu
 		if detail := failureDetail(res); detail != "" {
 			line += ": " + detail
 		}
-		if _, err := fmt.Fprintf(a.Err, "%s: %s\n", res.Target.Name, escapeControl(line)); err != nil {
+		if _, err := fmt.Fprintf(a.Err, "%s: %s\n", res.Target.Name, output.EscapeCell(line)); err != nil {
 			return err
 		}
 	}
@@ -274,45 +273,4 @@ func outputLines(s string) []string {
 		lines[i] = strings.TrimSuffix(line, "\r")
 	}
 	return lines
-}
-
-// escapeControl makes the control characters of one line of untrusted output
-// visible instead of letting the terminal act on them: a carriage return or
-// a cursor movement could overwrite what another node answered, and an OSC
-// sequence could write the clipboard. A tab only moves forward and is kept.
-// Bytes that are not UTF-8 are escaped too, because an 8-bit terminal reads
-// 0x9b as the start of a control sequence.
-func escapeControl(s string) string {
-	clean := true
-	for _, r := range s {
-		if (r < 0x20 && r != '\t') || (r >= 0x7f && r <= 0x9f) || r == utf8.RuneError {
-			clean = false
-			break
-		}
-	}
-	if clean {
-		return s
-	}
-	var b strings.Builder
-	for len(s) > 0 {
-		r, size := utf8.DecodeRuneInString(s)
-		switch {
-		case r == utf8.RuneError && size == 1:
-			fmt.Fprintf(&b, "\\x%02x", s[0])
-		case r == '\r':
-			b.WriteString(`\r`)
-		case r == '\n':
-			b.WriteString(`\n`)
-		case r == '\t':
-			b.WriteRune(r)
-		case r < 0x20 || r == 0x7f:
-			fmt.Fprintf(&b, "\\x%02x", r)
-		case r >= 0x80 && r <= 0x9f:
-			fmt.Fprintf(&b, "\\u%04x", r)
-		default:
-			b.WriteString(s[:size])
-		}
-		s = s[size:]
-	}
-	return b.String()
 }

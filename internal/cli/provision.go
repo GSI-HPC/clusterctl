@@ -589,10 +589,10 @@ trap - EXIT
 // cincDetail says why a node failed, with anything the node sent escaped.
 func cincDetail(res *transport.Result) string {
 	if line := strings.TrimSpace(lastNonEmpty(res.Stderr)); line != "" {
-		return escapeControl(line)
+		return output.EscapeCell(line)
 	}
 	if res.Err != nil {
-		return escapeControl(res.Err.Error())
+		return output.EscapeCell(res.Err.Error())
 	}
 	return fmt.Sprintf("exit %d", res.ExitCode)
 }
