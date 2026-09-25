@@ -201,7 +201,10 @@ func TestGroupByOutput(t *testing.T) {
 		{Target: transport.Target{Name: "exe4"}, Stdout: "4.18.0\n"},
 		{Target: transport.Target{Name: "exe5"}, Stdout: "", ExitCode: 1},
 	}
-	groups := fanout.GroupByOutput(results)
+	groups, err := fanout.GroupByOutput(results)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := len(groups), 3; got != want {
 		t.Fatalf("got %d groups, want %d", got, want)
 	}
@@ -239,8 +242,12 @@ func TestGroupByOutputKeepsApartWhatEndedDifferently(t *testing.T) {
 		{Target: transport.Target{Name: "exe6"}, ExitCode: -1, Err: context.Canceled},
 		{Target: transport.Target{Name: "exe7"}},
 	}
+	groups, err := fanout.GroupByOutput(results)
+	if err != nil {
+		t.Fatal(err)
+	}
 	status := map[string]string{}
-	for _, g := range fanout.GroupByOutput(results) {
+	for _, g := range groups {
 		if g.Nodes.Len() != 1 {
 			t.Errorf("%s were grouped although they ended differently", g.Nodes)
 		}
@@ -320,5 +327,28 @@ func TestRunTurnsAPanicIntoThatTargetsFailure(t *testing.T) {
 				t.Errorf("the log has no stack naming exe2:\n%s", log)
 			}
 		})
+	}
+}
+
+// A target name was added to a group as a node set expression, and one the
+// set refused was dropped although the comment said it became its own
+// group: exe[2-3] was counted as two hosts, and a,b[ vanished. A name that
+// is not one host name cannot be grouped, which is reported instead.
+func TestGroupByOutputRefusesWhatIsNotAHostName(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"exe[2-3]", "exe2,exe3", "a,b["} {
+		results := []*transport.Result{
+			{Target: transport.Target{Name: "exe1"}, Stdout: "yes\n"},
+			{Target: transport.Target{Name: name}, Stdout: "yes\n"},
+		}
+		groups, err := fanout.GroupByOutput(results)
+		if err == nil {
+			t.Errorf("%q: grouped as %v, want an error", name, groups)
+			continue
+		}
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("%q: error = %v, want it to name the target", name, err)
+		}
 	}
 }

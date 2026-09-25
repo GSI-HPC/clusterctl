@@ -225,8 +225,19 @@ func printExec(a *app.App, cmd *cobra.Command, results []*transport.Result, dedu
 	// A node controls its own output, so none of it reaches the terminal
 	// as a control sequence.
 	out := cmd.OutOrStdout()
+	var groups []fanout.Group
+	grouped := false
 	if dedup {
-		for _, g := range fanout.GroupByOutput(results) {
+		var groupErr error
+		groups, groupErr = fanout.GroupByOutput(results)
+		// Every target has run by now, so what it printed is shown
+		// ungrouped rather than lost.
+		if grouped = groupErr == nil; !grouped {
+			a.Printf("%v; showing the output of each node\n", groupErr)
+		}
+	}
+	if grouped {
+		for _, g := range groups {
 			if _, err := fmt.Fprintf(out, "%s (%d): %s\n", g.Nodes, g.Nodes.Len(), g.Status); err != nil {
 				return err
 			}
