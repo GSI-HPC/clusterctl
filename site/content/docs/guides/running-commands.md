@@ -134,6 +134,10 @@ The default is conservative, because a connection through a tunnel or a jump
 host is more fragile than a local one, and because a wide fan-out is what makes
 sshd refuse connections under `MaxStartups`.
 
+`fanout.max` and `--fanout` have to be at least 1. A `0` or a negative value
+is refused, by `config validate` with the file and line it was written on,
+rather than quietly read as the default.
+
 ## Copying files
 
 ```console

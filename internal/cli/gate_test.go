@@ -416,3 +416,56 @@ func TestForcedExecNamesWhatItLetsThrough(t *testing.T) {
 		t.Errorf("sent %d commands, want three", len(calls))
 	}
 }
+
+// A fanout.max of 0 became 16 without a word, and the schema let 0 and -1
+// through config validate; --fanout 0 and -1 were dropped the same way.
+func TestFanoutBelowOneIsRefused(t *testing.T) {
+	for _, value := range []string{"0", "-1"} {
+		t.Run("site "+value, func(t *testing.T) {
+			dir := exampleCopy(t, "    max: 24\n", "    max: "+value+"\n")
+			_, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "validate")
+			if err == nil {
+				t.Fatalf("config validate accepted fanout.max: %s", value)
+			}
+			if !strings.Contains(err.Error(), "site.yaml:") || !strings.Contains(err.Error(), "fanout") {
+				t.Errorf("error = %v, want the file, the line and the setting", err)
+			}
+			if got, want := exitcode.From(err), exitcode.Usage; got != want {
+				t.Errorf("exit code = %d, want %d", got, want)
+			}
+		})
+		t.Run("context override "+value, func(t *testing.T) {
+			dir := exampleWith(t, "config.yaml", func(s string) string {
+				return strings.Replace(s, "fanout.max: 6", "fanout.max: "+value, 1)
+			})
+			_, err := run(t, harnessOptions{config: []string{dir}}, "--context", "cluster2", "config", "validate")
+			if err == nil || !strings.Contains(err.Error(), "fanout.max") {
+				t.Errorf("err = %v, want a context override of fanout.max: %s refused", err, value)
+			}
+		})
+		t.Run("CLUSTERCTL_FANOUT "+value, func(t *testing.T) {
+			t.Setenv("CLUSTERCTL_FANOUT", value)
+			if _, err := run(t, harnessOptions{}, "config", "validate"); err == nil {
+				t.Errorf("CLUSTERCTL_FANOUT=%s was accepted", value)
+			}
+		})
+		for _, args := range [][]string{
+			{"--set", "fanout.max=" + value, "config", "validate"},
+			{"--fanout", value, "config", "validate"},
+		} {
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				_, err := run(t, harnessOptions{}, args...)
+				if err == nil {
+					t.Fatalf("%v was accepted", args)
+				}
+				if got, want := exitcode.From(err), exitcode.Usage; got != want {
+					t.Errorf("exit code = %d, want %d", got, want)
+				}
+			})
+		}
+	}
+	h, err := run(t, harnessOptions{}, "--fanout", "3", "config", "explain", "fanout.max")
+	if err != nil || !strings.Contains(h.out.String(), "3") {
+		t.Errorf("--fanout 3: %v\n%s", err, h.out)
+	}
+}

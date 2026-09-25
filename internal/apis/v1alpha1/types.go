@@ -312,7 +312,7 @@ type SafetySpec struct {
 type FanoutSpec struct {
 	// Max is how many nodes are worked on at once. Keep it conservative
 	// when the connections go through a tunnel or a jump host.
-	Max int `json:"max,omitempty" yaml:"max,omitempty" jsonschema:"description=Nodes contacted at once"`
+	Max int `json:"max,omitempty" yaml:"max,omitempty" jsonschema:"minimum=1,description=Nodes contacted at once; at least 1"`
 	// ConnectTimeout bounds the connection, CommandTimeout the command. The
 	// command timeout is enforced on the node with timeout(1), because
 	// killing the local ssh does not stop the remote process.
