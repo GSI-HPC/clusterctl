@@ -226,6 +226,12 @@ record. For a name with a domain, the service processor is derived only when
 the domain is the one the rules give the node; an IP address names no service
 processor.
 
+Every command that works on a service processor uses it: the `bmc` commands,
+`provision`, `node fqdn --bmc`, `hostkey scan`, `verify`, `refresh` and
+`remove --bmc`, and `dns lookup --bmc`. `dns lookup --bmc` resolves a
+`bmcAddress` that is a name; one that is an IP address is shown as it is,
+with a note that it was not looked up.
+
 ## Passwords
 
 A password is never written in the configuration. A credential says where to

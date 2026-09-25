@@ -47,7 +47,10 @@ with a `proxyJump` is reached through its jump host with `ssh -W`, over the
 generated configuration, so the jump host's own key is checked against the
 file first; that connection runs in batch mode and never prompts. Hosts are
 scanned in parallel up to `fanout.max`, and `--timeout` bounds each host once,
-from the connection to the key. The file is always
+from the connection to the key. With `--bmc`, `scan`, `verify`, `refresh` and `remove` act on
+the nodes' service processors instead, reached the way the `bmc` commands
+reach them: at the `bmcAddress` the inventory records, else by the name the
+naming rules give them, and the key is recorded under that host. The file is always
 rewritten completely, under a lock, and sorted, so two administrators
 refreshing at once cannot lose an entry and the diff is readable.
 
