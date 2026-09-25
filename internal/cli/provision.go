@@ -366,13 +366,6 @@ client on it.`,
 	)
 }
 
-func cincConfigPath(a *app.App) string {
-	if p := a.Spec.Services.Cinc.SoloConfigPath; p != "" {
-		return p
-	}
-	return "/etc/cinc/solo"
-}
-
 // The configuration file on a node holds shell assignments, the format the
 // shell toolkit sourced. clusterctl writes every value quoted, so the file
 // stays safe for anything that still sources it, and reads it back without
@@ -626,7 +619,7 @@ new file is moved into place only once it has arrived complete.
 			if err != nil {
 				return err
 			}
-			path := cincConfigPath(a)
+			path := a.Spec.Services.Cinc.SoloConfigPath
 			detail := solo.URL
 			if solo.RunList != "" {
 				detail += " with run list " + solo.RunList
@@ -679,7 +672,7 @@ reached.`,
 			if err != nil {
 				return err
 			}
-			path := cincConfigPath(a)
+			path := a.Spec.Services.Cinc.SoloConfigPath
 			results, err := runOnNodes(a, ns, transport.Request{
 				Script: cincReadScript(path),
 			})
@@ -749,10 +742,7 @@ This changes the nodes, so it asks first.`,
 				return err
 			}
 			binary := a.Spec.Services.Cinc.Binary
-			if binary == "" {
-				binary = "cinc-solo"
-			}
-			path := cincConfigPath(a)
+			path := a.Spec.Services.Cinc.SoloConfigPath
 			// The archive and run list come from each node's file, which is
 			// read only once the run is confirmed, so a dry run cannot show
 			// them and says so.
@@ -1035,7 +1025,7 @@ func planReinstall(a *app.App, ns *nodeset.NodeSet, explicit string, keepKeys bo
 	if err != nil {
 		return nil, err
 	}
-	p := &reinstallPlan{role: role, root: pxeRoot(a), links: links}
+	p := &reinstallPlan{role: role, root: a.Spec.Services.PXESrv.Root, links: links}
 	if !keepKeys {
 		p.knownHosts = a.Path(a.Spec.SSH.KnownHostsFile)
 	}
@@ -1412,7 +1402,7 @@ credential, and 1 when a host refused.`,
 			if err != nil {
 				return err
 			}
-			root := pxeRoot(a)
+			root := a.Spec.Services.PXESrv.Root
 			ns, err := selection(a, args)
 			if err != nil {
 				return err

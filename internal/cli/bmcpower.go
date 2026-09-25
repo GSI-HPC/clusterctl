@@ -105,9 +105,6 @@ func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, c
 	do func(context.Context, string, *redfish.Client) (T, error)) []redfishCall[T] {
 	ctx := a.Context()
 	limit := a.Spec.BMC.Redfish.MaxConcurrent
-	if limit < 1 {
-		limit = 8
-	}
 	calls := make([]redfishCall[T], len(names))
 	for i, node := range names {
 		calls[i] = redfishCall[T]{node: node, client: clients[i]}

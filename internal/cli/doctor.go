@@ -207,18 +207,12 @@ func remoteTools(a *app.App) map[string][]string {
 }
 
 // ipmiBinary is the program the configured IPMI back end runs, at the path
-// it runs it from. The defaults are the ones internal/ipmi uses.
+// it runs it from.
 func ipmiBinary(spec v1alpha1.IPMISpec) string {
 	if spec.Backend == ipmi.BackendIpmitool {
-		if spec.IpmitoolPath != "" {
-			return spec.IpmitoolPath
-		}
-		return "/usr/bin/ipmitool"
+		return spec.IpmitoolPath
 	}
-	if spec.IpmipowerPath != "" {
-		return spec.IpmipowerPath
-	}
-	return "/usr/sbin/ipmipower"
+	return spec.IpmipowerPath
 }
 
 // toolCheck is the line of the remote script that prints a tool when it is

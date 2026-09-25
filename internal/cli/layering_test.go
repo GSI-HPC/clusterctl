@@ -428,3 +428,18 @@ func TestSetWithoutAValueIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// defaults.yaml gives these values, and the commands use them as they are,
+// so an empty one or a zero is refused rather than read as "the default".
+func TestValuesDefaultsGiveCannotBeEmptied(t *testing.T) {
+	for _, set := range []string{
+		`services.dhcp.configPath=""`,
+		`services.cinc.binary=""`,
+		`bmc.pdu.nameFormat=""`,
+		`bmc.ipmi.ipmipowerPath=""`,
+		`bmc.redfish.maxConcurrent=0`,
+	} {
+		_, err := run(t, harnessOptions{}, "--set", set, "config", "view")
+		wantCode(t, err, exitcode.Usage)
+	}
+}

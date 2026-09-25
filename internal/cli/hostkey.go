@@ -69,12 +69,8 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 		hosts, scanners = append(hosts, host), append(scanners, scanner)
 	}
 
-	limit := a.Spec.Fanout.Max
-	if limit < 1 {
-		limit = fanout.DefaultMax
-	}
 	var mu sync.Mutex
-	fanout.Each(a.Context(), len(hosts), limit, func(i int) {
+	fanout.Each(a.Context(), len(hosts), a.Spec.Fanout.Max, func(i int) {
 		entries, err := scanHost(a.Context(), scanners[i], hosts[i])
 		mu.Lock()
 		defer mu.Unlock()
