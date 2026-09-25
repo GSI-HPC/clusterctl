@@ -521,28 +521,3 @@ func TestIncludeGlobsArePassedToSSH(t *testing.T) {
 		t.Errorf("an include glob was dropped: port %q", got)
 	}
 }
-
-// A misspelt keyword breaks every connection. ssh names the keyword on a line
-// before its last one, so the whole of what it said is reported.
-func TestCheckConfigReportsWhatSSHRejects(t *testing.T) {
-	t.Parallel()
-	requireSSH(t)
-	dir := t.TempDir()
-	c := transport.New(transport.Options{
-		Roles:          map[string]v1alpha1.HostRole{"a": {Host: "a.example.org", Options: map[string]string{"ConectTimeout": "5"}}},
-		StateDir:       dir,
-		KnownHostsFile: filepath.Join(dir, "k"),
-	})
-	err := c.CheckConfig(context.Background())
-	if err == nil {
-		t.Fatal("a misspelt keyword was not reported")
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "conecttimeout") {
-		t.Errorf("the report does not name the keyword: %v", err)
-	}
-
-	good := transport.New(transport.Options{StateDir: dir, KnownHostsFile: filepath.Join(dir, "k")})
-	if err := good.CheckConfig(context.Background()); err != nil {
-		t.Errorf("a valid configuration was reported: %v", err)
-	}
-}

@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -723,39 +722,6 @@ func (c *Client) writeConfig() (string, error) {
 		return "", err
 	}
 	return path, nil
-}
-
-// CheckConfig has ssh read the generated configuration together with
-// everything it includes, and reports all that ssh said when it refuses it.
-//
-// ssh rejects a misspelt keyword only when it reads the file, and then fails
-// every connection; the line naming the keyword comes before the last one, so
-// the whole of its output is kept.
-func (c *Client) CheckConfig(ctx context.Context) error {
-	path, err := c.ConfigPath()
-	if err != nil {
-		return err
-	}
-	host := "localhost"
-	for _, name := range sortedKeys(c.roles) {
-		if h := c.roles[name].Host; h != "" {
-			host = h
-			break
-		}
-	}
-	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, c.Binary(), "-G", "-F", path, host)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			return fmt.Errorf("running %s: %w", c.Binary(), err)
-		}
-		return exitcode.Wrap(exitcode.Usage,
-			fmt.Errorf("ssh refuses %s: %s", path, strings.TrimSpace(stderr.String())))
-	}
-	return nil
 }
 
 // seconds renders a duration in whole seconds, rounding up: ssh reads 0 as
