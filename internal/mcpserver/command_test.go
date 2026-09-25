@@ -187,3 +187,26 @@ func TestReadCommandStopsAnEndlessJQProgram(t *testing.T) {
 		t.Errorf("result = %+v, want it cut", out)
 	}
 }
+
+// cobra's help and completion commands are part of the tree from the start,
+// and only read, but they are the shell's, not the cluster's: an agent is not
+// offered them, and a completion script is not written into the protocol.
+func TestReadCommandOffersNoShellBuiltins(t *testing.T) {
+	f := start(t, setup{})
+	for _, args := range [][]string{
+		{"help"},
+		{"help", "node", "list"},
+		{"completion", "bash"},
+		{"completion"},
+	} {
+		msg := f.refused(t, "read_command", map[string]any{"args": args})
+		if !strings.HasPrefix(msg, "rejected:") {
+			t.Errorf("%v: message = %q, want it rejected", args, msg)
+		}
+		for _, offered := range []string{"  help", "  completion"} {
+			if strings.Contains(msg, offered) {
+				t.Errorf("%v: the commands offered include %q:\n%s", args, strings.TrimSpace(offered), msg)
+			}
+		}
+	}
+}
