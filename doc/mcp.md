@@ -43,6 +43,8 @@ Two things are deliberately not offered. **Running commands on the nodes**
 (`exec`, `copy`) is a root shell on the cluster whose effect cannot be
 classified. **Interactive commands** (`login`, the `shell` commands,
 `bmc web`, `dhcp capture`, `tunnel start`) need a terminal or keep running.
+cobra's `help` and `completion` only read, but they serve the shell rather
+than the cluster, so the tree `read_command` uses leaves them out.
 
 ### What each command does
 
