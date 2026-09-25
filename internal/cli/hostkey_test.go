@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -305,6 +306,69 @@ func TestHostkeyRemoveTakesTheInventoryBMCAddress(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "10.9.0.77") {
 		t.Errorf("the removal is not reported under 10.9.0.77:\n%s", h.out)
+	}
+}
+
+// A scan is a step with a target for each node: one whose host answered,
+// one whose host did not, one whose service processor has no name, which
+// is refused before anything is dialled, and those an interrupt left out,
+// which end canceled so that the count still reaches its total.
+func TestHostkeyScanReportsEveryNode(t *testing.T) {
+	host := startFakeHost(t)
+	noBMCName := exampleWith(t, "site.yaml", func(s string) string {
+		s = strings.Replace(s, "        bmc: \"{name}.{domains.mgmtHpc}\"\n", "", 1)
+		return strings.Replace(s, "        bmc: \"{bmcPrefix}{name}.{domains.mgmt}\"\n", "", 1)
+	})
+	for _, tc := range []struct {
+		name   string
+		config []string
+		args   []string
+		// cancel interrupts the command at the first host dialled;
+		// otherwise every host but exe0002 answers.
+		cancel bool
+		want   string
+	}{
+		{"a host that does not answer", nil, []string{"hostkey", "scan", "-n", "exe[1-3]"}, false, `
+step scan the host keys total=3 limit=24 [fold]: failed (target): 1 of 3 failed: exe0002
+  target exe0002: failed (target): no host key could be collected from {}: dial tcp: connection refused
+  target exe[0001,0003]: ok
+`},
+		{"a processor with no name", []string{noBMCName, bmcAddressInventory(t)},
+			[]string{"hostkey", "scan", "--bmc", "-n", "exe[1,3]"}, false, `
+step scan the host keys total=2 limit=24 [fold]: failed (usage): 1 of 2 failed: exe0001
+  target exe0001: failed (usage): naming rule 1, which matches {}, has no bmc template, so its service processor has no name; add one or set bmcAddress in the inventory
+  target exe0003: ok
+`},
+		{"an interrupt", nil, []string{"--fanout", "1", "hostkey", "scan", "-n", "exe[1-3]"}, true, `
+step scan the host keys total=3 limit=1 [fold]: canceled (canceled): 3 of 3 failed: exe[0001-0003]
+  target exe[0001-0003]: canceled (canceled): context canceled
+`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			watched, tree := watch(t)
+			ctx, cancel := context.WithCancel(watched)
+			defer cancel()
+			scanDial = func(ctx context.Context, network, address string) (net.Conn, error) {
+				switch {
+				case tc.cancel:
+					cancel()
+					<-ctx.Done()
+					return nil, ctx.Err()
+				case strings.HasPrefix(address, "exe0002."):
+					return nil, &net.OpError{Op: "dial", Net: network, Err: syscall.ECONNREFUSED}
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, host.address)
+			}
+			t.Cleanup(func() { scanDial = nil })
+
+			_, err := run(t, harnessOptions{ctx: ctx, config: tc.config}, append(tc.args, "--timeout", "5s")...)
+			if err == nil {
+				t.Fatal("the scan succeeded")
+			}
+			if got := tree(); got != tc.want[1:] {
+				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
+			}
+		})
 	}
 }
 

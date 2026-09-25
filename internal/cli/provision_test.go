@@ -504,6 +504,60 @@ func TestReinstallDisarmsWhatItArmed(t *testing.T) {
 	})
 }
 
+// Each change a reinstall sends to the processors is a step with every node
+// it goes to as a target, and so is disarming what a failed step armed. A
+// step with nothing to send, such as disarming after a boot link failed
+// before any processor was asked, is not reported at all.
+func TestReinstallReportsEveryNodeOfEachStep(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(h *reinstallHost)
+		code  int
+		want  string
+	}{
+		{"every node reinstalls", func(*reinstallHost) {}, exitcode.OK, `
+step resetting the machines total=3 limit=8 [fold]: ok
+  target exe[0001-0003]: ok
+step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
+  target exe[0001-0003]: ok
+`},
+		{"a boot override fails", func(h *reinstallHost) { h.bmcs.down["exe0002"] = true }, exitcode.Transport, `
+step clearing the boot overrides total=2 limit=8 [fold]: ok
+  target exe[0001,0003]: ok
+step setting the machines to boot from the network once total=3 limit=8 [fold]: failed (transport): 1 of 3 failed: exe0002
+  target exe0002: failed (transport): {}: dial tcp: connection refused
+  target exe[0001,0003]: ok
+`},
+		{"a reset fails", func(h *reinstallHost) { h.bmcs.refuse["exe0002"] = "ForceRestart" }, exitcode.TargetFailed, `
+step clearing the boot overrides total=1 limit=8 [fold]: ok
+  target exe0002: ok
+step resetting the machines total=3 limit=8 [fold]: failed (target): 1 of 3 failed: exe0002
+  target exe0002: failed (target): {}: 400 Bad Request: refused
+  target exe[0001,0003]: ok
+step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
+  target exe[0001-0003]: ok
+`},
+		{"a boot link fails", func(h *reinstallHost) {
+			// A directory where the link of exe0002 goes cannot be
+			// replaced.
+			if err := os.Mkdir(filepath.Join(h.root, "10.0.2.2"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, exitcode.TargetFailed, "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
+			tc.setup(h)
+			ctx, tree := watch(t)
+			_, err := h.run(t, harnessOptions{ctx: ctx}, "provision", "reinstall", "-n", "exe[0001-0003]", "-y")
+			wantCode(t, err, tc.code)
+			if got := tree(); got != tc.want[1:] {
+				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
+			}
+		})
+	}
+}
+
 // Section 5.12: --no-reset said the set was reinstalling.
 func TestReinstallWithoutResetSaysTheSetIsArmed(t *testing.T) {
 	h := newReinstallHost(t, pxeOptions{})

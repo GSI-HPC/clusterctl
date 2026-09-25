@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -11,7 +12,6 @@ import (
 	"net"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -48,51 +48,87 @@ var scanDial func(ctx context.Context, network, address string) (net.Conn, error
 //
 // The hosts are scanned in parallel, bounded like any fan-out, so that nodes
 // still in the installer cost one timeout between them rather than one each.
+// The scan is reported as the step "scan the host keys", with a target for
+// each node; one whose host has no name ends failed, with the reason, and
+// first, so that an interrupt does not end it as interrupted.
 func scanTargets(ctx context.Context, a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duration) (map[string][]hostkeys.Entry, map[string]error) {
-	found := map[string][]hostkeys.Entry{}
-	failed := map[string]error{}
 	resolve := a.Namer.FQDN
 	if bmc {
 		resolve = a.BMCHost
 	}
-	var hosts []string
-	var scanners []*hostkeys.Scanner
-	for _, node := range ns.Expand() {
+	// scan is the scan of one node's host, or why there is none.
+	type scan struct {
+		node, host string
+		scanner    *hostkeys.Scanner
+		err        error
+	}
+	nodes := ns.Expand()
+	scans := make([]scan, len(nodes))
+	for i, node := range nodes {
 		host, err := resolve(node)
 		if err != nil {
-			failed[node] = err
+			scans[i] = scan{node: node, err: err}
 			continue
 		}
 		scanner := &hostkeys.Scanner{Timeout: timeout, Dial: scanDial}
 		if hops := jumpHops(a, host); len(hops) > 0 {
 			scanner.Dial = dialThrough(a, hops)
 		}
-		hosts, scanners = append(hosts, host), append(scanners, scanner)
+		scans[i] = scan{node: node, host: host, scanner: scanner}
 	}
-
-	var mu sync.Mutex
-	fanout.Each(ctx, len(hosts), a.Spec.Fanout.Max, func(i int) {
-		entries, err := scanHost(ctx, a.Diag, scanners[i], hosts[i])
-		mu.Lock()
-		defer mu.Unlock()
-		if err != nil {
-			failed[hosts[i]] = err
-			return
-		}
-		found[hosts[i]] = entries
+	// The nodes whose host has no name go first: they end at once, with
+	// their reason, rather than as interrupted when an interrupt comes
+	// before their turn. Nothing printed depends on the order.
+	slices.SortStableFunc(scans, func(x, y scan) int {
+		return cmp.Compare(boolRank(x.err == nil), boolRank(y.err == nil))
 	})
-	// A host the interrupt came before did not answer either.
-	for _, host := range hosts {
+
+	outcomes := fanout.Map(ctx, scans, fanout.Options[scan]{
+		Step:     "scan the host keys",
+		Limit:    a.Spec.Fanout.Max,
+		Describe: func(s scan) (node, host, role string) { return s.node, s.host, "" },
+		PanicLog: a.Diag,
+	}, func(ctx context.Context, s scan) ([]hostkeys.Entry, error) {
+		if s.err != nil {
+			return nil, s.err
+		}
+		return scanHost(ctx, a.Diag, s.scanner, s.host)
+	})
+	found := map[string][]hostkeys.Entry{}
+	failed := map[string]error{}
+	for i, o := range outcomes {
+		switch s := scans[i]; {
+		case s.err != nil:
+			failed[s.node] = s.err
+		case o.Started && o.Err != nil:
+			failed[s.host] = o.Err
+		case o.Started:
+			found[s.host] = o.Value
+		}
+	}
+	// A host the interrupt came before did not answer either, unless
+	// another node that shares it was scanned.
+	for i, o := range outcomes {
+		host := scans[i].host
 		_, ok := found[host]
-		if _, bad := failed[host]; !ok && !bad {
-			failed[host] = ctx.Err()
+		if _, bad := failed[host]; !o.Started && scans[i].err == nil && !ok && !bad {
+			failed[host] = o.Err
 		}
 	}
 	return found, failed
 }
 
-// scanHost scans one host. A panic in the scan becomes the host's failure
-// rather than the end of the process, and its stack is written to log.
+// boolRank orders false before true.
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// scanHost scans one host. A panic in the scan becomes the host's failure,
+// with its stack written to log under the name of the host, which is what
+// the tables name too.
 func scanHost(ctx context.Context, log io.Writer, scanner *hostkeys.Scanner, host string) (entries []hostkeys.Entry, err error) {
 	defer func() {
 		if p := fanout.Recovered(log, host, recover()); p != nil {

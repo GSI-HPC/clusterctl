@@ -217,7 +217,7 @@ func bmcPowerState(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, useI
 	if err := plan.resolve(ctx, a); err != nil {
 		return err
 	}
-	return printBMCResults(a, plan.run(ctx, a, nodes.Expand(), ipmi.ActionStatus))
+	return printBMCResults(a, plan.runStep(ctx, a, nodes.Expand(), ipmi.ActionStatus))
 }
 
 // resetTypeFor maps a power action to the Redfish reset type.
@@ -331,7 +331,7 @@ machine reinstalling in a loop, so --persistent has to be asked for.
 			}); err != nil {
 				return err
 			}
-			calls := redfishEach(a.Context(), a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+			calls := redfishEach(a.Context(), a, "set the boot source", nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				return target + " " + mode, c.SetBootOverride(ctx, target, persistent)
 			})
 			return printBMCResults(a, callResults(calls, true, func(s string) string { return s }))
@@ -354,7 +354,7 @@ Remove the boot source override, so the nodes boot their usual way again.`,
 				}); err != nil {
 				return err
 			}
-			calls := redfishEach(a.Context(), a, nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+			calls := redfishEach(a.Context(), a, "clear the boot override", nodes.Expand(), clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 				return "cleared", c.ClearBootOverride(ctx)
 			})
 			return printBMCResults(a, callResults(calls, true, func(s string) string { return s }))
@@ -373,7 +373,7 @@ accepts.`,
 			if err != nil {
 				return err
 			}
-			calls := redfishEach(a.Context(), a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
+			calls := redfishEach(a.Context(), a, "read the boot override", nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
 				return c.System(ctx)
 			})
 			t := output.NewTable(output.Cols("NODE", "SOURCE", "MODE", "ACCEPTS", "ERROR").Wide("ACCEPTS")...)
@@ -471,7 +471,7 @@ the power state and the reset types the firmware accepts.`,
 			if err != nil {
 				return err
 			}
-			calls := redfishEach(a.Context(), a, nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
+			calls := redfishEach(a.Context(), a, "read the system", nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
 				return c.System(ctx)
 			})
 			t := output.NewTable(output.Cols(
@@ -518,7 +518,7 @@ func redfishRequest(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, met
 		return err
 	}
 	changes := method != "GET"
-	calls := redfishEach(ctx, a, nodes.Expand(), clients, changes, func(ctx context.Context, _ string, c *redfish.Client) (map[string]any, error) {
+	calls := redfishEach(ctx, a, method+" "+path, nodes.Expand(), clients, changes, func(ctx context.Context, _ string, c *redfish.Client) (map[string]any, error) {
 		return c.Do(ctx, method, path, body)
 	})
 	object := map[string]any{}
