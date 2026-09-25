@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os/exec"
 	"sort"
 	"strings"
@@ -17,7 +16,9 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
+	"github.com/GSI-HPC/clusterctl/internal/naming"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
@@ -807,10 +808,10 @@ func nodeOfBMC(a *app.App, host string) string {
 			}
 		}
 	}
-	if net.ParseIP(host) != nil {
+	if hostname.IsIP(host) {
 		return host
 	}
-	return strings.SplitN(host, ".", 2)[0]
+	return naming.Short(host)
 }
 
 func newPDUCommand(r *root) *cobra.Command {
