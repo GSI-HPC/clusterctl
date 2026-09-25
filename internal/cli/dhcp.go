@@ -81,11 +81,7 @@ has only those counts as missing.
   clusterctl dhcp hosts -n exe[1-4]
   clusterctl dhcp hosts -n exe0001 -o yaml`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -129,18 +125,14 @@ has only those counts as missing.
 					"%d of %d nodes have no DHCP declaration", missing, ns.Len())
 			}
 			return nil
-		})
+		}))
 }
 
 func newDHCPConfigCommand(r *root) *cobra.Command {
 	return leaf("config", "Print the parsed DHCP configuration", `
 Print every host declaration the DHCP server carries.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			cfg, err := dhcpConfig(a)
 			if err != nil {
 				return err
@@ -156,7 +148,7 @@ Print every host declaration the DHCP server carries.`,
 			}
 			t.Caption = fmt.Sprintf("%d host declarations", len(cfg.Hosts))
 			return a.Print(output.Result{Table: t, Object: cfg})
-		})
+		}))
 }
 
 func newDHCPLeasesCommand(r *root) *cobra.Command {

@@ -39,9 +39,6 @@ up reported against the wrong node.`,
 	)
 }
 
-// slurmClient builds the client from the resolved configuration.
-func slurmClient(a *app.App) (*slurm.Client, error) { return a.Slurm() }
-
 // statesFor turns a state group name, or a list of states, into the states to
 // ask Slurm for.
 func statesFor(arg string) []string { return slurm.States(arg) }
@@ -68,15 +65,7 @@ node carries.
   clusterctl slurm node list --state defect
   clusterctl slurm node list --state idle -o wide`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
+		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
 			ns, err := a.SelectOptional(strings.Join(args, ","))
 			if err != nil {
 				return err
@@ -105,7 +94,7 @@ node carries.
 			}
 			t.Caption = fmt.Sprintf("%d nodes", len(nodes))
 			return a.Print(output.Result{Table: t, Object: nodes})
-		})
+		}))
 
 	cmd.Flags().StringVar(&state, "state", "", "limit to a state or a state group: "+strings.Join(stateGroupNames(), ", "))
 	_ = cmd.RegisterFlagCompletionFunc("state", fixed(stateGroupNames()...))
@@ -133,11 +122,7 @@ Slurm does not read as exactly the node named is refused.
 
   clusterctl slurm node drain 'ticket 4711: failing DIMM' -n exe0007`,
 		cobra.MinimumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			reason := strings.TrimSpace(args[0])
 			if err := slurm.ValidateReason(reason); err != nil {
 				return err
@@ -165,7 +150,7 @@ Slurm does not read as exactly the node named is refused.
 			}
 			a.Printf("drained %s\n", ns)
 			return nil
-		})
+		}))
 }
 
 func newSlurmNodeResumeCommand(r *root) *cobra.Command {
@@ -174,11 +159,7 @@ Set the nodes to resume so that jobs are scheduled on them again.
 
 The nodes are checked against Slurm before anything is shown, as for drain.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			c, ns, err := slurmNodes(a, args)
 			if err != nil {
 				return err
@@ -194,7 +175,7 @@ The nodes are checked against Slurm before anything is shown, as for drain.`,
 			}
 			a.Printf("resumed %s\n", ns)
 			return nil
-		})
+		}))
 }
 
 // slurmNodes selects the nodes a Slurm change acts on and checks that Slurm
@@ -202,7 +183,7 @@ The nodes are checked against Slurm before anything is shown, as for drain.`,
 //
 // Nodes named both as arguments and with -n are refused by App.Select.
 func slurmNodes(a *app.App, args []string) (*slurm.Client, *nodeset.NodeSet, error) {
-	c, err := slurmClient(a)
+	c, err := a.Slurm()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -241,15 +222,7 @@ group, ready to be passed to another command.
 When no node is in the state, nothing is printed, and the -n it fills in is
 refused as empty rather than replaced by CLUSTERCTL_NODES.`,
 		cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
+		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
 			state := ""
 			if len(args) == 1 {
 				state = args[0]
@@ -262,7 +235,7 @@ refused as empty rather than replaced by CLUSTERCTL_NODES.`,
 				return a.Print(output.Result{Nodes: ns, Object: ns.Expand()})
 			}
 			return say(cmd, "%s\n", ns)
-		})
+		}))
 	cmd.ValidArgsFunction = fixed(stateGroupNames()...)
 	return cmd
 }
@@ -291,15 +264,7 @@ nodes they run on.
   clusterctl slurm job list --state pending -o wide
   clusterctl slurm job list -n exe0007`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
+		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
 			ns, err := a.SelectOptional(strings.Join(args, ","))
 			if err != nil {
 				return err
@@ -336,7 +301,7 @@ nodes they run on.
 			}
 			t.Caption = fmt.Sprintf("%d jobs", len(jobs))
 			return a.Print(output.Result{Table: t, Object: jobs})
-		})
+		}))
 
 	cmd.Flags().StringVar(&state, "state", "", "limit to a job state, for example running or pending")
 	cmd.Flags().StringVarP(&user, "user", "u", "", "limit to one or more users")
@@ -358,15 +323,7 @@ Read what finished out of the accounting database.
   clusterctl slurm job history --state failed --since 24h
   clusterctl slurm job history --jobs 4711,4712`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
+		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, _ []string) error {
 			filter := slurm.AccountingFilter{Since: since, AllUsers: user == ""}
 			if filter.Since == 0 {
 				filter.Since = a.Spec.Slurm.LookBack.Or(time.Hour)
@@ -401,7 +358,7 @@ Read what finished out of the accounting database.
 			}
 			t.Caption = fmt.Sprintf("%d jobs", len(jobs))
 			return a.Print(output.Result{Table: t, Object: jobs})
-		})
+		}))
 
 	cmd.Flags().DurationVar(&since, "since", 0, "how far back to look (default: from the configuration)")
 	cmd.Flags().StringVar(&state, "state", "", "limit to job states, for example failed,timeout")
@@ -418,15 +375,7 @@ func newSlurmJobSummaryCommand(r *root) *cobra.Command {
 Count the jobs in a state per user and account, which is the overview to read
 before deciding whose work is filling the queue.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
+		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, _ []string) error {
 			filter := slurm.JobFilter{States: strings.Split(strings.ToUpper(state), ",")}
 			jobs, err := c.Jobs(a.Context(), filter)
 			if err != nil {
@@ -464,7 +413,7 @@ before deciding whose work is filling the queue.`,
 			}
 			t.Caption = fmt.Sprintf("%d jobs in state %s", len(jobs), state)
 			return a.Print(output.Result{Table: t, Object: object})
-		})
+		}))
 
 	cmd.Flags().StringVar(&state, "state", "PENDING", "the job state to count")
 	_ = cmd.RegisterFlagCompletionFunc("state", fixed("PENDING", "RUNNING"))
@@ -475,15 +424,7 @@ func newSlurmAccountCommand(r *root) *cobra.Command {
 	list := leaf("list [ACCOUNT]", "List the accounts and their coordinators", `
 List the accounts of the accounting database.`,
 		cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
+		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
 			accounts, err := c.Accounts(a.Context(), first(args))
 			if err != nil {
 				return err
@@ -498,20 +439,12 @@ List the accounts of the accounting database.`,
 				t.Add(acc.Account, acc.Description, acc.Organization, acc.Coordinators)
 			}
 			return a.Print(output.Result{Table: t, Object: accounts})
-		})
+		}))
 
 	limits := leaf("limits [ACCOUNT]", "List the limits of an account's associations", `
 List the associations of an account with the limits they carry.`,
 		cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
+		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
 			assoc, err := c.AccountLimits(a.Context(), first(args))
 			if err != nil {
 				return err
@@ -522,7 +455,7 @@ List the associations of an account with the limits they carry.`,
 				t.Add(x.Account, x.User, x.MaxSubmit, x.MaxJobs, x.MaxNodes, x.MaxCPUs, x.MaxWall, x.FairShare)
 			}
 			return a.Print(output.Result{Table: t, Object: assoc})
-		})
+		}))
 
 	add := leaf("add ACCOUNT [ORGANIZATION] [DESCRIPTION]", "Create an account", `
 Add an account to the accounting database, in the cluster whose login node the
@@ -532,11 +465,7 @@ cluster configuration says and to the account name.
 An account name is letters, digits and . _ @ - only: sacctmgr reads a comma as
 a list and brackets as a range, so proj[1-100] would create a hundred accounts.`,
 		cobra.RangeArgs(1, 3),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			org, desc := "", ""
 			if len(args) > 1 {
 				org = args[1]
@@ -548,7 +477,7 @@ a list and brackets as a range, so proj[1-100] would create a hundred accounts.`
 				slurm.ValidateText("organisation", org), slurm.ValidateText("description", desc)); err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
-			c, err := slurmClient(a)
+			c, err := a.Slurm()
 			if err != nil {
 				return err
 			}
@@ -561,16 +490,12 @@ a list and brackets as a range, so proj[1-100] would create a hundred accounts.`
 			}
 			a.Printf("account %s created\n", args[0])
 			return nil
-		})
+		}))
 
 	coordinator := leaf("coordinator ACCOUNT USER...", "Make users coordinators of an account", `
 Add coordinators to an account.`,
 		cobra.MinimumNArgs(2),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			if err := slurm.ValidateName("account", args[0]); err != nil {
 				return err
 			}
@@ -579,7 +504,7 @@ Add coordinators to an account.`,
 					return err
 				}
 			}
-			c, err := slurmClient(a)
+			c, err := a.Slurm()
 			if err != nil {
 				return err
 			}
@@ -592,23 +517,19 @@ Add coordinators to an account.`,
 			}
 			a.Printf("coordinators of %s set\n", args[0])
 			return nil
-		})
+		}))
 
 	shares := leaf("shares [ACCOUNT] [VALUE]", "Read or set fair share", `
 List the fair-share values of the accounts, or set the value of one in the
 cluster whose login node the clients run on.`,
 		cobra.MaximumNArgs(2),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			if len(args) == 2 {
 				if err := errors.Join(slurm.ValidateName("account", args[0]), slurm.ValidateFairShare(args[1])); err != nil {
 					return exitcode.Wrap(exitcode.Usage, err)
 				}
 			}
-			c, err := slurmClient(a)
+			c, err := a.Slurm()
 			if err != nil {
 				return err
 			}
@@ -631,7 +552,7 @@ cluster whose login node the clients run on.`,
 				t.Add(x.Account, x.User, x.FairShare)
 			}
 			return a.Print(output.Result{Table: t, Object: assoc})
-		})
+		}))
 
 	return group("account", "Administer the accounting database accounts", `
 List, create and configure the accounts jobs are charged to.`,
@@ -642,15 +563,7 @@ func newSlurmUserCommand(r *root) *cobra.Command {
 	list := leaf("list [USER]", "List the user associations", `
 List the users of the accounting database with their accounts.`,
 		cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
+		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
 			users, err := c.Users(a.Context(), first(args))
 			if err != nil {
 				return err
@@ -660,7 +573,7 @@ List the users of the accounting database with their accounts.`,
 				t.Add(u.User, u.Account, u.DefaultAccount, u.FairShare)
 			}
 			return a.Print(output.Result{Table: t, Object: users})
-		})
+		}))
 
 	add := leaf("add USER [ACCOUNT] [DEFAULT_ACCOUNT]", "Associate a user with an account", `
 Associate a user with an account in the cluster whose login node the clients
@@ -675,11 +588,7 @@ written, with getent. getent reads the name service switch of the login node,
 local accounts included, so check the directory when that matters. A number
 is refused, because getent would resolve it as a user ID.`,
 		cobra.RangeArgs(1, 3),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			user := args[0]
 			account, defaultAccount := "", ""
 			if len(args) > 1 {
@@ -699,7 +608,7 @@ is refused, because getent would resolve it as a user ID.`,
 					return err
 				}
 			}
-			c, err := slurmClient(a)
+			c, err := a.Slurm()
 			if err != nil {
 				return err
 			}
@@ -727,21 +636,17 @@ is refused, because getent would resolve it as a user ID.`,
 			}
 			a.Printf("user %s associated\n", user)
 			return nil
-		})
+		}))
 
 	setDefault := leaf("default USER ACCOUNT", "Set the default account of a user", `
 Change which account a user's jobs are charged to by default, in the cluster
 whose login node the clients run on.`,
 		cobra.ExactArgs(2),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			if err := errors.Join(slurm.ValidateUserName(args[0]), slurm.ValidateName("account", args[1])); err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
-			c, err := slurmClient(a)
+			c, err := a.Slurm()
 			if err != nil {
 				return err
 			}
@@ -753,7 +658,7 @@ whose login node the clients run on.`,
 			}
 			a.Printf("default account of %s set to %s\n", args[0], args[1])
 			return nil
-		})
+		}))
 
 	return group("user", "Administer the accounting database users", `
 List users and their accounts, and change what their jobs are charged to.`,
@@ -765,15 +670,7 @@ func newSlurmPartitionCommand(r *root) *cobra.Command {
 List the partitions with their node counts, run-time limits and the resources
 they offer.`,
 		cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
-			c, err := slurmClient(a)
-			if err != nil {
-				return err
-			}
+		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
 			partitions, err := c.Partitions(a.Context(), first(args))
 			if err != nil {
 				return err
@@ -795,7 +692,7 @@ they offer.`,
 					p.Memory, p.CPUs, p.CPUState, p.Groups, p.Nodes)
 			}
 			return a.Print(output.Result{Table: t, Object: partitions})
-		})
+		}))
 }
 
 // confirmAccounting asks before a change to the accounting database that

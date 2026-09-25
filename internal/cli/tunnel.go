@@ -62,11 +62,7 @@ func newTunnelListCommand(r *root) *cobra.Command {
 	return leaf("list", "List the configured tunnels", `
 List the tunnel profiles the site offers and what each one routes.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			m := manager(a)
 			t := output.NewTable(
 				output.Column{Name: "NAME"},
@@ -78,7 +74,7 @@ List the tunnel profiles the site offers and what each one routes.`,
 				t.Add(s.Name, s.Remote, s.Subnets, s.Description)
 			}
 			return a.Print(output.Result{Table: t, Object: m.Status()})
-		})
+		}))
 }
 
 func newTunnelStatusCommand(r *root) *cobra.Command {
@@ -89,11 +85,7 @@ A process id file left behind by a crash is not reported as a running tunnel:
 the process it names has to be alive and running with that file, as sshuttle
 started by tunnel start does.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			status := manager(a).Status()
 			t := output.NewTable(
 				output.Column{Name: "NAME"},
@@ -110,7 +102,7 @@ started by tunnel start does.`,
 				t.Add(s.Name, state, pid, s.Remote, s.Subnets)
 			}
 			return a.Print(output.Result{Table: t, Object: status})
-		})
+		}))
 }
 
 func newTunnelStartCommand(r *root) *cobra.Command {
@@ -122,11 +114,7 @@ sshuttle connects with the generated ssh configuration, like every other
 connection: the host key is checked against the site's file, and the role's
 jump hosts and account apply. An exclude that expands to nothing is refused.`,
 		cobra.ExactArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			m := manager(a)
 			argv, err := m.Args(args[0])
 			if err != nil {
@@ -142,7 +130,7 @@ jump hosts and account apply. An exclude that expands to nothing is refused.`,
 			}
 			a.Printf("tunnel %s is up\n", args[0])
 			return nil
-		})
+		}))
 	cmd.ValidArgsFunction = completeTunnels(r)
 	return cmd
 }
@@ -152,11 +140,7 @@ func newTunnelStopCommand(r *root) *cobra.Command {
 Stop a running tunnel profile. Only the process running with the profile's
 process id file is signalled; a stale file is removed.`,
 		cobra.ExactArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			m := manager(a)
 			if _, err := m.Profile(args[0]); err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
@@ -170,7 +154,7 @@ process id file is signalled; a stale file is removed.`,
 			}
 			a.Printf("tunnel %s is down\n", args[0])
 			return nil
-		})
+		}))
 	cmd.ValidArgsFunction = completeTunnels(r)
 	return cmd
 }

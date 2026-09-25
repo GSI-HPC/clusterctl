@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
@@ -54,11 +55,7 @@ two, so it is refused. Globs and ~ work in both.
   clusterctl copy -n @exe /etc/hosts /etc/hosts
   clusterctl copy -n exe[1-4] --download /var/log/slurmd.log /var/log/messages ./logs/`,
 		cobra.MinimumNArgs(2),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			sources, destination := args[:len(args)-1], args[len(args)-1]
 			remotes := []string{destination}
 			if download {
@@ -161,7 +158,7 @@ two, so it is refused. Globs and ~ work in both.
 				return err
 			}
 			return failureError(results)
-		})
+		}))
 
 	flags := cmd.Flags()
 	flags.StringVarP(&user, "user", "u", "", "remote account to copy as")

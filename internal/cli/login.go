@@ -117,11 +117,7 @@ it was given, so globs, quotes and whitespace survive:
   clusterctl login -r mgmt
   clusterctl login exe0001`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			// Everything after -- is the remote command; cobra hands both
 			// halves over, so the split is found here.
 			names, argv := args, []string(nil)
@@ -164,7 +160,7 @@ it was given, so globs, quotes and whitespace survive:
 				return say(cmd, "%s\n", strings.Join(line, " "))
 			}
 			return a.SSH.Interactive(a.Context(), target, req)
-		})
+		}))
 
 	f.register(cmd)
 	cmd.ValidArgsFunction = completeRoles(r)

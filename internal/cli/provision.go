@@ -54,11 +54,7 @@ func newSecretsListCommand(r *root) *cobra.Command {
 	return leaf("list", "List the secrets the configuration carries", `
 List the encrypted files and where each one lands on a node.`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			t := output.NewTable(output.Cols("SOURCE", "TARGET", "MODE", "OWNER")...)
 			for _, s := range a.Spec.Services.Cinc.Secrets {
 				owner := s.Owner
@@ -73,7 +69,7 @@ List the encrypted files and where each one lands on a node.`,
 			}
 			t.Caption = fmt.Sprintf("%d secrets", t.Len())
 			return a.Print(output.Result{Table: t, Object: a.Spec.Services.Cinc.Secrets})
-		})
+		}))
 }
 
 func newSecretsPushCommand(r *root) *cobra.Command {
@@ -92,11 +88,7 @@ This overwrites files on the nodes, so it asks first.
 
   clusterctl secrets push -n exe[1-4]`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			files := a.Spec.Services.Cinc.Secrets
 			if len(files) == 0 {
 				return exitcode.Errorf(exitcode.Usage,
@@ -185,7 +177,7 @@ This overwrites files on the nodes, so it asks first.
 				return err
 			}
 			return pushFailures(targets, failed)
-		})
+		}))
 }
 
 // secretScript writes the payload on standard input to a temporary file
@@ -292,11 +284,7 @@ plaintext. The caption of the table names the sops that decrypts.
 
   clusterctl secrets check --decrypt`,
 		cobra.NoArgs,
-		func(cmd *cobra.Command, _ []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			used := map[string]int{}
 			for _, ref := range secretRefsOf(a.Spec) {
 				used[ref.Name]++
@@ -353,7 +341,7 @@ plaintext. The caption of the table names the sops that decrypts.
 				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d Secret documents failed the check", failed, t.Len())
 			}
 			return nil
-		})
+		}))
 	cmd.Flags().BoolVar(&decrypt, "decrypt", false, "also decrypt each document in memory")
 	return cmd
 }
@@ -636,11 +624,7 @@ new file is moved into place only once it has arrived complete.
 
   clusterctl cinc config http://installer/cinc/latest.tgz -n exe[1-4]`,
 		cobra.MinimumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			solo := cincSolo{URL: args[0], RunList: runList}
 			if err := solo.check(); err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
@@ -679,7 +663,7 @@ new file is moved into place only once it has arrived complete.
 				return err
 			}
 			return cincFailureError(results)
-		})
+		}))
 	cmd.Flags().StringVarP(&runList, "run-list", "R", "", "run list to write alongside the archive URL")
 	return cmd
 }
@@ -702,11 +686,7 @@ read, or whose file holds anything but plain assignments, is shown as failed
 and makes the command fail, with exit code 3 when a node could not be
 reached.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -759,7 +739,7 @@ reached.`,
 				return err
 			}
 			return cincFailureError(outcomes)
-		})
+		}))
 }
 
 func newCincRunCommand(r *root) *cobra.Command {
@@ -776,11 +756,7 @@ and the client is not started there.
 
 This changes the nodes, so it asks first.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			if err := checkCincRunList(runList); err != nil {
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
@@ -866,7 +842,7 @@ This changes the nodes, so it asks first.`,
 				return err
 			}
 			return cincFailureError(results)
-		})
+		}))
 	cmd.Flags().StringVarP(&runList, "run-list", "R", "", "run list to use for this run only")
 	return cmd
 }
@@ -927,11 +903,7 @@ commands that remove it.
   clusterctl provision reinstall -n exe0001
   clusterctl provision reinstall -n @rack:R02 --dry-run`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -986,7 +958,7 @@ commands that remove it.
 				err = printErr
 			}
 			return err
-		})
+		}))
 
 	cmd.Flags().StringVar(&bootPath, "boot-path", "", "boot configuration to install from (default: from the cluster rules)")
 	cmd.Flags().BoolVar(&keepKeys, "keep-host-keys", false, "leave the host key file alone")
@@ -1466,11 +1438,7 @@ node in the JSON output, and fails the command: with exit code 3 when a host
 could not be reached, 2 for a configuration problem such as a missing
 credential, and 1 when a host refused.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, err := pxeRole(a)
 			if err != nil {
 				return err
@@ -1582,7 +1550,7 @@ credential, and 1 when a host refused.`,
 				return fmt.Errorf("where the reinstallation of %s stands is not fully known: %w", fold(failedNames), err)
 			}
 			return nil
-		})
+		}))
 }
 
 func orUnknown(s string) string {

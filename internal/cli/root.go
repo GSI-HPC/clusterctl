@@ -23,6 +23,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
+	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/internal/version"
 )
@@ -98,6 +99,29 @@ func (r *root) App() (*app.App, error) {
 	}
 	r.cached = a
 	return a, nil
+}
+
+// run builds the function of a command that works in the command context,
+// resolving the context first.
+func (r *root) run(fn func(a *app.App, cmd *cobra.Command, args []string) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		a, err := r.App()
+		if err != nil {
+			return err
+		}
+		return fn(a, cmd, args)
+	}
+}
+
+// runSlurm is run for a command that asks the Slurm clients of the cluster.
+func (r *root) runSlurm(fn func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error) func(*cobra.Command, []string) error {
+	return r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
+		c, err := a.Slurm()
+		if err != nil {
+			return err
+		}
+		return fn(a, c, cmd, args)
+	})
 }
 
 // nodesFromFlagOrEnv returns the default node set and whether it came from

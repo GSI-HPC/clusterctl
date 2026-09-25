@@ -117,11 +117,7 @@ The hardware address comes from DHCP, and from the inventory for a node DHCP
 does not know. A node whose identifier cannot be derived is named on standard
 error and makes the command fail; it is left out of the table and of -o json.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -155,7 +151,7 @@ error and makes the command fail; it is left out of the table and of -o json.`,
 					failed.Len(), ns.Len(), failed)
 			}
 			return nil
-		})
+		}))
 }
 
 // portState is what the fabric says about one port.
@@ -252,11 +248,7 @@ port that is not up makes the command fail.
 
   clusterctl fabric state -n exe[1-10]`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, err := fabricRole(a)
 			if err != nil {
 				return err
@@ -313,7 +305,7 @@ port that is not up makes the command fail.
 				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d ports are not up", notUp, len(entries))
 			}
 			return nil
-		})
+		}))
 }
 
 // switchPort is the switch port a node's port is cabled to.
@@ -395,11 +387,7 @@ With --uplink the switch port is found by asking the subnet manager for the
 LID of the node's port and looking for the one switch port linked to it, and
 only that port is read. The switch and port are named on standard error.`,
 		cobra.ExactArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, err := fabricRole(a)
 			if err != nil {
 				return err
@@ -438,7 +426,7 @@ only that port is read. The switch and port are named on standard error.`,
 				return err
 			}
 			return say(cmd, "%s\n", output.EscapeText(result.Output()))
-		})
+		}))
 	cmd.Flags().BoolVar(&uplink, "uplink", false, "read the switch port instead of the node port")
 	return cmd
 }
@@ -458,11 +446,7 @@ func newHCALinkCommand(r *root) *cobra.Command {
 	return leaf("link [NODESET]", "Show the adapter link state of a node set", `
 Report the state, rate and physical state of each node's adapter.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -500,18 +484,14 @@ done
 				return err
 			}
 			return failureError(results)
-		})
+		}))
 }
 
 func newHCACableCommand(r *root) *cobra.Command {
 	return leaf("cable [NODESET]", "Show the cable in each node's adapter", `
 Report the cable part number and length each node's adapter sees.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -546,7 +526,7 @@ mlxcables -q 2>/dev/null | awk -F': *' '
 				return err
 			}
 			return failureError(results)
-		})
+		}))
 }
 
 func newHCAConfigCommand(r *root) *cobra.Command {
@@ -606,11 +586,7 @@ Read a firmware setting from the adapters of each node.
 
   clusterctl hca config get KEEP_LINK_UP_ON_BOOT_P1 -n exe[1-4]`,
 		cobra.MinimumNArgs(1),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			key := args[0]
 			if err := checkMlxconfig(key, "", false); err != nil {
 				return err
@@ -637,7 +613,7 @@ Read a firmware setting from the adapters of each node.
 				return err
 			}
 			return failureError(results)
-		})
+		}))
 }
 
 // hcaSetScript sets one firmware value on every adapter of a node and prints
@@ -673,11 +649,7 @@ goes through the confirmation gate.
 
   clusterctl hca config set KEEP_LINK_UP_ON_BOOT_P1 1 -n exe[1-4]`,
 		cobra.MinimumNArgs(2),
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			key, value := args[0], args[1]
 			if err := checkMlxconfig(key, value, true); err != nil {
 				return err
@@ -730,18 +702,14 @@ goes through the confirmation gate.
 				return err
 			}
 			return failureError(results)
-		})
+		}))
 }
 
 func newHCAFirmwareCommand(r *root) *cobra.Command {
 	return leaf("firmware [NODESET]", "Show the adapter firmware version of a node set", `
 Report the adapter firmware version each node is running.`,
 		cobra.ArbitraryArgs,
-		func(cmd *cobra.Command, args []string) error {
-			a, err := r.App()
-			if err != nil {
-				return err
-			}
+		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
@@ -777,5 +745,5 @@ done
 				return err
 			}
 			return failureError(results)
-		})
+		}))
 }
