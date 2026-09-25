@@ -279,6 +279,13 @@ $ clusterctl boot grub unset exe0007
 A GRUB link has no one-shot form: the node loads its target at every boot
 until `boot grub unset` removes the link.
 
+The target is a file on the TFTP host, relative to `services.tftp.grubPath`
+unless it is absolute. It has to exist and to lie under `services.tftp.root`,
+which is all the TFTP server serves; anything else exits `2` before the link
+is touched, `--dry-run` included. The link is written relative to its
+directory, as `1.0/grub.cfg.install-exec` above, so that a TFTP server
+confined to its root follows it too.
+
 ## When a node does not come up
 
 ```console
