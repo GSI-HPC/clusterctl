@@ -87,8 +87,11 @@ what is left to fill in.
   with every YAML reader.
 - **The cluster is pinned to its site's nodes.** Its `Cluster` lists the
   site's `NodeInventory` under `inventories`. A cluster that lists none takes
-  every inventory that is loaded, those of another site read with it
-  included.
+  the inventories of its own site. A `NodeInventory` does not say which site
+  it belongs to, so that is every inventory that is loaded while one site is
+  loaded; with several sites loaded, such a cluster is refused, by every
+  command and by `config validate`, rather than handed the nodes of another
+  site to resolve through its own naming rules.
 - **Only into an empty directory.** A directory that holds anything, a hidden
   file or a `.git` directory included, is refused, with `--dry-run` as well.
   To start a site repository, write into an empty subdirectory of it, or run

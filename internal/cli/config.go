@@ -342,8 +342,9 @@ a value that came from a file, the line it was written on.`,
 func newConfigValidateCommand(r *root) *cobra.Command {
 	return leaf("validate", "Check the configuration files", `
 Read every configuration document, validate it against the schema of its kind
-and resolve the current context. Problems are reported with the file, the line
-and the path they were found at.
+and resolve the current context. Every cluster, not only the current one, is
+checked to read only its own site's inventories. Problems are reported with
+the file, the line and the path they were found at.
 
 This is what to run after editing the configuration and in a pipeline that
 publishes it.`,
@@ -356,6 +357,11 @@ publishes it.`,
 			// Protected host entries that name a group are otherwise only
 			// resolved when a command is about to change something.
 			if _, err := a.Gate.Protected(); err != nil {
+				return err
+			}
+			// Every cluster, not only the current one, has to say which
+			// nodes it reads.
+			if err := a.CheckClusters(); err != nil {
 				return err
 			}
 			t := output.NewTable(output.Cols("FILE", "KIND", "NAME")...)
