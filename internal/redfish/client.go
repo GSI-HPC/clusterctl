@@ -30,6 +30,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // DefaultSystemPath is where most firmware puts the computer system.
@@ -271,14 +272,44 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, body any) ([]by
 	if err != nil {
 		return nil, resp.StatusCode, c.unreachable(ctx, fmt.Errorf("%s: reading the answer: %w", c.Host, err))
 	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		return raw, resp.StatusCode, exitcode.Wrap(exitcode.Transport,
-			fmt.Errorf("%s: %s: %s", c.Host, resp.Status, redfishMessage(raw)))
-	}
 	if resp.StatusCode >= 400 {
-		return raw, resp.StatusCode, fmt.Errorf("%s: %s: %s", c.Host, resp.Status, redfishMessage(raw))
+		refused := &StatusError{Host: c.Host, StatusCode: resp.StatusCode, Status: resp.Status, Message: redfishMessage(raw)}
+		if resp.StatusCode == http.StatusUnauthorized {
+			return raw, resp.StatusCode, exitcode.Wrap(exitcode.Transport, refused)
+		}
+		return raw, resp.StatusCode, refused
 	}
 	return raw, resp.StatusCode, nil
+}
+
+// StatusError says that a service processor answered a request with a
+// status of 400 or more. A 401 turned the account away, and DoRaw gives it
+// the exit code of a host that could not be authenticated with; any other
+// status is the processor's refusal, a target failure.
+type StatusError struct {
+	Host string
+	// StatusCode and Status are the response's, such as 401 and
+	// "401 Unauthorized".
+	StatusCode int
+	Status     string
+	// Message is what the processor said about it, from the error in the
+	// body, or else the body itself.
+	Message string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s: %s: %s", e.Host, e.Status, e.Message)
+}
+
+// ProgressClass says that the account was refused, by a 401 or a 403, and
+// leaves any other refusal to the exit code.
+func (e *StatusError) ProgressClass() progress.Class {
+	switch e.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return progress.ClassAuth
+	default:
+		return progress.ClassNone
+	}
 }
 
 // unreachable marks an error that left no answer from the processor, which

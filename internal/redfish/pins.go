@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // PinStore records the certificate a service processor presented, so that a
@@ -151,3 +152,6 @@ func (e *PinMismatchError) Error() string {
 			"If the certificate was replaced on purpose, run \"clusterctl bmc forget %s\" and try again",
 		e.Host, e.Recorded, e.Seen, e.Host)
 }
+
+// ProgressClass says that the certificate did not match its pin.
+func (e *PinMismatchError) ProgressClass() progress.Class { return progress.ClassPin }

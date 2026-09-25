@@ -104,6 +104,7 @@ func (c *Client) Copy(ctx context.Context, target Target, req CopyRequest) (*Res
 	start := time.Now()
 	runErr := cmd.Run()
 	result := &Result{Target: target, Stderr: stderr.String(), Duration: time.Since(start)}
-	result.ExitCode, result.Err = classify(ctx, target, runErr, result.Stderr)
+	// No timeout(1) runs around scp, so none of its statuses is one.
+	result.ExitCode, result.Err = classify(ctx, target, runErr, result.Stderr, 0, result.Duration)
 	return result, nil
 }
