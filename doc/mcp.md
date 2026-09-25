@@ -185,6 +185,19 @@ confirmation come with it.
   nodes, count, and outcome. An apply writes two lines, `applying` before
   anything is sent and then `applied` or `failed`. A plan or an apply that
   cannot be recorded is refused; a refusal that cannot be recorded says so.
+- **Two calls at a time.** The SDK starts every tool call as soon as it
+  arrives, and each call can reach as many hosts at once as `fanout.max`
+  allows, so calls an agent sends side by side would multiply that. The
+  server works on two at once; another call waits until one of them ends, and
+  a call the client gives up on while it waits is not run. Every tool counts,
+  since each reads the configuration afresh and may reach a host:
+  `select_nodes` can run a group source's command. A place is taken for each
+  run of a handler, not for the whole call. `apply_plan` ends one run when it
+  puts its question, and the answer starts another, whether the client sends
+  it back on a retry of the call or, for a client on an older protocol, the
+  SDK asks and runs the handler again. A question left open holds no place,
+  so two of them do not stop every other call; once answered, the apply may
+  wait for a place like any other call before anything is sent.
 - **A panic is a failed call.** A panic in a handler is recovered and
   reported as `failed:`, so it does not end the server and the plans waiting
   in it. A panic in the work for one node of a fan-out, which the handler's

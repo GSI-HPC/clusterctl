@@ -47,7 +47,7 @@ func (s *Server) addReadTools() {
 			"Returns the folded set, its size, the names when there are few, the nodes the inventory " +
 			"does not know and the protected hosts the set contains.",
 		Annotations: readOnly(),
-	}, s.selectNodes)
+	}, limited(s, s.selectNodes))
 
 	mcp.AddTool(s.sdk, &mcp.Tool{
 		Name:  "describe_nodes",
@@ -58,7 +58,7 @@ func (s *Server) addReadTools() {
 			"per node. A facet that cannot be read is reported under errors and the rest is still returned.",
 			maxDescribed, maxGroupsOf),
 		Annotations: readOnly(),
-	}, s.describeNodes)
+	}, limited(s, s.describeNodes))
 
 	mcp.AddTool(s.sdk, &mcp.Tool{
 		Name:  "query_slurm",
@@ -69,7 +69,7 @@ func (s *Server) addReadTools() {
 			"(queued jobs counted per user, account and partition). Node states may be given as a group: " +
 			"alloc, idle, drain, down or defect.",
 		Annotations: readOnly(),
-	}, s.querySlurm)
+	}, limited(s, s.querySlurm))
 }
 
 // selectInput is the argument of select_nodes.

@@ -84,6 +84,12 @@ type Options struct {
 	Now func() time.Time
 }
 
+// maxCalls is how many tool calls the server works on at once. The SDK
+// starts every call as soon as it arrives, and each can reach as many hosts
+// at once as fanout.max allows, so an agent sending calls side by side would
+// multiply the connections one command is allowed.
+const maxCalls = 2
+
 // Server is a clusterctl MCP server.
 type Server struct {
 	opts    Options
@@ -92,6 +98,8 @@ type Server struct {
 	plans   *planStore
 	audit   *auditLog
 	sdk     *mcp.Server
+	// calls holds a place for each tool call being worked on.
+	calls chan struct{}
 }
 
 // New resolves the configuration once, pins the context it names and builds
@@ -117,7 +125,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		return nil, errors.New("mcpserver: no command tree was given")
 	}
 
-	s := &Server{opts: opts}
+	s := &Server{opts: opts, calls: make(chan struct{}, maxCalls)}
 	a, err := s.app(ctx)
 	if err != nil {
 		return nil, err
@@ -217,6 +225,42 @@ func (s *Server) recoverPanics(next mcp.MethodHandler) mcp.MethodHandler {
 			result, err = nil, failure
 		}()
 		return next(ctx, method, req)
+	}
+}
+
+// limited makes a tool handler wait for a place among the calls the server
+// works on at once, and hold it while it runs. A call the client gives up on
+// while it waits is not run.
+//
+// The place is taken for each run of the handler rather than for the whole
+// call. The question apply_plan puts to the administrator ends one run, and
+// the answer starts another: the client sends it back on a retry of the
+// call, or, for a client on an older protocol, the SDK asks and runs the
+// handler again. So a call waiting for a person holds no place, and two
+// questions left unanswered do not stop every other call.
+func limited[In, Out any](s *Server, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
+		var err error
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+		case s.calls <- struct{}{}:
+			// When a place and the cancellation are both ready, select
+			// picks either, so the context is asked again, once: the place
+			// is given back on the answer the call is turned away with.
+			if err = ctx.Err(); err != nil {
+				<-s.calls
+			}
+		}
+		if err != nil {
+			s.logf("%s was given up on while it waited for one of the %d calls worked on at once to end",
+				req.Params.Name, maxCalls)
+			var none Out
+			return nil, none, callError(fmt.Errorf(
+				"cancelled while waiting for one of the %d calls the server works on at once to end: %w", maxCalls, err))
+		}
+		defer func() { <-s.calls }()
+		return handler(ctx, req, in)
 	}
 }
 

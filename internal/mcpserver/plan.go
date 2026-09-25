@@ -233,7 +233,7 @@ func (s *Server) addPlanTools() {
 			"warnings and the exact commands that would be sent. Show the plan to the user, then call " +
 			"apply_plan. A plan expires after a few minutes and can be applied once.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-	}, s.planChange)
+	}, limited(s, s.planChange))
 
 	mcp.AddTool(s.sdk, &mcp.Tool{
 		Name:  "apply_plan",
@@ -242,7 +242,7 @@ func (s *Server) addPlanTools() {
 			"gave them. The user is asked to confirm, and above the site's threshold to type the number of " +
 			"hosts; a declined confirmation changes nothing.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(true), OpenWorldHint: new(true)},
-	}, s.applyPlan)
+	}, limited(s, s.applyPlan))
 }
 
 // planInput is the argument of plan_change.

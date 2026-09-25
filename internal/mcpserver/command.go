@@ -45,7 +45,7 @@ func (s *Server) addCommandTool() {
 			"Commands that change something, prompt or keep running are refused. " +
 			"The commands offered are:\n" + s.readCommandList(),
 		Annotations: readOnly(),
-	}, s.readCommand)
+	}, limited(s, s.readCommand))
 }
 
 // commandInput is the argument of read_command.
