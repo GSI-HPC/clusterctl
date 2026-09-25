@@ -515,8 +515,40 @@ func TestReinstallWithoutResetSaysTheSetIsArmed(t *testing.T) {
 	}
 }
 
+// A dry run of a reinstall reads the PXE host as the real run does, so it
+// is refused where the real run would be: it used to skip the check and
+// succeed.
+func TestReinstallDryRunChecksThePXEHost(t *testing.T) {
+	t.Run("a missing boot path", func(t *testing.T) {
+		h := newReinstallHost(t, pxeOptions{})
+		_, err := h.run(t, harnessOptions{}, "provision", "reinstall", "-n", "exe0001",
+			"--boot-path", "/nonexistent/ipxe.net2", "--dry-run")
+		if got, want := exitcode.From(err), exitcode.Usage; got != want {
+			t.Fatalf("exit code = %d, want %d (%v)", got, want, err)
+		}
+		if !strings.Contains(err.Error(), "/nonexistent/ipxe.net2") {
+			t.Errorf("error = %v, want it to name the path", err)
+		}
+		h.untouched(t)
+	})
+
+	t.Run("a persistent link in the way", func(t *testing.T) {
+		h := newReinstallHost(t, pxeOptions{})
+		h.link(t, "10.0.2.1.static", h.exePath())
+		_, err := h.run(t, harnessOptions{}, "--set", staticSuffix,
+			"provision", "reinstall", "-n", "exe0001", "--dry-run")
+		if got, want := exitcode.From(err), exitcode.Usage; got != want {
+			t.Fatalf("exit code = %d, want %d (%v)", got, want, err)
+		}
+		if !strings.Contains(err.Error(), "persistent") {
+			t.Errorf("error = %v, want it to name the persistent link", err)
+		}
+		h.untouched(t)
+	})
+}
+
 // Section 5.9: the preview names each boot path with its nodes, not only
-// the set, and says what a dry run leaves unchecked.
+// the set.
 func TestReinstallPreviewListsEveryBootPath(t *testing.T) {
 	h := newReinstallHost(t, pxeOptions{})
 	out, err := h.run(t, harnessOptions{}, "provision", "reinstall", "-n", "exe0001,dbm01", "--force", "--dry-run")
@@ -527,11 +559,13 @@ func TestReinstallPreviewListsEveryBootPath(t *testing.T) {
 	for _, want := range []string{
 		h.exePath() + ", for the next request: exe0001 (10.0.2.1)",
 		filepath.Join(h.root, "boot/cluster/1.0/dbm01/ipxe.net2") + ", for the next request: dbm01 (10.0.1.2)",
-		dryRunChecks,
 	} {
 		if !strings.Contains(preview, want) {
 			t.Errorf("preview does not say %q:\n%s", want, preview)
 		}
+	}
+	if strings.Contains(preview, "not checked") {
+		t.Errorf("the preview says something was not checked:\n%s", preview)
 	}
 	h.untouched(t)
 }

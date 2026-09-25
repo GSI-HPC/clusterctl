@@ -85,8 +85,8 @@ Everything that changes or destroys something goes through
 `--dry-run` stops after the preview and sends no change. Read-only lookups
 still run for real: the node set is resolved, group sources such as
 `@slurm:main` are asked over ssh, the DHCP server's configuration is read, and
-the checks a real run makes, such as the Slurm job check or a drain's reason,
-are made the same way. The rehearsal therefore selects and addresses the same
+the checks a real run makes, such as the Slurm job check, a drain's reason or
+the boot paths on the PXE host, are made the same way. The rehearsal therefore selects and addresses the same
 hosts the real run would, refuses what the real run would refuse with the same
 exit code, and exits zero only when the real run would go ahead. Only the
 changes are recorded and printed instead of sent. A lookup that a dry run
@@ -198,9 +198,11 @@ that it stays until `boot grub unset`.
 **A boot link is checked before it is written.** The address a link is named
 after has to be an IP address that no other node has, and every boot path has
 to exist on the PXE host, all before the question, which lists each boot path
-with the nodes and addresses it is written for. A dry run sends nothing to the
-PXE host and says what it left unchecked. Every node is tried and reported, so
-a link that cannot be written neither stops the rest nor goes unnoticed.
+with the nodes and addresses it is written for. The check only reads, so a
+dry run makes it too and is refused where the real run would be: a missing
+boot path, or a persistent link in the way of a one-shot one. Every node is
+tried and reported, so a link that cannot be written neither stops the rest
+nor goes unnoticed.
 
 **Draining a node needs a reason.** The reason is the first argument, not an
 option, because a drained node with no reason is one nobody dares resume. It is checked before the preview: no control characters, which could

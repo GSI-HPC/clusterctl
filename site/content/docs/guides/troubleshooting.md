@@ -11,8 +11,8 @@ $ clusterctl doctor --remote
 ```
 
 `--remote` contacts every configured host role and checks the programs the
-commands need are installed. Under `--dry-run` nothing is contacted, and each
-host role is reported as skipped rather than reachable.
+commands need are installed. These checks only read, so `--dry-run` makes
+them too.
 
 ## A value is not what the file says
 
@@ -159,8 +159,8 @@ when the path is direct.
 ## Something changed that should not have
 
 Every destructive command understands `--dry-run` and prints what it would do
-without changing anything. Lookups, such as resolving a group or asking Slurm
-about a node, still run. It is also what to use when reading an unfamiliar
+without changing anything. Lookups, such as resolving a group, asking Slurm
+about a node or checking a boot path on the PXE host, still run. It is also what to use when reading an unfamiliar
 command's behaviour:
 
 ```console

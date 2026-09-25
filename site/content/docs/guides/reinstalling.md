@@ -43,7 +43,6 @@ Would reinstall 1 host: exe0007
   everything on these machines is lost
   /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2, for the next request: exe0007 (10.0.2.7)
   then each machine is set to boot from the network once and reset through Redfish
-  not checked in a dry run: that the boot paths exist on the PXE host and that no persistent link is in the way
 
 $ clusterctl provision reinstall -n exe0007
 About to reinstall 1 host: exe0007
@@ -67,7 +66,8 @@ Everything is resolved before the first machine is touched: each node's
 address, boot path, service processor and BMC credential. The boot paths are
 checked on the PXE host, and Slurm is asked whether the nodes run jobs. A set
 with one node that fails any of these stops before anything changes, rather
-than leaving half the set configured.
+than leaving half the set configured. These checks only read, so a dry run
+makes them too and is refused where the real run would be.
 {{< /callout >}}
 
 Slurm is asked the way `bmc power reset` asks it: a node that runs a job, or

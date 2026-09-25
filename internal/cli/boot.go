@@ -233,14 +233,11 @@ func describeBootLinks(links []bootLink) string {
 	return strings.Join(lines, "\n  ")
 }
 
-// dryRunChecks names what a dry run leaves unchecked: it sends nothing to
-// the PXE host, not even the reads.
-const dryRunChecks = "not checked in a dry run: that the boot paths exist on the PXE host and that no persistent link is in the way"
-
 // checkBootLinks reads the PXE host before anything is written: every boot
 // path has to exist, or the machine is reset into a failed network boot,
 // and a one-shot link is refused over a persistent one, which the PXE
-// service would keep offering after the first request.
+// service would keep offering after the first request. It only reads, so a
+// dry run makes the same check and is refused where the real run would be.
 func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
 	var paths []string
 	seen := map[string]bool{}
@@ -256,7 +253,7 @@ func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
 		script.WriteString(" " + shellquote.Quote(p))
 	}
 	script.WriteString("; do [ -f \"$p\" ] || printf '%s\\n' \"$p\"; done\n")
-	result, err := a.RunOnRole(a.Context(), role, transport.Request{
+	result, err := a.ReadOnRole(a.Context(), role, transport.Request{
 		Script:  script.String(),
 		Timeout: a.Timeout().Get(),
 		TTY:     transport.TTYNone,
@@ -302,7 +299,7 @@ func checkBootLinks(a *app.App, role, root string, links []bootLink) error {
 // readBootLinks lists the links under the PXE root, name to target, in one
 // call rather than one connection per node.
 func readBootLinks(a *app.App, role, root string) (map[string]string, error) {
-	result, err := a.RunOnRole(a.Context(), role, transport.Request{
+	result, err := a.ReadOnRole(a.Context(), role, transport.Request{
 		Argv:    []string{"find", root, "-maxdepth", "1", "-type", "l", "-printf", "%f\t%l\n"},
 		Timeout: a.Timeout().Get(),
 		TTY:     transport.TTYNone,
@@ -584,12 +581,10 @@ was not reported fails the command.
 			if err != nil {
 				return err
 			}
-			detail := describeBootLinks(links)
-			if a.DryRun() {
-				detail += "\n  " + dryRunChecks
-			} else if err := checkBootLinks(a, role, root, links); err != nil {
+			if err := checkBootLinks(a, role, root, links); err != nil {
 				return err
 			}
+			detail := describeBootLinks(links)
 
 			if err := a.Gate.Confirm(safety.Action{
 				Verb:    "set the network boot configuration of",

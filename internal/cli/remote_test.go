@@ -62,6 +62,9 @@ func TestDryRunReadsDHCPForReal(t *testing.T) {
 	}
 	read := false
 	for _, call := range rec.Calls() {
+		if isBootPathCheck(call.Request) {
+			continue
+		}
 		if len(call.Request.Argv) == 0 || call.Request.Argv[0] != "cat" {
 			t.Errorf("a dry run sent %q", call.Command)
 			continue

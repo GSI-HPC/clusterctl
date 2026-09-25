@@ -35,7 +35,6 @@ const (
 	statusOK   = "ok"
 	statusWarn = "warning"
 	statusFail = "failed"
-	statusSkip = "skipped"
 )
 
 func newDoctorCommand(r *root) *cobra.Command {
@@ -47,8 +46,8 @@ a missing ssh client, a host key file that is not there, an unreadable age
 identity.
 
 With --remote the infrastructure hosts are contacted as well and asked whether
-the tools the commands rely on are installed. Under --dry-run nothing is
-contacted, and each host is reported as skipped rather than as reachable.
+the tools the commands rely on are installed. The checks only read, so they
+are made under --dry-run too.
 
   clusterctl doctor
   clusterctl doctor --remote`,
@@ -303,14 +302,11 @@ func remoteChecks(a *app.App) []check {
 			checks = append(checks, check{"role " + role, statusFail, err.Error()})
 			continue
 		}
-		// A dry run contacts nothing, and the recorder that stands in for
-		// the hosts answers every request with success. Reporting that as
-		// reachable would be a check that was never made.
-		if a.DryRunRecorder != nil {
-			checks = append(checks, check{"role " + role, statusSkip, "not contacted under --dry-run"})
-			continue
-		}
-		result, err := a.Runner.Run(a.Context(), target, transport.Request{
+		// The checks only read, so they go through ReadRunner: a dry run
+		// contacts the role for real rather than asking the recorder that
+		// stands in for the hosts, which answers every request with
+		// success.
+		result, err := a.ReadRunner.Run(a.Context(), target, transport.Request{
 			Argv:    []string{"true"},
 			Timeout: 20 * time.Second,
 			TTY:     transport.TTYNone,
@@ -339,7 +335,7 @@ func remoteChecks(a *app.App) []check {
 			}
 			script.WriteString(toolCheck(tool))
 		}
-		missing, err := a.Runner.Run(a.Context(), target, transport.Request{
+		missing, err := a.ReadRunner.Run(a.Context(), target, transport.Request{
 			Script:  script.String(),
 			Timeout: 30 * time.Second,
 			TTY:     transport.TTYNone,
@@ -360,7 +356,7 @@ func remoteChecks(a *app.App) []check {
 
 func printChecks(a *app.App, format output.Format, streams app.Streams, checks []check) error {
 	t := output.NewTable(output.Cols("CHECK", "STATUS", "DETAIL")...)
-	failed, warned, skipped := 0, 0, 0
+	failed, warned := 0, 0
 	for _, c := range checks {
 		t.Add(c.Name, c.Status, c.Detail)
 		switch c.Status {
@@ -368,14 +364,9 @@ func printChecks(a *app.App, format output.Format, streams app.Streams, checks [
 			failed++
 		case statusWarn:
 			warned++
-		case statusSkip:
-			skipped++
 		}
 	}
 	t.Caption = fmt.Sprintf("%d checks, %d failed, %d warnings", len(checks), failed, warned)
-	if skipped > 0 {
-		t.Caption += fmt.Sprintf(", %d skipped", skipped)
-	}
 
 	result := output.Result{Table: t, Object: checks}
 	if a != nil {
