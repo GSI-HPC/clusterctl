@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -42,36 +43,70 @@ import (
 
 // Streams are the input and output a command talks to. Tests replace them
 // with buffers.
+//
+// The zero value of each terminal field means there is no terminal, which is
+// what a test, the MCP server and the documentation generator have.
 type Streams struct {
-	In       io.Reader
-	Out      io.Writer
-	Err      io.Writer
-	IsTTY    bool
+	In  io.Reader
+	Out io.Writer
+	Err io.Writer
+
+	// IsTTY says standard input is a terminal, so that a confirmation or a
+	// password can be asked for.
+	IsTTY bool
+	// OutIsTTY and ErrIsTTY say standard output and standard error are
+	// terminals, so that something may be drawn on them.
+	OutIsTTY bool
+	ErrIsTTY bool
+	// OutIsPipe says standard output goes into a pipe or a socket, whose
+	// reader, such as grep or less, may well write to the terminal a
+	// display would draw on, where nothing keeps the two apart.
+	OutIsPipe bool
+	// Size returns the width and height of the terminal on standard error,
+	// asked afresh on every call so that a resized window is seen. It is nil
+	// when standard error is not a terminal.
+	Size func() (w, h int, err error)
+
 	StateDir string
 	CacheDir string
 }
 
 // DefaultStreams returns the process streams.
 //
+// A state or cache directory that cannot be known is left empty, and New
+// refuses to run without it.
+func DefaultStreams() Streams {
+	streams := fileStreams(os.Stdin, os.Stdout, os.Stderr)
+	streams.StateDir, _ = config.StateDir()
+	streams.CacheDir, _ = config.CacheDir()
+	return streams
+}
+
+// fileStreams returns the streams of three open files.
+//
 // Whether there is a terminal decides whether a destructive command may ask
 // for a confirmation or has to refuse, so it is asked of the terminal itself
 // rather than inferred from the file mode: /dev/null is a character device
 // too, and a command run with stdin closed would otherwise be prompted and
-// then read an immediate end of file.
-//
-// A state or cache directory that cannot be known is left empty, and New
-// refuses to run without it.
-func DefaultStreams() Streams {
-	stateDir, _ := config.StateDir()
-	cacheDir, _ := config.CacheDir()
-	return Streams{
-		In:       os.Stdin,
-		Out:      os.Stdout,
-		Err:      os.Stderr,
-		IsTTY:    term.IsTerminal(int(os.Stdin.Fd())),
-		StateDir: stateDir,
-		CacheDir: cacheDir,
+// then read an immediate end of file. Each stream is asked on its own: a
+// command whose output goes to a pipe still has a terminal on standard
+// error.
+func fileStreams(in, out, errOut *os.File) Streams {
+	streams := Streams{
+		In:       in,
+		Out:      out,
+		Err:      errOut,
+		IsTTY:    term.IsTerminal(int(in.Fd())),
+		OutIsTTY: term.IsTerminal(int(out.Fd())),
+		ErrIsTTY: term.IsTerminal(int(errOut.Fd())),
 	}
+	if streams.ErrIsTTY {
+		streams.Size = func() (int, int, error) { return term.GetSize(int(errOut.Fd())) }
+	}
+	if info, err := out.Stat(); err == nil {
+		streams.OutIsPipe = info.Mode()&(fs.ModeNamedPipe|fs.ModeSocket) != 0
+	}
+	return streams
 }
 
 // Options are the global flags, resolved before a command runs.
