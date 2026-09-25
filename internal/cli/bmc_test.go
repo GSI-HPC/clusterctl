@@ -293,3 +293,30 @@ func TestBMCKeepsTheVendorProfileForEverySpelling(t *testing.T) {
 		}
 	}
 }
+
+// The inventory kept a name as written, but every per-node lookup asked for
+// it lowercased, so a node written with capitals lost its bmcAddress and the
+// action went to the derived name instead. Such a name is refused.
+func TestInventoryNameWithCapitalsIsRefused(t *testing.T) {
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
+		return s + "    - nodes: EXE0020\n      bmcAddress: 10.9.0.88\n"
+	})
+
+	for _, args := range [][]string{
+		{"node", "fqdn", "--bmc", "-n", "exe0020"},
+		{"bmc", "power", "cycle", "--ipmi", "-y", "-n", "EXE0020"},
+	} {
+		h, err := run(t, harnessOptions{config: []string{inventory}, recorder: ipmiOK()}, args...)
+		if err == nil {
+			t.Errorf("%s: accepted, output:\n%s", strings.Join(args, " "), h.out)
+			continue
+		}
+		if !strings.Contains(err.Error(), "exe0020") {
+			t.Errorf("%s: error = %v, want it to say how to write the name", strings.Join(args, " "), err)
+		}
+		if calls := h.recorder.Calls(); len(calls) != 0 {
+			t.Errorf("%s: sent %d commands, want none", strings.Join(args, " "), len(calls))
+		}
+	}
+}

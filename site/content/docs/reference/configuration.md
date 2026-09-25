@@ -187,10 +187,11 @@ spec:
 ```
 
 Entries are applied in order, and a later entry refines the nodes it names.
-Write a host the same way in every entry: `exe1`, `exe0001` and `EXE0001` are
-one host, so an entry naming `exe1` after one naming `exe[0001-1024]` is
-refused rather than guessed at. The error names both entries and the spelling
-to use.
+Write a host the same way in every entry: `exe1` and `exe0001` are one host,
+so an entry naming `exe1` after one naming `exe[0001-1024]` is refused rather
+than guessed at. The error names both entries and the spelling to use. Write
+names in lower case: host names are not case sensitive, so `EXE0001` is
+refused with the spelling `exe0001`.
 
 `rack` and `level` are also exposed as attributes, so a group source reading an
 attribute can build one group per rack. Writing either the field or the
