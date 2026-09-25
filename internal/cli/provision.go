@@ -372,6 +372,12 @@ const (
 	cincRunListKey = "CHEF_RUN_LIST"
 )
 
+// cincRunTimeout is how long the client may run on a node when
+// fanout.commandTimeout does not allow longer. Converging a freshly
+// installed node can take far longer than the commands that setting is
+// meant for, whose default is ten minutes.
+const cincRunTimeout = 30 * time.Minute
+
 // cincSolo is what the configuration file of a node names.
 type cincSolo struct {
 	URL     string
@@ -713,6 +719,10 @@ The configuration file is read, never sourced: a node whose file holds
 anything but plain assignments, or names no http or https archive, is refused
 and the client is not started there.
 
+The client may run for 30 minutes on each node, or for fanout.commandTimeout
+when that is longer, since converging a freshly installed node takes longer
+than most commands.
+
 This changes the nodes, so it asks first.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
@@ -781,7 +791,7 @@ This changes the nodes, so it asks first.`,
 				ready = append(ready, res.Target)
 			}
 			for _, res := range a.Executor().RunEach(a.Context(), ready, func(t transport.Target) transport.Request {
-				return a.Collect(transport.Request{Argv: argv[t.Name], Timeout: a.Timeout().Or(30 * time.Minute)})
+				return a.Collect(transport.Request{Argv: argv[t.Name], Timeout: max(a.Timeout().Get(), cincRunTimeout)})
 			}) {
 				results[index[res.Target.Name]] = res
 			}
