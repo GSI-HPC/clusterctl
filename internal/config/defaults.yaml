@@ -39,6 +39,9 @@ ssh:
   include:
     - ~/.ssh/config
     - /etc/ssh/ssh_config
+  # Reaching a host may take connectionAttempts attempts of connectTimeout, a
+  # second apart, and as long again for each jump host. A command that has not
+  # ended that long, and five seconds, after its timeout is stopped locally.
   connectTimeout: 10s
   connectionAttempts: 2
   serverAliveInterval: 60s

@@ -242,7 +242,11 @@ type SSHSpec struct {
 	// StrictHostKeyChecking may be relaxed for a site that has not collected
 	// its host keys yet. It is on by default.
 	StrictHostKeyChecking *bool `json:"strictHostKeyChecking,omitempty" yaml:"strictHostKeyChecking,omitempty"`
-	// ConnectTimeout and ConnectionAttempts bound one connection attempt.
+	// ConnectTimeout bounds one connection attempt, and ConnectionAttempts
+	// says how many are made, a second apart. Together they bound how long
+	// reaching a host may take, and each jump host on the way as long
+	// again; a command with a timeout is given that on top of it before ssh
+	// is stopped locally.
 	ConnectTimeout     Duration `json:"connectTimeout,omitempty" yaml:"connectTimeout,omitempty"`
 	ConnectionAttempts int      `json:"connectionAttempts,omitempty" yaml:"connectionAttempts,omitempty"`
 	// ServerAlive keeps an idle session from being dropped.
@@ -313,7 +317,9 @@ type FanoutSpec struct {
 	Max int `json:"max,omitempty" yaml:"max,omitempty" jsonschema:"minimum=1,description=Nodes contacted at once; at least 1"`
 	// CommandTimeout bounds the command. It is enforced on the node with
 	// timeout(1), because killing the local ssh does not stop the remote
-	// process. ssh.connectTimeout bounds the connection.
+	// process. ssh.connectTimeout bounds the connection. A command that has
+	// not ended five seconds after its timeout, plus the time reaching the
+	// node may take, is ended locally too: the node stopped answering.
 	CommandTimeout Duration `json:"commandTimeout,omitempty" yaml:"commandTimeout,omitempty"`
 }
 
