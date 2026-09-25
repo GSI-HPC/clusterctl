@@ -12,8 +12,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 )
 
 // A tunnel connects with the generated ssh configuration, so that it checks
@@ -25,10 +23,7 @@ func TestTunnelStartUsesTheGeneratedSSHConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tunnel start --dry-run failed: %v\n%s", err, h.errOut)
 	}
-	argv, err := shellquote.Split(strings.TrimSpace(h.out.String()))
-	if err != nil {
-		t.Fatalf("the command is not one shell command line: %v\n%s", err, h.out)
-	}
+	argv := shellWords(t, strings.TrimSpace(h.out.String()))
 	option := func(name string) string {
 		for i, arg := range argv {
 			if arg == name && i+1 < len(argv) {
@@ -44,10 +39,7 @@ func TestTunnelStartUsesTheGeneratedSSHConfiguration(t *testing.T) {
 	}
 
 	// sshuttle splits the command the way a POSIX shell does.
-	ssh, err := shellquote.Split(option("--ssh-cmd"))
-	if err != nil {
-		t.Fatalf("--ssh-cmd is not a shell command line: %v", err)
-	}
+	ssh := shellWords(t, option("--ssh-cmd"))
 	if len(ssh) != 3 || ssh[0] != "ssh" || ssh[1] != "-F" {
 		t.Fatalf("--ssh-cmd = %q, want ssh -F and the generated file", ssh)
 	}
@@ -64,6 +56,17 @@ func TestTunnelStartUsesTheGeneratedSSHConfiguration(t *testing.T) {
 			t.Errorf("%s is missing %q", config, want)
 		}
 	}
+}
+
+// shellWords splits a command line into the words a POSIX shell makes of it,
+// by asking one.
+func shellWords(t *testing.T, line string) []string {
+	t.Helper()
+	out, err := exec.Command("sh", "-c", `eval "set -- $1" && printf '%s\0' "$@"`, "sh", line).Output()
+	if err != nil {
+		t.Fatalf("%q is not one shell command line: %v", line, err)
+	}
+	return strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
 }
 
 // sleeper starts a process of this user that is not a tunnel.

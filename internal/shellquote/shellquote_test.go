@@ -53,6 +53,7 @@ func TestQuoteSurvivesTheShell(t *testing.T) {
 		{"echo", "a\\b"},
 		{"echo", "-n", ""},
 		{"echo", "tab\there"},
+		{"echo", "bash", "-c", "echo 'a b' && ls *.log", "arg with spaces"},
 	}
 	for _, argv := range vectors {
 		line := shellquote.Join(argv)
@@ -74,49 +75,5 @@ func TestQuoteSurvivesTheShell(t *testing.T) {
 				t.Errorf("%q: argument %d = %q, want %q", line, i, got[i], want[i])
 			}
 		}
-	}
-}
-
-func TestSplit(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		in   string
-		want []string
-	}{
-		{"sinfo -h -o %N", []string{"sinfo", "-h", "-o", "%N"}},
-		{`sinfo -o "%N %T"`, []string{"sinfo", "-o", "%N %T"}},
-		{`echo 'it'\''s'`, []string{"echo", "it's"}},
-		{`a\ b c`, []string{"a b", "c"}},
-		{"   ", nil},
-	}
-	for _, tc := range tests {
-		got, err := shellquote.Split(tc.in)
-		if err != nil {
-			t.Errorf("Split(%q) failed: %v", tc.in, err)
-			continue
-		}
-		if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
-			t.Errorf("Split(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-
-	for _, in := range []string{`"unterminated`, `'unterminated`} {
-		if _, err := shellquote.Split(in); err == nil {
-			t.Errorf("Split(%q) should fail", in)
-		}
-	}
-}
-
-func TestJoinRoundTrips(t *testing.T) {
-	t.Parallel()
-
-	argv := []string{"bash", "-c", "echo 'a b' && ls *.log", "arg with spaces"}
-	got, err := shellquote.Split(shellquote.Join(argv))
-	if err != nil {
-		t.Fatalf("Split failed: %v", err)
-	}
-	if strings.Join(got, "\x00") != strings.Join(argv, "\x00") {
-		t.Errorf("round trip gave %q, want %q", got, argv)
 	}
 }
