@@ -341,7 +341,8 @@ type DHCPService struct {
 	// ConfigPath is the dhcpd configuration read for addresses and boot
 	// files.
 	ConfigPath string `json:"configPath,omitempty" yaml:"configPath,omitempty" jsonschema:"minLength=1"`
-	// CacheTTL is how long a fetched copy of that file is reused.
+	// CacheTTL is how long a fetched copy of that file is reused by later
+	// commands. One command reads it once whatever this says.
 	CacheTTL Duration `json:"cacheTtl,omitempty" yaml:"cacheTtl,omitempty"`
 	// LogPath is the system log searched for DHCP responses.
 	LogPath string `json:"logPath,omitempty" yaml:"logPath,omitempty" jsonschema:"minLength=1"`

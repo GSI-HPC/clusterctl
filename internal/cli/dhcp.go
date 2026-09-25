@@ -27,38 +27,16 @@ addresses, client identifiers and boot files it hands to the nodes.
 The configuration is parsed rather than grepped, so a declaration whose
 options are in an unusual order reports its own values and not a neighbour's.
 Files named by include statements are read too, and a construct the parser
-does not understand is an error. The configuration is fetched once and reused
-for a short time, so asking about a hundred nodes does not fetch it a hundred
-times.`,
+does not understand is an error. A command reads the configuration once,
+however many nodes it asks about, and a server that could not be read is not
+asked again for the next node. A fetched copy is reused by the commands that
+follow for services.dhcp.cacheTtl, two minutes unless it says otherwise.`,
 		newDHCPHostsCommand(r),
 		newDHCPConfigCommand(r),
 		newDHCPLeasesCommand(r),
 		newDHCPShellCommand(r),
 		newDHCPCaptureCommand(r),
 	)
-}
-
-// dhcpConfig fetches and parses the server configuration, and every file it
-// includes.
-func dhcpConfig(a *app.App) (*dhcp.Config, error) {
-	spec := a.Spec.Services.DHCP
-	if spec.Role == "" {
-		return nil, exitcode.Errorf(exitcode.Usage,
-			"no host role runs the DHCP server; set services.dhcp.role")
-	}
-	path := spec.ConfigPath
-	ttl := spec.CacheTTL.Or(2 * time.Minute)
-	cfg, err := dhcp.ParseFile(path, func(file string) ([]byte, error) {
-		return a.RemoteFile(a.Context(), spec.Role, file, ttl)
-	})
-	if err != nil {
-		// A file that could not be fetched keeps the exit code saying so.
-		if exitcode.Has(err) {
-			return nil, err
-		}
-		return nil, exitcode.Errorf(exitcode.TargetFailed, "parsing %s: %w", path, err)
-	}
-	return cfg, nil
 }
 
 func newDHCPHostsCommand(r *root) *cobra.Command {
@@ -82,7 +60,7 @@ has only those counts as missing.
 			if err != nil {
 				return err
 			}
-			cfg, err := dhcpConfig(a)
+			cfg, err := a.DHCPConfig(a.Context())
 			if err != nil {
 				return err
 			}
@@ -123,7 +101,7 @@ func newDHCPConfigCommand(r *root) *cobra.Command {
 Print every host declaration the DHCP server carries.`,
 		cobra.NoArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
-			cfg, err := dhcpConfig(a)
+			cfg, err := a.DHCPConfig(a.Context())
 			if err != nil {
 				return err
 			}

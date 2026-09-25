@@ -135,3 +135,42 @@ func TestDHCPReadFailureKeepsTheMessage(t *testing.T) {
 		t.Errorf("exit code for an unreachable host = %d, want %d", got, want)
 	}
 }
+
+// boot status goes on past a node whose address could not be read, and every
+// node without an inventory address read the DHCP configuration again: a
+// server that could not be reached was asked once per node, an ssh timeout
+// each, and a good one was fetched once per node once its cached copy had
+// expired. The command reads it once.
+func TestBootStatusReadsDHCPOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply func(transport.Target, transport.Request) (*transport.Result, error)
+		code  int
+	}{
+		{"a server that answers", dhcpServer("10.0.2"), exitcode.OK},
+		{"a server that cannot be reached", func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+			if tg.Role == "dhcp" {
+				return sshTimedOut(tg), nil
+			}
+			return &transport.Result{Target: tg}, nil
+		}, exitcode.Transport},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &transport.Recorder{Reply: tc.reply}
+			h, err := run(t, harnessOptions{recorder: rec},
+				"--set", "services.dhcp.cacheTtl=1ns", "boot", "status", "-n", "exe0002,exe0007")
+			if got := exitcode.From(err); got != tc.code {
+				t.Errorf("exit code = %d (%v), want %d\n%s", got, err, tc.code, h.out)
+			}
+			reads := 0
+			for _, c := range rec.Calls() {
+				if c.Target.Role == "dhcp" {
+					reads++
+				}
+			}
+			if reads != 1 {
+				t.Errorf("the DHCP server was asked %d times, want once", reads)
+			}
+		})
+	}
+}

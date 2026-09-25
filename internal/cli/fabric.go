@@ -39,30 +39,24 @@ machine did.`,
 // DHCP comes first, because it is what the node boots with and what the
 // documentation promises; the inventory answers only for a node DHCP does
 // not know, or when no host role runs the DHCP server. The DHCP
-// configuration is read once, and a failure to read it fails the lookup
-// rather than quietly falling back to an inventory address that may be stale.
+// configuration is read once per command, and a failure to read it fails the
+// lookup rather than quietly falling back to an inventory address that may be
+// stale.
 type guidLookup struct {
-	a      *app.App
-	loaded bool
-	dhcp   *dhcp.Config
-	err    error
+	a    *app.App
+	dhcp *dhcp.Config
 }
 
 func newGUIDLookup(a *app.App) *guidLookup { return &guidLookup{a: a} }
 
-// load reads the DHCP configuration, once.
+// load reads the DHCP configuration, which the command reads only once.
 func (l *guidLookup) load() error {
-	if l.loaded {
-		return l.err
-	}
-	l.loaded = true
 	if l.a.Spec.Services.DHCP.Role == "" {
 		return nil
 	}
-	cfg, err := dhcpConfig(l.a)
+	cfg, err := l.a.DHCPConfig(l.a.Context())
 	if err != nil {
-		l.err = fmt.Errorf("reading the DHCP configuration: %w", err)
-		return l.err
+		return fmt.Errorf("reading the DHCP configuration: %w", err)
 	}
 	l.dhcp = cfg
 	return nil
