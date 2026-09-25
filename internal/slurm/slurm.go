@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -132,11 +133,6 @@ func oneLine(s string) string {
 		}
 	}
 	return output.EscapeCell(strings.Join(lines, "; "))
-}
-
-// isControl reports the C0 and C1 control characters and DEL.
-func isControl(r rune) bool {
-	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
 }
 
 func (c *Client) timeout() time.Duration {
@@ -455,7 +451,7 @@ func ValidateReason(reason string) error {
 			"%q is what Slurm prints for no reason; say what is wrong and where it is tracked", trimmed)
 	}
 	for _, r := range reason {
-		if isControl(r) {
+		if unicode.IsControl(r) {
 			return exitcode.Errorf(exitcode.Usage,
 				"the reason contains the control character %s; write it on one line of plain text",
 				strings.Trim(strconv.QuoteRune(r), "'"))
@@ -839,7 +835,7 @@ func ValidateUserName(value string) error {
 // which may not hold control characters.
 func ValidateText(kind, value string) error {
 	for _, r := range value {
-		if isControl(r) {
+		if unicode.IsControl(r) {
 			return exitcode.Errorf(exitcode.Usage, "the %s contains the control character %s",
 				kind, strings.Trim(strconv.QuoteRune(r), "'"))
 		}
