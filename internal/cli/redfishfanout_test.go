@@ -24,7 +24,6 @@ func processorOf(req *http.Request) string {
 func TestAPanicOnOneProcessorFailsOnlyThatNode(t *testing.T) {
 	t.Run("bmc power", func(t *testing.T) {
 		isolateHome(t)
-		panicLog(t)
 		t.Setenv("BMC_PASSWORD", "s3cret")
 		fakeRedfish(t, func(req *http.Request) (*http.Response, error) {
 			if processorOf(req) == "exe0002" {
@@ -47,10 +46,12 @@ func TestAPanicOnOneProcessorFailsOnlyThatNode(t *testing.T) {
 				}
 			}
 		}
+		if !strings.Contains(h.errOut.String(), "panic while working on exe0002") {
+			t.Errorf("the stack of the panic was not written to standard error:\n%s", h.errOut)
+		}
 	})
 
 	t.Run("provision reinstall", func(t *testing.T) {
-		panicLog(t)
 		h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
 		h.bmcs.panics["exe0002"] = "Pxe"
 		_, err := h.run(t, harnessOptions{}, "provision", "reinstall", "-n", "exe[0001-0003]", "-y")
@@ -69,7 +70,6 @@ func TestAPanicOnOneProcessorFailsOnlyThatNode(t *testing.T) {
 	})
 
 	t.Run("provision status", func(t *testing.T) {
-		panicLog(t)
 		h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
 		h.bmcs.panics["exe0002"] = "GET"
 		out, err := h.run(t, harnessOptions{}, "provision", "status", "-n", "exe[0001-0003]")

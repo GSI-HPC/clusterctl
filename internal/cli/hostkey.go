@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"slices"
@@ -71,7 +72,7 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 
 	var mu sync.Mutex
 	fanout.Each(a.Context(), len(hosts), a.Spec.Fanout.Max, func(i int) {
-		entries, err := scanHost(a.Context(), scanners[i], hosts[i])
+		entries, err := scanHost(a.Context(), a.Diag, scanners[i], hosts[i])
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {
@@ -91,10 +92,10 @@ func scanTargets(a *app.App, ns *nodeset.NodeSet, bmc bool, timeout time.Duratio
 }
 
 // scanHost scans one host. A panic in the scan becomes the host's failure
-// rather than the end of the process.
-func scanHost(ctx context.Context, scanner *hostkeys.Scanner, host string) (entries []hostkeys.Entry, err error) {
+// rather than the end of the process, and its stack is written to log.
+func scanHost(ctx context.Context, log io.Writer, scanner *hostkeys.Scanner, host string) (entries []hostkeys.Entry, err error) {
 	defer func() {
-		if p := fanout.Recovered(host, recover()); p != nil {
+		if p := fanout.Recovered(log, host, recover()); p != nil {
 			entries, err = nil, p
 		}
 	}()

@@ -37,6 +37,7 @@ func (a *App) Credentials() *credentials.Resolver {
 			Prompt:      a.promptPassword,
 			Secret:      a.SecretValue,
 			NoTerminal:  !a.IsTTY,
+			Stderr:      a.Diag,
 		}
 	})
 	return a.credentials

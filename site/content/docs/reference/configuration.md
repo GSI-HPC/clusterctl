@@ -125,7 +125,7 @@ Exactly one per credential:
 | `file` | The first line of a file |
 | `ageFile` | An age encrypted file, with `workstation.identities` |
 | `secretRef` | `{name, key}` of a `Secret` document |
-| `command` | The first line a helper prints; a helper named by a relative path resolves against the `Site` document, a bare name is looked up in `PATH` |
+| `command` | The first line a helper prints; a helper named by a relative path resolves against the `Site` document, a bare name is looked up in `PATH`. What it writes on standard error goes to clusterctl's standard error, or to the server's log under `clusterctl mcp` |
 | `prompt` | The terminal |
 
 ## Cluster

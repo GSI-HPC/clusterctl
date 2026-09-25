@@ -261,22 +261,14 @@ func TestGroupByOutputKeepsApartWhatEndedDifferently(t *testing.T) {
 	}
 }
 
-// panicLog sends the stacks of recovered panics to a buffer for the rest of
-// the test. A test that uses it does not run in parallel, since the log is
-// shared by the process.
-func panicLog(t *testing.T) *strings.Builder {
-	t.Helper()
-	var log strings.Builder
-	old := fanout.PanicLog
-	fanout.PanicLog = &log
-	t.Cleanup(func() { fanout.PanicLog = old })
-	return &log
-}
-
 // A panic in the work for one target ended the process, and with it
 // clusterctl mcp and every plan it held: recover only catches a panic in
 // its own goroutine. It is now that target's failure, and the rest finish.
+// The stack goes to the executor's log, which is the front end's
+// diagnostics, rather than always to the process's standard error.
 func TestRunTurnsAPanicIntoThatTargetsFailure(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name  string
 		setup func(*fanout.Executor)
@@ -298,8 +290,9 @@ func TestRunTurnsAPanicIntoThatTargetsFailure(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			log := panicLog(t)
-			e := &fanout.Executor{Runner: &transport.Recorder{}, Max: 2}
+			t.Parallel()
+			var log strings.Builder
+			e := &fanout.Executor{Runner: &transport.Recorder{}, Max: 2, PanicLog: &log}
 			tc.setup(e)
 
 			results := e.Run(context.Background(), targets("exe1", "exe2", "exe3"), transport.Request{Argv: []string{"true"}})
@@ -321,7 +314,7 @@ func TestRunTurnsAPanicIntoThatTargetsFailure(t *testing.T) {
 				}
 			}
 			if !strings.Contains(log.String(), "exe2") || !strings.Contains(log.String(), "goroutine") {
-				t.Errorf("the log has no stack naming exe2:\n%s", log)
+				t.Errorf("the log has no stack naming exe2:\n%s", log.String())
 			}
 		})
 	}

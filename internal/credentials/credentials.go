@@ -14,6 +14,7 @@ package credentials
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -64,6 +65,9 @@ type Resolver struct {
 	// own, so that a helper such as gpg's pinentry cannot ask on whatever
 	// terminal the process was started from.
 	NoTerminal bool
+	// Stderr receives what a command source writes on its standard error;
+	// nil is the process's.
+	Stderr io.Writer
 
 	// reading is held across a whole lookup, so that concurrent callers
 	// wait for the one read instead of each prompting or running the
@@ -178,7 +182,10 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 			helper = r.path(helper)
 		}
 		cmd := exec.CommandContext(ctx, helper, src.Command[1:]...)
-		cmd.Stderr = os.Stderr
+		cmd.Stderr = r.Stderr
+		if cmd.Stderr == nil {
+			cmd.Stderr = os.Stderr
+		}
 		// A helper that leaves something behind holding its output does
 		// not keep the lookup waiting once the context has ended.
 		cmd.WaitDelay = 5 * time.Second

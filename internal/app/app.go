@@ -50,6 +50,12 @@ type Streams struct {
 	In  io.Reader
 	Out io.Writer
 	Err io.Writer
+	// Diag receives what clusterctl has to say about itself rather than
+	// about the command: what a password helper writes on its standard
+	// error, and the stack of a recovered panic. Under clusterctl mcp it is
+	// the server's log, where Err is the notes a call returns to the agent.
+	// Nil means Err.
+	Diag io.Writer
 
 	// IsTTY says standard input is a terminal, so that a confirmation or a
 	// password can be asked for.
@@ -268,6 +274,9 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		Spec:     resolved.Spec,
 		Format:   format,
 		opts:     opts,
+	}
+	if a.Diag == nil {
+		a.Diag = a.Err
 	}
 	// --fanout is applied as the flags layer of the configuration, so that
 	// config explain reports it; the built-in default is in defaults.yaml.
@@ -651,7 +660,7 @@ func (a *App) SelectOptional(expr string) (*nodeset.NodeSet, error) {
 
 // Executor returns a fan-out executor bound to the configured limits.
 func (a *App) Executor() *fanout.Executor {
-	return &fanout.Executor{Runner: a.Runner, Max: a.Spec.Fanout.Max}
+	return &fanout.Executor{Runner: a.Runner, Max: a.Spec.Fanout.Max, PanicLog: a.Diag}
 }
 
 // Timeout returns the command timeout for remote execution.

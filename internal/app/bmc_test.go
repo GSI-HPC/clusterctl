@@ -182,3 +182,58 @@ func TestRedfishClientsAreBuiltConcurrently(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// A password helper wrote its standard error to the process's own, which
+// under clusterctl mcp only happened to be the server's log. It goes to the
+// front end's diagnostics now, which are the command's error stream unless
+// the front end, as the MCP server does, gives other ones: there the error
+// stream is the notes a call returns to the agent.
+func TestAPasswordHelperSpeaksToTheDiagnostics(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		ownDiag bool
+	}{
+		{"on the error stream when the front end gives no diagnostics", false},
+		{"in the diagnostics alone when the front end gives them", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			errOut, diag := &strings.Builder{}, &strings.Builder{}
+			streams := app.Streams{
+				In:       strings.NewReader(""),
+				Out:      &strings.Builder{},
+				Err:      errOut,
+				StateDir: filepath.Join(dir, "state"),
+				CacheDir: filepath.Join(dir, "cache"),
+			}
+			if tc.ownDiag {
+				streams.Diag = diag
+			}
+			a, err := app.New(context.Background(), streams, app.Options{
+				ConfigFiles: []string{exampleDir},
+				Env:         func(string) string { return "" },
+				Runner:      &transport.Recorder{},
+				Set: map[string]string{
+					"credentials.helper.username":         "admin",
+					"credentials.helper.password.command": `[sh, -c, "echo unlocking the vault >&2; echo s3cret"]`,
+				},
+			})
+			if err != nil {
+				t.Fatalf("building the app: %v", err)
+			}
+			cred, err := a.Credentials().Get(context.Background(), "helper")
+			if err != nil || cred.Password() != "s3cret" {
+				t.Fatalf("Get = %v, %v", cred, err)
+			}
+			const said = "unlocking the vault"
+			if got, want := strings.Contains(errOut.String(), said), !tc.ownDiag; got != want {
+				t.Errorf("the helper's message is on the error stream = %t, want %t:\n%s", got, want, errOut)
+			}
+			if got, want := strings.Contains(diag.String(), said), tc.ownDiag; got != want {
+				t.Errorf("the helper's message is in the diagnostics = %t, want %t:\n%s", got, want, diag)
+			}
+		})
+	}
+}

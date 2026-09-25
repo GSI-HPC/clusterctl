@@ -13,28 +13,30 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 )
 
-// PanicLog is where the stack of a recovered panic is written: the
-// process's standard error, which under clusterctl mcp is the server's log.
-var PanicLog io.Writer = os.Stderr
-
+// panicLogMu keeps the stacks of panics in workers running side by side
+// from interleaving.
 var panicLogMu sync.Mutex
 
 // Recovered turns a panic in the work for one target into that target's
-// error, and writes the stack to PanicLog. It is called as
-// Recovered(name, recover()) in a function deferred by the goroutine doing
-// the work, and returns nil when nothing panicked.
+// error, and writes the stack to log, the front end's diagnostics, or the
+// process's standard error when log is nil. It is called as
+// Recovered(log, name, recover()) in a function deferred by the goroutine
+// doing the work, and returns nil when nothing panicked.
 //
 // recover only stops a panic in its own goroutine, so each worker of a
 // fan-out needs its own; without it, a panic on one target ends the
 // process, and under clusterctl mcp every plan waiting to be applied.
-func Recovered(target string, v any) error {
+func Recovered(log io.Writer, target string, v any) error {
 	if v == nil {
 		return nil
+	}
+	if log == nil {
+		log = os.Stderr
 	}
 	panicked := fmt.Sprint(v)
 	panicLogMu.Lock()
 	// The log is a courtesy; a write that fails changes nothing.
-	_, _ = fmt.Fprintf(PanicLog, "clusterctl: panic while working on %s: %q\n%s", target, panicked, debug.Stack())
+	_, _ = fmt.Fprintf(log, "clusterctl: panic while working on %s: %q\n%s", target, panicked, debug.Stack())
 	panicLogMu.Unlock()
 	return exitcode.Errorf(exitcode.TargetFailed, "clusterctl panicked; this is a bug, please report it: %q", panicked)
 }

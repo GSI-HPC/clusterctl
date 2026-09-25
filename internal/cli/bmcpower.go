@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -113,7 +114,7 @@ func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, c
 	fanout.Each(ctx, len(calls), limit, func(i int) {
 		if calls[i].client != nil {
 			calls[i].sent = true
-			calls[i].send(ctx, changes, do)
+			calls[i].send(ctx, a.Diag, changes, do)
 		}
 	})
 	for i := range calls {
@@ -124,12 +125,13 @@ func redfishEach[T any](a *app.App, names []string, clients []*redfish.Client, c
 	return calls
 }
 
-// send sends the request of one call. A panic in it is the call's failure:
-// the request may have been carried out, as after any other failure that
-// does not prove it never reached the processor.
-func (call *redfishCall[T]) send(ctx context.Context, changes bool, do func(context.Context, string, *redfish.Client) (T, error)) {
+// send sends the request of one call. A panic in it is the call's failure,
+// with its stack written to log: the request may have been carried out, as
+// after any other failure that does not prove it never reached the
+// processor.
+func (call *redfishCall[T]) send(ctx context.Context, log io.Writer, changes bool, do func(context.Context, string, *redfish.Client) (T, error)) {
 	defer func() {
-		if err := fanout.Recovered(call.node, recover()); err != nil {
+		if err := fanout.Recovered(log, call.node, recover()); err != nil {
 			call.err = err
 		}
 	}()
