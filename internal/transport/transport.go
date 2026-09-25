@@ -510,8 +510,8 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 // When ctx ends, the client is sent SIGTERM rather than killed, so that it
 // closes the session and puts the terminal back as it found it; it is killed
 // only if it has not gone killGrace later. Wait gives up on the output at the
-// same point, since a process the client started, such as a ProxyCommand,
-// can hold it open after the client has gone.
+// same point, since a process the client started, such as a ProxyCommand or
+// the ssh scp runs, can hold it open after the client has gone.
 //
 // Stopping the client does not stop the remote command: without a terminal
 // on the host nothing tells it, and it runs until its own timeout ends it or
