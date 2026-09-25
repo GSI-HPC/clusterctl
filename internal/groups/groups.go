@@ -13,13 +13,9 @@ package groups
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -392,17 +388,15 @@ func (r *Resolver) execCached(name string, src v1alpha1.GroupSource, argv []stri
 	if ttl <= 0 || r.cacheDir == "" {
 		return r.run(target, command)
 	}
-	key := r.diskKey(name, target, command)
-	if expr, ok := r.readDisk(key, ttl); ok {
-		return expr, nil
+	key, dir := r.diskKey(name, target, command), filepath.Join(r.cacheDir, "groups")
+	if expr, ok := fileutil.ReadCache(dir, key, ttl); ok {
+		return string(expr), nil
 	}
 	expr, err := r.run(target, command)
 	if err != nil {
 		return "", err
 	}
-	if expr != "" {
-		r.writeDisk(key, expr)
-	}
+	fileutil.WriteCache(dir, key, []byte(expr))
 	return expr, nil
 }
 
@@ -501,53 +495,13 @@ func (r *Resolver) store(source, kind, group string, expr string) {
 // carries the group name. Nothing is replaced or shortened, so no two
 // lookups share an entry unless they would send the same command to the
 // same host for the same cluster.
-func (r *Resolver) diskKey(source string, target transport.Target, command []string) string {
-	data, _ := json.Marshal(struct {
+func (r *Resolver) diskKey(source string, target transport.Target, command []string) any {
+	return struct {
 		Scope   string   `json:"scope"`
 		Source  string   `json:"source"`
 		Host    string   `json:"host"`
 		User    string   `json:"user"`
 		Role    string   `json:"role"`
 		Command []string `json:"command"`
-	}{r.scope, source, target.Host, target.User, target.Role, command})
-	return string(data)
-}
-
-func (r *Resolver) readDisk(key string, ttl time.Duration) (string, bool) {
-	data, err := os.ReadFile(r.cachePath(key))
-	if err != nil {
-		return "", false
-	}
-	var entry cacheEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return "", false
-	}
-	// The key is kept in the entry and compared, so an entry is only ever
-	// read back for the lookup that wrote it.
-	// An entry written in the future never ages, so it is not trusted.
-	age := time.Since(entry.At)
-	if entry.Key != key || entry.Expr == "" || age < 0 || age > ttl {
-		return "", false
-	}
-	return entry.Expr, true
-}
-
-func (r *Resolver) writeDisk(key, expr string) {
-	data, err := json.Marshal(cacheEntry{Key: key, At: time.Now(), Expr: expr})
-	if err != nil {
-		return
-	}
-	// A cache that cannot be written is not worth failing a command over.
-	_ = fileutil.WriteAtomic(r.cachePath(key), data, 0o600)
-}
-
-type cacheEntry struct {
-	Key  string    `json:"key"`
-	At   time.Time `json:"at"`
-	Expr string    `json:"expr"`
-}
-
-func (r *Resolver) cachePath(key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return filepath.Join(r.cacheDir, "groups", hex.EncodeToString(sum[:])+".json")
+	}{r.scope, source, target.Host, target.User, target.Role, command}
 }

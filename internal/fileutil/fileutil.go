@@ -8,6 +8,9 @@ package fileutil
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -367,4 +370,53 @@ func trustedOwner(path string, info fs.FileInfo) error {
 	}
 	return untrusted("%s is owned by uid %d, neither this user (uid %d) nor root",
 		path, uid, os.Geteuid())
+}
+
+// ReadCache returns what WriteCache stored under key in dir, if it was
+// written less than ttl ago. The key is kept in the entry and compared, so
+// an entry is only ever read back for the lookup that wrote it, and one
+// written in the future, which would never age, is not trusted. Anything
+// missing, stale or unreadable is a miss: the caller fetches again.
+func ReadCache(dir string, key any, ttl time.Duration) ([]byte, bool) {
+	path, id := cacheFile(dir, key)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var entry cacheEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return nil, false
+	}
+	age := time.Since(entry.At)
+	if entry.Key != id || len(entry.Data) == 0 || age < 0 || age > ttl {
+		return nil, false
+	}
+	return entry.Data, true
+}
+
+// WriteCache stores data under key in dir for ReadCache. Nothing is kept of
+// empty data, and a cache that cannot be written is not worth failing a
+// command over, so nothing is reported.
+func WriteCache(dir string, key any, data []byte) {
+	path, id := cacheFile(dir, key)
+	raw, err := json.Marshal(cacheEntry{Key: id, At: time.Now(), Data: data})
+	if err == nil && len(data) > 0 {
+		_ = WriteAtomic(path, raw, 0o600)
+	}
+}
+
+// cacheEntry is one cached answer. Data is kept as bytes, which JSON holds
+// in base64, so that a file that is not UTF-8 comes back unchanged.
+type cacheEntry struct {
+	Key  string    `json:"key"`
+	At   time.Time `json:"at"`
+	Data []byte    `json:"data"`
+}
+
+// cacheFile names the entry of a key, the key being everything that decides
+// the answer, and returns the key as the entry records it.
+func cacheFile(dir string, key any) (path, id string) {
+	raw, _ := json.Marshal(key)
+	sum := sha256.Sum256(raw)
+	return filepath.Join(dir, hex.EncodeToString(sum[:])+".json"), string(raw)
 }
