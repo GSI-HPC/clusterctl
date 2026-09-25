@@ -51,7 +51,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | --- | --- |
 | `internal/transport` | Driving the OpenSSH client, and generating the configuration it runs with. |
 | `internal/shellquote` | Rendering an argument vector so a remote shell reproduces it exactly. |
-| `internal/fanout` | Working on many targets at once, bounded and in order, and reporting the work as it goes. |
+| `internal/fanout` | Working on many targets at once, bounded and in order, or in batches with a pause between them, and reporting the work as it goes. |
 | `internal/progress` | Reporting the work under way: its steps, targets and calls as spans carried in the context, and every change to one as an event for a display or an agent. |
 | `internal/safety` | Deciding whether a destructive action may proceed. |
 | `internal/fileutil` | Writing files atomically and under a lock, and the cache on disk. |

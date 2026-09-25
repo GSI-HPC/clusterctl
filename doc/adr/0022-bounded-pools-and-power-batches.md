@@ -90,7 +90,9 @@ partly failed, and cutting a batch down to the pool's limit.
   `fanout.Map` does all of it, so a pool on it reports without a line of
   its own. Batches are spans too, all of them queued at the start, with
   a wait for each pause, and a batch that is not tried ends skipped and
-  counts as its Total.
+  counts as its Total. `fanout.Batches` splits a set, runs its batches one
+  after the other with the pause between them, stops after one that
+  failed or at an interrupt, and reports them so.
 - **One exit code.** The failures of a pool become the command's exit code
   through `exitcode.Worst` ([ADR 0020](0020-one-exit-code-rule-for-many-hosts.md)).
 
