@@ -84,6 +84,25 @@ never allows: the test sees exactly the limit in flight, and one call too many
 when the limit is broken. `fanout.Map`, the executor, the Redfish fan-out and
 the host key scans are tested this way.
 
+**Progress events.** `progress/progresstest` holds a command to what it
+reports. `Capture` is a sink that keeps the events of a Bus, and `Check` tests
+them against every promise the progress package makes to a display: each span
+starts and ends once, under a parent that is still open; the targets of a step
+are announced, queued, before the first of them runs, and add up to its total
+however the step ended, an interrupt included; no more run at once than its
+limit; every suspension of the display is resumed; and no text holds anything
+a terminal would act on. The command test harness gives every command it runs
+a Bus with a capture and checks the events once the test is over, so each
+command test is also a test of what the command reports. `Tree` draws the
+spans as an indented tree that does not depend on how concurrent work was
+scheduled: the targets that read the same are folded into one line naming
+them as a node set, and siblings are sorted. The tests of a reinstall, the
+power batches, secrets push, provision status, `doctor --remote`, the host key
+scans and a dry run that looks up a group compare trees; a test that does
+takes its own Bus with `watch`. One test runs a set of commands with a Bus
+and without one and compares their standard output, standard error and exit
+status byte for byte, since progress must never reach either stream.
+
 **Command tests** drive the real command tree end to end and assert on what
 would be sent, not on whether the code compiles: that a glob and an apostrophe
 survive the trip, that a declined confirmation sends nothing, that a dry run
