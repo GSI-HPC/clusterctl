@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -107,6 +108,16 @@ func (r *root) inSpan(cmd *cobra.Command, args []string, run func(*cobra.Command
 	r.ctx = ctx
 	err = run(cmd, args)
 	returned = true
+	return err
+}
+
+// inStep runs fn as a step of the work ctx carries, named name, with the
+// flags given, and ends the step with what fn returned: progress.Hidden
+// for the lookups a command makes before it asks or changes anything.
+func inStep(ctx context.Context, name string, flags progress.Flags, fn func(context.Context) error) error {
+	ctx, step := progress.Start(ctx, progress.KindStep, name, progress.WithFlags(flags))
+	err := fn(ctx)
+	step.End(err)
 	return err
 }
 

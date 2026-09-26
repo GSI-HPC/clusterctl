@@ -880,9 +880,13 @@ commands that remove it.
 
 			// Everything is resolved before the first change, so that a
 			// set with one node that cannot be reinstalled stops here
-			// rather than halfway through.
-			plan, err := planReinstall(a.Context(), a, ns, bootPath, keepKeys)
-			if err != nil {
+			// rather than halfway through. These lookups are plumbing a
+			// display shows only when they fail or take long.
+			var plan *reinstallPlan
+			if err := inStep(a.Context(), "resolve", progress.Hidden, func(ctx context.Context) (err error) {
+				plan, err = planReinstall(ctx, a, ns, bootPath, keepKeys)
+				return err
+			}); err != nil {
 				return err
 			}
 			if !noReset {
@@ -896,7 +900,9 @@ commands that remove it.
 			} else {
 				details = append(details, "then each machine is set to boot from the network once and reset through Redfish")
 			}
-			if err := checkBootLinks(a.Context(), a, plan.role, plan.root, plan.links); err != nil {
+			if err := inStep(a.Context(), "check the boot paths", progress.Hidden, func(ctx context.Context) error {
+				return checkBootLinks(ctx, a, plan.role, plan.root, plan.links)
+			}); err != nil {
 				return err
 			}
 			action.Detail = strings.Join(details, "\n  ")
@@ -1071,8 +1077,15 @@ func planReinstall(ctx context.Context, a *app.App, ns *nodeset.NodeSet, explici
 // forgets the host keys and resets the machines. The host keys, which
 // cannot be put back, go only once every machine is armed. When a step
 // fails, every node that was not reset is disarmed again.
+//
+// Each part is a step of its own, named as its failure names it: the one
+// script that writes the boot links, each change sent to the processors,
+// and forgetting the host keys, on this machine.
 func (p *reinstallPlan) run(ctx context.Context, a *app.App, noReset bool) error {
-	err := writeBootLinks(ctx, a, p.role, p.root, p.links)
+	const configuring = "configuring the network boot"
+	err := inStep(ctx, configuring, 0, func(ctx context.Context) error {
+		return writeBootLinks(ctx, a, p.role, p.root, p.links)
+	})
 	for i, l := range p.links {
 		p.nodes[i].BootLink = l.Result
 		if l.Error != "" {
@@ -1080,7 +1093,7 @@ func (p *reinstallPlan) run(ctx context.Context, a *app.App, noReset bool) error
 		}
 	}
 	if err != nil {
-		return p.fail(ctx, a, "configuring the network boot", err, p.nodes)
+		return p.fail(ctx, a, configuring, err, p.nodes)
 	}
 
 	const bootOnce = "setting the machines to boot from the network once"
@@ -1096,16 +1109,19 @@ func (p *reinstallPlan) run(ctx context.Context, a *app.App, noReset bool) error
 	}
 
 	if p.knownHosts != "" {
-		err := hostkeys.Modify(ctx, p.knownHosts, func(f *hostkeys.File) error {
-			for _, n := range p.nodes {
-				for _, name := range n.hostNames {
-					f.Remove(name)
+		const forgetting = "forgetting the host keys"
+		err := inStep(ctx, forgetting, 0, func(ctx context.Context) error {
+			return hostkeys.Modify(ctx, p.knownHosts, func(f *hostkeys.File) error {
+				for _, n := range p.nodes {
+					for _, name := range n.hostNames {
+						f.Remove(name)
+					}
 				}
-			}
-			return nil
+				return nil
+			})
 		})
 		if err != nil {
-			return p.fail(ctx, a, "forgetting the host keys", err, p.nodes)
+			return p.fail(ctx, a, forgetting, err, p.nodes)
 		}
 		p.keysForgotten = true
 	}
@@ -1177,42 +1193,45 @@ func (p *reinstallPlan) settle() {
 
 // fail disarms the given nodes after a step failed: it clears each boot
 // override that may have been set and removes each boot link that may have
-// been written. It returns the error of the step, followed by what became
-// of the set and, for whatever is still armed, the commands that disarm it.
+// been written, as a step of its own, "disarming", when there is anything
+// to undo. It returns the error of the step, followed by what became of the
+// set and, for whatever is still armed, the commands that disarm it.
 func (p *reinstallPlan) fail(ctx context.Context, a *app.App, step string, stepErr error, left []*reinstallNode) error {
-	var overridden []*reinstallNode
+	var overridden, linked []*reinstallNode
+	var links []bootLink
 	for _, n := range left {
 		if n.overridden() {
 			overridden = append(overridden, n)
 		}
-	}
-	errs := sendToBMCs(ctx, a, "clearing the boot overrides", overridden, func(ctx context.Context, c *redfish.Client) error {
-		return c.ClearBootOverride(ctx)
-	})
-	for i, n := range overridden {
-		if errs[i] == nil {
-			n.BootOnce = stepCleared
-		}
-		n.note("clearing the boot override", errs[i])
-	}
-
-	var linked []*reinstallNode
-	var links []bootLink
-	for _, n := range left {
 		if n.linked() {
 			linked = append(linked, n)
 			links = append(links, bootLink{Node: n.Node, Address: n.Address, Path: n.BootPath, Mode: n.Mode})
 		}
 	}
-	if len(links) > 0 {
-		_ = removeBootLinks(ctx, a, p.role, p.root, links)
-		for i, n := range linked {
-			if links[i].Result == stepRemoved {
-				n.BootLink = stepRemoved
-				continue
+	if len(overridden) > 0 || len(links) > 0 {
+		_ = inStep(ctx, "disarming", 0, func(ctx context.Context) error {
+			errs := sendToBMCs(ctx, a, "clearing the boot overrides", overridden, func(ctx context.Context, c *redfish.Client) error {
+				return c.ClearBootOverride(ctx)
+			})
+			for i, n := range overridden {
+				if errs[i] == nil {
+					n.BootOnce = stepCleared
+				}
+				n.note("clearing the boot override", errs[i])
 			}
-			n.Errors = append(n.Errors, "removing the boot link: "+links[i].Error)
-		}
+			var removed error
+			if len(links) > 0 {
+				removed = removeBootLinks(ctx, a, p.role, p.root, links)
+				for i, n := range linked {
+					if links[i].Result == stepRemoved {
+						n.BootLink = stepRemoved
+						continue
+					}
+					n.Errors = append(n.Errors, "removing the boot link: "+links[i].Error)
+				}
+			}
+			return errors.Join(nodeFailures(overridden, errs), removed)
+		})
 	}
 	p.settle()
 

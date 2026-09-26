@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -324,6 +325,61 @@ func TestAnswersAreMatchedToTheWholeName(t *testing.T) {
 	}
 	if s := statusOf(t, statuses, "bmc10"); s.Err != "" {
 		t.Errorf("bmc10 = %+v, want ok", s)
+	}
+}
+
+// Each processor's status is told as the line that answers for it
+// arrives, over either stream, read by the rule Power reads its answers by
+// and so the same as Power returns for it; a processor with no line is
+// told nothing, and of two names that both start a line, as addresses with
+// colons in them may, the line answers for the longer.
+func TestEachAnswerIsToldAsItArrives(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, backend string
+		want          map[string]string
+	}{
+		{"ipmipower", ipmi.BackendIpmipower, map[string]string{"bmc1": "ok", "bmc10": "unknown", "fe80::1:2": "ok"}},
+		{"ipmitool", ipmi.BackendIpmitool, map[string]string{"bmc1": "unknown", "bmc10": "unknown", "fe80::1:2": "unknown"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+				return transport.ExitResult(tg, 0, "bmc1: ok\nfe80::1:2: ok\n", "bmc10: connection timeout\n"), nil
+			}}
+			b := &ipmi.Backend{Runner: rec, Target: transport.Target{Name: "mgmt", Host: "mgmt-gw.example.org"},
+				Spec: v1alpha1.IPMISpec{Backend: tc.backend}, Username: "admin", Password: "hunter2"}
+			var mu sync.Mutex
+			told := map[string]ipmi.Status{}
+			b.Answered = func(s ipmi.Status) {
+				mu.Lock()
+				defer mu.Unlock()
+				if _, again := told[s.BMC]; again {
+					t.Errorf("%s was told twice", s.BMC)
+				}
+				told[s.BMC] = s
+			}
+			bmcs := nodeset.New()
+			for _, bmc := range []string{"bmc1", "bmc10", "bmc2", "fe80::1", "fe80::1:2"} {
+				if err := bmcs.Add(bmc); err != nil {
+					t.Fatal(err)
+				}
+			}
+			statuses, err := b.Power(context.Background(), ipmi.ActionOff, bmcs)
+			if err != nil {
+				t.Fatalf("Power failed: %v", err)
+			}
+			if len(told) != len(tc.want) {
+				t.Errorf("told %v, want %d processors", told, len(tc.want))
+			}
+			for bmc, state := range tc.want {
+				s := statusOf(t, statuses, bmc)
+				if told[bmc].State != state || told[bmc].State != s.State || told[bmc].Err != s.Err {
+					t.Errorf("%s: told %+v, Power returned %+v, want the state %s from both", bmc, told[bmc], s, state)
+				}
+			}
+		})
 	}
 }
 

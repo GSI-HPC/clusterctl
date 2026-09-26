@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,6 +19,8 @@ import (
 	"filippo.io/age"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -269,6 +272,128 @@ func TestProgressLeavesTheOutputAlone(t *testing.T) {
 			}
 			if seen[0] != seen[1] {
 				t.Errorf("with a Bus:\n%s\n\nwithout one:\n%s", seen[0], seen[1])
+			}
+		})
+	}
+}
+
+// watchEvents is watch, and gives the events as well as their tree, for a
+// test of the order the spans ended in.
+func watchEvents(t *testing.T) (ctx context.Context, done func() (string, []progress.Event)) {
+	t.Helper()
+	c := &progresstest.Capture{}
+	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	return progress.WithBus(context.Background(), bus), func() (string, []progress.Event) {
+		t.Helper()
+		bus.Close()
+		events := c.Events()
+		progresstest.Check(t, events)
+		return c.Tree(), events
+	}
+}
+
+// endedDuring returns the targets that ended while the ssh call to role
+// was under way, and those that ended after it.
+func endedDuring(events []progress.Event, role string) (during, after []string) {
+	callOpen := false
+	for _, e := range events {
+		switch {
+		case e.Kind == progress.KindCall && e.Name == "ssh" && e.Role == role:
+			callOpen = e.Type != progress.TypeEnd
+		case e.Kind == progress.KindTarget && e.Type == progress.TypeEnd:
+			if callOpen {
+				during = append(during, e.Name)
+			} else {
+				after = append(after, e.Name)
+			}
+		}
+	}
+	return during, after
+}
+
+// The IPMI backend asks every processor of an account in one run, and a
+// node is counted done as the line that answers for its processor
+// arrives, as the table reads it: an answer, a refusal, and a processor
+// the backend never answered for, which ends only once the run is over.
+func TestIPMIEndsEachNodeAsItsAnswerArrives(t *testing.T) {
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		return transport.ExitResult(tg, 0,
+			"exe0001.mgmt.hpc.example.org: ok\nexe0002.mgmt.hpc.example.org: connection timeout\n", ""), nil
+	}}
+	ctx, done := watchEvents(t)
+	h, err := run(t, harnessOptions{ctx: ctx, recorder: rec},
+		append(noSlurm, "-o", "json", "bmc", "power", "off", "--ipmi", "-y", "-n", "exe[1-3]")...)
+	wantCode(t, err, exitcode.TargetFailed)
+	tree, events := done()
+	want := `
+command bmc power: failed (target): 2 of 3 service processors failed
+  call credential bmc source=env [hidden]: ok
+  step power off total=3 [fold]: failed (target): 2 of 3 service processors failed
+    call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=1m0s exit=0: ok
+    target exe0001: ok
+    target exe0002: failed (target): connection timeout
+    target exe0003: failed (target): not reported by the IPMI backend
+  wait confirm message=power off 3 hosts: ok
+`
+	if tree != want[1:] {
+		t.Errorf("progress:\n%s\nwant:\n%s", tree, want[1:])
+	}
+	during, after := endedDuring(events, "mgmt")
+	if strings.Join(during, ",") != "exe0001,exe0002" || strings.Join(after, ",") != "exe0003" {
+		t.Errorf("ended while the backend ran: %v, after it: %v; want exe0001 and exe0002, then exe0003", during, after)
+	}
+	states := map[string]string{}
+	for _, row := range jsonRows(t, h) {
+		states[row["node"].(string)], _ = row["state"].(string)
+	}
+	if states["exe0001"] != "ok" || states["exe0002"] != "unknown" || states["exe0003"] != "unknown" {
+		t.Errorf("rows say %v", states)
+	}
+}
+
+// fabric state asks about its ports one after the other in one script, and
+// a port is counted done as the line that answers for it arrives, up or
+// down as the table reads it; a port the script stopped before ends only
+// then, with why it stopped. The line of the port under way when the
+// script stopped never ended, and is no answer.
+func TestFabricStateEndsEachPortAsItsAnswerArrives(t *testing.T) {
+	for _, tc := range []struct {
+		name, stdout string
+		status, code int
+		during       string
+		want         string
+	}{
+		{"every port answers", "0|Active|LinkUp|4X|10.0 Gbps\n1|Down|Polling||\n", 0, exitcode.TargetFailed, "exe0001,exe0002", `
+command fabric state: failed (target): 1 of 2 ports are not up
+  call read /etc/dhcp/dhcpd.conf host=dhcp01.example.org role=dhcp cache=miss [hidden]: ok
+    call ssh node=dhcp host=dhcp01.example.org role=dhcp timeout=10m0s exit=0 [hidden]: ok
+  step query ports total=2 [fold]: failed (target): 1 of 2 ports are not up
+    call ssh node=fabric host=ibgw01.example.org role=fabric timeout=10m0s exit=0: ok
+    target exe0001: ok
+    target exe0002: failed (target): the port is down: link Down, physical Polling
+`},
+		{"the script runs out of time", "0|Active|LinkUp|4X|10.0 Gbps\n1|", 124, exitcode.TargetFailed, "exe0001", `
+command fabric state: failed (target): 1 of 2 ports are not up, and the fabric host stopped before it had answered for all: fabric (ibgw01.example.org): command exited 124
+  call read /etc/dhcp/dhcpd.conf host=dhcp01.example.org role=dhcp cache=miss [hidden]: ok
+    call ssh node=dhcp host=dhcp01.example.org role=dhcp timeout=10m0s exit=0 [hidden]: ok
+  step query ports total=2 [fold]: failed (target): 1 of 2 ports are not up, and the fabric host stopped before it had answered for all: fabric (ibgw01.example.org): command exited 124
+    call ssh node=fabric host=ibgw01.example.org role=fabric timeout=10m0s exit=124: failed (target): fabric (ibgw01.example.org): command exited 124
+    target exe0001: ok
+    target exe0002: failed (target): fabric (ibgw01.example.org): command exited 124
+`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, done := watchEvents(t)
+			_, err := run(t, harnessOptions{ctx: ctx, recorder: fabricAnswers(tc.stdout, tc.status, "")},
+				"fabric", "state", "-n", "exe0001,exe0002")
+			wantCode(t, err, tc.code)
+			tree, events := done()
+			if tree != tc.want[1:] {
+				t.Errorf("progress:\n%s\nwant:\n%s", tree, tc.want[1:])
+			}
+			if during, _ := endedDuring(events, "fabric"); strings.Join(during, ",") != tc.during {
+				t.Errorf("ended while the script ran: %v, want %s", during, tc.during)
 			}
 		})
 	}

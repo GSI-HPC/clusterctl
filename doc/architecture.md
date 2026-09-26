@@ -194,9 +194,9 @@ the run. A pool on `Map` reports its work as the spans of `internal/progress`:
 a step, with every target queued before the first one runs and each ended
 before it gives its place to the next, so that a display never counts more
 running than the bound, and has counted every target, those an interrupt left
-out among them, by the time the step ends. `Batches` reports each batch the
-same way, all of them announced before the first is sent, and the pauses
-between them as waits.
+out among them, and those left out on purpose, which end skipped, by the time
+the step ends. `Batches` reports each batch the same way, all of them
+announced before the first is sent, and the pauses between them as waits.
 
 A panic while one target is worked on is recovered in that target's worker,
 since `recover` only reaches its own goroutine, and becomes that target's

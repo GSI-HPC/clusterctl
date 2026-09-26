@@ -20,6 +20,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
@@ -253,7 +254,7 @@ func addLoseJobsFlag(cmd *cobra.Command, loseJobs *bool) {
 // a node Slurm did not report and a Slurm that cannot be asked all refuse
 // the action, unless loseJobs is set. It asks Slurm even in a dry run, so
 // that the dry run refuses what the real run would.
-func checkSlurmIdle(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, action string, loseJobs bool) error {
+func checkSlurmIdle(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, action string, loseJobs bool) (err error) {
 	if action == ipmi.ActionStatus || action == ipmi.ActionOn {
 		return nil
 	}
@@ -266,6 +267,10 @@ func checkSlurmIdle(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, act
 		return nil
 	}
 
+	// The check is plumbing, which a display shows only when it refuses
+	// the nodes, cannot ask, or takes long.
+	ctx, step := progress.Start(ctx, progress.KindStep, "check Slurm jobs", progress.WithFlags(progress.Hidden))
+	defer func() { step.End(err) }()
 	c, err := a.Slurm()
 	var jobs slurm.JobState
 	if err == nil {
@@ -604,11 +609,16 @@ management network, and report which of them answer.`,
 
 			// fping answers for a whole list in one run and prints the hosts
 			// that answered. The list follows --, so no name is read as an
-			// option.
+			// option. It prints them once the sweep is over, so the step
+			// knows how many processors it asks, but not which answered
+			// until it ends.
+			ctx, step := progress.Start(a.Context(), progress.KindStep, "ping", progress.Total(bmcs.Len()))
 			argv := append([]string{"fping", "-a", "-q", "-r", "1", "--"}, bmcs.Expand()...)
-			result, err := a.Runner.Run(a.Context(), target, a.Collect(transport.Request{Argv: argv, Timeout: 2 * time.Minute}))
+			result, err := a.Runner.Run(ctx, target, a.Collect(transport.Request{Argv: argv, Timeout: 2 * time.Minute}))
 			if err != nil {
-				return bmcError(a.Context(), exitcode.Wrap(exitcode.Transport, err), false)
+				err = bmcError(a.Context(), exitcode.Wrap(exitcode.Transport, err), false)
+				step.End(err)
+				return err
 			}
 			// fping exits 1 when a host did not answer and 2 when a name did
 			// not resolve; anything else, or a failed connection, means the
@@ -618,8 +628,10 @@ management network, and report which of them answer.`,
 				if detail == "" && result.Err != nil {
 					detail = result.Err.Error()
 				}
-				return bmcError(a.Context(), exitcode.Errorf(exitcode.Transport,
+				err := bmcError(a.Context(), exitcode.Errorf(exitcode.Transport,
 					"the sweep with fping on %s failed (exit %d): %s", target, result.ExitCode, detail), false)
+				step.End(err)
+				return err
 			}
 
 			alive := nodeset.New()
@@ -640,18 +652,20 @@ management network, and report which of them answer.`,
 				t.Add(name, state)
 			}
 			t.Caption = fmt.Sprintf("%d of %d answered", alive.Len(), bmcs.Len())
+			var silent error
+			switch {
+			case result.ExitCode == 2:
+				silent = exitcode.Errorf(exitcode.Transport,
+					"%d service processors did not answer, and fping could not resolve some of them", bmcs.Len()-alive.Len())
+			case alive.Len() < bmcs.Len():
+				silent = exitcode.Errorf(exitcode.TargetFailed,
+					"%d service processors did not answer", bmcs.Len()-alive.Len())
+			}
+			step.End(silent)
 			if err := a.Print(output.Result{Table: t}); err != nil {
 				return err
 			}
-			if result.ExitCode == 2 {
-				return exitcode.Errorf(exitcode.Transport,
-					"%d service processors did not answer, and fping could not resolve some of them", bmcs.Len()-alive.Len())
-			}
-			if alive.Len() < bmcs.Len() {
-				return exitcode.Errorf(exitcode.TargetFailed,
-					"%d service processors did not answer", bmcs.Len()-alive.Len())
-			}
-			return nil
+			return silent
 		}))
 }
 
