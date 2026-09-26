@@ -78,10 +78,10 @@ type Streams struct {
 	// prompt. It is nil when standard error is not a terminal, or there are
 	// no jobs to tell apart.
 	Foreground func() bool
-	// Display says a progress display is drawn on standard error while the
-	// command runs, through Out and Err, which take it off before they
-	// write. Nothing else may draw there then: scp's progress meter is left
-	// off.
+	// Display says a progress display, the counter or plain lines, is shown
+	// on standard error while the command runs, through Out and Err, which
+	// keep what the command writes clear of it. Nothing else may draw there
+	// then: scp's progress meter is left off.
 	Display bool
 
 	StateDir string

@@ -119,7 +119,39 @@ split by `|`. While no such step runs, the line names the step or the command
 that does. It is taken off before anything else is written and drawn again
 below it, it stays off while a question waits for its answer, and it is gone
 before the command ends, so what is left on the terminal is what the command
-printed.
+printed, and one line more for a command that ran for a second or longer or
+whose targets did not all succeed:
+
+```console
+provision reinstall: 478 ok, 2 failed in 18m03s
+```
+
+It counts each node once, as the worst of the ways it fared in the command's
+steps, and says how long the command ran; the error after it says which nodes
+failed and why.
+
+Plain lines are for a log, a CI job's for instance, as much as for a terminal:
+a line for each thing worth one, with the time since the command started in
+front, and no escape codes:
+
+```console
+[0:00] bmc power › power off: start, 480 hosts, 8 at a time
+[0:03] bmc power › power off › exe0007 failed (transport): exe0007.mgmt: dial tcp: i/o timeout
+[0:10] bmc power › power off: 312/480 done, 1 failed, 8 running, 160 queued
+[0:18] bmc power › power off: failed in 18s: 478 ok, 2 failed
+bmc power: 478 ok, 2 failed in 18s
+```
+
+A line names a step by its path from the command. There is one as a step or a
+batch starts and as it ends, with how its targets ended; one as a pause between
+two batches starts; one for each target that fails, once, with why; and, every
+ten seconds, one for each step under way that works on many targets, with how
+far it has got. The lookups a command makes before it asks, the single
+requests and what the hosts print get none: `exec` prints the output at the
+end, and `-o json` and `-o yaml` carry it whole. The summary comes last, as it
+does after the counter. The lines are written to standard error ahead of
+whatever the command writes after the work they tell of, never into the middle
+of a line, and not while a question waits for its answer.
 
 `--progress`, or `CLUSTERCTL_PROGRESS` when the flag is not given, chooses what
 is shown:
@@ -128,18 +160,19 @@ is shown:
 | --- | --- |
 | `auto`, the default | The counter when standard error is a terminal and `TERM` is not `dumb`, and nothing otherwise |
 | `counter` | The counter; refused when standard error is not a terminal or `TERM` is `dumb` |
+| `plain` | Plain lines, with or without a terminal |
 | `none` | Nothing |
 
-Without a terminal, in a pipe, a file or a CI log, nothing is drawn: standard
-error holds exactly what it holds with `--progress none`. The format given with
-`-o` changes nothing here, since progress never touches standard output.
-scp's own progress meter is left off while the counter is drawn. The commands
-that hand the terminal to another program, such as `login` and the shells,
-draw nothing, and neither do the commands an agent runs through `clusterctl
-mcp`. ssh can still ask a question on the terminal by itself, a passphrase
-for instance, which clusterctl does not see; if the counter is drawn over it,
-the question still waits for its answer, and `--progress none` leaves the
-terminal to ssh.
+Without a terminal, in a pipe, a file or a CI log, nothing is shown unless
+`plain` is asked for: standard error holds exactly what it holds with
+`--progress none`. The format given with `-o` changes nothing here, since
+progress never touches standard output. scp's own progress meter is left off
+while progress is shown. The commands that hand the terminal to another
+program, such as `login` and the shells, show nothing, and neither do the
+commands an agent runs through `clusterctl mcp`. ssh can still ask a question
+on the terminal by itself, a passphrase for instance, which clusterctl does not
+see; if the counter is drawn over it, the question still waits for its answer,
+and `--progress none` leaves the terminal to ssh.
 
 An error message often quotes what a node, a BMC or a group source said, so it
 is escaped the same way before it is printed, except that newlines and tabs are

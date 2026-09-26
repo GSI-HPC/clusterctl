@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -139,13 +140,16 @@ const (
 	// progressCounter is one line on standard error, redrawn as the work
 	// goes on.
 	progressCounter = "counter"
+	// progressPlain is a line on standard error for each thing worth one,
+	// with no escape codes, for a log as much as a terminal.
+	progressPlain = "plain"
 	// progressNone shows nothing: standard error carries what it would
 	// without progress, byte for byte.
 	progressNone = "none"
 )
 
 // progressModes are the values --progress takes.
-var progressModes = []string{progressAuto, progressCounter, progressNone}
+var progressModes = []string{progressAuto, progressCounter, progressPlain, progressNone}
 
 // progressMode returns how a command's progress is shown: as --progress
 // says, else CLUSTERCTL_PROGRESS, else auto, which draws the counter where
@@ -157,7 +161,8 @@ var progressModes = []string{progressAuto, progressCounter, progressNone}
 // and nothing keeps the two apart; asked for, the counter is drawn all the
 // same. A counter --progress asks for where it cannot be drawn is refused
 // rather than dropped, so that the one who asked finds out why nothing
-// shows.
+// shows. Plain
+// lines need no terminal, and are shown wherever they are asked for.
 //
 // The variable is set once, in a profile, and inherited by the cron jobs
 // and CI steps whose standard error is no terminal, which never asked for
@@ -196,7 +201,7 @@ func (r *root) progressMode() (mode, note string, err error) {
 		}
 		return "", "", exitcode.Errorf(exitcode.Usage,
 			"%s asks for a counter, but %s; use none, or auto to draw one only where it can be", from, unfit)
-	case progressNone:
+	case progressPlain, progressNone:
 		return mode, "", nil
 	}
 	unknown := fmt.Sprintf("%s is %q; it takes one of %s", from, mode, strings.Join(progressModes, ", "))
@@ -206,28 +211,51 @@ func (r *root) progressMode() (mode, note string, err error) {
 	return "", "", exitcode.Errorf(exitcode.Usage, "%s", unknown)
 }
 
-// startCounter makes the counter a command's progress is drawn as, on term,
-// and starts drawing it. The tests draw the frames themselves, on a clock of
-// their own.
-var startCounter = func(term *display.Terminal) *display.Counter {
-	counter := display.NewCounter(term, display.CounterOptions{})
+// renderer is a display a command's progress is shown by: a sink of its
+// Bus, closed once the Bus is.
+type renderer interface {
+	progress.Sink
+	Close()
+}
+
+// startDisplay makes the display a command's progress is shown by in mode,
+// on term, and starts it. The tests replace it to draw the frames
+// themselves, on a clock of their own that they make displayClock too.
+var startDisplay = func(mode string, term *display.Terminal) renderer {
+	if mode == progressPlain {
+		plain := display.NewPlain(term, display.PlainOptions{Now: displayClock})
+		plain.Start()
+		return plain
+	}
+	counter := display.NewCounter(term, display.CounterOptions{Now: displayClock})
 	counter.Start()
 	return counter
 }
 
-// display returns the Bus a command's progress is drawn from when nothing
-// watches the command already, and what takes the display off the terminal
-// and puts the streams back once the Bus is closed; no Bus when --progress
-// has nothing drawn. An agent's commands never draw; the MCP server gives
-// them a Bus of its own.
+// displayClock is the clock of a display's Bus.
+var displayClock = time.Now
+
+// display returns the Bus a command's progress is shown from when nothing
+// watches the command already, and what takes the display off the terminal,
+// puts the streams back and leaves the summary once the Bus is closed; no
+// Bus when --progress has nothing shown. An agent's commands never show
+// anything; the MCP server gives them a Bus of its own.
 //
-// Everything the command writes where the display draws goes through the
-// writers of its terminal, which take the display off first: standard
-// error, the diagnostics, and standard output when it shows on the terminal
-// too, of the command context and of cobra alike, whose output printExec
-// and the help write to. They are put in place before the command context
-// is built, which copies the streams, and only while a display is drawn:
-// without one, nothing stands between the command and its streams.
+// Everything the command writes where the display shows goes through the
+// writers of its terminal, which take the counter off first, or write the
+// plain lines that came before: standard error, the diagnostics, and
+// standard output when it shows on the terminal too, or wherever it goes
+// for plain lines, which a log may keep along with the output; those of the
+// command context and cobra's alike, which printExec and the help write to.
+// They are put in place before the command context is built, which copies
+// the streams, and only while a display is shown: without one, nothing
+// stands between the command and its streams.
+//
+// The summary is one line on standard error once the display is gone, and
+// before the command's error, for a command that ran for a second or more:
+// how many of its targets ended how, and how long it ran. It says it is
+// clusterctl's, as the error does, so that it is not read as a host's. What
+// failed and why is the error's to say.
 func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 	mode, modeNote, err := r.progressMode()
 	if modeNote != "" {
@@ -246,11 +274,12 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 	if term.PanicLog == nil {
 		term.PanicLog = r.streams.Err
 	}
-	counter := startCounter(term)
+	shown := startDisplay(mode, term)
+	summary := &display.Summary{}
 
 	saved, top := r.streams, cmd.Root()
 	out, errOut := top.OutOrStdout(), top.ErrOrStderr()
-	if r.streams.OutIsTTY {
+	if r.streams.OutIsTTY || mode == progressPlain {
 		r.streams.Out = term.Writer(r.streams.Out)
 		top.SetOut(term.Writer(out))
 	}
@@ -263,11 +292,16 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 	}
 	r.streams.Display = true
 
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{counter}, PanicLog: diag})
+	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{shown, summary}, Now: displayClock, PanicLog: diag})
 	return bus, func() {
-		counter.Close()
+		shown.Close()
 		r.streams = saved
 		top.SetOut(out)
 		top.SetErr(errOut)
+		if line := summary.Line(); line != "" {
+			// The summary is a courtesy; a line that cannot be written
+			// changes nothing about the command.
+			_, _ = fmt.Fprintln(saved.Err, "clusterctl: "+line)
+		}
 	}, nil
 }

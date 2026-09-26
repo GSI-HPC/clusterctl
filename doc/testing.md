@@ -104,12 +104,16 @@ commands with a Bus and without one and compares their standard output,
 standard error and exit status byte for byte, since progress must never reach
 either stream.
 
-**The counter** is tested on a terminal that is a buffer and a clock the test
-moves: `display.Counter.Draw` draws one frame, and the command tests replace
-`startCounter` with `fakeCounters`, whose counters are drawn only when the
-test says, from a fake transport's answer or a pause between batches. So a
-frame shows the same counts on every run, and no test waits for the counter's
-second or its ticks.
+**The displays** are tested on a terminal that is a buffer and a clock the
+test moves: `display.Counter.Draw` draws one frame, `display.Plain.Draw`
+writes the lines held and the heartbeats due, and the command tests replace
+`startDisplay` with `fakeDisplays`, whose displays are drawn only when the
+test says, from a fake transport's answer or a pause between batches, on a
+clock the displays' Bus reads too. So a frame or a plain line shows the same
+counts and times on every run, and no test waits for the counter's second,
+a heartbeat's ten or their ticks. The plain lines of a fan-out, a power-on in
+batches and a reinstall that fails are compared whole, the summary among
+them.
 
 **Command tests** drive the real command tree end to end and assert on what
 would be sent, not on whether the code compiles: that a glob and an apostrophe

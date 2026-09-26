@@ -738,7 +738,7 @@ func TestProvisionStatusReportsEveryNode(t *testing.T) {
 // other.
 func TestProvisionStatusAsksTheProcessorsAndTheNodesAtOnce(t *testing.T) {
 	h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
-	c := fakeCounters(t)
+	c := fakeDisplays(t)
 	processorAsked, drawn := make(chan struct{}), make(chan struct{})
 	var firstRequest, firstNode sync.Once
 	fake := provisionClient
