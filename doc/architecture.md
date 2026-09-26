@@ -114,6 +114,14 @@ except in the commands that open an interactive session. That is what lets a
 dry run swap in a recorder and a test drive the whole program without a
 cluster.
 
+Every leaf command but an interactive one runs in a progress span of its own,
+which `cli` opens before the command context is built, so that
+`App.Context()`, the gate and the group resolver carry it and whatever the
+command reports nests under it. `app.New` wraps both runners in
+`transport.Traced`, which reports every request as an `ssh` call under the
+span its context carries: a dry run's recorded requests end skipped, and its
+lookups through `ReadRunner`, which reach the host, end as they came back.
+
 ## What runs where
 
 clusterctl runs on an administrator's workstation. Almost everything it does
