@@ -29,6 +29,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 )
 
@@ -413,6 +414,10 @@ type Scanner struct {
 // Scan collects the host key a host offers. The algorithms are offered in one
 // handshake, best first, so the server picks the strongest it has and an
 // unreachable host costs one timeout rather than one for each algorithm.
+//
+// A host whose key could not be collected did not answer as an ssh server
+// does, whatever stopped it, so the error is a transport failure, the code
+// the scan commands exit with.
 func (s *Scanner) Scan(ctx context.Context, host string) ([]Entry, error) {
 	port := cmp.Or(s.Port, "22")
 	timeout := s.Timeout
@@ -429,7 +434,7 @@ func (s *Scanner) Scan(ctx context.Context, host string) ([]Entry, error) {
 	address := net.JoinHostPort(host, port)
 	entry, err := scanOne(ctx, dial, address, host, DefaultAlgorithms, timeout)
 	if err != nil {
-		return nil, fmt.Errorf("no host key could be collected from %s: %w", host, err)
+		return nil, exitcode.Wrap(exitcode.Transport, fmt.Errorf("no host key could be collected from %s: %w", host, err))
 	}
 	return []Entry{entry}, nil
 }

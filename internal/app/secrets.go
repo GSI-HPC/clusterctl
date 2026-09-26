@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/secrets"
 )
 
@@ -57,8 +59,10 @@ func (a *App) identityFilesLocked() ([]secrets.IdentityFile, error) {
 
 // SecretValue decrypts the Secret document a reference names, once per
 // process, and returns the value of the key. The plaintext stays in memory.
-func (a *App) SecretValue(ref v1alpha1.SecretKeyRef) ([]byte, error) {
-	values, err := a.SecretValues(ref.Name)
+// The decryption is reported under the span ctx carries, the credential or
+// the step that needs it.
+func (a *App) SecretValue(ctx context.Context, ref v1alpha1.SecretKeyRef) ([]byte, error) {
+	values, err := a.SecretValues(ctx, ref.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -71,8 +75,10 @@ func (a *App) SecretValue(ref v1alpha1.SecretKeyRef) ([]byte, error) {
 	return value, nil
 }
 
-// SecretValues decrypts a whole Secret document.
-func (a *App) SecretValues(name string) (map[string][]byte, error) {
+// SecretValues decrypts a whole Secret document. The decryption, which runs
+// sops, is reported as a hidden call; a document decrypted before is not
+// decrypted again, and not reported.
+func (a *App) SecretValues(ctx context.Context, name string) (map[string][]byte, error) {
 	s := &a.secrets
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -97,10 +103,15 @@ func (a *App) SecretValues(name string) (map[string][]byte, error) {
 			return nil, err
 		}
 	}
-	sections, err := secrets.DecryptSops(a.Context(), a.sopsLocked(), raw, keys, config.SecretSections())
+	ctx, decrypt := progress.Start(ctx, progress.KindCall, "decrypt the Secret "+name,
+		progress.WithFlags(progress.Hidden), progress.Source("sops"))
+	sections, err := secrets.DecryptSops(ctx, a.sopsLocked(), raw, keys, config.SecretSections())
 	if err != nil {
-		return nil, exitcode.Wrap(exitcode.Usage, fmt.Errorf("the Secret %q (%s): %w", name, doc.File, err))
+		err = exitcode.Wrap(exitcode.Usage, fmt.Errorf("the Secret %q (%s): %w", name, doc.File, err))
+		decrypt.End(err)
+		return nil, err
 	}
+	decrypt.End(nil)
 	values, err := config.SecretValues(doc.File, sections)
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
@@ -136,16 +147,20 @@ func (a *App) sopsLocked() *secrets.Sops {
 
 // SecretContent decrypts one secret file of the site into memory, from its
 // own age encrypted file or from a key of a Secret document.
-func (a *App) SecretContent(file v1alpha1.SecretFile) ([]byte, error) {
+func (a *App) SecretContent(ctx context.Context, file v1alpha1.SecretFile) ([]byte, error) {
 	if file.SecretRef != nil {
-		return a.SecretValue(*file.SecretRef)
+		return a.SecretValue(ctx, *file.SecretRef)
 	}
-	return a.AgeFile(file.Source)
+	return a.AgeFile(ctx, file.Source)
 }
 
 // AgeFile decrypts an age encrypted file of the site into memory, with the
-// identities of the workstation.
-func (a *App) AgeFile(path string) ([]byte, error) {
+// identities of the workstation. The decryption is reported as a hidden
+// call, under the span ctx carries.
+func (a *App) AgeFile(ctx context.Context, path string) (_ []byte, err error) {
+	_, decrypt := progress.Start(ctx, progress.KindCall, "decrypt "+path,
+		progress.WithFlags(progress.Hidden), progress.Source("age"))
+	defer func() { decrypt.End(err) }()
 	ids, err := a.Identities()
 	if err != nil {
 		return nil, err

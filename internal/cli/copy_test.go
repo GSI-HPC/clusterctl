@@ -207,3 +207,34 @@ func TestCopyRefusesShellSyntaxInRemotePaths(t *testing.T) {
 		})
 	}
 }
+
+// Each transfer is a call under its node's target, which says how it ended:
+// a transfer scp failed is the node's failure, and one given up on at its
+// timeout ran out of time.
+func TestCopyReportsEachTransferAsACall(t *testing.T) {
+	binary, _ := fakeScp(t, `case "$*" in
+*exe0002*) echo "scp: /etc/hosts: Permission denied" >&2; exit 1 ;;
+*exe0003*) exec sleep 30 ;;
+esac`)
+	ctx, tree := watch(t)
+	_, err := run(t, harnessOptions{ctx: ctx}, "--set", "ssh.scpBinary="+binary, "-y",
+		"copy", "-n", "exe[1-3]", "--timeout", "1s", "/etc/hosts", "/etc/hosts")
+	wantCode(t, err, exitcode.Transport)
+	// A summary takes the class of the first of its failures that says one,
+	// the timeout here, where its exit code is the worst of them, 3. The
+	// timeout leaves the transfers that end at once a wide margin on a slow
+	// machine.
+	want := `command copy: failed (timeout): 2 of 3 hosts failed: exe[0002-0003]
+  step copy total=3 limit=24 [fold]: failed (timeout): 2 of 3 failed: exe[0002-0003]
+    target exe0001: ok
+      call scp node={} host={} timeout=1s exit=0: ok
+    target exe0002: failed (target): {} ({}): command exited 1
+      call scp node={} host={} timeout=1s exit=1: failed (target): {} ({}): command exited 1
+    target exe0003: failed (timeout): {} ({}): the transfer did not finish within 1s: context deadline exceeded
+      call scp node={} host={} timeout=1s: failed (timeout): {} ({}): the transfer did not finish within 1s: context deadline exceeded
+  wait confirm message=copy files to 3 hosts: ok
+`
+	if got := tree(); got != want {
+		t.Errorf("progress:\n%s\nwant:\n%s", got, want)
+	}
+}

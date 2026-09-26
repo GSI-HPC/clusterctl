@@ -517,39 +517,60 @@ func TestReinstallReportsEveryNodeOfEachStep(t *testing.T) {
 	}{
 		{"every node reinstalls", func(*reinstallHost) {}, exitcode.OK, `
 command provision reinstall: ok
+  call credential bmc source=env [hidden]: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
   step resetting the machines total=3 limit=8 [fold]: ok
     target exe[0001-0003]: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
+      call redfish host={} method=POST path=/redfish/v1/Systems/1/Actions/ComputerSystem.Reset http=200: ok
   step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
     target exe[0001-0003]: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
+      call redfish host={} method=PATCH path=/redfish/v1/Systems/1 http=200: ok
+  wait confirm message=reinstall 3 hosts: ok
 `},
 		{"a boot override fails", func(h *reinstallHost) { h.bmcs.down["exe0002"] = true }, exitcode.Transport, `
 command provision reinstall: failed (transport): setting the machines to boot from the network once failed: exe0002: exe0002.mgmt.hpc.example.org: dial tcp: connection refused; the boot links and boot overrides of exe[0001-0003] were removed again
+  call credential bmc source=env [hidden]: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
   step clearing the boot overrides total=2 limit=8 [fold]: ok
     target exe[0001,0003]: ok
+      call redfish host={} method=PATCH path=/redfish/v1/Systems/1 http=200: ok
   step setting the machines to boot from the network once total=3 limit=8 [fold]: failed (transport): 1 of 3 failed: exe0002
     target exe0002: failed (transport): {}: dial tcp: connection refused
+      call redfish host={} method=GET path=/redfish/v1/Systems/1: failed (transport): {}: dial tcp: connection refused
     target exe[0001,0003]: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
+      call redfish host={} method=PATCH path=/redfish/v1/Systems/1 http=200: ok
+  wait confirm message=reinstall 3 hosts: ok
 `},
 		{"a reset fails", func(h *reinstallHost) { h.bmcs.refuse["exe0002"] = "ForceRestart" }, exitcode.TargetFailed, `
 command provision reinstall: failed (target): resetting the machines failed: exe0002: exe0002.mgmt.hpc.example.org: 400 Bad Request: refused; exe[0001,0003] is reinstalling; the boot links and boot overrides of exe0002 were removed again, but their host keys are forgotten; "clusterctl hostkey refresh -n exe0002" writes them again
+  call credential bmc source=env [hidden]: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
   step clearing the boot overrides total=1 limit=8 [fold]: ok
     target exe0002: ok
+      call redfish host={} method=PATCH path=/redfish/v1/Systems/1 http=200: ok
   step resetting the machines total=3 limit=8 [fold]: failed (target): 1 of 3 failed: exe0002
     target exe0002: failed (target): {}: 400 Bad Request: refused
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
+      call redfish host={} method=POST path=/redfish/v1/Systems/1/Actions/ComputerSystem.Reset http=400: failed (target): {}: 400 Bad Request: refused
     target exe[0001,0003]: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
+      call redfish host={} method=POST path=/redfish/v1/Systems/1/Actions/ComputerSystem.Reset http=200: ok
   step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
     target exe[0001-0003]: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
+      call redfish host={} method=PATCH path=/redfish/v1/Systems/1 http=200: ok
+  wait confirm message=reinstall 3 hosts: ok
 `},
 		{"a boot link fails", func(h *reinstallHost) {
 			// A directory where the link of exe0002 goes cannot be
@@ -559,10 +580,12 @@ command provision reinstall: failed (target): resetting the machines failed: exe
 			}
 		}, exitcode.TargetFailed, `
 command provision reinstall: failed (target): configuring the network boot failed: the boot link of exe0002 could not be changed; the boot links and boot overrides of exe[0001,0003] were removed again
+  call credential bmc source=env [hidden]: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
   call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
+  wait confirm message=reinstall 3 hosts: ok
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -330,8 +330,8 @@ func TestHostkeyScanReportsEveryNode(t *testing.T) {
 	}{
 		{"a host that does not answer", nil, []string{"hostkey", "scan", "-n", "exe[1-3]"}, false, `
 command hostkey scan: failed (transport): 1 of 3 hosts did not answer
-  step scan the host keys total=3 limit=24 [fold]: failed (target): 1 of 3 failed: exe0002
-    target exe0002: failed (target): no host key could be collected from {}: dial tcp: connection refused
+  step scan the host keys total=3 limit=24 [fold]: failed (transport): 1 of 3 failed: exe0002
+    target exe0002: failed (transport): no host key could be collected from {}: dial tcp: connection refused
     target exe[0001,0003]: ok
 `},
 		{"a processor with no name", []string{noBMCName, bmcAddressInventory(t)},

@@ -4,6 +4,7 @@
 package groups
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"testing"
@@ -21,7 +22,7 @@ func TestALookupThatPanicsIsForgotten(t *testing.T) {
 	panicked := make(chan any, 1)
 	go func() {
 		defer func() { panicked <- recover() }()
-		_, _ = r.lookup(key, func() (string, error) {
+		_, _ = r.lookup(context.Background(), key, "resolve @static:compute", func(*asking) (string, error) {
 			close(started)
 			<-release
 			panic("the source's reply could not be read")
@@ -30,7 +31,7 @@ func TestALookupThatPanicsIsForgotten(t *testing.T) {
 	<-started
 	waited := make(chan error, 1)
 	go func() {
-		_, err := r.lookup(key, func() (string, error) {
+		_, err := r.lookup(context.Background(), key, "resolve @static:compute", func(*asking) (string, error) {
 			t.Error("a caller that waited ran find itself")
 			return "", nil
 		})
@@ -53,7 +54,7 @@ func TestALookupThatPanicsIsForgotten(t *testing.T) {
 	if err := <-waited; !errors.Is(err, errAbandoned) {
 		t.Errorf("the caller that waited got %v, want errAbandoned", err)
 	}
-	expr, err := r.lookup(key, func() (string, error) {
+	expr, err := r.lookup(context.Background(), key, "resolve @static:compute", func(*asking) (string, error) {
 		return "exe[1-4]", nil
 	})
 	if err != nil || expr != "exe[1-4]" {

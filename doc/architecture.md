@@ -125,7 +125,12 @@ lookups through `ReadRunner`, which reach the host, end as they came back.
 on the output drops any of it: a display is shown them where a step shows
 lines, as exec's does, and a parser is handed those that ended through
 `Request.OnLine`, so that it can end a target before the command has. Standard
-input, which carries secrets, is never looked at.
+input, which carries secrets, is never looked at. A Redfish request and a copy
+are calls too, and so, hidden unless they fail or take long, are the plumbing:
+a credential read, a file read from a host, a group lookup and a decryption,
+each saying where its answer came from but never what it was. The
+confirmation is a wait, and a display is off the terminal while its question
+is asked and answered.
 
 ## What runs where
 

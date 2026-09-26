@@ -111,7 +111,7 @@ This overwrites files on the nodes, so it asks first.
 			}
 			contents := make([][]byte, len(files))
 			for i, file := range files {
-				if contents[i], err = a.SecretContent(file); err != nil {
+				if contents[i], err = a.SecretContent(a.Context(), file); err != nil {
 					return err
 				}
 			}
@@ -299,7 +299,7 @@ plaintext. The caption of the table names the sops that decrypts.
 				}
 				if err == nil && decrypt {
 					status = "decrypts"
-					_, err = a.SecretValues(name)
+					_, err = a.SecretValues(a.Context(), name)
 				}
 				if err != nil {
 					status = "fails: " + err.Error()

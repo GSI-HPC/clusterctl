@@ -399,33 +399,50 @@ func TestBMCPowerReportsEachNodeOnceAcrossItsTransports(t *testing.T) {
 		{"bmc status over Redfish alone", ipmiOK(),
 			[]string{"--set", "bmc.order=[redfish]", "bmc", "status", "-n", "exe[0001,0003-0004]"}, `
 command bmc status: failed (target): 1 of 3 service processors failed
+  call credential bmc source=env [hidden]: ok
   step power status total=3 [fold]: failed (target): 1 of 3 service processors failed
     target exe0003: failed (target): {}: Internal Server Error: busy
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=500: failed (target): {}: Internal Server Error: busy
     target exe[0001,0004]: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
 `},
 		{"a read that falls back to IPMI and fails there too", ipmiFailing("on"),
 			[]string{"bmc", "status", "-n", "exe[0001-0003]"}, `
 command bmc status: failed (target): 1 of 3 service processors failed
+  call credential bmc source=env [hidden]: ok
   step power status total=3 [fold]: failed (target): 1 of 3 service processors failed
     call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=1m0s exit=0: ok
+    target exe0001: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
     target exe0002: failed (target): connection timeout; before that, Redfish failed: {}: dial tcp: connection refused
-    target exe[0001,0003]: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1: failed (transport): {}: dial tcp: connection refused
+    target exe0003: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=500: failed (target): {}: Internal Server Error: busy
 `},
 		{"an action that falls back only where it was never sent", ipmiOK(),
 			[]string{"bmc", "power", "off", "-y", "-n", "exe[0001-0003]"}, `
 command bmc power: failed (target): 1 of 3 service processors failed
+  call credential bmc source=env [hidden]: ok
   step power off total=3 [fold]: failed (target): 1 of 3 service processors failed
     call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=1m0s exit=0: ok
+    target exe0001: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
+      call redfish host={} method=POST path=/redfish/v1/Systems/1/Actions/ComputerSystem.Reset http=200: ok
+    target exe0002: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1: failed (transport): {}: dial tcp: connection refused
     target exe0003: failed (target): {}: Internal Server Error: busy
-    target exe[0001-0002]: ok
+      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=500: failed (target): {}: Internal Server Error: busy
+  wait confirm message=power off 3 hosts: ok
 `},
 		{"IPMI alone", ipmiFailing("ok"),
 			[]string{"bmc", "power", "off", "--ipmi", "-y", "-n", "exe[0001-0003]"}, `
 command bmc power: failed (target): 1 of 3 service processors failed
+  call credential bmc source=env [hidden]: ok
   step power off total=3 [fold]: failed (target): 1 of 3 service processors failed
     call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=1m0s exit=0: ok
     target exe0002: failed (target): connection timeout
     target exe[0001,0003]: ok
+  wait confirm message=power off 3 hosts: ok
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -518,6 +535,7 @@ func TestBMCPowerReportsItsBatches(t *testing.T) {
 			},
 			map[string]string{"exe0001": "ok", "exe0005": "unknown", "exe0007": "not tried", "exe0010": "not tried"}, `
 command bmc power: failed (target): 1 of 10 service processors failed, 4 not tried: exe[0007-0010]
+  call credential bmc source=env [hidden]: ok
   step power on total=10 [fold]: failed (target): 1 of 3 service processors failed
     batch 1/4 node=exe[0001-0003] batch=1/4 total=3: ok
       call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=1m0s exit=0: ok
@@ -529,17 +547,20 @@ command bmc power: failed (target): 1 of 10 service processors failed, 4 not tri
     batch 3/4 node=exe[0007-0008] batch=3/4 total=2: skipped: not tried: an earlier batch failed
     batch 4/4 node=exe[0009-0010] batch=4/4 total=2: skipped: not tried: an earlier batch failed
     wait stagger timeout=5s: ok
+  wait confirm message=power on 10 hosts: ok
 `},
 		{"an interrupt in a pause", "exe[1-6]", true, exitcode.Interrupted,
 			[]string{"powering on exe[0001-0003] (1 of 2)\nwaiting 5s before the next batch\n"},
 			map[string]string{"exe0003": "ok", "exe0004": "not sent", "exe0006": "not sent"}, `
 command bmc power: canceled (canceled): interrupted, 3 not sent: exe[0004-0006]
+  call credential bmc source=env [hidden]: ok
   step power on total=6 [fold]: canceled (canceled): context canceled
     batch 1/2 node=exe[0001-0003] batch=1/2 total=3: ok
       call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=1m0s exit=0: ok
       target exe[0001-0003]: ok
     batch 2/2 node=exe[0004-0006] batch=2/2 total=3: canceled (canceled): context canceled
     wait stagger timeout=5s: canceled (canceled): context canceled
+  wait confirm message=power on 6 hosts: ok
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
