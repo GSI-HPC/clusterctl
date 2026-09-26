@@ -176,7 +176,9 @@ node over standard input. It never lands on either disk, and it never appears
 in an argument vector. Every secret is decrypted before you are asked, so a
 key you lack stops the push, and its `--dry-run`, before the node is touched.
 On the node, each file is written beside its target and moved into place only
-once all of it has arrived, so a dropped connection leaves the old file.
+once all of it has arrived, so a dropped connection leaves the old file. Two
+secrets with the same target are refused before anything is decrypted: only
+the last would stay, after the first had been in place for a while.
 
 A node that cannot be reached is named, is not tried again for the remaining
 secrets, and makes the push exit `3`, even when another node refused.

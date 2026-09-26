@@ -400,8 +400,9 @@ type SecretFile struct {
 	// SecretRef takes the content from a key of a sops encrypted Secret
 	// document instead of a file of its own.
 	SecretRef *SecretKeyRef `json:"secretRef,omitempty" yaml:"secretRef,omitempty" jsonschema:"description=Key of a sops encrypted Secret document holding the content; exactly one of source and secretRef"`
-	// Target is the absolute path on the node.
-	Target string `json:"target" yaml:"target" jsonschema:"required"`
+	// Target is the absolute path on the node. No two secrets may share
+	// one: secrets push refuses them.
+	Target string `json:"target" yaml:"target" jsonschema:"required,description=Absolute path on the node; secrets push refuses two secrets with the same target"`
 	// Mode is the octal permission of the target, written as a string so
 	// that "0600" is not read as a decimal number.
 	Mode string `json:"mode,omitempty" yaml:"mode,omitempty" jsonschema:"description=Octal mode written as a string, e.g. \"0600\""`
