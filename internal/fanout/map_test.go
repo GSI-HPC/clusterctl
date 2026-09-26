@@ -244,6 +244,58 @@ func TestMapReportsAnInterrupt(t *testing.T) {
 	}
 }
 
+// A target that failed once the interrupt had come ends canceled, and a
+// step whose failures all did ends canceled too, whatever the work made of
+// the interrupt.
+func TestMapEndsAStepTheInterruptEndedCanceled(t *testing.T) {
+	t.Parallel()
+
+	ctx, tree := watch(t)
+	ctx, cancel := context.WithCancel(ctx)
+	fanout.Map(ctx, nodes(2), fanout.Options[string]{Step: "read the power state", Limit: 2},
+		func(_ context.Context, node string) (struct{}, error) {
+			if node == "exe2" {
+				cancel()
+				return struct{}{}, exitcode.Errorf(exitcode.Transport, "exe2: dial tcp: operation was canceled")
+			}
+			return struct{}{}, nil
+		})
+	want := `step read the power state total=2 limit=2 [fold]: canceled (canceled): 1 of 2 failed: exe2
+  target exe1: ok
+  target exe2: canceled (canceled): context canceled
+`
+	if got := tree(); got != want {
+		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// A step says why it failed as the exit code of its failures does, not as
+// the first of them that says a class of its own: a timeout among hosts
+// that could not be reached makes the step's code Transport.
+func TestMapStepSaysTheClassOfItsExitCode(t *testing.T) {
+	t.Parallel()
+
+	ctx, tree := watch(t)
+	fanout.Map(ctx, nodes(3), fanout.Options[string]{Step: "copy", Limit: 1},
+		func(_ context.Context, node string) (struct{}, error) {
+			switch node {
+			case "exe1":
+				return struct{}{}, exitcode.Wrap(exitcode.Transport, fmt.Errorf("exe1: %w", context.DeadlineExceeded))
+			case "exe2":
+				return struct{}{}, exitcode.Errorf(exitcode.Transport, "exe2: connection refused")
+			}
+			return struct{}{}, nil
+		})
+	want := `step copy total=3 limit=1 [fold]: failed (transport): 2 of 3 failed: exe[1-2]
+  target exe1: failed (timeout): {}: context deadline exceeded
+  target exe2: failed (transport): {}: connection refused
+  target exe3: ok
+`
+	if got := tree(); got != want {
+		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // The executor reports its targets through Map: under the step its caller
 // names, or "run", with the flags it is given. A command that exited
 // non-zero without an error is a failed target all the same.
@@ -267,8 +319,8 @@ func TestExecutorReportsItsTargets(t *testing.T) {
 }
 
 // The error a fan-out exits with counts and names the hosts that failed,
-// keeps the exit code the worst of them asks for, and keeps their errors
-// underneath.
+// keeps the exit code the worst of them asks for, and the progress class of
+// that code, and keeps their errors underneath.
 func TestFailureError(t *testing.T) {
 	t.Parallel()
 
@@ -278,21 +330,26 @@ func TestFailureError(t *testing.T) {
 		results []*transport.Result
 		want    string
 		code    int
+		class   progress.Class
 	}{
-		{"none failed", []*transport.Result{{Target: transport.Target{Name: "exe1"}}}, "", exitcode.OK},
+		{"none failed", []*transport.Result{{Target: transport.Target{Name: "exe1"}}}, "", exitcode.OK, progress.ClassNone},
 		{"a command that exited non-zero", []*transport.Result{
 			{Target: transport.Target{Name: "exe1"}},
 			{Target: transport.Target{Name: "exe2"}, ExitCode: 1},
-		}, "1 of 2 hosts failed: exe2", exitcode.TargetFailed},
+		}, "1 of 2 hosts failed: exe2", exitcode.TargetFailed, progress.ClassTarget},
 		{"an unreachable host among them", []*transport.Result{
 			{Target: transport.Target{Name: "exe1"}, ExitCode: 1, Err: errors.New("exe1: command exited 1")},
 			{Target: transport.Target{Name: "exe2"}, ExitCode: 255, Err: down},
 			{Target: transport.Target{Name: "exe3"}},
-		}, "2 of 3 hosts failed: exe[1-2]", exitcode.Transport},
+		}, "2 of 3 hosts failed: exe[1-2]", exitcode.Transport, progress.ClassTransport},
+		{"a timeout among them", []*transport.Result{
+			{Target: transport.Target{Name: "exe1"}, ExitCode: 124, Err: fmt.Errorf("exe1: %w", context.DeadlineExceeded)},
+			{Target: transport.Target{Name: "exe2"}, ExitCode: 255, Err: down},
+		}, "2 of 2 hosts failed: exe[1-2]", exitcode.Transport, progress.ClassTransport},
 		{"an interrupt", []*transport.Result{
 			{Target: transport.Target{Name: "exe1"}, ExitCode: 255, Err: down},
 			{Target: transport.Target{Name: "exe2"}, ExitCode: -1, Err: context.Canceled},
-		}, "2 of 2 hosts failed: exe[1-2]", exitcode.Interrupted},
+		}, "2 of 2 hosts failed: exe[1-2]", exitcode.Interrupted, progress.ClassCanceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -302,6 +359,9 @@ func TestFailureError(t *testing.T) {
 			}
 			if got := exitcode.From(err); got != tc.code {
 				t.Errorf("exit code %d, want %d", got, tc.code)
+			}
+			if got := progress.Classify(err); got != tc.class {
+				t.Errorf("class %s, want %s", got, tc.class)
 			}
 			if tc.code == exitcode.Transport && !errors.Is(err, down) {
 				t.Errorf("the error of the unreachable host is not kept underneath: %v", err)

@@ -220,12 +220,12 @@ esac`)
 	_, err := run(t, harnessOptions{ctx: ctx}, "--set", "ssh.scpBinary="+binary, "-y",
 		"copy", "-n", "exe[1-3]", "--timeout", "1s", "/etc/hosts", "/etc/hosts")
 	wantCode(t, err, exitcode.Transport)
-	// A summary takes the class of the first of its failures that says one,
-	// the timeout here, where its exit code is the worst of them, 3. The
+	// A summary says the class of its exit code, the worst of its
+	// failures', 3, not the timeout, the first of them that says one. The
 	// timeout leaves the transfers that end at once a wide margin on a slow
 	// machine.
-	want := `command copy: failed (timeout): 2 of 3 hosts failed: exe[0002-0003]
-  step copy total=3 limit=24 [fold]: failed (timeout): 2 of 3 failed: exe[0002-0003]
+	want := `command copy: failed (transport): 2 of 3 hosts failed: exe[0002-0003]
+  step copy total=3 limit=24 [fold]: failed (transport): 2 of 3 failed: exe[0002-0003]
     target exe0001: ok
       call scp node={} host={} timeout=1s exit=0: ok
     target exe0002: failed (target): {} ({}): command exited 1

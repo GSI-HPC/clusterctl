@@ -59,3 +59,21 @@ func TestClassify(t *testing.T) {
 		}
 	}
 }
+
+// An exit code has the class the last rule of Classify gives it, and a
+// success none.
+func TestCodeClass(t *testing.T) {
+	t.Parallel()
+	for code, want := range map[int]progress.Class{
+		exitcode.OK:           progress.ClassNone,
+		exitcode.TargetFailed: progress.ClassTarget,
+		exitcode.Usage:        progress.ClassUsage,
+		exitcode.Transport:    progress.ClassTransport,
+		exitcode.Interrupted:  progress.ClassCanceled,
+		42:                    progress.ClassTarget,
+	} {
+		if got := progress.CodeClass(code); got != want {
+			t.Errorf("CodeClass(%d) = %s, want %s", code, got, want)
+		}
+	}
+}

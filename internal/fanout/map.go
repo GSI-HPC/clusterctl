@@ -60,7 +60,8 @@ type Outcome[R any] struct {
 // it takes its place and ended before it gives the place up, so that a
 // display never counts more running than the limit; those never started
 // end canceled, so that the count reaches its total; and the step ends once
-// the last has, naming the items that failed. fn is called with the context
+// the last has, naming the items that failed, canceled when every one of
+// them ended canceled, as an interrupt leaves a pool. fn is called with the context
 // of its item's target, so that the calls it makes are reported under it.
 // An item that failed once the context had ended is reported canceled,
 // since the interrupt is what ended it, and its outcome keeps the error fn
@@ -83,6 +84,8 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 	}
 
 	out := make([]Outcome[R], len(items))
+	// canceled are the items whose targets ended canceled.
+	canceled := make([]bool, len(items))
 	Each(ctx, len(items), limit, func(i int) {
 		spans[i].Run()
 		value, err := call(ctxs[i], o.PanicLog, names[i], items[i], fn)
@@ -90,21 +93,30 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 		if err != nil && ctxs[i].Err() != nil {
 			err = ctxs[i].Err()
 		}
+		canceled[i] = endsCanceled(err)
 		spans[i].End(err)
 	})
 	var failed []string
 	var errs []error
+	interrupted := true
 	for i := range out {
 		if !out[i].Started {
 			out[i].Err = ctx.Err()
+			canceled[i] = endsCanceled(out[i].Err)
 			spans[i].End(out[i].Err)
 		}
 		if out[i].Err != nil {
 			failed, errs = append(failed, names[i]), append(errs, out[i].Err)
+			interrupted = interrupted && canceled[i]
 		}
 	}
-	step.End(failure("", len(items), failed, errs))
+	step.End(failure("", len(items), failed, errs, interrupted))
 	return out
+}
+
+// endsCanceled reports whether a target that ends with err ends canceled.
+func endsCanceled(err error) bool {
+	return err != nil && progress.Classify(err) == progress.ClassCanceled
 }
 
 // describe says what a display names an item by.
@@ -139,13 +151,16 @@ func FailureError(results []*transport.Result) error {
 	for _, r := range Failures(results) {
 		names, errs = append(names, r.Target.Name), append(errs, r.Err)
 	}
-	return failure("hosts", len(results), names, errs)
+	return failure("hosts", len(results), names, errs, false)
 }
 
 // failure sums up the items of a fan-out of n that failed: "k of n <noun>
 // failed: <node set>", with their names as a node set and each error that
-// is not nil underneath. It is nil when none failed.
-func failure(noun string, n int, names []string, errs []error) error {
+// is not nil underneath. Its progress class is that of its exit code, or
+// canceled when the items were interrupted, as their targets ended: the
+// error of an item is what its work returned, which does not always say
+// that an interrupt stopped it. It is nil when none failed.
+func failure(noun string, n int, names []string, errs []error, interrupted bool) error {
 	if len(names) == 0 {
 		return nil
 	}
@@ -161,9 +176,15 @@ func failure(noun string, n int, names []string, errs []error) error {
 	if noun != "" {
 		what = noun + " failed"
 	}
-	return &exitcode.Error{Code: cmp.Or(exitcode.Worst(kept...), exitcode.TargetFailed), Err: &failedTargets{
+	code := cmp.Or(exitcode.Worst(kept...), exitcode.TargetFailed)
+	class := progress.CodeClass(code)
+	if interrupted {
+		class = progress.ClassCanceled
+	}
+	return &exitcode.Error{Code: code, Err: &failedTargets{
 		message: fmt.Sprintf("%d of %d %s: %s", len(names), n, what, set),
 		errs:    kept,
+		class:   class,
 	}}
 }
 
@@ -172,8 +193,13 @@ func failure(noun string, n int, names []string, errs []error) error {
 type failedTargets struct {
 	message string
 	errs    []error
+	class   progress.Class
 }
 
 func (e *failedTargets) Error() string { return e.message }
 
 func (e *failedTargets) Unwrap() []error { return e.errs }
+
+// ProgressClass says why the fan-out failed as its exit code does, rather
+// than as whichever of its targets' errors says a class first.
+func (e *failedTargets) ProgressClass() progress.Class { return e.class }

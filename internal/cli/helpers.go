@@ -15,6 +15,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -166,11 +167,15 @@ func failureError(results []*transport.Result) error {
 type hostFailures struct {
 	message string
 	errs    []error
+	code    int
 }
 
 func (e *hostFailures) Error() string { return e.message }
 
 func (e *hostFailures) Unwrap() []error { return e.errs }
+
+// ProgressClass says why the hosts failed as the exit code does.
+func (e *hostFailures) ProgressClass() progress.Class { return progress.CodeClass(e.code) }
 
 func firstLine(s string) string {
 	before, _, _ := strings.Cut(s, "\n")
