@@ -516,26 +516,40 @@ func TestReinstallReportsEveryNodeOfEachStep(t *testing.T) {
 		want  string
 	}{
 		{"every node reinstalls", func(*reinstallHost) {}, exitcode.OK, `
-step resetting the machines total=3 limit=8 [fold]: ok
-  target exe[0001-0003]: ok
-step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
-  target exe[0001-0003]: ok
+command provision reinstall: ok
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
+  step resetting the machines total=3 limit=8 [fold]: ok
+    target exe[0001-0003]: ok
+  step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
+    target exe[0001-0003]: ok
 `},
 		{"a boot override fails", func(h *reinstallHost) { h.bmcs.down["exe0002"] = true }, exitcode.Transport, `
-step clearing the boot overrides total=2 limit=8 [fold]: ok
-  target exe[0001,0003]: ok
-step setting the machines to boot from the network once total=3 limit=8 [fold]: failed (transport): 1 of 3 failed: exe0002
-  target exe0002: failed (transport): {}: dial tcp: connection refused
-  target exe[0001,0003]: ok
+command provision reinstall: failed (transport): setting the machines to boot from the network once failed: exe0002: exe0002.mgmt.hpc.example.org: dial tcp: connection refused; the boot links and boot overrides of exe[0001-0003] were removed again
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
+  step clearing the boot overrides total=2 limit=8 [fold]: ok
+    target exe[0001,0003]: ok
+  step setting the machines to boot from the network once total=3 limit=8 [fold]: failed (transport): 1 of 3 failed: exe0002
+    target exe0002: failed (transport): {}: dial tcp: connection refused
+    target exe[0001,0003]: ok
 `},
 		{"a reset fails", func(h *reinstallHost) { h.bmcs.refuse["exe0002"] = "ForceRestart" }, exitcode.TargetFailed, `
-step clearing the boot overrides total=1 limit=8 [fold]: ok
-  target exe0002: ok
-step resetting the machines total=3 limit=8 [fold]: failed (target): 1 of 3 failed: exe0002
-  target exe0002: failed (target): {}: 400 Bad Request: refused
-  target exe[0001,0003]: ok
-step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
-  target exe[0001-0003]: ok
+command provision reinstall: failed (target): resetting the machines failed: exe0002: exe0002.mgmt.hpc.example.org: 400 Bad Request: refused; exe[0001,0003] is reinstalling; the boot links and boot overrides of exe0002 were removed again, but their host keys are forgotten; "clusterctl hostkey refresh -n exe0002" writes them again
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
+  step clearing the boot overrides total=1 limit=8 [fold]: ok
+    target exe0002: ok
+  step resetting the machines total=3 limit=8 [fold]: failed (target): 1 of 3 failed: exe0002
+    target exe0002: failed (target): {}: 400 Bad Request: refused
+    target exe[0001,0003]: ok
+  step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
+    target exe[0001-0003]: ok
 `},
 		{"a boot link fails", func(h *reinstallHost) {
 			// A directory where the link of exe0002 goes cannot be
@@ -543,7 +557,13 @@ step setting the machines to boot from the network once total=3 limit=8 [fold]: 
 			if err := os.Mkdir(filepath.Join(h.root, "10.0.2.2"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-		}, exitcode.TargetFailed, "\n"},
+		}, exitcode.TargetFailed, `
+command provision reinstall: failed (target): configuring the network boot failed: the boot link of exe0002 could not be changed; the boot links and boot overrides of exe[0001,0003] were removed again
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
+`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newReinstallHost(t, pxeOptions{inventory: threeNodes})

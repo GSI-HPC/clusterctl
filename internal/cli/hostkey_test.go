@@ -329,19 +329,31 @@ func TestHostkeyScanReportsEveryNode(t *testing.T) {
 		want   string
 	}{
 		{"a host that does not answer", nil, []string{"hostkey", "scan", "-n", "exe[1-3]"}, false, `
-step scan the host keys total=3 limit=24 [fold]: failed (target): 1 of 3 failed: exe0002
-  target exe0002: failed (target): no host key could be collected from {}: dial tcp: connection refused
-  target exe[0001,0003]: ok
+command hostkey scan: failed (transport): 1 of 3 hosts did not answer
+  step scan the host keys total=3 limit=24 [fold]: failed (target): 1 of 3 failed: exe0002
+    target exe0002: failed (target): no host key could be collected from {}: dial tcp: connection refused
+    target exe[0001,0003]: ok
 `},
 		{"a processor with no name", []string{noBMCName, bmcAddressInventory(t)},
 			[]string{"hostkey", "scan", "--bmc", "-n", "exe[1,3]"}, false, `
-step scan the host keys total=2 limit=24 [fold]: failed (usage): 1 of 2 failed: exe0001
-  target exe0001: failed (usage): naming rule 1, which matches {}, has no bmc template, so its service processor has no name; add one or set bmcAddress in the inventory
-  target exe0003: ok
+command hostkey scan: failed (transport): 1 of 2 hosts did not answer
+  step scan the host keys total=2 limit=24 [fold]: failed (usage): 1 of 2 failed: exe0001
+    target exe0001: failed (usage): naming rule 1, which matches {}, has no bmc template, so its service processor has no name; add one or set bmcAddress in the inventory
+    target exe0003: ok
 `},
 		{"an interrupt", nil, []string{"--fanout", "1", "hostkey", "scan", "-n", "exe[1-3]"}, true, `
-step scan the host keys total=3 limit=1 [fold]: canceled (canceled): 3 of 3 failed: exe[0001-0003]
-  target exe[0001-0003]: canceled (canceled): context canceled
+command hostkey scan: canceled (canceled): 3 of 3 hosts did not answer
+  step scan the host keys total=3 limit=1 [fold]: canceled (canceled): 3 of 3 failed: exe[0001-0003]
+    target exe[0001-0003]: canceled (canceled): context canceled
+`},
+		// The processor with no name is refused first, whatever its place,
+		// so that the interrupt does not end it as interrupted.
+		{"an interrupt and a processor with no name", []string{noBMCName, bmcAddressInventory(t)},
+			[]string{"--fanout", "1", "hostkey", "scan", "--bmc", "-n", "exe[3,5]"}, true, `
+command hostkey scan: canceled (canceled): 2 of 2 hosts did not answer
+  step scan the host keys total=2 limit=1 [fold]: canceled (canceled): 2 of 2 failed: exe[0003,0005]
+    target exe0003: canceled (canceled): context canceled
+    target exe0005: failed (usage): naming rule 1, which matches {}, has no bmc template, so its service processor has no name; add one or set bmcAddress in the inventory
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -253,6 +253,7 @@ are about to do and ask before doing it.`),
 	builtins(cmd, streams)
 	annotateEffects(cmd)
 	usageArgs(cmd)
+	traceLeaves(cmd, r)
 	return cmd, r
 }
 

@@ -165,13 +165,14 @@ type App struct {
 	// Groups resolves @group references.
 	Groups *groups.Resolver
 	// SSH is the transport client; Runner is what commands run through,
-	// which is a recorder during a dry run.
+	// which is a recorder during a dry run. It reports each request as a
+	// progress call (transport.Traced).
 	SSH    *transport.Client
 	Runner transport.Runner
 	// ReadRunner runs the read-only lookups a command makes before it
 	// changes anything, such as asking Slurm whether a node runs a job. It
 	// is the real transport even in a dry run, so that the dry run reaches
-	// the same decision the real run would.
+	// the same decision the real run would, and is traced as Runner is.
 	ReadRunner transport.Runner
 	// DryRunRecorder holds what a dry run would have sent.
 	DryRunRecorder *transport.Recorder
@@ -323,19 +324,19 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 	a.SSH = transport.New(sshOpts)
-	a.Runner = a.SSH
+	var runner, reader transport.Runner = a.SSH, a.SSH
 	if opts.Runner != nil {
-		a.Runner = opts.Runner
+		runner, reader = opts.Runner, opts.Runner
 	}
 	if opts.DryRun {
 		a.DryRunRecorder = &transport.Recorder{}
-		a.Runner = a.DryRunRecorder
+		runner = a.DryRunRecorder
 	}
-
-	a.ReadRunner = transport.Runner(a.SSH)
-	if opts.Runner != nil {
-		a.ReadRunner = opts.Runner
-	}
+	// Every request is reported as a call under the span it is made for.
+	// A dry run's are recorded, not sent, and say so; its lookups reach
+	// the host.
+	a.Runner = transport.Traced(runner, opts.DryRun)
+	a.ReadRunner = transport.Traced(reader, false)
 	a.Groups = groups.New(groups.Options{
 		Spec:      a.Spec.Groups,
 		Inventory: a.Inventory,

@@ -5,6 +5,7 @@ package app_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -326,6 +329,47 @@ func TestFanoutLowersABoundOnlyFromTheFlag(t *testing.T) {
 				if got := a.Bound(setting); got != want {
 					t.Errorf("Bound(%d) = %d, want %d", setting, got, want)
 				}
+			}
+		})
+	}
+}
+
+// Every request a command makes is reported as a call. A dry run's Runner
+// records what it is given, so its calls are skipped, while ReadRunner
+// reaches the host even in a dry run, and its calls end as they came back.
+func TestTheRunnersReportEveryCall(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dry run %v", dryRun), func(t *testing.T) {
+			c := &progresstest.Capture{}
+			bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+			ctx := progress.WithBus(context.Background(), bus)
+			a, err := app.New(ctx, app.Streams{StateDir: t.TempDir(), CacheDir: t.TempDir()}, app.Options{
+				ConfigFiles: []string{exampleDir},
+				Env:         func(string) string { return "" },
+				DryRun:      dryRun,
+				Runner:      &transport.Recorder{},
+			})
+			if err != nil {
+				t.Fatalf("building the app: %v", err)
+			}
+			target, err := a.Role("install")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, runner := range []transport.Runner{a.Runner, a.ReadRunner} {
+				if _, err := runner.Run(ctx, target, transport.Request{Argv: []string{"true"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bus.Close()
+			progresstest.Check(t, c.Events())
+			sent := "call ssh node=install host=installer.hpc.example.org role=install exit=0: ok\n"
+			want := sent + sent
+			if dryRun {
+				want = "call ssh node=install host=installer.hpc.example.org role=install [dry-run]: skipped: dry run: not sent\n" + sent
+			}
+			if got := c.Tree(); got != want {
+				t.Errorf("progress:\n%s\nwant:\n%s", got, want)
 			}
 		})
 	}
