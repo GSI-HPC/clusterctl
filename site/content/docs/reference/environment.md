@@ -52,7 +52,8 @@ clusterctl refuses to run and `clusterctl doctor` says why.
 **On an infrastructure host**, depending on the roles a site configures:
 `ipmipower` or `ipmitool`, `fping`, the Slurm clients and `getent`,
 `ibportstate`, `ibqueryerrors`, `ibaddr`, `iblinkinfo` and `perfquery`, `git`,
-`tcpdump`, and `xargs`, which runs `ipmitool` for several processors at once.
+`tcpdump`, and `xargs`, which runs `ipmitool` for several processors and
+`ibportstate` for several ports at once.
 
 **On your workstation or the name servers:** the `dns` commands send their
 queries themselves, to `services.dns.server` or else to the name servers in

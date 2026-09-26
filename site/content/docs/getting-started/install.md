@@ -124,7 +124,7 @@ $ mise use -g sops
 | The management gateway | `ipmipower` or `ipmitool`, whichever `bmc.ipmi.backend` names, `xargs` with `ipmitool`, and `fping` |
 | The DHCP server | nothing; its files are read |
 | The PXE host | `git`, if boot configurations come from version control |
-| The fabric host | `ibportstate`, `ibqueryerrors`, `ibaddr`, `iblinkinfo`, `perfquery` |
+| The fabric host | `ibportstate`, `ibqueryerrors`, `ibaddr`, `iblinkinfo`, `perfquery`, `xargs` |
 
 `clusterctl doctor --remote` checks all of it and says what is missing.
 

@@ -10,12 +10,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/dhcp"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -170,32 +172,44 @@ const (
 	portNoAnswer = "no answer"
 )
 
-// portStateScript builds the one script that asks about every port, rather
-// than opening one connection to the fabric host per node.
+// portQuery is the program that asks the fabric about one port, with the
+// port's index as its first argument and its identifier as its second.
 //
-// Each answer line starts with the index of its port instead of the node
-// name: a node name comes from the inventory or from dhcpd.conf, and nothing
-// from there belongs in a script that runs as root on the fabric host. The
-// identifiers are hexadecimal by construction and quoted all the same.
+// Its answer line starts with the index of the port instead of the node
+// name: a node name comes from the inventory or from dhcpd.conf, and
+// nothing from there belongs in a script that runs as root on the fabric
+// host. The identifiers are hexadecimal by construction and arguments all
+// the same, never shell text. The line is printed whole with one printf
+// once ibportstate has returned, and cut at 400 bytes, so that the write
+// is never mixed with another's: a write to a pipe of no more than
+// PIPE_BUF bytes, which is never less than 512, is not, and the queries
+// side by side print into one pipe.
 //
 // ibportstate takes the port number after the destination; 1 is the port of
 // an adapter function, which is what a port identifier derived from a
 // hardware address names.
-func portStateScript(guids []string) string {
-	var script strings.Builder
-	script.WriteString(`set -u
-query() {
-  ibportstate -G "$1" 1 query 2>/dev/null | awk '
+const portQuery = `state=$(ibportstate -G "$2" 1 query 2>/dev/null | awk '
     { key = $0; sub(/:.*/, "", key)
       value = $0; sub(/^[^:]*:\.*/, "", value)
       if (!(key in seen)) seen[key] = value }
-    END { printf "%s|%s|%s|%s", seen["LinkState"], seen["PhysLinkState"], seen["LinkWidthActive"], seen["LinkSpeedActive"] }'
-}
-`)
+    END { printf "%s|%s|%s|%s", seen["LinkState"], seen["PhysLinkState"], seen["LinkWidthActive"], seen["LinkSpeedActive"] }')
+printf "%.400s\n" "$1|$state"`
+
+// portStateScript is the one script that asks about every port, rather
+// than opening one connection to the fabric host per node. It reads the
+// ports from its standard input, portList's lines, so that however many
+// there are the script stays the same few lines, and asks about
+// fanout.PerHost of them at a time.
+var portStateScript = fmt.Sprintf("set -u\nxargs -n 2 -P %d sh -c %s sh\n", fanout.PerHost, shellQuote(portQuery))
+
+// portList is what portStateScript reads: a line for each port, its index
+// and its identifier.
+func portList(guids []string) string {
+	var list strings.Builder
 	for i, guid := range guids {
-		fmt.Fprintf(&script, "printf '%d|'; query %s; echo\n", i, shellQuote(guid))
+		fmt.Fprintf(&list, "%d %s\n", i, guid)
 	}
-	return script.String()
+	return list.String()
 }
 
 // linkStateValue strips the numeric prefix some versions of ibportstate put
@@ -263,55 +277,94 @@ func (e portState) failure() error {
 	}
 }
 
-// portTargets report the ports of fabric state, a target each, in the
-// order the script asks about them: one runs at a time, and each ends as
-// the fabric's answer for it arrives, when the next one starts.
-type portTargets []*progress.Span
+// portTargets report the ports of fabric state, a target each, as the
+// script asks about them: at most fanout.PerHost run at a time, in the
+// order of the list, and each ends as the fabric's answer for it arrives,
+// when the next one not yet started starts, the way xargs starts the next
+// query once one has ended.
+type portTargets struct {
+	mu    sync.Mutex
+	spans []*progress.Span
+	// running and ended say where each port is.
+	running, ended []bool
+	// next is the first port that may not have started.
+	next int
+}
 
 // newPortTargets announces a target for each port under the span ctx
 // carries.
-func newPortTargets(ctx context.Context, entries []portState) portTargets {
-	p := make(portTargets, len(entries))
+func newPortTargets(ctx context.Context, entries []portState) *portTargets {
+	p := &portTargets{
+		spans:   make([]*progress.Span, len(entries)),
+		running: make([]bool, len(entries)),
+		ended:   make([]bool, len(entries)),
+	}
 	for i, e := range entries {
-		_, p[i] = progress.Start(ctx, progress.KindTarget, e.Node, progress.Queued(),
+		_, p.spans[i] = progress.Start(ctx, progress.KindTarget, e.Node, progress.Queued(),
 			progress.Node(e.Node), progress.Host(e.GUID))
 	}
 	return p
 }
 
-// start marks the first port running, as the script is sent.
-func (p portTargets) start() {
-	if len(p) > 0 {
-		p[0].Run()
+// start marks the first ports running, as many as are asked about at
+// once, as the script is sent.
+func (p *portTargets) start() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for range min(fanout.PerHost, len(p.spans)) {
+		p.startNext()
+	}
+}
+
+// startNext marks the first port not yet started running.
+func (p *portTargets) startNext() {
+	for ; p.next < len(p.spans); p.next++ {
+		if !p.running[p.next] && !p.ended[p.next] {
+			p.running[p.next] = true
+			p.spans[p.next].Run()
+			p.next++
+			return
+		}
 	}
 }
 
 // answered ends the target of the port a line of the script's output
 // answers for, and starts the next. It is a transport.Request's OnLine, so
 // it is handed only lines that ended; the answers are on standard output.
-func (p portTargets) answered(stream progress.Stream, line string) {
+// A port answered for before its turn, which it gets only when another's
+// line was lost, ends where it is, and the running ones stay as they are.
+func (p *portTargets) answered(stream progress.Stream, line string) {
 	if stream != progress.Stdout {
 		return
 	}
-	i, answer, ok := portAnswer(line, len(p))
+	i, answer, ok := portAnswer(line, len(p.spans))
 	if !ok {
 		return
 	}
-	p[i].End(answer.failure())
-	if i+1 < len(p) {
-		p[i+1].Run()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ended[i] {
+		return
+	}
+	p.ended[i] = true
+	p.spans[i].End(answer.failure())
+	if p.running[i] {
+		p.running[i] = false
+		p.startNext()
 	}
 }
 
 // end ends the targets of the ports whose answer did not arrive while the
 // script ran, as the table reads them, or with why the script stopped.
-func (p portTargets) end(entries []portState, stopped error) {
+func (p *portTargets) end(entries []portState, stopped error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for i, e := range entries {
 		err := e.failure()
 		if e.State == portNoAnswer && stopped != nil {
 			err = stopped
 		}
-		p[i].End(err)
+		p.spans[i].End(err)
 	}
 }
 
@@ -324,6 +377,9 @@ physically linked but still Initialize or Armed has no subnet manager
 configuration yet and carries no traffic, so it is reported down, with both
 states shown. A port the fabric does not answer for is reported as such. Any
 port that is not up makes the command fail.
+
+The ports are asked about in one session to the fabric host, four at a time,
+and listed in the order of the nodes whatever order the answers come in.
 
 When the fabric host stops before it has answered for every port, at the
 command's timeout or because the connection dropped, the ports it answered
@@ -364,11 +420,12 @@ reason it stopped. It only reads, so --dry-run asks the fabric too.
 			// leaves nothing to show, and so does an interrupt: the ports
 			// not asked yet would read as if they had not answered.
 			ctx, step := progress.Start(a.Context(), progress.KindStep, "query ports",
-				progress.WithFlags(progress.Fold), progress.Total(len(entries)))
+				progress.WithFlags(progress.Fold), progress.Total(len(entries)), progress.Limit(fanout.PerHost))
 			ports := newPortTargets(ctx, entries)
 			ports.start()
 			result, runErr := a.ReadOnRole(ctx, role, transport.Request{
-				Script: portStateScript(guids),
+				Script: portStateScript,
+				Stdin:  strings.NewReader(portList(guids)),
 				OnLine: ports.answered,
 			})
 			interrupted := runErr != nil && (errors.Is(runErr, context.Canceled) || exitcode.From(runErr) == exitcode.Interrupted)

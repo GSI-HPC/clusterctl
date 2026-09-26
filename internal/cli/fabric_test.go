@@ -8,13 +8,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -39,9 +44,9 @@ func fakeTool(t *testing.T, dir, name, body string) {
 
 // shellRunner runs each script sent to the hosts of one role, "" for the
 // nodes, in a real sh, in a scratch directory, with the fake tools of bin
-// first on PATH. That is as close to the host as a test gets: what is
-// asserted is what the script does, not how it is spelt. Every other host
-// answers with nothing.
+// first on PATH and what the request sends on its standard input. That is
+// as close to the host as a test gets: what is asserted is what the script
+// does, not how it is spelt. Every other host answers with nothing.
 func shellRunner(t *testing.T, bin, role string) (*transport.Recorder, string) {
 	t.Helper()
 	work := t.TempDir()
@@ -55,6 +60,7 @@ func shellRunner(t *testing.T, bin, role string) (*transport.Recorder, string) {
 		}
 		cmd := exec.Command("sh", "-c", script)
 		cmd.Dir = work
+		cmd.Stdin = req.Stdin
 		cmd.Env = []string{"PATH=" + bin + string(os.PathListSeparator) + "/usr/bin:/bin"}
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -278,6 +284,144 @@ func TestFabricStateAsksTheFabricInADryRun(t *testing.T) {
 	if !strings.Contains(h.out.String(), "Active") {
 		t.Errorf("the dry run did not show what the fabric said:\n%s", h.out)
 	}
+}
+
+// fabricNodes gives the example inventory's exe0002 and on, n of them, a
+// hardware address each, and returns the configuration and the node set.
+func fabricNodes(t *testing.T, n int) (config, set string) {
+	t.Helper()
+	config = exampleWith(t, "inventory.yaml", func(s string) string {
+		for i := 1; i <= n; i++ {
+			s += fmt.Sprintf("    - nodes: exe%04d\n      macs: [\"00:11:22:33:44:%02x\"]\n", i+1, i)
+		}
+		return s
+	})
+	return config, fmt.Sprintf("exe[0002-%04d]", n+1)
+}
+
+// The ports were written into the script, one line of it each, so the
+// script grew with the set until ssh refused its argument vector, around
+// two thousand ports. The script is the same few lines whatever the set,
+// and the ports travel on its standard input, an index and an identifier
+// a line, with no node name.
+func TestFabricStateSendsThePortsOnStandardInput(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		scripts []string
+		lists   []string
+	)
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if tg.Role == "fabric" {
+			list, err := io.ReadAll(req.Stdin)
+			if err != nil {
+				return nil, err
+			}
+			mu.Lock()
+			scripts, lists = append(scripts, req.Script), append(lists, string(list))
+			mu.Unlock()
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	inventory, three := fabricNodes(t, 3)
+	for _, set := range []string{"exe0002", three} {
+		_, err := run(t, harnessOptions{recorder: rec, config: []string{inventory}}, "fabric", "state", "-n", set)
+		wantCode(t, err, exitcode.TargetFailed)
+	}
+	if len(scripts) != 2 {
+		t.Fatalf("the fabric was asked %d times, want twice", len(scripts))
+	}
+	if scripts[0] != scripts[1] {
+		t.Errorf("the script changes with the set:\n%s\n---\n%s", scripts[0], scripts[1])
+	}
+	for _, text := range []string{"exe", "0x0011"} {
+		if strings.Contains(scripts[1], text) {
+			t.Errorf("the script names the ports (%s):\n%s", text, scripts[1])
+		}
+	}
+	want := "0 0x0011220300334401\n1 0x0011220300334402\n2 0x0011220300334403\n"
+	if lists[1] != want {
+		t.Errorf("standard input = %q, want %q", lists[1], want)
+	}
+	if want := "0 0x0011220300334401\n"; lists[0] != want {
+		t.Errorf("standard input = %q, want %q", lists[0], want)
+	}
+}
+
+// The fabric was asked about one port after the other. It is asked about
+// fanout.PerHost ports at once, and never more: each query is held until
+// one more than that are under way, which never happens while the bound is
+// kept, or a patience has passed, so exactly the bound run at once. The
+// table lists the ports in the order of the nodes whatever order the
+// answers came in, and a display never counts more running than the bound.
+func TestFabricStateAsksAboutFourPortsAtOnce(t *testing.T) {
+	bin := t.TempDir()
+	state := t.TempDir()
+	if err := os.Mkdir(filepath.Join(state, "running"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The first port answers last.
+	fakeTool(t, bin, "ibportstate", fmt.Sprintf(`
+d=%s
+touch "$d/running/$2"
+echo "$2" >> "$d/started"
+i=0
+while [ $i -lt 10 ]; do
+  n=$(ls "$d/running" | wc -l)
+  echo $n >> "$d/seen"
+  [ "$n" -gt %d ] && break
+  sleep 0.05
+  i=$((i+1))
+done
+[ "$2" = 0x0011220300334401 ] && sleep 0.2
+rm "$d/running/$2"
+cat <<'EOF'
+`+ibportstateOutput("Active", "LinkUp")+`EOF
+`, shellQuote(state), fanout.PerHost))
+	rec, _ := shellRunner(t, bin, "fabric")
+	const ports = 6
+	inventory, set := fabricNodes(t, ports)
+	ctx, done := watchEvents(t)
+	h, err := run(t, harnessOptions{ctx: ctx, recorder: rec, config: []string{inventory}}, "fabric", "state", "-n", set)
+	if err != nil {
+		t.Fatalf("fabric state failed: %v\n%s", err, h.out)
+	}
+	_, events := done()
+
+	var want strings.Builder
+	fmt.Fprintln(&want, "NODE     GUID                STATE  LINK    PHYSICAL")
+	for i := 1; i <= ports; i++ {
+		fmt.Fprintf(&want, "exe%04d  0x00112203003344%02x  up     Active  LinkUp\n", i+1, i)
+	}
+	if got := h.out.String(); got != want.String() {
+		t.Errorf("output:\n%s\nwant:\n%s", got, want.String())
+	}
+	if got := len(readFields(t, filepath.Join(state, "started"))); got != ports {
+		t.Errorf("the fabric was asked about %d ports, want %d", got, ports)
+	}
+	peak := 0
+	for _, n := range readFields(t, filepath.Join(state, "seen")) {
+		v, err := strconv.Atoi(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		peak = max(peak, v)
+	}
+	if peak != fanout.PerHost {
+		t.Errorf("the fabric was asked about %d ports at once, want %d", peak, fanout.PerHost)
+	}
+	if during, _ := endedDuring(events, "fabric"); len(during) != ports {
+		t.Errorf("%d ports ended as their answers arrived, want all %d: %v", len(during), ports, during)
+	}
+}
+
+// readFields returns the words of a file.
+func readFields(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Fields(string(data))
 }
 
 // TestFabricCountersUplinkReadsTheCabledSwitchPort is the report's 12.7:
