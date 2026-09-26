@@ -226,7 +226,7 @@ are about to do and ask before doing it.`),
 	flags.BoolVarP(&r.assumeYes, "yes", "y", false, "answer the confirmation prompts with yes")
 	flags.BoolVar(&r.force, "force", false, "allow protected hosts, and nodes the inventory does not know, to be touched")
 	flags.IntVar(&r.fanout, "fanout", 0,
-		"how many hosts to work on at once, at least 1; caps the service processors asked at once too (default: from the configuration)")
+		"how many hosts to work on at once, at least 1; caps the service processors and the names asked at once too, which fanout.max and CLUSTERCTL_FANOUT do not (default: from the configuration)")
 	r.fanoutGiven = func() bool { return flags.Changed("fanout") }
 	flags.StringVar(&r.progress, "progress", "",
 		"how to show the progress of a command on standard error: "+strings.Join(progressModes, ", ")+

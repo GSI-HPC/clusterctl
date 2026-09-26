@@ -97,9 +97,9 @@ command test is also a test of what the command reports. `Tree` draws the
 spans as an indented tree that does not depend on how concurrent work was
 scheduled: the targets that read the same are folded into one line naming
 them as a node set, and siblings are sorted. The tests of a reinstall, the
-power batches, secrets push, provision status, `doctor --remote`, the host key
-scans and a dry run that looks up a group compare trees; a test that does
-takes its own Bus with `watch`. One test runs a set of commands with a Bus
+power batches, secrets push, provision status, `dns lookup`, `doctor --remote`,
+the host key scans and a dry run that looks up a group compare trees; a test
+that does takes its own Bus with `watch`. One test runs a set of commands with a Bus
 and without one and compares their standard output, standard error and exit
 status byte for byte, since progress must never reach either stream.
 

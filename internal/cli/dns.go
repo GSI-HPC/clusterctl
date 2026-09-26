@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -21,7 +22,9 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 func newDNSCommand(r *root) *cobra.Command {
@@ -271,8 +274,17 @@ func (c *dnsClient) query(ctx context.Context, name string, qtype dnsmessage.Typ
 }
 
 // exchange sends one query to one server and waits for the answer to it.
+// It is reported as a call, which says what was asked of which server; an
+// answer that the name does not exist is an answer, and ends it ok.
 func (c *dnsClient) exchange(ctx context.Context, network, server string, packed []byte, id uint16,
-	question dnsmessage.Question) (*dnsmessage.Message, error) {
+	question dnsmessage.Question) (resp *dnsmessage.Message, err error) {
+	asked := strings.TrimPrefix(question.Type.String(), "Type") + " " + strings.TrimSuffix(question.Name.String(), ".")
+	if network == "tcp" {
+		asked += " over tcp"
+	}
+	ctx, call := progress.Start(ctx, progress.KindCall, "dns", progress.Host(server),
+		progress.Timeout(c.timeout), progress.Message(asked))
+	defer func() { call.End(err) }()
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, network, server)
@@ -312,8 +324,10 @@ func (c *dnsClient) exchange(ctx context.Context, network, server string, packed
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
-			if ctx.Err() != nil {
-				return nil, fmt.Errorf("%s did not answer within %s", server, c.timeout)
+			// The connection's deadline is the context's, and either may
+			// be seen first.
+			if cause := ctx.Err(); cause != nil || errors.Is(err, os.ErrDeadlineExceeded) {
+				return nil, &noAnswer{server: server, timeout: c.timeout, err: cmp.Or(cause, context.DeadlineExceeded)}
 			}
 			return nil, err
 		}
@@ -324,6 +338,25 @@ func (c *dnsClient) exchange(ctx context.Context, network, server string, packed
 		}
 	}
 }
+
+// noAnswer is a server that did not answer before the query's time was up,
+// or before the command was interrupted. It unwraps to the context's error,
+// which tells the two apart, so that a display reads the first as a timeout
+// and the second as canceled.
+type noAnswer struct {
+	server  string
+	timeout time.Duration
+	err     error
+}
+
+func (e *noAnswer) Error() string {
+	if errors.Is(e.err, context.Canceled) {
+		return fmt.Sprintf("the query to %s was interrupted before it was answered", e.server)
+	}
+	return fmt.Sprintf("%s did not answer within %s", e.server, e.timeout)
+}
+
+func (e *noAnswer) Unwrap() error { return e.err }
 
 // checkAnswer parses a response and makes sure it answers the question.
 func checkAnswer(data []byte, id uint16, question dnsmessage.Question) (*dnsmessage.Message, error) {
@@ -359,6 +392,10 @@ bmcAddress the inventory records for it, else the name the naming rules
 give it, which is the host the bmc commands reach. A bmcAddress that is an
 address is shown as it is and not looked up.
 
+The names are resolved services.dns.maxConcurrent at a time, 16 by
+default, or fewer when --fanout is lower, and listed in the order of the
+nodes whatever order the answers came in.
+
   clusterctl dns lookup -n exe[1-4]
   clusterctl dns lookup -n exe[1-4] --bmc`,
 		cobra.ArbitraryArgs,
@@ -372,15 +409,17 @@ address is shown as it is and not looked up.
 				return err
 			}
 
-			t := output.NewTable(output.Cols("NODE", "HOST", "CNAME", "ADDRESSES")...)
-			object := map[string]dnsAnswer{}
-			failed := 0
-			for _, node := range ns.Expand() {
-				var host string
+			// Every node's host is worked out before any name is looked
+			// up, so that a node the rules cannot name stops the command
+			// before a server is asked anything.
+			nodes := ns.Expand()
+			hosts := make([]string, len(nodes))
+			var lookups []int
+			for i, node := range nodes {
 				if bmc {
-					host, err = a.BMCHost(node)
+					hosts[i], err = a.BMCHost(node)
 				} else {
-					host, err = a.Namer.FQDN(node)
+					hosts[i], err = a.Namer.FQDN(node)
 				}
 				if err != nil {
 					return exitcode.Wrap(exitcode.Usage, err)
@@ -389,23 +428,50 @@ address is shown as it is and not looked up.
 				// what the bmc commands reach, so it is shown as it is; no
 				// server is asked, and the note says so, so that it is not
 				// taken for an answer.
-				if net.ParseIP(host) != nil {
-					a.Printf("%s: %s is an address, not a name; it was not looked up\n", node, host)
+				if net.ParseIP(hosts[i]) != nil {
+					a.Printf("%s: %s is an address, not a name; it was not looked up\n", node, hosts[i])
+					continue
+				}
+				lookups = append(lookups, i)
+			}
+
+			ctx := a.Context()
+			outcomes := fanout.Map(ctx, lookups, fanout.Options[int]{
+				Step:  "resolve the names",
+				Limit: a.Bound(a.Spec.Services.DNS.MaxConcurrent),
+				Describe: func(i int) (node, host, role string) {
+					return nodes[i], hosts[i], ""
+				},
+				PanicLog: a.Diag,
+			}, func(ctx context.Context, i int) (dnsAnswer, error) {
+				chain, addresses, err := res.lookupHost(ctx, hosts[i])
+				return dnsAnswer{CNAMEs: chain, Addresses: addresses}, err
+			})
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			// The answers are listed in the order of the nodes.
+			answers := make([]*fanout.Outcome[dnsAnswer], len(nodes))
+			for k, i := range lookups {
+				answers[i] = &outcomes[k]
+			}
+			t := output.NewTable(output.Cols("NODE", "HOST", "CNAME", "ADDRESSES")...)
+			object := map[string]dnsAnswer{}
+			failed := 0
+			for i, node := range nodes {
+				host, answer := hosts[i], answers[i]
+				switch {
+				case answer == nil:
 					object[host] = dnsAnswer{Addresses: []string{host}, Literal: true}
 					t.Add(node, host, "", host)
-					continue
-				}
-				chain, addresses, err := res.lookupHost(a.Context(), host)
-				if err != nil {
-					if ctxErr := a.Context().Err(); ctxErr != nil {
-						return ctxErr
-					}
-					t.Add(node, host, strings.Join(chain, " -> "), "no answer: "+err.Error())
+				case answer.Err != nil:
+					t.Add(node, host, strings.Join(answer.Value.CNAMEs, " -> "), "no answer: "+answer.Err.Error())
 					failed++
-					continue
+				default:
+					object[host] = answer.Value
+					t.Add(node, host, strings.Join(answer.Value.CNAMEs, " -> "), strings.Join(answer.Value.Addresses, ", "))
 				}
-				object[host] = dnsAnswer{CNAMEs: chain, Addresses: addresses}
-				t.Add(node, host, strings.Join(chain, " -> "), strings.Join(addresses, ", "))
 			}
 			if err := a.Print(output.Result{Table: t, Object: object}); err != nil {
 				return err

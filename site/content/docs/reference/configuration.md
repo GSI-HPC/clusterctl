@@ -100,7 +100,7 @@ contexts:
 | `tunnels` | sshuttle profiles: `remote`, `subnets`, `excludes`, `dns`, `method` |
 | `safety` | `protectedHosts`, `confirmAbove`, `slurmAware`, `powerOnBatch`, `powerOnStagger` |
 | `fanout` | `max`, `commandTimeout` (enforced on the node; ssh is stopped locally once a command outlives it by 5 s and the time `ssh.connectTimeout` × `ssh.connectionAttempts` lets reaching the node take, per jump host) |
-| `services` | `dhcp`, `pxesrv`, `tftp`, `http`, `cinc`, `fabric`, `dns` |
+| `services` | `dhcp`, `pxesrv`, `tftp`, `http`, `cinc`, `fabric`, `dns` (`dns.maxConcurrent` names at once, fewer when `--fanout` is lower; `fanout.max` does not change it) |
 
 ### Naming templates
 
