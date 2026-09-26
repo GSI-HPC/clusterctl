@@ -318,6 +318,39 @@ func TestExecutorReportsItsTargets(t *testing.T) {
 	}
 }
 
+// An item the work leaves out on purpose ends skipped with the reason,
+// which its outcome carries; it counts towards the step's total, and is no
+// failure of the step.
+func TestMapEndsAnItemLeftOutSkipped(t *testing.T) {
+	t.Parallel()
+
+	ctx, tree := watch(t)
+	outcomes := fanout.Map(ctx, nodes(3), fanout.Options[string]{Step: "write /etc/munge/munge.key", Limit: 2},
+		func(_ context.Context, node string) (struct{}, error) {
+			switch node {
+			case "exe2":
+				return struct{}{}, fanout.Skip("the node could not be reached")
+			case "exe3":
+				return struct{}{}, errors.New("exe3: command exited 1")
+			}
+			return struct{}{}, nil
+		})
+	if err := outcomes[1].Err; !fanout.IsSkipped(err) || err.Error() != "the node could not be reached" {
+		t.Errorf("the outcome of exe2 is %+v, want it skipped with the reason", outcomes[1])
+	}
+	if fanout.IsSkipped(outcomes[2].Err) {
+		t.Errorf("the failure of exe3 reads as skipped: %v", outcomes[2].Err)
+	}
+	want := `step write /etc/munge/munge.key total=3 limit=2 [fold]: failed (target): 1 of 3 failed: exe3
+  target exe1: ok
+  target exe2: skipped: the node could not be reached
+  target exe3: failed (target): {}: command exited 1
+`
+	if got := tree(); got != want {
+		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // The error a fan-out exits with counts and names the hosts that failed,
 // keeps the exit code the worst of them asks for, and the progress class of
 // that code, and keeps their errors underneath.

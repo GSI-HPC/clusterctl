@@ -13,12 +13,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"filippo.io/age"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/secrets"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -506,5 +509,142 @@ func TestSecretsPushRefusesTwoSecretsForOneTarget(t *testing.T) {
 			t.Errorf("%v: secrets push asked although two secrets share a target:\n%s", extra, h.errOut)
 		}
 		wantNoCalls(t, h)
+	}
+}
+
+// Each file was a fan-out of its own, so every node waited for the slowest
+// node of one file before any was written the next. A node now writes its
+// files one after the other on a worker of its own: the first write to
+// exe0001 is held until exe0002 has been sent its second file, which no
+// node could be while exe0001 held up the first file's fan-out.
+func TestSecretsPushWritesEachNodeWithoutWaitingForTheOthers(t *testing.T) {
+	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
+	second := make(chan struct{})
+	var once sync.Once
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		switch {
+		case tg.Name == "exe0001" && strings.Contains(req.Script, "munge.key"):
+			select {
+			case <-second:
+			case <-time.After(5 * time.Second):
+				t.Error("exe0002 was not sent its second secret while exe0001 was sent its first")
+			}
+		case tg.Name == "exe0002" && strings.Contains(req.Script, "bmc.pass"):
+			once.Do(func() { close(second) })
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	h, err := run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-2]", "-y")
+	if err != nil {
+		t.Fatalf("secrets push failed: %v\n%s", err, h.out)
+	}
+	// The table lists the files one after the other, each on every node,
+	// whatever order the nodes were written in.
+	want := `
+NODE     SECRET                STATUS
+exe0001  /etc/munge/munge.key  written
+exe0002  /etc/munge/munge.key  written
+exe0001  /etc/bmc.pass         written
+exe0002  /etc/bmc.pass         written
+`
+	if got := h.out.String(); got != want[1:] {
+		t.Errorf("output:\n%s\nwant:\n%s", got, want[1:])
+	}
+}
+
+// The nodes are written to fanout.max at a time, and --fanout lowers it:
+// each write is held until one more than the limit are under way, which
+// never happens while the limit is kept. A node writes its files one after
+// the other, so the writes under way are the nodes under way.
+func TestSecretsPushKeepsToTheFanOut(t *testing.T) {
+	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
+	for _, limit := range []int{1, 3} {
+		calls := &fanouttest.InFlight{Hold: limit + 1}
+		rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+			defer calls.Enter()()
+			return &transport.Result{Target: tg}, nil
+		}}
+		_, err := run(t, harnessOptions{config: []string{dir}, recorder: rec},
+			"--fanout", fmt.Sprint(limit), "secrets", "push", "-n", "exe[1-4]", "-y")
+		if err != nil {
+			t.Fatalf("--fanout %d: secrets push failed: %v", limit, err)
+		}
+		if got := calls.Peak(); got != limit {
+			t.Errorf("--fanout %d: %d writes were under way at once, want %d", limit, got, limit)
+		}
+		if got := calls.Started(); got != 8 {
+			t.Errorf("--fanout %d: %d writes were sent, want both files to each of 4 nodes", limit, got)
+		}
+	}
+}
+
+// A node that could not be reached for one secret is not tried again for
+// the next, even when an earlier secret failed there for another reason,
+// as the help says; a node that refused one secret is still sent the next.
+// A node that could not be reached makes the push exit 3, whatever failed
+// there first.
+func TestSecretsPushStopsANodeAtTheFirstSecretItCouldNotBeSent(t *testing.T) {
+	three := twoSecretFiles + "        - target: /etc/nslcd.conf\n          secretRef: {name: example, key: bmc-password}\n"
+	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: three}.write(t)
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		switch {
+		case tg.Name == "exe0001" && strings.Contains(req.Script, "munge.key"):
+			return transport.ExitResult(tg, 1, "", "chown: invalid user: 'munge:munge'\n"), nil
+		case tg.Name == "exe0001" && strings.Contains(req.Script, "bmc.pass"):
+			return exe0002Unreachable(transport.Target{Name: "exe0002", Host: tg.Host}, req)
+		case tg.Name == "exe0002" && strings.Contains(req.Script, "munge.key"):
+			return transport.ExitResult(tg, 1, "", "received 3 of 10 bytes; the file was left as it was\n"), nil
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	h, err := run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-2]", "-y")
+	// A node's first failure is the one it is reported with, and the worst
+	// of them the code the command exits with.
+	wantCode(t, err, exitcode.Transport)
+	want := `
+NODE     SECRET                STATUS
+exe0001  /etc/munge/munge.key  failed: chown: invalid user: 'munge:munge'
+exe0002  /etc/munge/munge.key  failed: received 3 of 10 bytes; the file was left as it was
+exe0001  /etc/bmc.pass         failed: ssh: connect to host exe0002 port 22: Connection timed out
+exe0002  /etc/bmc.pass         written
+exe0001  /etc/nslcd.conf       skipped: the node could not be reached
+exe0002  /etc/nslcd.conf       written
+`
+	if got := h.out.String(); got != want[1:] {
+		t.Errorf("output:\n%s\nwant:\n%s", got, want[1:])
+	}
+}
+
+// Once the command is interrupted no node is started and nothing more is
+// sent: a node never started fails its first secret with the interrupt and
+// skips the rest, saying that the command was interrupted, not that the
+// node could not be reached, and the command stops as interrupted.
+func TestSecretsPushStartsNothingOnceInterrupted(t *testing.T) {
+	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		cancel()
+		return &transport.Result{Target: tg, ExitCode: -1, Err: fmt.Errorf("%s: %w", tg, context.Canceled)}, nil
+	}}
+	h, err := run(t, harnessOptions{ctx: ctx, config: []string{dir}, recorder: rec},
+		"--fanout", "1", "secrets", "push", "-n", "exe[1-3]", "-y")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want the interrupt", err)
+	}
+	if calls := rec.Calls(); len(calls) != 1 {
+		t.Errorf("%d writes were sent, want only the one under way when the interrupt came", len(calls))
+	}
+	want := `
+NODE     SECRET                STATUS
+exe0001  /etc/munge/munge.key  failed: exe0001 (exe0001.hpc.example.org): context canceled
+exe0002  /etc/munge/munge.key  failed: context canceled
+exe0003  /etc/munge/munge.key  failed: context canceled
+exe0001  /etc/bmc.pass         skipped: the command was interrupted
+exe0002  /etc/bmc.pass         skipped: the command was interrupted
+exe0003  /etc/bmc.pass         skipped: the command was interrupted
+`
+	if got := h.out.String(); got != want[1:] {
+		t.Errorf("output:\n%s\nwant:\n%s", got, want[1:])
 	}
 }

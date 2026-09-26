@@ -180,7 +180,9 @@ once all of it has arrived, so a dropped connection leaves the old file. Two
 secrets with the same target are refused before anything is decrypted: only
 the last would stay, after the first had been in place for a while.
 
-A node that cannot be reached is named, is not tried again for the remaining
+The nodes are written to side by side, `fanout.max` at a time, each its
+secrets one after the other, so a node that hangs holds up no other. A node
+that cannot be reached is named, is not tried again for the remaining
 secrets, and makes the push exit `3`, even when another node refused.
 
 A secret can come from a sops encrypted `Secret` document instead of a file of

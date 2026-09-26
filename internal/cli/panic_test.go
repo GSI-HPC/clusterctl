@@ -71,3 +71,30 @@ func TestAPanicInAHostKeyScanFailsOnlyThatHost(t *testing.T) {
 		t.Errorf("the stack of the panic was not written to standard error:\n%s", h.errOut)
 	}
 }
+
+// A panic while one secret is written to a node is that write's failure,
+// and the node goes on with the next secret, which is written: the node
+// was there to answer. The push exits 1, and the stack goes to standard
+// error.
+func TestAPanicWritingOneSecretFailsOnlyThatWrite(t *testing.T) {
+	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if tg.Name == "exe0002" && strings.Contains(req.Script, "munge.key") {
+			panic("index out of range [3] with length 3")
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	h, err := run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-2]", "-y")
+	wantCode(t, err, exitcode.TargetFailed)
+	for _, want := range []string{
+		"exe0002  /etc/munge/munge.key  failed: ",
+		"exe0002  /etc/bmc.pass         written",
+	} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("output:\n%s\nwant a row that reads %q", h.out, want)
+		}
+	}
+	if log := h.errOut.String(); !strings.Contains(log, "panic while working on exe0002") || !strings.Contains(log, "goroutine") {
+		t.Errorf("the stack of the panic was not written to standard error:\n%s", log)
+	}
+}

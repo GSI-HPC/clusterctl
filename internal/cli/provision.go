@@ -27,6 +27,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/output"
@@ -85,9 +86,13 @@ workstation lacks stops the push, and its dry run, before a node is touched.
 Two secrets written to the same target are refused before that: only the
 last would stay, after the first had been in place for a while. Each file is
 written beside its target and moved into place only once all of it has
-arrived, so a lost connection leaves the old file as it was. A node
-that cannot be reached is not tried again for the next secret; when no node
-that failed could be reached, the command exits 3.
+arrived, so a lost connection leaves the old file as it was.
+
+The nodes are written to side by side, fanout.max at once, each its secrets
+one after the other, so no node waits for another's file before its next. A
+node that cannot be reached is not tried again for the next secret; when a
+node that failed could not be reached, for any of its secrets, the command
+exits 3, even when another node refused.
 
 This overwrites files on the nodes, so it asks first.
 
@@ -134,35 +139,48 @@ This overwrites files on the nodes, so it asks first.
 				return err
 			}
 
-			t := output.NewTable(output.Cols("NODE", "SECRET", "STATUS")...)
-			// failed holds the first failure of each node. A node that
-			// could not be reached is not tried again for the next
-			// secret, which would only wait out the connect timeout again.
-			failed := map[string]error{}
-			gone := map[string]bool{}
+			// Each node is written its secrets in order by a worker of its
+			// own, so that a node that hangs holds up no other. What became
+			// of each secret on each node is kept in written, which the
+			// worker fills as it goes.
+			push := secretPush{a: a, files: files, contents: contents, scripts: make([]string, len(files))}
 			for i, file := range files {
-				var live []transport.Target
-				for _, tg := range targets {
-					if !gone[tg.Name] {
-						live = append(live, tg)
-					}
-				}
-				script := secretScript(file, len(contents[i]))
-				results := a.Executor().RunEach(a.Context(), live, func(transport.Target) transport.Request {
-					return a.Collect(transport.Request{Script: script, Stdin: bytes.NewReader(contents[i])})
-				})
-				byName := map[string]*transport.Result{}
-				for _, res := range results {
-					byName[res.Target.Name] = res
-				}
-				for _, tg := range targets {
-					if gone[tg.Name] && byName[tg.Name] == nil {
-						t.Add(tg.Name, file.Target, "skipped: the node could not be reached")
+				push.scripts[i] = secretScript(file, len(contents[i]))
+			}
+			written := make([][]*transport.Result, len(targets))
+			nodes := make([]int, len(targets))
+			for k := range targets {
+				written[k], nodes[k] = make([]*transport.Result, len(files)), k
+			}
+			outcomes := fanout.Map(a.Context(), nodes, fanout.Options[int]{
+				Step:  "write the secrets",
+				Limit: a.Spec.Fanout.Max,
+				Describe: func(k int) (node, host, role string) {
+					return targets[k].Name, targets[k].Host, targets[k].Role
+				},
+				PanicLog: a.Diag,
+			}, func(ctx context.Context, k int) (struct{}, error) {
+				return struct{}{}, push.node(ctx, targets[k], written[k])
+			})
+			for k, o := range outcomes {
+				notPushed(targets[k], written[k], o.Err)
+			}
+
+			// The table lists the secrets one after the other, each on
+			// every node, as the files are configured.
+			t := output.NewTable(output.Cols("NODE", "SECRET", "STATUS")...)
+			// failed holds the first failure of each node, with the code
+			// the worst of its failures asks for: a node that refused one
+			// secret and could not be reached for the next is one that
+			// could not be reached.
+			failed := map[string]error{}
+			all := map[string][]error{}
+			for i, file := range files {
+				for k, tg := range targets {
+					res := written[k][i]
+					if fanout.IsSkipped(res.Err) {
+						t.Add(tg.Name, file.Target, "skipped: "+res.Err.Error())
 						continue
-					}
-					res := byName[tg.Name]
-					if res == nil {
-						res = &transport.Result{Target: tg, ExitCode: -1, Err: fmt.Errorf("%s: no result", tg.Name)}
 					}
 					t.Add(tg.Name, file.Target, pushStatus(res))
 					if !res.Failed() {
@@ -171,9 +189,12 @@ This overwrites files on the nodes, so it asks first.
 					if _, seen := failed[tg.Name]; !seen {
 						failed[tg.Name] = pushError(res)
 					}
-					if nodeUnreachable(failed[tg.Name]) {
-						gone[tg.Name] = true
-					}
+					all[tg.Name] = append(all[tg.Name], pushError(res))
+				}
+			}
+			for node, err := range failed {
+				if worst := exitcode.Worst(all[node]...); worst != exitcode.From(err) {
+					failed[node] = exitcode.Wrap(worst, err)
 				}
 			}
 			if err := a.Print(output.Result{Table: t}); err != nil {
@@ -199,6 +220,110 @@ func oneSecretPerTarget(files []v1alpha1.SecretFile) error {
 		first[target] = i
 	}
 	return nil
+}
+
+// secretUnreached is why a secret is not written to a node that could not
+// be reached for one before it, and secretInterrupted why none is written
+// once the command was interrupted.
+const (
+	secretUnreached   = "the node could not be reached"
+	secretInterrupted = "the command was interrupted"
+)
+
+// leftOut says why the secrets after one that failed with err are not
+// written to its node.
+func leftOut(err error) string {
+	if errors.Is(err, context.Canceled) || exitcode.From(err) == exitcode.Interrupted {
+		return secretInterrupted
+	}
+	return secretUnreached
+}
+
+// secretPush writes the decrypted secrets onto the nodes.
+type secretPush struct {
+	a        *app.App
+	files    []v1alpha1.SecretFile
+	contents [][]byte
+	scripts  []string
+}
+
+// node writes the secrets onto one node, one after the other, each as a
+// step of its own, and records in written what became of each. Once one
+// could not be written because the node could not be reached, or the
+// command was interrupted, the rest are left out, skipped, saying which.
+// It returns the node's first failure. The steps are plumbing to the
+// displays, shown when one fails or takes long: the node's target says
+// how it fared, and a line for every file on every node would drown it.
+func (p secretPush) node(ctx context.Context, tg transport.Target, written []*transport.Result) error {
+	var first error
+	gone := ""
+	for i, file := range p.files {
+		stepCtx, step := progress.Start(ctx, progress.KindStep, "write "+file.Target, progress.WithFlags(progress.Hidden))
+		if gone != "" {
+			written[i] = &transport.Result{Target: tg, ExitCode: -1, Err: fanout.Skip(gone)}
+			step.Skip(gone)
+			continue
+		}
+		res := p.write(stepCtx, tg, i)
+		written[i] = res
+		if !res.Failed() {
+			step.End(nil)
+			continue
+		}
+		err := pushError(res)
+		step.End(err)
+		if first == nil {
+			first = err
+		}
+		if nodeUnreachable(err) {
+			gone = leftOut(err)
+		}
+	}
+	return first
+}
+
+// write writes one secret onto one node, with the payload on standard
+// input, a reader of its own for every write. Nothing is sent once the
+// command is interrupted. A panic while it is written is that write's
+// failure, as a panic on one target of a fan-out is, and the node goes on
+// with the next secret.
+func (p secretPush) write(ctx context.Context, tg transport.Target, i int) (res *transport.Result) {
+	if err := ctx.Err(); err != nil {
+		return &transport.Result{Target: tg, ExitCode: -1, Err: err}
+	}
+	defer func() {
+		if err := fanout.Recovered(p.a.Diag, tg.Name, recover()); err != nil {
+			res = &transport.Result{Target: tg, ExitCode: -1, Err: err}
+		}
+	}()
+	res, err := p.a.Runner.Run(ctx, tg, p.a.Collect(transport.Request{Script: p.scripts[i], Stdin: bytes.NewReader(p.contents[i])}))
+	if res == nil {
+		res = &transport.Result{Target: tg, ExitCode: -1}
+	}
+	if err != nil && res.Err == nil {
+		res.Err = err
+	}
+	return res
+}
+
+// notPushed fills in what became of the secrets of a node that the pool
+// never started, once the command was interrupted, or whose worker
+// panicked: the first secret not recorded fails with why, and the rest are
+// skipped as for a node that could not be reached when that is why, or fail
+// the same way when it is not.
+func notPushed(tg transport.Target, written []*transport.Result, why error) {
+	missing := false
+	for i, res := range written {
+		if res != nil {
+			continue
+		}
+		if missing && nodeUnreachable(why) {
+			written[i] = &transport.Result{Target: tg, ExitCode: -1, Err: fanout.Skip(leftOut(why))}
+			continue
+		}
+		written[i] = &transport.Result{Target: tg, ExitCode: -1, Err: why}
+		missing = true
+	}
 }
 
 // secretScript writes the payload on standard input to a temporary file
