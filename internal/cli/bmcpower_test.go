@@ -611,3 +611,43 @@ command bmc power: canceled (canceled): interrupted, 3 not sent: exe[0004-0006]
 		})
 	}
 }
+
+// A processor's row is made as its answer arrives, and an interrupt that
+// comes after it changes neither the row nor how the display counted it:
+// the one that answered with a failure reads that failure, not an outcome
+// the interrupt left unknown, and only those that had not answered read
+// unknown.
+func TestBMCPowerKeepsTheAnswersThatCameBeforeAnInterrupt(t *testing.T) {
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		hosts := ipmiRequestHosts(req)
+		for _, bmc := range hosts[:2] {
+			answer := "ok"
+			if strings.HasPrefix(bmc, "exe0002.") {
+				answer = "connection timeout"
+			}
+			req.OnLine(progress.Stdout, bmc+": "+answer)
+		}
+		cancel()
+		return &transport.Result{Target: tg, ExitCode: 255, Err: exitcode.Wrap(exitcode.Interrupted, context.Canceled)}, nil
+	}}
+	watched, tree := watch(t)
+	ctx2, cancel2 := context.WithCancel(watched)
+	defer cancel2()
+	go func() { <-ctx.Done(); cancel2() }()
+	h, err := run(t, harnessOptions{ctx: ctx2, recorder: rec}, append(noSlurm, "-o", "json", "bmc", "power", "off", "--ipmi", "-y", "-n", "exe[1-3]")...)
+	wantCode(t, err, exitcode.Interrupted)
+	rows := jsonRows(t, h)
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3:\n%s", len(rows), h.out)
+	}
+	if rows[0]["state"] != "ok" || rows[1]["error"] != "connection timeout" || rows[1]["state"] == "outcome unknown" ||
+		rows[2]["state"] != "outcome unknown" {
+		t.Errorf("rows = %v, want exe0001 ok, exe0002 its failure and exe0003's outcome unknown", rows)
+	}
+	if got := tree(); !strings.Contains(got, "target exe0002: failed (target)") {
+		t.Errorf("progress:\n%s\nwant exe0002 failed as its row says", got)
+	}
+}

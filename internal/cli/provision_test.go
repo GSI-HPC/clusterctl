@@ -504,10 +504,13 @@ func TestReinstallDisarmsWhatItArmed(t *testing.T) {
 	})
 }
 
-// Each change a reinstall sends to the processors is a step with every node
-// it goes to as a target, and so is disarming what a failed step armed. A
-// step with nothing to send, such as disarming after a boot link failed
-// before any processor was asked, is not reported at all.
+// Each part of a reinstall is a step, named as its failure names it: the
+// lookups before the question, hidden; the boot links, written in one
+// script; each change sent to the processors, with every node it goes to as
+// a target; forgetting the host keys; and, after a failure, disarming what
+// was armed. A change with nothing to send, such as clearing the boot
+// overrides after a boot link failed before any processor was asked, is not
+// reported at all.
 func TestReinstallReportsEveryNodeOfEachStep(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -517,14 +520,19 @@ func TestReinstallReportsEveryNodeOfEachStep(t *testing.T) {
 	}{
 		{"every node reinstalls", func(*reinstallHost) {}, exitcode.OK, `
 command provision reinstall: ok
-  call credential bmc source=env [hidden]: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
+  step check Slurm jobs [hidden]: ok
+    call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0 [hidden]: ok
+  step check the boot paths [hidden]: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0 [hidden]: ok
+  step configuring the network boot: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  step forgetting the host keys: ok
   step resetting the machines total=3 limit=8 [fold]: ok
     target exe[0001-0003]: ok
       call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
       call redfish host={} method=POST path=/redfish/v1/Systems/1/Actions/ComputerSystem.Reset http=200: ok
+  step resolve [hidden]: ok
+    call credential bmc source=env [hidden]: ok
   step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
     target exe[0001-0003]: ok
       call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
@@ -533,14 +541,19 @@ command provision reinstall: ok
 `},
 		{"a boot override fails", func(h *reinstallHost) { h.bmcs.down["exe0002"] = true }, exitcode.Transport, `
 command provision reinstall: failed (transport): setting the machines to boot from the network once failed: exe0002: exe0002.mgmt.hpc.example.org: dial tcp: connection refused; the boot links and boot overrides of exe[0001-0003] were removed again
-  call credential bmc source=env [hidden]: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
-  step clearing the boot overrides total=2 limit=8 [fold]: ok
-    target exe[0001,0003]: ok
-      call redfish host={} method=PATCH path=/redfish/v1/Systems/1 http=200: ok
+  step check Slurm jobs [hidden]: ok
+    call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0 [hidden]: ok
+  step check the boot paths [hidden]: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0 [hidden]: ok
+  step configuring the network boot: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  step disarming: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+    step clearing the boot overrides total=2 limit=8 [fold]: ok
+      target exe[0001,0003]: ok
+        call redfish host={} method=PATCH path=/redfish/v1/Systems/1 http=200: ok
+  step resolve [hidden]: ok
+    call credential bmc source=env [hidden]: ok
   step setting the machines to boot from the network once total=3 limit=8 [fold]: failed (transport): 1 of 3 failed: exe0002
     target exe0002: failed (transport): {}: dial tcp: connection refused
       call redfish host={} method=GET path=/redfish/v1/Systems/1: failed (transport): {}: dial tcp: connection refused
@@ -551,14 +564,18 @@ command provision reinstall: failed (transport): setting the machines to boot fr
 `},
 		{"a reset fails", func(h *reinstallHost) { h.bmcs.refuse["exe0002"] = "ForceRestart" }, exitcode.TargetFailed, `
 command provision reinstall: failed (target): resetting the machines failed: exe0002: exe0002.mgmt.hpc.example.org: 400 Bad Request: refused; exe[0001,0003] is reinstalling; the boot links and boot overrides of exe0002 were removed again, but their host keys are forgotten; "clusterctl hostkey refresh -n exe0002" writes them again
-  call credential bmc source=env [hidden]: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
-  step clearing the boot overrides total=1 limit=8 [fold]: ok
-    target exe0002: ok
-      call redfish host={} method=PATCH path=/redfish/v1/Systems/1 http=200: ok
+  step check Slurm jobs [hidden]: ok
+    call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0 [hidden]: ok
+  step check the boot paths [hidden]: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0 [hidden]: ok
+  step configuring the network boot: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  step disarming: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+    step clearing the boot overrides total=1 limit=8 [fold]: ok
+      target exe0002: ok
+        call redfish host={} method=PATCH path=/redfish/v1/Systems/1 http=200: ok
+  step forgetting the host keys: ok
   step resetting the machines total=3 limit=8 [fold]: failed (target): 1 of 3 failed: exe0002
     target exe0002: failed (target): {}: 400 Bad Request: refused
       call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
@@ -566,6 +583,8 @@ command provision reinstall: failed (target): resetting the machines failed: exe
     target exe[0001,0003]: ok
       call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
       call redfish host={} method=POST path=/redfish/v1/Systems/1/Actions/ComputerSystem.Reset http=200: ok
+  step resolve [hidden]: ok
+    call credential bmc source=env [hidden]: ok
   step setting the machines to boot from the network once total=3 limit=8 [fold]: ok
     target exe[0001-0003]: ok
       call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
@@ -580,11 +599,16 @@ command provision reinstall: failed (target): resetting the machines failed: exe
 			}
 		}, exitcode.TargetFailed, `
 command provision reinstall: failed (target): configuring the network boot failed: the boot link of exe0002 could not be changed; the boot links and boot overrides of exe[0001,0003] were removed again
-  call credential bmc source=env [hidden]: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
-  call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
+  step check Slurm jobs [hidden]: ok
+    call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0 [hidden]: ok
+  step check the boot paths [hidden]: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0 [hidden]: ok
+  step configuring the network boot: failed (target): the boot link of exe0002 could not be changed
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  step disarming: ok
+    call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0: ok
+  step resolve [hidden]: ok
+    call credential bmc source=env [hidden]: ok
   wait confirm message=reinstall 3 hosts: ok
 `},
 	} {

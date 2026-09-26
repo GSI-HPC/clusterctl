@@ -17,6 +17,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/dhcp"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -208,27 +209,109 @@ func parsePortStates(entries []portState, out string) {
 		entries[i].State = portNoAnswer
 	}
 	for line := range strings.SplitSeq(out, "\n") {
-		f := strings.Split(strings.TrimRight(line, "\r"), "|")
-		if len(f) != 5 {
+		i, answer, ok := portAnswer(line, len(entries))
+		if !ok {
 			continue
 		}
-		i, err := strconv.Atoi(f[0])
-		if err != nil || i < 0 || i >= len(entries) {
-			continue
+		answer.Node, answer.GUID = entries[i].Node, entries[i].GUID
+		entries[i] = answer
+	}
+}
+
+// portAnswer reads one line of the answers of portStateScript: the index of
+// the port it answers for, one of n, and what the fabric said of it. Every
+// reader of the answers goes through it, so that a display that ends a
+// port's target as its line arrives says what the table says.
+func portAnswer(line string, n int) (int, portState, bool) {
+	f := strings.Split(strings.TrimRight(line, "\r"), "|")
+	if len(f) != 5 {
+		return 0, portState{}, false
+	}
+	i, err := strconv.Atoi(f[0])
+	if err != nil || i < 0 || i >= n {
+		return 0, portState{}, false
+	}
+	e := portState{
+		LinkState:     linkStateValue.ReplaceAllString(strings.TrimSpace(f[1]), ""),
+		PhysicalState: linkStateValue.ReplaceAllString(strings.TrimSpace(f[2]), ""),
+		Width:         strings.TrimSpace(f[3]),
+		Speed:         strings.TrimSpace(f[4]),
+	}
+	switch {
+	case e.LinkState == "" && e.PhysicalState == "":
+		e.State = portNoAnswer
+	case e.LinkState == "Active":
+		e.State = portUp
+	default:
+		e.State = portDown
+	}
+	return i, e, true
+}
+
+// errPortNoAnswer is the failure of a port the fabric did not answer for.
+var errPortNoAnswer = errors.New("the fabric did not answer for the port")
+
+// failure is what a port that is not up failed with, for a display.
+func (e portState) failure() error {
+	switch e.State {
+	case portUp:
+		return nil
+	case portDown:
+		return exitcode.Errorf(exitcode.TargetFailed, "the port is down: link %s, physical %s", e.LinkState, e.PhysicalState)
+	default:
+		return errPortNoAnswer
+	}
+}
+
+// portTargets report the ports of fabric state, a target each, in the
+// order the script asks about them: one runs at a time, and each ends as
+// the fabric's answer for it arrives, when the next one starts.
+type portTargets []*progress.Span
+
+// newPortTargets announces a target for each port under the span ctx
+// carries.
+func newPortTargets(ctx context.Context, entries []portState) portTargets {
+	p := make(portTargets, len(entries))
+	for i, e := range entries {
+		_, p[i] = progress.Start(ctx, progress.KindTarget, e.Node, progress.Queued(),
+			progress.Node(e.Node), progress.Host(e.GUID))
+	}
+	return p
+}
+
+// start marks the first port running, as the script is sent.
+func (p portTargets) start() {
+	if len(p) > 0 {
+		p[0].Run()
+	}
+}
+
+// answered ends the target of the port a line of the script's output
+// answers for, and starts the next. It is a transport.Request's OnLine, so
+// it is handed only lines that ended; the answers are on standard output.
+func (p portTargets) answered(stream progress.Stream, line string) {
+	if stream != progress.Stdout {
+		return
+	}
+	i, answer, ok := portAnswer(line, len(p))
+	if !ok {
+		return
+	}
+	p[i].End(answer.failure())
+	if i+1 < len(p) {
+		p[i+1].Run()
+	}
+}
+
+// end ends the targets of the ports whose answer did not arrive while the
+// script ran, as the table reads them, or with why the script stopped.
+func (p portTargets) end(entries []portState, stopped error) {
+	for i, e := range entries {
+		err := e.failure()
+		if e.State == portNoAnswer && stopped != nil {
+			err = stopped
 		}
-		e := &entries[i]
-		e.LinkState = linkStateValue.ReplaceAllString(strings.TrimSpace(f[1]), "")
-		e.PhysicalState = linkStateValue.ReplaceAllString(strings.TrimSpace(f[2]), "")
-		e.Width = strings.TrimSpace(f[3])
-		e.Speed = strings.TrimSpace(f[4])
-		switch {
-		case e.LinkState == "" && e.PhysicalState == "":
-			e.State = portNoAnswer
-		case e.LinkState == "Active":
-			e.State = portUp
-		default:
-			e.State = portDown
-		}
+		p[i].End(err)
 	}
 }
 
@@ -280,11 +363,19 @@ reason it stopped. It only reads, so --dry-run asks the fabric too.
 			// nothing, such as ssh that could not reach the fabric host,
 			// leaves nothing to show, and so does an interrupt: the ports
 			// not asked yet would read as if they had not answered.
-			result, runErr := a.ReadOnRole(a.Context(), role, transport.Request{
+			ctx, step := progress.Start(a.Context(), progress.KindStep, "query ports",
+				progress.WithFlags(progress.Fold), progress.Total(len(entries)))
+			ports := newPortTargets(ctx, entries)
+			ports.start()
+			result, runErr := a.ReadOnRole(ctx, role, transport.Request{
 				Script: portStateScript(guids),
+				OnLine: ports.answered,
 			})
 			interrupted := runErr != nil && (errors.Is(runErr, context.Canceled) || exitcode.From(runErr) == exitcode.Interrupted)
 			if runErr != nil && (result == nil || result.Stdout == "" || interrupted) {
+				parsePortStates(entries, "")
+				ports.end(entries, runErr)
+				step.End(runErr)
 				return runErr
 			}
 			parsePortStates(entries, result.Stdout)
@@ -298,26 +389,28 @@ reason it stopped. It only reads, so --dry-run asks the fabric too.
 				}
 				t.Add(e.Node, e.GUID, e.State, e.LinkState, e.PhysicalState, e.Width, e.Speed)
 			}
-			if err := a.Print(output.Result{Table: t, Object: entries}); err != nil {
-				return err
-			}
-			if runErr != nil {
+			if runErr != nil && result.Err != nil {
 				// The transport's own error says why the script stopped;
 				// ReadOnRole's quotes the first line the host printed,
 				// which may be a port's answer.
-				if result.Err != nil {
-					runErr = result.Err
-				}
-				if notUp > 0 {
-					return fmt.Errorf("%d of %d ports are not up, and the fabric host stopped before it had answered for all: %w",
-						notUp, len(entries), runErr)
-				}
-				return fmt.Errorf("the fabric host stopped before it was done: %w", runErr)
+				runErr = result.Err
 			}
-			if notUp > 0 {
-				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d ports are not up", notUp, len(entries))
+			var failed error
+			switch {
+			case runErr != nil && notUp > 0:
+				failed = fmt.Errorf("%d of %d ports are not up, and the fabric host stopped before it had answered for all: %w",
+					notUp, len(entries), runErr)
+			case runErr != nil:
+				failed = fmt.Errorf("the fabric host stopped before it was done: %w", runErr)
+			case notUp > 0:
+				failed = exitcode.Errorf(exitcode.TargetFailed, "%d of %d ports are not up", notUp, len(entries))
 			}
-			return nil
+			ports.end(entries, runErr)
+			step.End(failed)
+			if err := a.Print(output.Result{Table: t, Object: entries}); err != nil {
+				return err
+			}
+			return failed
 		}))
 }
 

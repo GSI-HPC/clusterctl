@@ -38,3 +38,20 @@ func TestBMCPingReadsTheSweepCarefully(t *testing.T) {
 		}
 	}
 }
+
+// The sweep is one step that knows how many processors it asks, with the
+// one call that asks them all; fping says which answered only once it is
+// done, so there is no target for each.
+func TestBMCPingReportsTheSweepAsAStep(t *testing.T) {
+	ctx, tree := watch(t)
+	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "exe0001.mgmt.hpc.example.org\n", ExitCode: 1}}}
+	_, err := run(t, harnessOptions{ctx: ctx, recorder: rec}, "bmc", "ping", "-n", "exe[0001-0002]")
+	wantCode(t, err, exitcode.TargetFailed)
+	want := `command bmc ping: failed (target): 1 service processors did not answer
+  step ping total=2: failed (target): 1 service processors did not answer
+    call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=2m0s exit=1: failed (target): mgmt (mgmt-gw.example.org): command exited 1
+`
+	if got := tree(); got != want {
+		t.Errorf("progress:\n%s\nwant:\n%s", got, want)
+	}
+}

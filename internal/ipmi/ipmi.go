@@ -22,6 +22,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
@@ -61,6 +62,14 @@ type Backend struct {
 	// Username and Password authenticate with the service processors.
 	Username string
 	Password string
+	// Answered, when it is set, is told the status of each processor as
+	// the line that answers for it arrives, before Power returns, so that
+	// a display can count the processor done then. It is called from the
+	// goroutines that read the backend's output, one per stream, perhaps
+	// at once. The lines are read by the rule Power reads them by, so
+	// what it is told is what Power returns for that processor; the
+	// backends print one line for each.
+	Answered func(Status)
 }
 
 // Format prints the backend without the password, whatever the verb, so
@@ -215,11 +224,12 @@ func (b *Backend) runIpmipower(ctx context.Context, action string, bmcs *nodeset
 	// FreeIPMI reads the account out of a configuration file, so neither the
 	// user nor the password reaches the argument vector.
 	payload := fmt.Sprintf("username %s\npassword %s\n", ipmipowerQuote(b.Username), ipmipowerQuote(b.Password))
-	result, err := b.run(ctx, argv, payload, b.Spec.Timeout.Get())
+	answer := func(text string) (string, bool) { return ipmipowerAnswer(action, text) }
+	result, err := b.run(ctx, argv, payload, b.Spec.Timeout.Get(), b.onLine(bmcs, answer))
 	if err != nil {
 		return nil, err
 	}
-	return b.collect(result, bmcs, func(text string) (string, bool) { return ipmipowerAnswer(action, text) }), nil
+	return b.collect(result, bmcs, answer), nil
 }
 
 // ipmitoolHostTimeout bounds one ipmitool run inside the loop. With one
@@ -251,51 +261,94 @@ func (b *Backend) runIpmitool(ctx context.Context, action string, bmcs *nodeset.
 	// The whole loop may take every run's bound, and the configured timeout
 	// on top for the connection.
 	timeout := b.Spec.Timeout.Get() + time.Duration(bmcs.Len())*(ipmitoolHostTimeout+5*time.Second)
-	result, err := b.runScript(ctx, script.String(), b.Password+"\n", timeout)
-	if err != nil {
-		return nil, err
-	}
-	return b.collect(result, bmcs, func(text string) (string, bool) {
+	answer := func(text string) (string, bool) {
 		if strings.HasPrefix(text, "exit ") {
 			return "", false
 		}
 		return ipmitoolAnswer(action, text)
-	}), nil
+	}
+	result, err := b.runScript(ctx, script.String(), b.Password+"\n", timeout, b.onLine(bmcs, answer))
+	if err != nil {
+		return nil, err
+	}
+	return b.collect(result, bmcs, answer), nil
 }
 
 // collect reads the answer of every processor of the set out of what the
 // backend printed, and accounts for the ones it did not answer for.
 func (b *Backend) collect(result *transport.Result, bmcs *nodeset.NodeSet, answer func(string) (string, bool)) []Status {
-	lines := strings.Split(result.Stdout+"\n"+result.Stderr, "\n")
+	lines := newLineMatcher(bmcs)
+	said := map[string]string{}
+	for _, line := range strings.Split(result.Stdout+"\n"+result.Stderr, "\n") {
+		if bmc, text, ok := lines.match(line); ok {
+			said[bmc] = text
+		}
+	}
 	names := bmcs.Expand()
 	statuses := make([]Status, 0, len(names))
 	for _, bmc := range names {
-		text, found := "", false
-		// A line belongs to a processor when it starts with its whole name
-		// and a colon, so that bmc1 is not answered for by bmc10.
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if rest, ok := strings.CutPrefix(line, bmc+":"); ok {
-				text, found = strings.TrimSpace(rest), true
-			}
+		if text, found := said[bmc]; found {
+			statuses = append(statuses, answered(bmc, text, answer))
+			continue
 		}
-		status := Status{BMC: bmc}
-		switch state, ok := answer(text); {
-		case found && ok:
-			status.State = state
-		case found:
-			status.State = "unknown"
-			status.Err = text
-			status.Err = cmp.Or(status.Err, "the IPMI backend printed nothing for it")
-			status.Cause = errors.New(status.Err)
-		default:
-			status.State = "unknown"
-			status.Cause = b.unreported(result)
-			status.Err = status.Cause.Error()
-		}
-		statuses = append(statuses, status)
+		cause := b.unreported(result)
+		statuses = append(statuses, Status{BMC: bmc, State: "unknown", Err: cause.Error(), Cause: cause})
 	}
 	return statuses
+}
+
+// onLine returns what hands b.Answered the status of each processor of the
+// set as its line arrives, as the OnLine of the backend's run; nil when
+// nobody asked.
+func (b *Backend) onLine(bmcs *nodeset.NodeSet, answer func(string) (string, bool)) func(progress.Stream, string) {
+	if b.Answered == nil {
+		return nil
+	}
+	lines := newLineMatcher(bmcs)
+	return func(_ progress.Stream, line string) {
+		if bmc, text, ok := lines.match(line); ok {
+			b.Answered(answered(bmc, text, answer))
+		}
+	}
+}
+
+// lineMatcher tells which processor of a set a line the backend printed
+// answers for. It is only read, so it is safe for concurrent use.
+type lineMatcher map[string]bool
+
+func newLineMatcher(bmcs *nodeset.NodeSet) lineMatcher {
+	m := lineMatcher{}
+	for _, bmc := range bmcs.Expand() {
+		m[bmc] = true
+	}
+	return m
+}
+
+// match returns the processor a line answers for and what it says of it.
+// A line belongs to a processor when it starts with its whole name and a
+// colon, so that bmc1 is not answered for by bmc10; when two names do, as
+// two addresses with colons in them might, the longer one.
+func (m lineMatcher) match(line string) (bmc, text string, ok bool) {
+	line = strings.TrimSpace(line)
+	for i := len(line) - 1; i >= 0; i-- {
+		if line[i] == ':' && m[line[:i]] {
+			return line[:i], strings.TrimSpace(line[i+1:]), true
+		}
+	}
+	return "", "", false
+}
+
+// answered is the status of a processor the backend printed text for.
+func answered(bmc, text string, answer func(string) (string, bool)) Status {
+	status := Status{BMC: bmc}
+	if state, ok := answer(text); ok {
+		status.State = state
+		return status
+	}
+	status.State = "unknown"
+	status.Err = cmp.Or(text, "the IPMI backend printed nothing for it")
+	status.Cause = errors.New(status.Err)
+	return status
 }
 
 // unreported explains a processor the backend printed no answer for. When
@@ -343,17 +396,18 @@ cat > "$secret"
 `
 
 // run sends a command to the backend host with the secret on stdin.
-func (b *Backend) run(ctx context.Context, argv []string, payload string, timeout time.Duration) (*transport.Result, error) {
+func (b *Backend) run(ctx context.Context, argv []string, payload string, timeout time.Duration, onLine func(progress.Stream, string)) (*transport.Result, error) {
 	command := shellquote.Join(argv)
 	command = strings.ReplaceAll(command, shellquote.Quote(passwordFilePlaceholder), `"$secret"`)
 	command = strings.ReplaceAll(command, passwordFilePlaceholder, `"$secret"`)
-	return b.runScript(ctx, command, payload, timeout)
+	return b.runScript(ctx, command, payload, timeout, onLine)
 }
 
-// runScript sends a script to the backend host with the secret on stdin. It
-// fails only when the script could not be sent at all; what the backend
-// said, and how it exited, is for the caller to read.
-func (b *Backend) runScript(ctx context.Context, body, payload string, timeout time.Duration) (*transport.Result, error) {
+// runScript sends a script to the backend host with the secret on stdin,
+// and hands each line the backend prints to onLine as it arrives. It fails
+// only when the script could not be sent at all; what the backend said,
+// and how it exited, is for the caller to read.
+func (b *Backend) runScript(ctx context.Context, body, payload string, timeout time.Duration, onLine func(progress.Stream, string)) (*transport.Result, error) {
 	body = strings.ReplaceAll(body, passwordFilePlaceholder, `"$secret"`)
 	script := fmt.Sprintf(wrapper, body)
 
@@ -362,5 +416,6 @@ func (b *Backend) runScript(ctx context.Context, body, payload string, timeout t
 		Stdin:   strings.NewReader(payload),
 		Timeout: timeout,
 		TTY:     transport.TTYNone,
+		OnLine:  onLine,
 	})
 }

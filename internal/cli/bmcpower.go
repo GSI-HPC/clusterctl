@@ -12,6 +12,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -695,33 +696,56 @@ func (r *bmcRun) runIPMI(ctx context.Context, a *app.App, names []string) []bmcR
 		for _, node := range nodes {
 			r.targets[node].span.Run()
 		}
-		statuses, err := backend.Power(ctx, action, bmcs)
+		// A processor's nodes are counted done as its answer arrives,
+		// with the row the answer makes, rather than once the slowest
+		// processor has answered. The row is made once, when the answer
+		// arrives, and is the table's too: an interrupt that comes after
+		// it changes neither what the display showed nor the row.
+		var (
+			toldMu sync.Mutex
+			told   = map[string]bmcResult{}
+		)
+		row := func(node string, s ipmi.Status) bmcResult {
+			toldMu.Lock()
+			defer toldMu.Unlock()
+			if made, ok := told[node]; ok {
+				return made
+			}
+			made := ipmiRow(ctx, action, node, s)
+			told[node] = made
+			return made
+		}
+		live := *backend
+		live.Answered = func(s ipmi.Status) {
+			for _, node := range byBMC[s.BMC] {
+				r.answered(ctx, app.TransportIPMI, node, row(node, s).err)
+			}
+		}
+		statuses, err := live.Power(ctx, action, bmcs)
 		if err != nil {
 			err = bmcError(ctx, err, action != ipmi.ActionStatus)
 			state := ""
 			if exitcode.From(err) == exitcode.Interrupted {
 				state = interruptedState(action != ipmi.ActionStatus)
 			}
-			fail(err, outcomeSent, state)
+			toldMu.Lock()
+			for _, node := range nodes {
+				if made, ok := told[node]; ok {
+					rows = append(rows, made)
+					continue
+				}
+				failed := bmcResult{Node: node, BMC: p.bmc[node], Via: app.TransportIPMI, State: state, outcome: outcomeSent}
+				failed.fail(err)
+				rows = append(rows, failed)
+			}
+			toldMu.Unlock()
 			continue
 		}
 		answered := map[string]bool{}
 		for _, s := range statuses {
 			answered[s.BMC] = true
 			for _, node := range byBMC[s.BMC] {
-				row := bmcResult{Node: node, BMC: s.BMC, Via: app.TransportIPMI, State: s.State}
-				if s.Err != "" {
-					cause := s.Cause
-					if cause == nil {
-						cause = errors.New(s.Err)
-					}
-					cause = bmcError(ctx, cause, action != ipmi.ActionStatus)
-					if exitcode.From(cause) == exitcode.Interrupted {
-						row.State = interruptedState(action != ipmi.ActionStatus)
-					}
-					row.fail(cause)
-				}
-				rows = append(rows, row)
+				rows = append(rows, row(node, s))
 			}
 		}
 		// Every node gets a row, even one whose processor the backend
@@ -735,6 +759,24 @@ func (r *bmcRun) runIPMI(ctx context.Context, a *app.App, names []string) []bmcR
 		}
 	}
 	return rows
+}
+
+// ipmiRow is the row of a node whose processor the IPMI backend answered
+// for with s.
+func ipmiRow(ctx context.Context, action, node string, s ipmi.Status) bmcResult {
+	row := bmcResult{Node: node, BMC: s.BMC, Via: app.TransportIPMI, State: s.State}
+	if s.Err != "" {
+		cause := s.Cause
+		if cause == nil {
+			cause = errors.New(s.Err)
+		}
+		cause = bmcError(ctx, cause, action != ipmi.ActionStatus)
+		if exitcode.From(cause) == exitcode.Interrupted {
+			row.State = interruptedState(action != ipmi.ActionStatus)
+		}
+		row.fail(cause)
+	}
+	return row
 }
 
 // batched says whether an action powers machines on, and so has to be
