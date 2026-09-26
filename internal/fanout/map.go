@@ -6,6 +6,7 @@ package fanout
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -65,7 +66,8 @@ type Outcome[R any] struct {
 // of its item's target, so that the calls it makes are reported under it.
 // An item that failed once the context had ended is reported canceled,
 // since the interrupt is what ended it, and its outcome keeps the error fn
-// returned.
+// returned. An item fn left out on purpose, by returning an error of Skip,
+// ends skipped and is none of those that failed.
 func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx context.Context, item T) (R, error)) []Outcome[R] {
 	limit := o.Limit
 	if limit < 1 {
@@ -90,6 +92,11 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 		spans[i].Run()
 		value, err := call(ctxs[i], o.PanicLog, names[i], items[i], fn)
 		out[i] = Outcome[R]{Value: value, Err: err, Started: true}
+		var skip *skipped
+		if errors.As(err, &skip) {
+			spans[i].Skip(skip.reason)
+			return
+		}
 		if err != nil && ctxs[i].Err() != nil {
 			err = ctxs[i].Err()
 		}
@@ -105,7 +112,7 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 			canceled[i] = endsCanceled(out[i].Err)
 			spans[i].End(out[i].Err)
 		}
-		if out[i].Err != nil {
+		if out[i].Err != nil && !IsSkipped(out[i].Err) {
 			failed, errs = append(failed, names[i]), append(errs, out[i].Err)
 			interrupted = interrupted && canceled[i]
 		}
@@ -118,6 +125,25 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 func endsCanceled(err error) bool {
 	return err != nil && progress.Classify(err) == progress.ClassCanceled
 }
+
+// Skip returns the error of work that leaves its item out on purpose:
+// returned by fn, Map ends the item's target skipped, with reason as what
+// it says, and does not count the item among those that failed. A command
+// can record it too, as secrets push does for the secrets it no longer
+// tries on a node it could not reach, so that IsSkipped tells them from
+// those that failed.
+func Skip(reason string) error { return &skipped{reason: reason} }
+
+// IsSkipped reports whether err says that an item was left out on purpose.
+func IsSkipped(err error) bool {
+	var skip *skipped
+	return errors.As(err, &skip)
+}
+
+// skipped is the error of an item left out on purpose.
+type skipped struct{ reason string }
+
+func (s *skipped) Error() string { return s.reason }
 
 // describe says what a display names an item by.
 func (o Options[T]) describe(item T) (node, host, role string) {
