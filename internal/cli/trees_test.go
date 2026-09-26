@@ -159,9 +159,10 @@ func TestProvisionStatusCountsANodeSshDoesNotReachAsAnswered(t *testing.T) {
 	}
 }
 
-// doctor --remote asks each role whether it answers, and the roles with
-// tools to look for whether they are there, one call after the other: a
-// role that did not answer is asked nothing more.
+// doctor --remote asks each role, a target of its own, in one session
+// each: whether it answers, and for the roles with tools to look for
+// whether they are there. A role that did not answer fails, with the
+// transport's error.
 func TestDoctorRemoteReportsTheCallsOfEachRole(t *testing.T) {
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if tg.Role == "dhcp" {
@@ -179,21 +180,29 @@ func TestDoctorRemoteReportsTheCallsOfEachRole(t *testing.T) {
 		t.Errorf("the command ended %q, want it failed (target) with the count of the checks that failed", head)
 	}
 	want := `
-  call ssh node=db host=dbm01.hpc.example.org role=db timeout=20s exit=0: ok
-  call ssh node=dhcp host=dhcp01.example.org role=dhcp timeout=20s exit=255: failed (transport): dhcp (dhcp01.example.org): ssh: connect to host dhcp: Connection refused
-  call ssh node=fabric host=ibgw01.example.org role=fabric timeout=20s exit=0: ok
-  call ssh node=fabric host=ibgw01.example.org role=fabric timeout=30s exit=0: ok
-  call ssh node=ifs host=ifs01.hpc.example.org role=ifs timeout=20s exit=0: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=20s exit=0: ok
-  call ssh node=install host=installer.hpc.example.org role=install timeout=30s exit=0: ok
-  call ssh node=login host=login.hpc.example.org role=login timeout=20s exit=0: ok
-  call ssh node=login host=login.hpc.example.org role=login timeout=30s exit=0: ok
-  call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=20s exit=0: ok
-  call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=30s exit=0: ok
-  call ssh node=mirror host=mirror.hpc.example.org role=mirror timeout=20s exit=0: ok
-  call ssh node=pool host=pool.example.org role=pool timeout=20s exit=0: ok
-  call ssh node=tftp host=tftp.example.org role=tftp timeout=20s exit=0: ok
-  call ssh node=wlm host=wlm01.hpc.example.org role=wlm timeout=20s exit=0: ok
+  step check the roles total=11 limit=24 [fold]: failed (transport): 1 of 11 failed: dhcp
+    target db role=db: ok
+      call ssh node={} host={} role=db timeout=20s exit=0: ok
+    target dhcp role=dhcp: failed (transport): {} ({}): ssh: connect to host {}: Connection refused
+      call ssh node={} host={} role=dhcp timeout=30s exit=255: failed (transport): {} ({}): ssh: connect to host {}: Connection refused
+    target fabric role=fabric: ok
+      call ssh node={} host={} role=fabric timeout=30s exit=0: ok
+    target ifs role=ifs: ok
+      call ssh node={} host={} role=ifs timeout=20s exit=0: ok
+    target install role=install: ok
+      call ssh node={} host={} role=install timeout=30s exit=0: ok
+    target login role=login: ok
+      call ssh node={} host={} role=login timeout=30s exit=0: ok
+    target mgmt role=mgmt: ok
+      call ssh node={} host={} role=mgmt timeout=30s exit=0: ok
+    target mirror role=mirror: ok
+      call ssh node={} host={} role=mirror timeout=20s exit=0: ok
+    target pool role=pool: ok
+      call ssh node={} host={} role=pool timeout=20s exit=0: ok
+    target tftp role=tftp: ok
+      call ssh node={} host={} role=tftp timeout=20s exit=0: ok
+    target wlm role=wlm: ok
+      call ssh node={} host={} role=wlm timeout=20s exit=0: ok
 `
 	if calls != want[1:] {
 		t.Errorf("progress:\n%s\nwant:\n%s", calls, want[1:])

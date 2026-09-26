@@ -34,6 +34,13 @@ type Options[T any] struct {
 	// PanicLog receives the stack of a panic in the work, the front end's
 	// diagnostics; nil is the process's standard error.
 	PanicLog io.Writer
+	// Acquire, when it is set, takes what an item's work needs besides its
+	// place in the pool, such as a place on each host it goes to (Hosts),
+	// and returns the function that gives that back once the work is done.
+	// It is called once the item has its place in the pool, and the item
+	// stays queued until it returns. An error it returns is the item's,
+	// whose work is then never started.
+	Acquire func(ctx context.Context, item T) (release func(), err error)
 }
 
 // Outcome is what the work for one item came to.
@@ -41,7 +48,8 @@ type Outcome[R any] struct {
 	// Value is what the work returned; the zero value when it panicked.
 	Value R
 	// Err is the error the work returned, or the one a panic in it
-	// became. For an item that was never started it is the context's.
+	// became. For an item that was never started it is the context's, or
+	// the one Options.Acquire refused it with.
 	Err error
 	// Started says whether the work for the item was started, which it
 	// is not once the context has ended.
@@ -67,7 +75,9 @@ type Outcome[R any] struct {
 // An item that failed once the context had ended is reported canceled,
 // since the interrupt is what ended it, and its outcome keeps the error fn
 // returned. An item fn left out on purpose, by returning an error of Skip,
-// ends skipped and is none of those that failed.
+// ends skipped and is none of those that failed. An item waiting for
+// o.Acquire is not yet running, and one it refused, or the context ended
+// for while it waited, ends as one never started.
 func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx context.Context, item T) (R, error)) []Outcome[R] {
 	limit := o.Limit
 	if limit < 1 {
@@ -89,6 +99,12 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 	// canceled are the items whose targets ended canceled.
 	canceled := make([]bool, len(items))
 	Each(ctx, len(items), limit, func(i int) {
+		release, err := o.acquire(ctxs[i], names[i], items[i])
+		if err != nil {
+			out[i].Err = err
+			return
+		}
+		defer release()
 		spans[i].Run()
 		value, err := call(ctxs[i], o.PanicLog, names[i], items[i], fn)
 		out[i] = Outcome[R]{Value: value, Err: err, Started: true}
@@ -108,7 +124,9 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 	interrupted := true
 	for i := range out {
 		if !out[i].Started {
-			out[i].Err = ctx.Err()
+			if out[i].Err == nil || ctx.Err() != nil {
+				out[i].Err = ctx.Err()
+			}
 			canceled[i] = endsCanceled(out[i].Err)
 			spans[i].End(out[i].Err)
 		}
@@ -151,6 +169,24 @@ func (o Options[T]) describe(item T) (node, host, role string) {
 		return fmt.Sprint(item), "", ""
 	}
 	return o.Describe(item)
+}
+
+// acquire takes what an item's work needs besides its place in the pool.
+// A panic in o.Acquire becomes the item's error.
+func (o Options[T]) acquire(ctx context.Context, name string, item T) (release func(), err error) {
+	if o.Acquire == nil {
+		return func() {}, nil
+	}
+	defer func() {
+		if p := Recovered(o.PanicLog, name, recover()); p != nil {
+			release, err = nil, p
+		}
+	}()
+	release, err = o.Acquire(ctx, item)
+	if err == nil && release == nil {
+		release = func() {}
+	}
+	return release, err
 }
 
 // call calls fn with one item. A panic in it becomes the item's error

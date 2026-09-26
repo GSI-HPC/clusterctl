@@ -33,9 +33,17 @@ func nodes(n int) []string {
 // Bus, checks every promise the events make and returns their tree.
 func watch(t *testing.T) (ctx context.Context, tree func() string) {
 	t.Helper()
-	c := &progresstest.Capture{}
+	_, ctx, tree = watchCapture(t)
+	return ctx, tree
+}
+
+// watchCapture is watch, and gives the capture too, for a test that reads
+// the events while the work is under way.
+func watchCapture(t *testing.T) (c *progresstest.Capture, ctx context.Context, tree func() string) {
+	t.Helper()
+	c = &progresstest.Capture{}
 	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
-	return progress.WithBus(context.Background(), bus), func() string {
+	return c, progress.WithBus(context.Background(), bus), func() string {
 		t.Helper()
 		bus.Close()
 		progresstest.Check(t, c.Events())
