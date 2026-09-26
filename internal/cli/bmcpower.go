@@ -310,7 +310,7 @@ func bmcExit(results []bmcResult) error {
 	if !notSent.IsEmpty() {
 		code = exitcode.Interrupted
 	}
-	return &exitcode.Error{Code: code, Err: &bmcFailures{message: strings.Join(parts, ", "), errs: errs}}
+	return &exitcode.Error{Code: code, Err: &bmcFailures{message: strings.Join(parts, ", "), errs: errs, code: code}}
 }
 
 // bmcFailures is the summary of a command that did not succeed on every
@@ -318,11 +318,15 @@ func bmcExit(results []bmcResult) error {
 type bmcFailures struct {
 	message string
 	errs    []error
+	code    int
 }
 
 func (e *bmcFailures) Error() string { return e.message }
 
 func (e *bmcFailures) Unwrap() []error { return e.errs }
+
+// ProgressClass says why the processors failed as the exit code does.
+func (e *bmcFailures) ProgressClass() progress.Class { return progress.CodeClass(e.code) }
 
 // bmcPlan is how each node of a set is reached: its processor, and the
 // transports to try in order.

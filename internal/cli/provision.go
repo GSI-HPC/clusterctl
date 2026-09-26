@@ -1322,7 +1322,8 @@ func namedFailures(names []string, errs []error) error {
 	if len(failed) == 0 {
 		return nil
 	}
-	return &exitcode.Error{Code: exitcode.Worst(failed...), Err: &hostFailures{message: strings.Join(parts, "; "), errs: failed}}
+	code := exitcode.Worst(failed...)
+	return &exitcode.Error{Code: code, Err: &hostFailures{message: strings.Join(parts, "; "), errs: failed, code: code}}
 }
 
 // provisionState is where the reinstallation of one node stands.

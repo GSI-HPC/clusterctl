@@ -68,7 +68,8 @@ command exec [dry-run]: ok
 }
 
 // A command interrupted while it ran ends canceled, whatever the error it
-// failed with says, as report tells it.
+// failed with says, as report tells it, and so does a step whose targets
+// the interrupt ended.
 func TestAnInterruptedCommandEndsCanceled(t *testing.T) {
 	watched, tree := watch(t)
 	ctx, cancel := context.WithCancel(watched)
@@ -82,7 +83,7 @@ func TestAnInterruptedCommandEndsCanceled(t *testing.T) {
 		t.Fatal("node hw succeeded")
 	}
 	want := `command node hw: canceled (canceled): 1 of 1 hosts failed: exe0001
-  step run total=1 limit=24 [fold]: failed (transport): 1 of 1 failed: exe0001
+  step run total=1 limit=24 [fold]: canceled (canceled): 1 of 1 failed: exe0001
     target exe0001: canceled (canceled): context canceled
       call ssh node={} host={} timeout=10m0s exit=255: failed (transport): {} ({}): Connection closed
 `
