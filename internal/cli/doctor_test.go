@@ -69,8 +69,9 @@ func TestDoctorFindsTheBackendAtItsPath(t *testing.T) {
 }
 
 // xargs runs ipmitool for several processors at once on the gateway, so
-// the gateway has to carry it with that back end; ipmipower fans out by
-// itself.
+// the gateway has to carry it with that back end, ipmipower fans out by
+// itself, and it asks the fabric about several ports at once on the fabric
+// host.
 func TestDoctorLooksForXargsWhereItRuns(t *testing.T) {
 	for _, tc := range []struct {
 		name, role string
@@ -79,6 +80,7 @@ func TestDoctorLooksForXargsWhereItRuns(t *testing.T) {
 	}{
 		{"the gateway of ipmitool", "mgmt", []string{"--set", "bmc.ipmi.backend=ipmitool"}, true},
 		{"the gateway of ipmipower", "mgmt", []string{"--set", "bmc.ipmi.backend=ipmipower"}, false},
+		{"the fabric host", "fabric", nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var (
@@ -96,6 +98,45 @@ func TestDoctorLooksForXargsWhereItRuns(t *testing.T) {
 				t.Errorf("xargs looked for on %s: %v, want %v; the checks were:\n%s", tc.role, got, tc.want, scripts[tc.role])
 			}
 		})
+	}
+}
+
+// A host that is both the gateway of ipmitool and the fabric host is asked
+// for xargs once, and told how many programs it has without counting it
+// twice.
+func TestDoctorLooksForAToolOnceOnARoleThatServesTwice(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		script string
+	)
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if tg.Role == "mgmt" {
+			mu.Lock()
+			script = req.Script
+			mu.Unlock()
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	doctorChecks(t, harnessOptions{recorder: rec}, "--remote",
+		"--set", "bmc.ipmi.backend=ipmitool", "--set", "services.fabric.role=mgmt")
+	if n := strings.Count(script, toolCheck("xargs")); n != 1 {
+		t.Errorf("xargs looked for %d times on mgmt, want once; the checks were:\n%s", n, script)
+	}
+}
+
+// An xargs without -P, such as BusyBox's built without it, is as good as
+// missing on the fabric host, whose script runs it with -P, and is named
+// with the options it lacks.
+func TestDoctorFindsAnXargsWithoutItsOptionsMissing(t *testing.T) {
+	bin := t.TempDir()
+	for _, tool := range []string{"ibportstate", "ibqueryerrors", "ibaddr", "iblinkinfo", "perfquery"} {
+		fakeTool(t, bin, tool, "exit 0\n")
+	}
+	fakeTool(t, bin, "xargs", "echo \"xargs: invalid option -- 'P'\" >&2\nexit 1\n")
+	rec, _ := shellRunner(t, bin, "fabric")
+	checks, _ := doctorChecks(t, harnessOptions{recorder: rec}, "--remote")
+	if got := checks["tools on fabric"]; got.Status != statusFail || got.Detail != "missing: xargs -0 -P" {
+		t.Errorf("tools on fabric = %+v, want xargs -0 -P missing", got)
 	}
 }
 

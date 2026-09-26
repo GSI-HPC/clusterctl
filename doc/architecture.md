@@ -186,9 +186,11 @@ mix. The names `dns lookup` resolves are bounded by
 `services.dns.maxConcurrent`, since a site's resolver may limit how fast it
 is asked. Sessions to one infrastructure host, such as the roles
 `doctor --remote` asks, are bounded by `fanout.PerHost`, four, through
-`fanout.Hosts`, which counts a jump host on the way as a host too. The MCP
-server works on two tool calls at once, so that an agent sending calls side
-by side does not multiply these bounds.
+`fanout.Hosts`, which counts a jump host on the way as a host too, and so
+are the ports `fabric state` has the fabric host ask about at once, by
+xargs, with the list on the script's standard input. The MCP server works
+on two tool calls at once, so that an agent sending calls side by side does
+not multiply these bounds.
 
 Every such pool is one loop, `fanout.Each`, which starts nothing once the
 command is interrupted, and `fanout.Map` runs any kind of work on it, the

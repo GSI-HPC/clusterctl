@@ -194,14 +194,18 @@ func localChecks(a *app.App) []check {
 }
 
 // remoteTools are the programs each host role has to carry for the commands
-// that use it to work.
+// that use it to work, each once, though several services use it.
 func remoteTools(a *app.App) map[string][]string {
 	tools := map[string][]string{}
 	add := func(role string, names ...string) {
 		if role == "" {
 			return
 		}
-		tools[role] = append(tools[role], names...)
+		for _, name := range names {
+			if !slices.Contains(tools[role], name) {
+				tools[role] = append(tools[role], name)
+			}
+		}
 	}
 	add(a.Spec.Slurm.Role, "sinfo", "squeue", "sacct", "sacctmgr", "scontrol", "getent")
 	add(a.Spec.BMC.IPMI.Via, ipmiBinary(a.Spec.BMC.IPMI), "fping")
@@ -211,7 +215,8 @@ func remoteTools(a *app.App) map[string][]string {
 	}
 	add(a.Spec.Services.DHCP.Role, "dhcpd")
 	add(a.Spec.Services.PXESrv.Role, "git")
-	add(a.Spec.Services.Fabric.Role, "ibportstate", "ibqueryerrors", "ibaddr", "iblinkinfo", "perfquery")
+	// xargs asks the fabric about several ports at once.
+	add(a.Spec.Services.Fabric.Role, "ibportstate", "ibqueryerrors", "ibaddr", "iblinkinfo", "perfquery", "xargs")
 	return tools
 }
 
@@ -227,9 +232,15 @@ func ipmiBinary(spec v1alpha1.IPMISpec) string {
 // toolCheck is the line of the remote script that prints a tool when it is
 // missing. A tool given as a path has to be that executable; a bare name is
 // looked up in PATH. The name comes from the configuration, so it is quoted.
+// xargs has to take -0 and -P as well, which the scripts run it with and a
+// minimal one, such as BusyBox's built without them, does not: it is as
+// good as missing then, and named with the options.
 func toolCheck(tool string) string {
 	q := shellQuote(tool)
-	if strings.Contains(tool, "/") {
+	switch {
+	case tool == "xargs":
+		return "printf 'x\\0' | xargs -0 -n 1 -P 2 true >/dev/null 2>&1 || echo 'xargs -0 -P'\n"
+	case strings.Contains(tool, "/"):
 		return fmt.Sprintf("test -x %s || echo %s\n", q, q)
 	}
 	return fmt.Sprintf("command -v %s >/dev/null 2>&1 || echo %s\n", q, q)

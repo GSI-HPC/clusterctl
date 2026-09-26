@@ -357,6 +357,76 @@ func endedDuring(events []progress.Event, role string) (during, after []string) 
 	return during, after
 }
 
+// The fabric host asks about four ports at a time, starting the next as
+// one ends, so a display shows four running until fewer are left, the next
+// port in the list starting as each answer arrives, whatever order the
+// answers come in. When a port's line is lost, the host has gone on to the
+// next port, whose answer may then arrive before its turn: it ends where it
+// is, no more than four are ever running, and the lost one ends with no
+// answer once the script is over.
+func TestFabricStateRunsFourPortsAtATime(t *testing.T) {
+	up := func(ports ...int) string {
+		var out strings.Builder
+		for _, i := range ports {
+			fmt.Fprintf(&out, "%d|Active|LinkUp|4X|10.0 Gbps\n", i)
+		}
+		return out.String()
+	}
+	for _, tc := range []struct {
+		name, stdout string
+		code         int
+		peaks        []int
+		want         string
+	}{
+		{"the answers come in any order", up(3, 0, 1, 2, 5, 4), 0, []int{4, 4, 4, 3, 2, 1}, `
+  step query ports total=6 limit=4 [fold]: ok
+    call ssh node=fabric host=ibgw01.example.org role=fabric timeout=10m0s exit=0: ok
+    target exe[0002-0007]: ok
+`},
+		{"a line is lost", up(0, 5, 2, 3, 4), exitcode.TargetFailed, []int{4, 4, 4, 3, 2}, `
+  step query ports total=6 limit=4 [fold]: failed (target): 1 of 6 ports are not up
+    call ssh node=fabric host=ibgw01.example.org role=fabric timeout=10m0s exit=0: ok
+    target exe0003: failed (target): the fabric did not answer for the port
+    target exe[0002,0004-0007]: ok
+`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inventory, set := fabricNodes(t, 6)
+			rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+				if tg.Role == "fabric" {
+					return transport.ExitResult(tg, 0, tc.stdout, ""), nil
+				}
+				return &transport.Result{Target: tg}, nil
+			}}
+			ctx, done := watchEvents(t)
+			_, err := run(t, harnessOptions{ctx: ctx, recorder: rec, config: []string{inventory}}, "fabric", "state", "-n", set)
+			wantCode(t, err, tc.code)
+			tree, events := done()
+			if _, step, _ := strings.Cut(tree, "  step query ports"); "  step query ports"+step != tc.want[1:] {
+				t.Errorf("progress:\n%s\nwant the step:\n%s", tree, tc.want[1:])
+			}
+			// How many ports are running as each answer arrives.
+			running := map[progress.SpanID]bool{}
+			var peaks []int
+			for _, e := range events {
+				if e.Kind != progress.KindTarget {
+					continue
+				}
+				switch {
+				case e.Type == progress.TypeRun:
+					running[e.Span] = true
+				case e.Type == progress.TypeEnd && e.Status == progress.StatusOK:
+					peaks = append(peaks, len(running))
+					delete(running, e.Span)
+				}
+			}
+			if !slices.Equal(peaks, tc.peaks) {
+				t.Errorf("ports running as each answer arrived: %v, want %v", peaks, tc.peaks)
+			}
+		})
+	}
+}
+
 // The IPMI backend asks every processor of an account in one run, and a
 // node is counted done as the line that answers for its processor
 // arrives, as the table reads it: an answer, a refusal, and a processor
@@ -398,11 +468,11 @@ command bmc power: failed (target): 2 of 3 service processors failed
 	}
 }
 
-// fabric state asks about its ports one after the other in one script, and
-// a port is counted done as the line that answers for it arrives, up or
-// down as the table reads it; a port the script stopped before ends only
-// then, with why it stopped. The line of the port under way when the
-// script stopped never ended, and is no answer.
+// fabric state asks about its ports in one script, and a port is counted
+// done as the line that answers for it arrives, up or down as the table
+// reads it; a port the script stopped before ends only then, with why it
+// stopped. The line of the port under way when the script stopped never
+// ended, and is no answer.
 func TestFabricStateEndsEachPortAsItsAnswerArrives(t *testing.T) {
 	for _, tc := range []struct {
 		name, stdout string
@@ -414,7 +484,7 @@ func TestFabricStateEndsEachPortAsItsAnswerArrives(t *testing.T) {
 command fabric state: failed (target): 1 of 2 ports are not up
   call read /etc/dhcp/dhcpd.conf host=dhcp01.example.org role=dhcp cache=miss [hidden]: ok
     call ssh node=dhcp host=dhcp01.example.org role=dhcp timeout=10m0s exit=0 [hidden]: ok
-  step query ports total=2 [fold]: failed (target): 1 of 2 ports are not up
+  step query ports total=2 limit=4 [fold]: failed (target): 1 of 2 ports are not up
     call ssh node=fabric host=ibgw01.example.org role=fabric timeout=10m0s exit=0: ok
     target exe0001: ok
     target exe0002: failed (target): the port is down: link Down, physical Polling
@@ -423,7 +493,7 @@ command fabric state: failed (target): 1 of 2 ports are not up
 command fabric state: failed (target): 1 of 2 ports are not up, and the fabric host stopped before it had answered for all: fabric (ibgw01.example.org): command exited 124
   call read /etc/dhcp/dhcpd.conf host=dhcp01.example.org role=dhcp cache=miss [hidden]: ok
     call ssh node=dhcp host=dhcp01.example.org role=dhcp timeout=10m0s exit=0 [hidden]: ok
-  step query ports total=2 [fold]: failed (target): 1 of 2 ports are not up, and the fabric host stopped before it had answered for all: fabric (ibgw01.example.org): command exited 124
+  step query ports total=2 limit=4 [fold]: failed (target): 1 of 2 ports are not up, and the fabric host stopped before it had answered for all: fabric (ibgw01.example.org): command exited 124
     call ssh node=fabric host=ibgw01.example.org role=fabric timeout=10m0s exit=124: failed (target): fabric (ibgw01.example.org): command exited 124
     target exe0001: ok
     target exe0002: failed (target): fabric (ibgw01.example.org): command exited 124
