@@ -6,9 +6,11 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -237,6 +239,56 @@ func TestBMCPowerGroupsTheSetByAccount(t *testing.T) {
 	}
 	if out := h.errOut.String() + h.out.String(); !strings.Contains(out, "bmc-v1") || !strings.Contains(out, "exe0005") {
 		t.Errorf("the preview does not show the groups:\n%s", out)
+	}
+}
+
+// ipmitool is run for bmc.ipmi.maxConcurrent processors at once on the
+// gateway, and --fanout lowers that where it is lower but never raises it,
+// while fanout.max from --set or the environment leaves it alone; the run
+// is one ssh session whatever the bound, and reads as before.
+func TestIpmitoolKeepsToItsLimit(t *testing.T) {
+	ipmitool := []string{"--set", "bmc.ipmi.backend=ipmitool"}
+	three := []string{"--set", "bmc.ipmi.maxConcurrent=3"}
+	for _, tc := range []struct {
+		name string
+		env  string
+		args []string
+		want int
+	}{
+		{"the default", "", nil, 8},
+		{"bmc.ipmi.maxConcurrent alone", "", three, 3},
+		{"a lower --fanout", "", append([]string{"--fanout", "2"}, three...), 2},
+		{"a higher --fanout", "", append([]string{"--fanout", "8"}, three...), 3},
+		{"fanout.max with --set", "", append([]string{"--set", "fanout.max=1"}, three...), 3},
+		{"fanout.max from the environment", "1", three, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("BMC_PASSWORD", "s3cret")
+			if tc.env != "" {
+				t.Setenv("CLUSTERCTL_FANOUT", tc.env)
+			}
+			args := slices.Concat(noSlurm, ipmitool, tc.args,
+				[]string{"-o", "json", "bmc", "power", "status", "--ipmi", "-n", "exe[0001-0005]"})
+			h, err := run(t, harnessOptions{recorder: ipmiOK()}, args...)
+			if err != nil {
+				t.Fatalf("bmc power status failed: %v\n%s", err, h.errOut)
+			}
+			calls := ipmiCalls(h)
+			if len(calls) != 1 {
+				t.Fatalf("got %d IPMI runs, want one: %v", len(calls), h.recorder.Commands())
+			}
+			if want := fmt.Sprintf("xargs -0 -n 1 -P %d sh -c ", tc.want); !strings.Contains(calls[0].Request.Script, want) {
+				t.Errorf("the run is not bounded by %d:\n%s", tc.want, calls[0].Request.Script)
+			}
+			if got := len(ipmiRequestHosts(calls[0].Request)); got != 5 {
+				t.Errorf("the run names %d processors, want 5", got)
+			}
+			for _, row := range jsonRows(t, h) {
+				if row["state"] != "on" || row["error"] != nil {
+					t.Errorf("%v = %v, want it on", row["node"], row)
+				}
+			}
+		})
 	}
 }
 

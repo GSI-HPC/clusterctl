@@ -115,11 +115,12 @@ func ipmiRequestHosts(req transport.Request) []string {
 			}
 			return ns.Expand()
 		}
-		if f == "for" && i+2 < len(fields) && fields[i+1] == "h" && fields[i+2] == "in" {
+		// ipmitool is handed the processors on the gateway by xargs, from
+		// printf '%s\0' and the names.
+		if f == "printf" && i+1 < len(fields) && fields[i+1] == `'%s\0'` {
 			var hosts []string
-			for _, h := range fields[i+3:] {
-				if h == "do" || strings.HasSuffix(h, ";") {
-					hosts = append(hosts, strings.Trim(strings.TrimSuffix(h, ";"), `'`))
+			for _, h := range fields[i+2:] {
+				if h == "|" {
 					break
 				}
 				hosts = append(hosts, strings.Trim(h, `'`))

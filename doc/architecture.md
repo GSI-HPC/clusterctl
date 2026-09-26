@@ -178,13 +178,17 @@ bounded separately by `bmc.redfish.maxConcurrent`, because a service processor
 is much slower than a node and a wide fan-out to them achieves nothing. A
 processor also has few connections to give, so a client closes its connection
 once its request is answered, and any it has left idle for as long as a
-request may take, rather than keep it for a request that may not come. The
-names `dns lookup` resolves are bounded by `services.dns.maxConcurrent`, since
-a site's resolver may limit how fast it is asked. Sessions to one
-infrastructure host, such as the roles `doctor --remote` asks, are bounded by
-`fanout.PerHost`, four, through `fanout.Hosts`, which counts a jump host on
-the way as a host too. The MCP server works on two tool calls at once, so that
-an agent sending calls side by side does not multiply these bounds.
+request may take, rather than keep it for a request that may not come.
+ipmitool, which takes one processor at a time, is run by xargs on the host
+`bmc.ipmi.via` names for `bmc.ipmi.maxConcurrent` processors at once, in one
+session, each printing its whole line with one write so that the lines never
+mix. The names `dns lookup` resolves are bounded by
+`services.dns.maxConcurrent`, since a site's resolver may limit how fast it
+is asked. Sessions to one infrastructure host, such as the roles
+`doctor --remote` asks, are bounded by `fanout.PerHost`, four, through
+`fanout.Hosts`, which counts a jump host on the way as a host too. The MCP
+server works on two tool calls at once, so that an agent sending calls side
+by side does not multiply these bounds.
 
 Every such pool is one loop, `fanout.Each`, which starts nothing once the
 command is interrupted, and `fanout.Map` runs any kind of work on it, the

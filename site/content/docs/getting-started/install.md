@@ -121,7 +121,7 @@ $ mise use -g sops
 | Role | Programs |
 | --- | --- |
 | The Slurm host | `sinfo`, `squeue`, `sacct`, `sacctmgr`, `scontrol`, `getent` |
-| The management gateway | `ipmipower` or `ipmitool`, whichever `bmc.ipmi.backend` names, and `fping` |
+| The management gateway | `ipmipower` or `ipmitool`, whichever `bmc.ipmi.backend` names, `xargs` with `ipmitool`, and `fping` |
 | The DHCP server | nothing; its files are read |
 | The PXE host | `git`, if boot configurations come from version control |
 | The fabric host | `ibportstate`, `ibqueryerrors`, `ibaddr`, `iblinkinfo`, `perfquery` |

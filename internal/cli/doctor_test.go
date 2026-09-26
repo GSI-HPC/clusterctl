@@ -68,6 +68,37 @@ func TestDoctorFindsTheBackendAtItsPath(t *testing.T) {
 	}
 }
 
+// xargs runs ipmitool for several processors at once on the gateway, so
+// the gateway has to carry it with that back end; ipmipower fans out by
+// itself.
+func TestDoctorLooksForXargsWhereItRuns(t *testing.T) {
+	for _, tc := range []struct {
+		name, role string
+		args       []string
+		want       bool
+	}{
+		{"the gateway of ipmitool", "mgmt", []string{"--set", "bmc.ipmi.backend=ipmitool"}, true},
+		{"the gateway of ipmipower", "mgmt", []string{"--set", "bmc.ipmi.backend=ipmipower"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var (
+				mu      sync.Mutex
+				scripts = map[string]string{}
+			)
+			rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+				mu.Lock()
+				scripts[tg.Role] = req.Script
+				mu.Unlock()
+				return &transport.Result{Target: tg}, nil
+			}}
+			doctorChecks(t, harnessOptions{recorder: rec}, append([]string{"--remote"}, tc.args...)...)
+			if got := strings.Contains(scripts[tc.role], toolCheck("xargs")); got != tc.want {
+				t.Errorf("xargs looked for on %s: %v, want %v; the checks were:\n%s", tc.role, got, tc.want, scripts[tc.role])
+			}
+		})
+	}
+}
+
 // TestDoctorDryRunChecksTheRoles: under --dry-run every role was reported
 // as not contacted, although the check only runs true. It is a read, so a
 // dry run makes it for real: a role that answers is ok, and one that does

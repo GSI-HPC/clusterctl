@@ -438,6 +438,7 @@ func TestValuesDefaultsGiveCannotBeEmptied(t *testing.T) {
 		`bmc.pdu.nameFormat=""`,
 		`bmc.ipmi.ipmipowerPath=""`,
 		`bmc.redfish.maxConcurrent=0`,
+		`bmc.ipmi.maxConcurrent=0`,
 		`services.dns.maxConcurrent=0`,
 	} {
 		_, err := run(t, harnessOptions{}, "--set", set, "config", "view")

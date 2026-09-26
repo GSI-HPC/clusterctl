@@ -205,6 +205,10 @@ func remoteTools(a *app.App) map[string][]string {
 	}
 	add(a.Spec.Slurm.Role, "sinfo", "squeue", "sacct", "sacctmgr", "scontrol", "getent")
 	add(a.Spec.BMC.IPMI.Via, ipmiBinary(a.Spec.BMC.IPMI), "fping")
+	if a.Spec.BMC.IPMI.Backend == ipmi.BackendIpmitool {
+		// xargs runs ipmitool for several processors at once.
+		add(a.Spec.BMC.IPMI.Via, "xargs")
+	}
 	add(a.Spec.Services.DHCP.Role, "dhcpd")
 	add(a.Spec.Services.PXESrv.Role, "git")
 	add(a.Spec.Services.Fabric.Role, "ibportstate", "ibqueryerrors", "ibaddr", "iblinkinfo", "perfquery")

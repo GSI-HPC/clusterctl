@@ -66,7 +66,11 @@ This is more than 8 hosts. Type the number of hosts to continue: 10
 ```
 
 A set whose nodes use different transports or accounts shows one line for each
-group, and each group of IPMI nodes goes to the backend with its own account.
+group, and each group of IPMI nodes goes to the backend with its own account,
+in one ssh session to the gateway. ipmipower is handed the whole group.
+ipmitool takes one processor at a time, so it is run there for
+`bmc.ipmi.maxConcurrent` processors at once, 8 by default, or as many as a
+lower `--fanout` says, each for at most 25 seconds.
 
 {{< callout type="warning" >}}
 A node running a Slurm job is refused, because powering it off loses the job.

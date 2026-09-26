@@ -264,13 +264,17 @@ func (a *App) noteFirstContact(pins *redfish.PinStore, host string) {
 
 // IPMIBackend builds the backend that runs the IPMI tools, on the host role
 // bmc.ipmi.via names, with the account of the given node. Nothing runs the
-// tools locally, so a site that names no role gets a usage error.
+// tools locally, so a site that names no role gets a usage error. The
+// processors ipmitool is run for at once are bmc.ipmi.maxConcurrent, or
+// fewer where --fanout is lower; ipmipower, which fans out by itself, is
+// handed --fanout when it was given.
 func (a *App) IPMIBackend(ctx context.Context, node string) (*ipmi.Backend, error) {
 	cred, err := a.BMCCredential(ctx, node)
 	if err != nil {
 		return nil, err
 	}
 	spec := a.Spec.BMC.IPMI
+	spec.MaxConcurrent = a.Bound(spec.MaxConcurrent)
 	target, err := a.Role(spec.Via)
 	if err != nil {
 		if spec.Via != "" {
@@ -285,6 +289,7 @@ func (a *App) IPMIBackend(ctx context.Context, node string) (*ipmi.Backend, erro
 		Spec:     spec,
 		Username: cred.Username,
 		Password: cred.Password(),
+		Fanout:   a.FanoutFlag(),
 	}, nil
 }
 
