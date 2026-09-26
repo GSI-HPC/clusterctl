@@ -162,6 +162,9 @@ given, higher or lower.
 is refused, by `config validate` with the file and line it was written on,
 rather than quietly read as the default.
 
+On a terminal, the live tree shows how many hosts run at once and how many
+wait their turn, and which have run longest; see [Progress](../progress/).
+
 ## Copying files
 
 ```console
