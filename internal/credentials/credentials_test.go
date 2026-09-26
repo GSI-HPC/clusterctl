@@ -50,7 +50,7 @@ func TestFromAnAgeFile(t *testing.T) {
 		"bmc": {Username: "admin", Password: v1alpha1.PasswordSource{AgeFile: "secrets/bmc.age"}},
 	}, nil)
 	var asked string
-	r.AgeFile = func(path string) ([]byte, error) {
+	r.AgeFile = func(_ context.Context, path string) ([]byte, error) {
 		asked = path
 		return []byte("hunter2\n"), nil
 	}
@@ -237,7 +237,7 @@ func TestFromSecretRef(t *testing.T) {
 			"two":   {Username: "admin", Password: v1alpha1.PasswordSource{SecretRef: &v1alpha1.SecretKeyRef{Name: "vault", Key: "bmc"}, FromEnv: "X"}},
 		},
 		Env: func(string) string { return "" },
-		Secret: func(ref v1alpha1.SecretKeyRef) ([]byte, error) {
+		Secret: func(_ context.Context, ref v1alpha1.SecretKeyRef) ([]byte, error) {
 			asked++
 			return map[string][]byte{"bmc": []byte("hunter2\n"), "empty": []byte("\n")}[ref.Key], nil
 		},
@@ -327,7 +327,10 @@ func TestAFailedReadIsMadeOnce(t *testing.T) {
 			}},
 		{"a Secret that cannot be read", v1alpha1.PasswordSource{SecretRef: &v1alpha1.SecretKeyRef{Name: "vault", Key: "bmc"}},
 			func(r *credentials.Resolver, read func()) {
-				r.Secret = func(v1alpha1.SecretKeyRef) ([]byte, error) { read(); return nil, errors.New("no identity opens it") }
+				r.Secret = func(context.Context, v1alpha1.SecretKeyRef) ([]byte, error) {
+					read()
+					return nil, errors.New("no identity opens it")
+				}
 			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

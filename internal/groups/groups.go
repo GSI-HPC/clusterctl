@@ -27,6 +27,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -170,7 +171,7 @@ func (r *Resolver) Sources() []string {
 // source's, and another source's group of the same name is not an answer.
 func (r *Resolver) Resolve(source, group string) (string, error) {
 	if source != "" {
-		return r.resolveIn(source, group)
+		return r.resolveIn(r.ctx, source, group)
 	}
 	order := r.Sources()
 	if r.def != "" {
@@ -179,7 +180,7 @@ func (r *Resolver) Resolve(source, group string) (string, error) {
 	}
 	var tried []string
 	for _, name := range order {
-		expr, err := r.resolveIn(name, group)
+		expr, err := r.resolveIn(r.ctx, name, group)
 		if err == nil {
 			return expr, nil
 		}
@@ -195,18 +196,19 @@ func (r *Resolver) Resolve(source, group string) (string, error) {
 	return "", notDefined("no group source defines %q (sources: %s)", group, strings.Join(r.Sources(), ", "))
 }
 
-func (r *Resolver) resolveIn(name, group string) (string, error) {
+// resolveIn asks one source for one group, a lookup made under ctx.
+func (r *Resolver) resolveIn(ctx context.Context, name, group string) (string, error) {
 	src, ok := r.sources[name]
 	if !ok {
 		return "", fmt.Errorf("unknown group source %q (known: %s)", name, strings.Join(r.Sources(), ", "))
 	}
-	return r.lookup(cacheKey(name, "map", group), func() (string, error) {
-		return r.find(name, src, group)
+	return r.lookup(ctx, cacheKey(name, "map", group), "resolve @"+name+":"+group, func(q *asking) (string, error) {
+		return r.find(q, name, src, group)
 	})
 }
 
 // find asks one source for one group.
-func (r *Resolver) find(name string, src v1alpha1.GroupSource, group string) (string, error) {
+func (r *Resolver) find(q *asking, name string, src v1alpha1.GroupSource, group string) (string, error) {
 	var (
 		expr string
 		err  error
@@ -228,12 +230,12 @@ func (r *Resolver) find(name string, src v1alpha1.GroupSource, group string) (st
 		}
 		expr = ns.String()
 	case src.Exec != nil:
-		expr, err = r.execCached(name, src, src.Exec.Map, map[string]string{PlaceholderGroup: group})
+		expr, err = r.execCached(q, name, src, src.Exec.Map, map[string]string{PlaceholderGroup: group})
 		if err == nil && strings.TrimSpace(expr) == "" {
 			err = fmt.Errorf("returned no nodes for group %q", group)
 		}
 		if err != nil {
-			return "", r.execFailed(name, group, err)
+			return "", r.execFailed(q, name, group, err)
 		}
 	default:
 		return "", fmt.Errorf("group source %q defines nothing", name)
@@ -248,9 +250,9 @@ func (r *Resolver) All(source string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown group source %q (known: %s)", source, strings.Join(r.Sources(), ", "))
 	}
-	return r.lookup(cacheKey(source, "all", ""), func() (string, error) {
+	return r.lookup(r.ctx, cacheKey(source, "all", ""), "resolve @"+source+":*", func(q *asking) (string, error) {
 		if src.Exec != nil && len(src.Exec.All) > 0 {
-			out, err := r.execCached(source, src, src.Exec.All, nil)
+			out, err := r.execCached(q, source, src, src.Exec.All, nil)
 			if err != nil {
 				return "", fmt.Errorf("source %q: %w", source, err)
 			}
@@ -258,13 +260,13 @@ func (r *Resolver) All(source string) (string, error) {
 		}
 		// Without a command of its own, the union of every group is what
 		// the source knows.
-		names, err := r.List(source)
+		names, err := r.list(q.ctx, source)
 		if err != nil {
 			return "", err
 		}
 		parts := make([]string, 0, len(names))
 		for _, group := range names {
-			one, err := r.resolveIn(source, group)
+			one, err := r.resolveIn(q.ctx, source, group)
 			if err != nil {
 				return "", err
 			}
@@ -276,6 +278,11 @@ func (r *Resolver) All(source string) (string, error) {
 
 // List implements nodeset.Resolver.
 func (r *Resolver) List(source string) ([]string, error) {
+	return r.list(r.ctx, source)
+}
+
+// list lists the groups of a source, a lookup made under ctx.
+func (r *Resolver) list(ctx context.Context, source string) ([]string, error) {
 	source = cmp.Or(source, r.def)
 	src, ok := r.sources[source]
 	if !ok {
@@ -298,8 +305,8 @@ func (r *Resolver) List(source string) ([]string, error) {
 		}
 		return r.inventory.AttributeValues(src.Attribute), nil
 	case src.Exec != nil && len(src.Exec.List) > 0:
-		out, err := r.lookup(cacheKey(source, "list", ""), func() (string, error) {
-			out, err := r.execCached(source, src, src.Exec.List, nil)
+		out, err := r.lookup(ctx, cacheKey(source, "list", ""), "list the groups of @"+source, func(q *asking) (string, error) {
+			out, err := r.execCached(q, source, src, src.Exec.List, nil)
 			if err != nil {
 				return "", fmt.Errorf("source %q: %w", source, err)
 			}
@@ -321,7 +328,7 @@ func (r *Resolver) List(source string) ([]string, error) {
 // nothing for a partition it does not have, and a host that does not answer
 // prints nothing either. Only a source that can list its groups can say
 // that a group is not one of them, and only when that listing succeeds.
-func (r *Resolver) execFailed(name, group string, err error) error {
+func (r *Resolver) execFailed(q *asking, name, group string, err error) error {
 	err = fmt.Errorf("source %q: %w", name, err)
 	if exitcode.From(err) == exitcode.Transport || len(r.sources[name].Exec.List) == 0 {
 		return err
@@ -332,9 +339,10 @@ func (r *Resolver) execFailed(name, group string, err error) error {
 	// many groups it finds missing: one made during this command is as new
 	// as the answer that just failed, and only one that succeeded is kept.
 	src := r.sources[name]
-	out, listErr := r.lookup(cacheKey(name, "fresh list", ""), func() (string, error) {
-		return r.exec(src.Exec, src.Exec.List, nil)
-	})
+	out, listErr := r.lookup(q.ctx, cacheKey(name, "fresh list", ""), "list the groups of @"+name+" again",
+		func(q *asking) (string, error) {
+			return r.exec(q, src.Exec, src.Exec.List, nil)
+		})
 	if listErr != nil || slices.Contains(fields(out), group) {
 		return err
 	}
@@ -367,7 +375,7 @@ func (r *Resolver) GroupsOf(node string) (map[string][]string, error) {
 func (r *Resolver) groupsIn(name, node string) ([]string, error) {
 	src := r.sources[name]
 	if src.Exec != nil && len(src.Exec.Reverse) > 0 {
-		answer, err := r.exec(src.Exec, src.Exec.Reverse, map[string]string{PlaceholderNode: node})
+		answer, err := r.exec(&asking{ctx: r.ctx}, src.Exec, src.Exec.Reverse, map[string]string{PlaceholderNode: node})
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", name, err)
 		}
@@ -383,7 +391,7 @@ func (r *Resolver) groupsIn(name, node string) ([]string, error) {
 		errs   []error
 	)
 	for _, group := range groups {
-		expr, err := r.resolveIn(name, group)
+		expr, err := r.resolveIn(r.ctx, name, group)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -401,20 +409,21 @@ func (r *Resolver) groupsIn(name, node string) ([]string, error) {
 }
 
 // execCached is exec for a lookup the source allows to be cached.
-func (r *Resolver) execCached(name string, src v1alpha1.GroupSource, argv []string, vars map[string]string) (string, error) {
+func (r *Resolver) execCached(q *asking, name string, src v1alpha1.GroupSource, argv []string, vars map[string]string) (string, error) {
 	target, command, err := r.prepare(src.Exec, argv, vars)
 	if err != nil {
 		return "", err
 	}
 	ttl := src.CacheTTL.Get()
 	if ttl <= 0 || r.cacheDir == "" {
-		return r.run(target, command)
+		return r.run(q, target, command)
 	}
 	key, dir := r.diskKey(name, target, command), filepath.Join(r.cacheDir, "groups")
 	if expr, ok := fileutil.ReadCache(dir, key, ttl); ok {
+		q.cache = "disk"
 		return string(expr), nil
 	}
-	expr, err := r.run(target, command)
+	expr, err := r.run(q, target, command)
 	if err != nil {
 		return "", err
 	}
@@ -424,12 +433,12 @@ func (r *Resolver) execCached(name string, src v1alpha1.GroupSource, argv []stri
 
 // exec runs one command of an exec source, substituting the placeholders as
 // whole arguments.
-func (r *Resolver) exec(src *v1alpha1.ExecGroupSource, argv []string, vars map[string]string) (string, error) {
+func (r *Resolver) exec(q *asking, src *v1alpha1.ExecGroupSource, argv []string, vars map[string]string) (string, error) {
 	target, command, err := r.prepare(src, argv, vars)
 	if err != nil {
 		return "", err
 	}
-	return r.run(target, command)
+	return r.run(q, target, command)
 }
 
 // prepare resolves the target of an exec source and substitutes the
@@ -470,8 +479,9 @@ func (r *Resolver) prepare(src *v1alpha1.ExecGroupSource, argv []string, vars ma
 // An error already carrying an exit code, such as the transport failure of
 // an ssh that could not connect, keeps it. A command that failed on a host
 // that answered is that host's failure, reported with what it printed.
-func (r *Resolver) run(target transport.Target, command []string) (string, error) {
-	result, err := r.runner.Run(r.ctx, target, transport.Request{
+func (r *Resolver) run(q *asking, target transport.Target, command []string) (string, error) {
+	q.cache = "miss"
+	result, err := r.runner.Run(q.ctx, target, transport.Request{
 		Argv:    command,
 		Timeout: r.timeout,
 		TTY:     transport.TTYNone,
@@ -499,6 +509,15 @@ func cacheKey(source, kind, group string) string {
 	return source + "\x00" + kind + "\x00" + group
 }
 
+// asking is one lookup under way: the context the commands it sends run
+// under, which carries its span, and where its answer came from, for the
+// span: "disk" for the disk cache, "miss" for a command it sent, and nothing
+// for an answer from the configuration or the inventory.
+type asking struct {
+	ctx   context.Context
+	cache string
+}
+
 // lookup answers the lookup key names, running find for it at most once
 // however many callers ask.
 //
@@ -511,7 +530,12 @@ func cacheKey(source, kind, group string) string {
 // command that was interrupted, says nothing about the source's groups, and
 // the next caller asks again. find runs under the resolver's context, so it
 // ends with the command, and so does every wait for it.
-func (r *Resolver) lookup(key string, find func() (string, error)) (string, error) {
+//
+// The lookup that runs find is reported under ctx as a hidden call, name,
+// and the commands it sends as calls under that; a caller answered from
+// memory, or by the lookup of another, makes none. A source that has no
+// such group has answered, so its lookup ends well: the search goes on.
+func (r *Resolver) lookup(ctx context.Context, key, name string, find func(q *asking) (string, error)) (string, error) {
 	r.mu.Lock()
 	if expr, ok := r.cache[key]; ok {
 		r.mu.Unlock()
@@ -531,6 +555,8 @@ func (r *Resolver) lookup(key string, find func() (string, error)) (string, erro
 	r.flights[key] = f
 	r.mu.Unlock()
 
+	ctx, span := progress.Start(ctx, progress.KindCall, name, progress.WithFlags(progress.Hidden))
+	q := &asking{ctx: ctx}
 	defer func() {
 		r.mu.Lock()
 		delete(r.flights, key)
@@ -542,8 +568,13 @@ func (r *Resolver) lookup(key string, find func() (string, error)) (string, erro
 		}
 		r.mu.Unlock()
 		close(f.done)
+		if errors.Is(f.err, ErrNotDefined) {
+			span.End(nil, progress.Cache(q.cache), progress.Message("no such group"))
+		} else {
+			span.End(f.err, progress.Cache(q.cache))
+		}
 	}()
-	f.expr, f.err = find()
+	f.expr, f.err = find(q)
 	return f.expr, f.err
 }
 

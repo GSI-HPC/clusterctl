@@ -53,6 +53,7 @@ command node hw [dry-run]: ok
 `},
 		{"a dry run the gate stops", nil, []string{"exec", "-n", "exe1", "--dry-run", "--", "true"}, exitcode.OK, `
 command exec [dry-run]: ok
+  wait confirm message=run a command on 1 host: skipped: dry run: nothing was done
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

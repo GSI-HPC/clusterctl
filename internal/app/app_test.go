@@ -374,3 +374,44 @@ func TestTheRunnersReportEveryCall(t *testing.T) {
 		})
 	}
 }
+
+// A file read from a host is a hidden call that says whether the cached copy
+// answered it, and nests the ssh call when the host was asked.
+func TestARemoteFileIsReportedWithWhereItCameFrom(t *testing.T) {
+	c := &progresstest.Capture{}
+	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	ctx := progress.WithBus(context.Background(), bus)
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if req.Argv[len(req.Argv)-1] == "/missing" {
+			return transport.ExitResult(tg, 1, "", "cat: /missing: No such file or directory\n"), nil
+		}
+		return &transport.Result{Target: tg, Stdout: "contents\n"}, nil
+	}}
+	a, err := app.New(ctx, app.Streams{StateDir: t.TempDir(), CacheDir: t.TempDir()}, app.Options{
+		ConfigFiles: []string{exampleDir},
+		Env:         func(string) string { return "" },
+		Runner:      rec,
+	})
+	if err != nil {
+		t.Fatalf("building the app: %v", err)
+	}
+	for range 2 {
+		if _, err := a.RemoteFile(ctx, "install", "/etc/motd", time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.RemoteFile(ctx, "install", "/missing", time.Minute); err == nil {
+		t.Error("a missing file was read")
+	}
+	bus.Close()
+	progresstest.Check(t, c.Events())
+	want := `call read /etc/motd host=installer.hpc.example.org role=install cache=hit [hidden]: ok
+call read /etc/motd host=installer.hpc.example.org role=install cache=miss [hidden]: ok
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=0 [hidden]: ok
+call read /missing host=installer.hpc.example.org role=install cache=miss [hidden]: failed (target): reading /missing: install (installer.hpc.example.org) exited 1: cat: /missing: No such file or directory
+  call ssh node=install host=installer.hpc.example.org role=install timeout=10m0s exit=1 [hidden]: failed (target): install (installer.hpc.example.org): command exited 1
+`
+	if got := c.Tree(); got != want {
+		t.Errorf("progress:\n%s\nwant:\n%s", got, want)
+	}
+}

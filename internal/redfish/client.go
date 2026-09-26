@@ -226,7 +226,16 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) (map[str
 }
 
 // DoRaw performs one request and returns the body and the status.
-func (c *Client) DoRaw(ctx context.Context, method, path string, body any) ([]byte, int, error) {
+//
+// The request is reported as a call, "redfish", with its method, path and
+// processor, under the span ctx carries, and ends with the status the
+// processor answered and the error, whose class says whether the
+// processor could not be reached, refused the account or presented another
+// certificate than the one pinned.
+func (c *Client) DoRaw(ctx context.Context, method, path string, body any) (raw []byte, status int, err error) {
+	ctx, call := progress.Start(ctx, progress.KindCall, "redfish", progress.HTTP(method, path), progress.Host(c.Host))
+	defer func() { call.End(err, progress.HTTPStatus(status)) }()
+
 	client, err := c.httpClient(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -268,7 +277,7 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, body any) ([]by
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	raw, err = io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, resp.StatusCode, c.unreachable(ctx, fmt.Errorf("%s: reading the answer: %w", c.Host, err))
 	}

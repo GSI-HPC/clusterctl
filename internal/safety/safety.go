@@ -22,6 +22,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -242,7 +243,29 @@ func isAre(n int) string {
 
 // Confirm runs the full gate: the protected host check, then the preview and
 // the prompt. It returns nil when the action may proceed.
-func (g *Gate) Confirm(a Action) error {
+//
+// The gate is reported as a wait, "confirm", under the span of the gate's
+// context, with the action and its host count as its message. It ends well
+// when the action may proceed, asked or confirmed in advance, skipped in a
+// dry run, failed when the action was refused, and canceled when the answer
+// was no or the command was interrupted. A display is taken off the
+// terminal while the question is asked and answered, and put back however
+// that ends.
+func (g *Gate) Confirm(a Action) (err error) {
+	count := 0
+	if a.Targets != nil {
+		count = a.Targets.Len()
+	}
+	ctx, wait := progress.Start(g.context(), progress.KindWait, "confirm",
+		progress.Message(fmt.Sprintf("%s %d host%s", a.Verb, count, plural(count))))
+	defer func() {
+		if IsDryRun(err) {
+			wait.Skip(err.Error())
+			return
+		}
+		wait.End(err)
+	}()
+
 	if err := g.interrupted(); err != nil {
 		return err
 	}
@@ -268,6 +291,8 @@ func (g *Gate) Confirm(a Action) error {
 			"%s needs a confirmation but there is no terminal to ask on; pass -y to confirm in advance", a.Verb)
 	}
 
+	resume := progress.Suspend(ctx)
+	defer resume()
 	g.printf("About to %s\n", p.Summary())
 	p.printDetail(g)
 	g.printf("%s ", p.Question())
@@ -419,6 +444,14 @@ func (g *Gate) done() <-chan struct{} {
 		return nil
 	}
 	return g.Context.Done()
+}
+
+// context returns the gate's context, or one that never ends.
+func (g *Gate) context() context.Context {
+	if g.Context == nil {
+		return context.Background()
+	}
+	return g.Context
 }
 
 // interrupted returns the error of the gate's context once it has ended,

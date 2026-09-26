@@ -18,6 +18,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -143,9 +144,9 @@ two, so it is refused. Globs and ~ work in both.
 			// scp draws its progress meter on the terminal, redrawing one
 			// line. Only one transfer at a time can have that line; the
 			// meters of several side by side would overwrite each other.
-			var progress io.Writer
+			var meter io.Writer
 			if len(targets) == 1 || executor.Max == 1 {
-				progress = a.Err
+				meter = a.Err
 			}
 			executor.Runner = copyRunner{
 				client:  a.SSH,
@@ -157,7 +158,7 @@ two, so it is refused. Globs and ~ work in both.
 						Upload:      !download,
 						Recursive:   recursive,
 						Preserve:    preserve,
-						Progress:    progress,
+						Progress:    meter,
 					}
 				},
 			}
@@ -188,8 +189,25 @@ type copyRunner struct {
 }
 
 // Run copies to or from one target; the request is ignored in favour of the
-// target's transfer.
+// target's transfer. The transfer is reported as a call, "scp", under the
+// target's span, and ends as the result does.
 func (c copyRunner) Run(ctx context.Context, target transport.Target, _ transport.Request) (*transport.Result, error) {
+	ctx, call := progress.Start(ctx, progress.KindCall, "scp", progress.Node(target.Name),
+		progress.Host(target.Host), progress.Role(target.Role), progress.Timeout(c.timeout))
+	res, err := c.copy(ctx, target)
+	switch {
+	case err != nil:
+		call.End(err)
+	case res.ExitCode >= 0:
+		call.End(res.Err, progress.Exit(res.ExitCode))
+	default:
+		call.End(res.Err)
+	}
+	return res, err
+}
+
+// copy runs the target's transfer within the timeout of one.
+func (c copyRunner) copy(ctx context.Context, target transport.Target) (*transport.Result, error) {
 	transferCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	res, err := c.client.Copy(transferCtx, target, c.request(target))

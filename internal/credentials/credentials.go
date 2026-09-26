@@ -27,6 +27,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // Credential is a resolved account.
@@ -55,13 +56,13 @@ type Resolver struct {
 	Path func(string) string
 	// AgeFile decrypts an age encrypted file, named as the configuration
 	// names it, for an ageFile source.
-	AgeFile func(path string) ([]byte, error)
+	AgeFile func(ctx context.Context, path string) ([]byte, error)
 	// Env reads environment variables; nil reads the process environment.
 	Env func(string) string
 	// Prompt asks the administrator for a password.
 	Prompt func(prompt string) (string, error)
 	// Secret reads a key of a Secret document for a secretRef source.
-	Secret func(ref v1alpha1.SecretKeyRef) ([]byte, error)
+	Secret func(ctx context.Context, ref v1alpha1.SecretKeyRef) ([]byte, error)
 	// NoTerminal says that nobody is at a terminal to answer a prompt, as
 	// under the MCP server. A command source then runs in a session of its
 	// own, so that a helper such as gpg's pinentry cannot ask on whatever
@@ -122,7 +123,15 @@ func (r *Resolver) Get(ctx context.Context, name string) (Credential, error) {
 		return Credential{}, fmt.Errorf("unknown credential %q; the site defines %s",
 			name, strings.Join(slices.Sorted(maps.Keys(r.Credentials)), ", "))
 	}
+	// The read is reported, by the credential's name and the kind of its
+	// source; what was read is not. A lookup answered from memory reads
+	// nothing and is not reported.
+	ctx, lookup := progress.Start(ctx, progress.KindCall, "credential "+name,
+		progress.WithFlags(progress.Hidden), progress.Source(sourceKind(spec.Password)))
 	password, err := r.read(ctx, name, spec.Password)
+	// A password that cannot be read is the configuration's to fix, as the
+	// commands report it, not a host's refusal.
+	lookup.End(exitcode.Default(exitcode.Usage, err))
 	if err != nil {
 		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			r.mu.Lock()
@@ -153,6 +162,32 @@ func notRead(name string, err error) error {
 		code = exitcode.Interrupted
 	}
 	return exitcode.Wrap(code, fmt.Errorf("credential %q was not read: %w", name, err))
+}
+
+// sourceKind names the kind of source a password is read from, for a
+// display: env, file, age, sops, command or prompt, or nothing for an entry
+// that names none or several.
+func sourceKind(src v1alpha1.PasswordSource) string {
+	kind := ""
+	for _, source := range []struct {
+		set  bool
+		kind string
+	}{
+		{src.FromEnv != "", "env"},
+		{src.File != "", "file"},
+		{src.AgeFile != "", "age"},
+		{src.SecretRef != nil, "sops"},
+		{len(src.Command) > 0, "command"},
+		{src.Prompt, "prompt"},
+	} {
+		if source.set {
+			if kind != "" {
+				return ""
+			}
+			kind = source.kind
+		}
+	}
+	return kind
 }
 
 func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordSource) (string, error) {
@@ -191,7 +226,7 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		return firstLine(string(data)), nil
 
 	case src.AgeFile != "":
-		data, err := r.AgeFile(src.AgeFile)
+		data, err := r.AgeFile(ctx, src.AgeFile)
 		if err != nil {
 			return "", fmt.Errorf("credential %q: %w", name, err)
 		}
@@ -202,7 +237,7 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		if r.Secret == nil {
 			return "", fmt.Errorf("credential %q reads Secret %s, but no Secret documents were loaded", name, src.SecretRef)
 		}
-		data, err := r.Secret(*src.SecretRef)
+		data, err := r.Secret(ctx, *src.SecretRef)
 		if err != nil {
 			return "", fmt.Errorf("credential %q: %w", name, err)
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -26,12 +27,17 @@ import (
 // set query into one connection per node.
 //
 // The file is read through ReadRunner, so a dry run sees the same file the real
-// run would.
-func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Duration) ([]byte, error) {
+// run would. The read is reported as a hidden call, with Cache saying whether
+// the cached copy answered it or the host was asked.
+func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Duration) (_ []byte, err error) {
 	target, err := a.Role(role)
 	if err != nil {
 		return nil, err
 	}
+	ctx, read := progress.Start(ctx, progress.KindCall, "read "+path, progress.WithFlags(progress.Hidden),
+		progress.Role(role), progress.Host(target.Host))
+	cache := "miss"
+	defer func() { read.End(err, progress.Cache(cache)) }()
 	// The cache directory is shared by every configuration, context and the
 	// MCP server of one user, so the key holds everything that decides
 	// which file is read: the site, cluster and context, the host with its
@@ -44,6 +50,7 @@ func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Durati
 	}{a.cacheScope(), target, a.Spec.Hosts[target.Role], path}
 	dir := filepath.Join(a.CacheDir, "remote")
 	if data, ok := fileutil.ReadCache(dir, key, ttl); ok && ttl > 0 {
+		cache = "hit"
 		return data, nil
 	}
 
