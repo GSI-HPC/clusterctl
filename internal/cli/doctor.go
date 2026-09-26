@@ -6,9 +6,11 @@ package cli
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
@@ -47,8 +50,10 @@ a missing ssh client, a host key file that is not there, an unreadable age
 identity, a sops too old to read the Secret documents.
 
 With --remote the infrastructure hosts are contacted as well and asked whether
-the tools the commands rely on are installed. The checks only read, so they
-are made under --dry-run too.
+the tools the commands rely on are installed, each role in one session, side
+by side, at most four sessions at once on one host, a jump host on the way
+counted as one too. The checks only read, so they are made under --dry-run
+too.
 
   clusterctl doctor
   clusterctl doctor --remote`,
@@ -294,60 +299,127 @@ func nonEmptyLines(s string) []string {
 	return out
 }
 
+// remoteChecks asks every host role whether it answers, and whether it
+// carries the tools the commands that use it need. The roles are asked side
+// by side, one session each, at most fanout.PerHost at a time on any one
+// host, a jump host on the way counted as well, since each session opens a
+// connection there too. The checks come back in the order of the roles.
 func remoteChecks(ctx context.Context, a *app.App) []check {
-	var checks []check
 	tools := remoteTools(a)
-
-	for _, role := range a.RoleNames() {
+	roles := a.RoleNames()
+	checks := make([][]check, len(roles))
+	targets := make([]transport.Target, len(roles))
+	var asked []int
+	for i, role := range roles {
 		target, err := a.Role(role)
 		if err != nil {
-			checks = append(checks, check{"role " + role, statusFail, err.Error()})
+			checks[i] = []check{{"role " + role, statusFail, err.Error()}}
 			continue
 		}
-		// The checks only read, so they go through ReadRunner: a dry run
-		// contacts the role for real rather than asking the recorder that
-		// stands in for the hosts, which answers every request with
-		// success.
-		ping := a.Collect(transport.Request{Argv: []string{"true"}, Timeout: 20 * time.Second})
-		result, err := a.ReadRunner.Run(ctx, target, ping)
-		if err != nil || result.Failed() {
-			detail := "unreachable"
-			if err != nil {
-				detail = err.Error()
-			} else if result.Err != nil {
-				detail = result.Err.Error()
-			}
-			checks = append(checks, check{"role " + role, statusFail, detail})
-			continue
-		}
-		checks = append(checks, check{"role " + role, statusOK, target.Host})
+		targets[i] = target
+		asked = append(asked, i)
+	}
 
-		wanted := tools[role]
-		if len(wanted) == 0 {
-			continue
+	hosts := &fanout.Hosts{}
+	outcomes := fanout.Map(ctx, asked, fanout.Options[int]{
+		Step:  "check the roles",
+		Limit: a.Spec.Fanout.Max,
+		Describe: func(i int) (node, host, role string) {
+			return roles[i], targets[i].Host, roles[i]
+		},
+		PanicLog: a.Diag,
+		Acquire: func(ctx context.Context, i int) (func(), error) {
+			return hosts.Acquire(ctx, append(a.SSH.JumpHosts(targets[i].Host), targets[i].Host)...)
+		},
+	}, func(ctx context.Context, i int) ([]check, error) {
+		return checkRole(ctx, a, targets[i], tools[roles[i]])
+	})
+	for k, i := range asked {
+		if checks[i] = outcomes[k].Value; checks[i] == nil {
+			// A role the command was interrupted before, or whose check
+			// panicked.
+			checks[i] = []check{{"role " + roles[i], statusFail, fmt.Sprintf("%s: %v", targets[i], outcomes[k].Err)}}
 		}
+	}
+	return slices.Concat(checks...)
+}
+
+// checkRole asks one role, in one session, whether it answers and which of
+// the tools it has to carry it lacks: it runs their checks, or true when it
+// needs none. A session that did not reach the host fails the role; one
+// that did passes it, with the tools' check after it. The error is what the
+// role's check failed with, for a display.
+func checkRole(ctx context.Context, a *app.App, target transport.Target, wanted []string) ([]check, error) {
+	role := target.Name
+	req := transport.Request{Argv: []string{"true"}, Timeout: 20 * time.Second}
+	if len(wanted) > 0 {
 		var script strings.Builder
 		script.WriteString("set -u\n")
 		for _, tool := range wanted {
-			if tool == "" {
-				continue
+			if tool != "" {
+				script.WriteString(toolCheck(tool))
 			}
-			script.WriteString(toolCheck(tool))
 		}
-		probe := a.Collect(transport.Request{Script: script.String(), Timeout: 30 * time.Second})
-		missing, err := a.ReadRunner.Run(ctx, target, probe)
-		switch {
-		case err != nil:
-			checks = append(checks, check{"tools on " + role, statusWarn, err.Error()})
-		case len(missing.Lines()) > 0:
-			checks = append(checks, check{"tools on " + role, statusFail,
-				"missing: " + strings.Join(missing.Lines(), ", ")})
-		default:
-			checks = append(checks, check{"tools on " + role, statusOK,
-				fmt.Sprintf("%d programs present", len(wanted))})
-		}
+		req = transport.Request{Script: script.String(), Timeout: 30 * time.Second}
 	}
-	return checks
+	// The checks only read, so they go through ReadRunner: a dry run
+	// contacts the role for real rather than asking the recorder that
+	// stands in for the hosts, which answers every request with success.
+	result, err := a.ReadRunner.Run(ctx, target, a.Collect(req))
+	if !reachedRole(result, err, len(wanted) > 0) {
+		if err == nil && result != nil {
+			err = result.Err
+		}
+		if err == nil {
+			err = errors.New("unreachable")
+		}
+		return []check{{"role " + role, statusFail, err.Error()}}, err
+	}
+	checks := []check{{"role " + role, statusOK, target.Host}}
+	if len(wanted) == 0 {
+		return checks, nil
+	}
+	tools := "tools on " + role
+	switch missing := result.Lines(); {
+	case len(missing) > 0:
+		detail := "missing: " + strings.Join(missing, ", ")
+		return append(checks, check{tools, statusFail, detail}), errors.New(detail)
+	case result.Failed():
+		// The host answered, but the checks did not run to their end,
+		// such as when they ran out of time.
+		detail := fmt.Sprintf("%s: exited %d", target, result.ExitCode)
+		var ranOut *transport.TimeoutError
+		switch {
+		case errors.As(result.Err, &ranOut):
+			detail = fmt.Sprintf("the checks ran out of time after %s; the programs were not all looked for", ranOut.Timeout)
+		case result.Err != nil:
+			detail = result.Err.Error()
+		}
+		return append(checks, check{tools, statusWarn, detail}), nil
+	default:
+		return append(checks, check{tools, statusOK, fmt.Sprintf("%d programs present", len(wanted))}), nil
+	}
+}
+
+// reachedRole reports whether the session of a role's check reached its
+// host and ran there. true fails only when it did not. The tools' checks
+// exit 0 whenever they run to their end, missing tools or not, so their
+// session answered only when it succeeded or ran out of time on the host,
+// having looked at what it could: anything else, ssh's own failure, ssh
+// stopped here, an interrupt, or an account that logs in but runs nothing,
+// such as a nologin shell or a password that has to be changed, fails the
+// role as it fails one without tools.
+func reachedRole(result *transport.Result, err error, tools bool) bool {
+	switch {
+	case err != nil || result == nil:
+		return false
+	case !result.Failed():
+		return true
+	case !tools:
+		return false
+	}
+	var ranOut *transport.TimeoutError
+	return errors.As(result.Err, &ranOut)
 }
 
 func printChecks(a *app.App, format output.Format, streams app.Streams, checks []check) error {

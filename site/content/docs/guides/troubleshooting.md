@@ -11,8 +11,10 @@ $ clusterctl doctor --remote
 ```
 
 `--remote` contacts every configured host role and checks the programs the
-commands need are installed. These checks only read, so `--dry-run` makes
-them too.
+commands need are installed. Each role is asked in one session, and the roles
+side by side, at most four sessions at once on one host; a jump host counts
+too, since every session behind it connects there as well. These checks only
+read, so `--dry-run` makes them too.
 
 ## A value is not what the file says
 

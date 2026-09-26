@@ -180,13 +180,16 @@ processor also has few connections to give, so a client closes its connection
 once its request is answered, and any it has left idle for as long as a
 request may take, rather than keep it for a request that may not come. The
 names `dns lookup` resolves are bounded by `services.dns.maxConcurrent`, since
-a site's resolver may limit how fast it is asked. The MCP server works on two
-tool calls at once, so that an agent sending calls side by side does not
-multiply these bounds.
+a site's resolver may limit how fast it is asked. Sessions to one
+infrastructure host, such as the roles `doctor --remote` asks, are bounded by
+`fanout.PerHost`, four, through `fanout.Hosts`, which counts a jump host on
+the way as a host too. The MCP server works on two tool calls at once, so that
+an agent sending calls side by side does not multiply these bounds.
 
 Every such pool is one loop, `fanout.Each`, which starts nothing once the
 command is interrupted, and `fanout.Map` runs any kind of work on it, the
-executor's among them. Each kind of work has a bound of its own, which
+executor's among them, an item that needs a place on a host as well waiting
+for it queued. Each kind of work has a bound of its own, which
 `fanout.max` in the configuration does not change and a lower `--fanout`
 lowers, through `App.Bound`
 ([ADR 0022](adr/0022-bounded-pools-and-power-batches.md)). A power-on and a

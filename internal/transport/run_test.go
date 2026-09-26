@@ -294,6 +294,33 @@ func TestTheTimeToReachAHostCountsEveryAttemptAndJump(t *testing.T) {
 	}
 }
 
+// A session to a host opens a connection to every jump host on the way,
+// which a bound on the sessions to one host has to count as well: the
+// chain of the host's role, and the chain of that chain's first hop, but
+// not the chains of the later hops, which ssh hands the rest of the chain.
+func TestTheJumpHostsOnTheWayToAHost(t *testing.T) {
+	t.Parallel()
+	c := transport.New(transport.Options{Roles: map[string]v1alpha1.HostRole{
+		"mgmt":  {Host: "mgmt.example.org"},
+		"inner": {Host: "inner.example.org", ProxyJump: "mgmt"},
+		"dhcp":  {Host: "dhcp.example.org", ProxyJump: "mgmt"},
+		"deep":  {Host: "deep.example.org", ProxyJump: "inner,gw2"},
+		"gw2":   {Host: "gw2.example.org", ProxyJump: "mgmt"},
+		"ext":   {Host: "ext.example.org", ProxyJump: "admin@bastion.example.org:2222"},
+	}})
+	for host, want := range map[string]string{
+		"exe0001.example.org": "",
+		"mgmt.example.org":    "",
+		"dhcp.example.org":    "mgmt.example.org",
+		"deep.example.org":    "inner.example.org gw2.example.org mgmt.example.org",
+		"ext.example.org":     "bastion.example.org",
+	} {
+		if got := strings.Join(c.JumpHosts(host), " "); got != want {
+			t.Errorf("JumpHosts(%s) = %q, want %q", host, got, want)
+		}
+	}
+}
+
 // TestAStatusOfTimeoutCountsOnlyAfterTheTimeout checks that a command
 // ended by timeout(1) on the host, which exits 124, or 137 once it had to be
 // killed, is told apart from one that exited the same way by itself: a
