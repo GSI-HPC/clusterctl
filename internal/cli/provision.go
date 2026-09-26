@@ -82,8 +82,10 @@ mode the configuration asks for.
 
 Every secret is decrypted before anything is asked or written, so a key this
 workstation lacks stops the push, and its dry run, before a node is touched.
-Each file is written beside its target and moved into place only once all of
-it has arrived, so a lost connection leaves the old file as it was. A node
+Two secrets written to the same target are refused before that: only the
+last would stay, after the first had been in place for a while. Each file is
+written beside its target and moved into place only once all of it has
+arrived, so a lost connection leaves the old file as it was. A node
 that cannot be reached is not tried again for the next secret; when no node
 that failed could be reached, the command exits 3.
 
@@ -96,6 +98,9 @@ This overwrites files on the nodes, so it asks first.
 			if len(files) == 0 {
 				return exitcode.Errorf(exitcode.Usage,
 					"no secrets are configured; add services.cinc.secrets to the site document")
+			}
+			if err := oneSecretPerTarget(files); err != nil {
+				return err
 			}
 			ns, err := selection(a, args)
 			if err != nil {
@@ -176,6 +181,24 @@ This overwrites files on the nodes, so it asks first.
 			}
 			return pushFailures(targets, failed)
 		}))
+}
+
+// oneSecretPerTarget refuses two secrets written to the same target: only
+// the last would stay on the node, after the first had been in place for a
+// while, which is a mistake in the configuration rather than something to
+// carry out.
+func oneSecretPerTarget(files []v1alpha1.SecretFile) error {
+	first := map[string]int{}
+	for i, file := range files {
+		target := path.Clean(file.Target)
+		if j, ok := first[target]; ok {
+			return exitcode.Errorf(exitcode.Usage,
+				"services.cinc.secrets[%d] and services.cinc.secrets[%d] are both written to %s; give each target one secret in the site document",
+				j, i, target)
+		}
+		first[target] = i
+	}
+	return nil
 }
 
 // secretScript writes the payload on standard input to a temporary file

@@ -484,3 +484,27 @@ func leaked(h *harness, err error) bool {
 	}
 	return strings.Contains(text, "hunter2") || strings.Contains(text, "czNjcjN0")
 }
+
+// Two secrets written to the same target left the node with whichever
+// arrived last. They are refused before anything is decrypted, so a key
+// this workstation lacks, as it lacks the example's, is not what is
+// reported, and before anything is asked, however the path is spelt.
+func TestSecretsPushRefusesTwoSecretsForOneTarget(t *testing.T) {
+	secrets := `services.cinc.secrets=[` +
+		`{"target":"/etc/munge/munge.key","secretRef":{"name":"example","key":"munge-key"}},` +
+		`{"target":"/etc/nslcd.keytab","source":"nslcd.keytab.age"},` +
+		`{"target":"/etc/munge//munge.key","secretRef":{"name":"example","key":"bmc-password"}}]`
+	for _, extra := range [][]string{nil, {"--dry-run"}} {
+		h, err := run(t, harnessOptions{tty: true, stdin: "y\n"},
+			append([]string{"--set", secrets, "secrets", "push", "-n", "exe[1-3]"}, extra...)...)
+		wantCode(t, err, exitcode.Usage)
+		want := "services.cinc.secrets[0] and services.cinc.secrets[2] are both written to /etc/munge/munge.key"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%v: error = %v, want %q", extra, err, want)
+		}
+		if strings.Contains(h.errOut.String()+h.out.String(), "[y/N]") {
+			t.Errorf("%v: secrets push asked although two secrets share a target:\n%s", extra, h.errOut)
+		}
+		wantNoCalls(t, h)
+	}
+}
