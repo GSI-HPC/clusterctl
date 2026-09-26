@@ -88,6 +88,9 @@ func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if progress.BusFrom(ctx) == nil && !opts.unwatched {
+		ctx = checked(t, ctx)
+	}
 	cmd := NewRootCommand(ctx, streams)
 	cmd.SetOut(h.out)
 	cmd.SetErr(h.errOut)
@@ -108,6 +111,24 @@ func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.
 	h.streams = streams
 
 	return h, cmd
+}
+
+// checked returns ctx with a Bus whose events are kept, which every command
+// a test runs is given unless the test watches the events itself: once the
+// test is over, the events are checked against every promise they make, so
+// that a command test is also a test of what the command reports. The
+// capture asks for the lines of output too, as a live display does.
+func checked(t *testing.T, ctx context.Context) context.Context {
+	t.Helper()
+	c := &progresstest.Capture{Lines: true}
+	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	t.Cleanup(func() {
+		// Checked before the Bus is closed, which would end what the
+		// command left open.
+		progresstest.Check(t, c.Events())
+		bus.Close()
+	})
+	return progress.WithBus(ctx, bus)
 }
 
 // watch returns a context whose Bus sends a command's progress events to a
@@ -173,8 +194,12 @@ type harnessOptions struct {
 	// several runs can share one the way the commands of one user do.
 	cacheDir string
 	// ctx is the context the command runs under; cancelling it is what an
-	// interrupt does.
+	// interrupt does. Unless it carries a Bus, one is added whose events
+	// are checked once the test is over.
 	ctx context.Context
+	// unwatched runs the command with no Bus, as the command line runs it
+	// when nothing is drawn.
+	unwatched bool
 }
 
 // rootOf digs the root state out of a built command tree.
