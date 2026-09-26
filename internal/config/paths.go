@@ -29,6 +29,9 @@ const (
 	// EnvProgress chooses how progress is shown when --progress is not
 	// given.
 	EnvProgress = "CLUSTERCTL_PROGRESS"
+	// EnvProgressLog names the file the progress events of a command are
+	// appended to when --progress-log is not given.
+	EnvProgressLog = "CLUSTERCTL_PROGRESS_LOG"
 )
 
 // listSeparator separates the entries of CLUSTERCTL_CONFIG.

@@ -24,6 +24,14 @@ type Options struct {
 	Now func() time.Time
 	// Trace is the trace the spans belong to; zero draws one at random.
 	Trace TraceID
+	// Parent, TraceFlags and TraceState say where Trace came from when
+	// another program handed it on, as ParseTraceContext reads them: the
+	// span of that program's the work runs under, the trace flags and
+	// the tracestate. They are recorded, for an event log, and change
+	// nothing else; without a Trace they are ignored.
+	Parent     SpanID
+	TraceFlags byte
+	TraceState string
 	// PanicLog receives the stack of a sink that panicked, the front
 	// end's diagnostics; nil is the process's standard error.
 	PanicLog io.Writer
@@ -42,7 +50,7 @@ type Bus struct {
 	lines    bool
 	now      func() time.Time
 	panicLog io.Writer
-	trace    TraceID
+	trace    TraceContext
 	base     uint64
 	started  uint64
 	seq      uint64
@@ -59,26 +67,46 @@ func NewBus(o Options) *Bus {
 		sinks:    slices.Clone(o.Sinks),
 		now:      o.Now,
 		panicLog: o.PanicLog,
-		trace:    o.Trace,
+		trace:    TraceContext{Trace: o.Trace, Parent: o.Parent, Flags: o.TraceFlags, State: o.TraceState},
 	}
 	if b.now == nil {
 		b.now = time.Now
 	}
-	if b.trace == (TraceID{}) {
+	if b.trace.Trace == (TraceID{}) {
+		b.trace = TraceContext{}
 		// crypto/rand never fails; it ends the process when it cannot.
-		_, _ = rand.Read(b.trace[:])
+		_, _ = rand.Read(b.trace.Trace[:])
 	}
+	// The base is drawn whatever the trace, so that runs that continue
+	// one trace do not share span ids.
 	var base [8]byte
 	_, _ = rand.Read(base[:])
 	b.base = binary.BigEndian.Uint64(base[:])
 	b.mu.Lock()
+	b.begin()
 	b.lines = b.wantLines()
 	b.mu.Unlock()
 	return b
 }
 
 // Trace returns the trace the Bus's spans belong to.
-func (b *Bus) Trace() TraceID { return b.trace }
+func (b *Bus) Trace() TraceID { return b.trace.Trace }
+
+// TraceContext returns the trace the Bus's spans belong to, and where it
+// came from.
+func (b *Bus) TraceContext() TraceContext { return b.trace }
+
+// begin tells the sinks that record the trace which one it is, and removes
+// one that panics. b.mu is held.
+func (b *Bus) begin() {
+	for i := 0; i < len(b.sinks); i++ {
+		ts, ok := b.sinks[i].(TraceSink)
+		if ok && !b.safely(func() { ts.Begin(b.trace) }) {
+			b.sinks = slices.Delete(b.sinks, i, i+1)
+			i--
+		}
+	}
+}
 
 // Close ends every span still open as canceled, "not finished", the
 // innermost first, and resumes a display still suspended. Nothing is sent

@@ -5,7 +5,11 @@ package mcpserver_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -106,6 +110,50 @@ func TestReadCommandIgnoresTheProgressVariable(t *testing.T) {
 	f.call(t, "read_command", map[string]any{"args": []string{"node", "fqdn", "-n", "exe1"}}, &out)
 	if out.ExitCode != 0 || out.Notes != "" {
 		t.Errorf("result = %+v, want success and no notes", out)
+	}
+}
+
+// An agent's commands write no event log: CLUSTERCTL_PROGRESS_LOG in the
+// server's environment is not read for them, and --progress-log, which
+// would have the server write a file the agent names, is refused. Each
+// call is a trace of its own, so TRACEPARENT in the server's environment
+// is not continued either: the audit log names the call's trace.
+func TestAgentsCommandsWriteNoEventLog(t *testing.T) {
+	dir := t.TempDir()
+	logged := filepath.Join(dir, "progress.jsonl")
+	t.Setenv(config.EnvProgressLog, logged)
+	t.Setenv("TRACEPARENT", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	f := start(t, setup{answer: accept(map[string]any{"confirm": true})})
+	var out commandResult
+	f.call(t, "read_command", map[string]any{"args": []string{"node", "fqdn", "-n", "exe1"}}, &out)
+	if out.ExitCode != 0 || out.Notes != "" {
+		t.Errorf("result = %+v, want success and no notes", out)
+	}
+	p := f.plan(t, map[string]any{"action": "resume", "nodes": "exe1"})
+	var applied applyResult
+	f.call(t, "apply_plan", applyArgs(p), &applied)
+	if _, err := os.Stat(logged); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the server's CLUSTERCTL_PROGRESS_LOG was written for a tool call: %v", err)
+	}
+	for _, line := range auditLines(t, f.stateDir) {
+		if line["trace"] == "4bf92f3577b34da6a3ce929d0e0e4736" {
+			t.Errorf("a call continued the server's TRACEPARENT: %v", line)
+		}
+	}
+
+	named := filepath.Join(dir, "named.jsonl")
+	for _, args := range [][]string{
+		{"node", "fqdn", "-n", "exe1", "--progress-log", named},
+		{"--progress-log=" + named, "node", "fqdn", "-n", "exe1"},
+		{"node", "fqdn", "-n", "exe1", "--progress-log="},
+	} {
+		msg := f.refused(t, "read_command", map[string]any{"args": args})
+		if !strings.HasPrefix(msg, "rejected:") || !strings.Contains(msg, "--progress-log is set by the server") {
+			t.Errorf("%v: message = %q, want --progress-log refused", args, msg)
+		}
+	}
+	if _, err := os.Stat(named); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the log an agent named was written: %v", err)
 	}
 }
 

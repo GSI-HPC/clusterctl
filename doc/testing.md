@@ -123,6 +123,13 @@ marks, an interrupt, a question and a write in the middle of a frame are
 compared whole, and so are the plain lines of a fan-out, a power-on in
 batches and a reinstall that fails, the summary among them.
 
+**The event log** is compared line for line, with the span ids, which each
+Bus draws at random, replaced by their order, and a clock the test moves: the
+lines of hand-made spans in `progress`, and those of `exec` under a
+`TRACEPARENT` in `cli`. A test sets every part of an event and fails when one
+is neither logged nor left out on purpose, so a part added to `Event` or
+`Fields` is not logged, or kept out, without a decision.
+
 **Command tests** drive the real command tree end to end and assert on what
 would be sent, not on whether the code compiles: that a glob and an apostrophe
 survive the trip, that a declined confirmation sends nothing, that a dry run
