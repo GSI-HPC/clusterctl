@@ -191,6 +191,109 @@ func WriteNew(path string, data []byte, perm os.FileMode) (err error) {
 	return f.Close()
 }
 
+// AppendPrivate opens a file to append to that nobody but this user may
+// read, such as a log of host names and errors, and creates it readable and
+// writable by this user alone when it is not there. A regular file that is
+// there already has to be one this user owns and nobody else can read or
+// write: the lines appended would be read by whoever else can read it, and
+// could be mixed with lines of theirs by whoever else can write it. A named
+// pipe has to be this user's or root's, since whoever reads it reads the
+// lines. A terminal or another device is opened as it is. A path that names
+// one of this process's own descriptors, /dev/stderr, /dev/fd/3, is written
+// through that descriptor, wherever the shell that started the process
+// pointed it: the lines follow what the process writes there, not at the
+// start of a file stderr was redirected to.
+//
+// The path is often in a directory others can write to, so a symbolic link
+// on the way to the file has to be this user's or root's too, as for
+// WriteAtomic: one another user made would have the lines appended to a
+// file of this user's that it points at, or a file created where it points.
+// A path that is no link when it is looked at is opened without following
+// one, so that none can take its place in between.
+func AppendPrivate(path string) (*os.File, error) {
+	if f, ok, err := ownDescriptor(path); ok {
+		return f, err
+	}
+	end, linked, err := trustedLinks(path)
+	if err != nil {
+		return nil, err
+	}
+	if info, err := os.Lstat(end); err == nil && info.Mode()&fs.ModeNamedPipe != 0 {
+		// Opened, a pipe waits for its reader; one nobody trusts is not.
+		if err := trustedOwner(end, info); err != nil {
+			return nil, err
+		}
+	}
+	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	if !linked {
+		flags |= noFollow
+	}
+	f, err := os.OpenFile(path, flags, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	// The file opened is the one checked, whatever was at the path before.
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	switch mode := info.Mode(); {
+	case mode&fs.ModeNamedPipe != 0:
+		if err := trustedOwner(path, info); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		return f, nil
+	case !mode.IsRegular():
+		return f, nil
+	}
+	if uid, _, ok := owner(info); ok && uid != os.Geteuid() {
+		_ = f.Close()
+		return nil, untrusted("%s is owned by uid %d, not by this user (uid %d)", path, uid, os.Geteuid())
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		_ = f.Close()
+		return nil, fmt.Errorf("%s can be read or written by others than its owner (mode %v); run chmod 600 %s",
+			path, perm, path)
+	}
+	return f, nil
+}
+
+// trustedLinks follows the symbolic links path leads through, as far as
+// they name paths that are there, and refuses one that neither this user
+// nor root owns. It returns where the links end and whether there was one.
+// A link that names no path, such as the one /dev/fd/3 is to a pipe, ends
+// the walk: the system follows it, and what it leads to is checked once
+// it is open.
+func trustedLinks(path string) (end string, linked bool, err error) {
+	end = path
+	for range maxLinks {
+		info, err := os.Lstat(end)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			// A path that is not there is for the open to create.
+			return end, linked, nil
+		case err != nil:
+			return "", false, err
+		case info.Mode()&fs.ModeSymlink == 0:
+			return end, linked, nil
+		}
+		if err := trustedOwner(end, info); err != nil {
+			return "", false, err
+		}
+		link, err := os.Readlink(end)
+		if err != nil {
+			return "", false, err
+		}
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(filepath.Dir(end), link)
+		}
+		end, linked = link, true
+	}
+	return "", false, fmt.Errorf("%s: too many levels of symbolic links", path)
+}
+
 // Update reads a file, hands its content to change and writes back whatever
 // comes out, holding an exclusive lock for the whole cycle. A file that does
 // not exist yet is presented as empty.

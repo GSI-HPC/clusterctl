@@ -48,12 +48,19 @@ type root struct {
 	// progressGiven tells a --progress that was given from one that was
 	// not, which leaves the choice to the environment.
 	progressGiven func() bool
+	progressLog   string
+	// progressLogGiven tells a --progress-log that was given, even an
+	// empty one, from one that was not.
+	progressLogGiven func() bool
 
 	// runner replaces the transport; only the tests set it.
 	runner transport.Runner
 	// agent says the tree runs the commands of an MCP client: there is no
 	// default node set, and only the site's hosts may be named.
 	agent bool
+	// traceparent and tracestate are the trace context clusterctl was
+	// started with, which takeTraceContext took out of the environment.
+	traceparent, tracestate string
 
 	cached *app.App
 }
@@ -185,6 +192,7 @@ func NewRootCommand(ctx context.Context, streams app.Streams) *cobra.Command {
 // newRoot builds the command tree and returns the state its flags write to.
 func newRoot(ctx context.Context, streams app.Streams) (*cobra.Command, *root) {
 	r := &root{streams: streams, ctx: ctx}
+	r.traceparent, r.tracestate = takeTraceContext()
 
 	cmd := &cobra.Command{
 		Use:   "clusterctl",
@@ -232,6 +240,10 @@ are about to do and ask before doing it.`),
 		"how to show the progress of a command on standard error: "+strings.Join(progressModes, ", ")+
 			" (default: "+config.EnvProgress+", else auto, a live tree when standard error is a terminal; plain writes lines for a log)")
 	r.progressGiven = func() bool { return flags.Changed("progress") }
+	flags.StringVar(&r.progressLog, "progress-log", "",
+		"append the progress events of a command to this file, one JSON object per line, created readable by you alone (default: "+
+			config.EnvProgressLog+"; an empty one writes none)")
+	r.progressLogGiven = func() bool { return flags.Changed("progress-log") }
 
 	registerCompletions(cmd, r)
 

@@ -10,8 +10,8 @@
 // nests under the target it is made for without being handed down. Every
 // change to a span is sent, as one Event of plain data, to the sinks of the
 // Bus the context carries, in one total order. A counter, a live tree, an
-// agent's progress notifications and a test are sinks; this package draws
-// nothing itself.
+// agent's progress notifications, an event log and a test are sinks; this
+// package draws nothing itself, and writes only the event log, Log.
 //
 // Without a Bus in the context, Start returns the context unchanged and a
 // nil *Span, and every method of a nil *Span does nothing, so work that
@@ -24,7 +24,9 @@
 //
 // The events map one to one onto a trace: the trace id is 16 bytes, a span
 // id is 8, and each Bus draws the base of its span ids at random, so that
-// runs sharing one trace do not share span ids.
+// runs sharing one trace do not share span ids. A Bus may continue a trace
+// another program began, as ParseTraceContext reads it from a W3C
+// traceparent.
 package progress
 
 import (
@@ -211,7 +213,10 @@ const (
 // inherited are the flags a span passes to the spans started under it.
 const inherited = Hidden | ShowLines
 
-func (f Flags) String() string {
+func (f Flags) String() string { return strings.Join(f.names(), ",") }
+
+// names returns the names of the flags set, nil for none.
+func (f Flags) names() []string {
 	var names []string
 	for _, n := range []struct {
 		flag Flags
@@ -221,7 +226,7 @@ func (f Flags) String() string {
 			names = append(names, n.name)
 		}
 	}
-	return strings.Join(names, ",")
+	return names
 }
 
 // Type is what an event reports.
@@ -382,6 +387,13 @@ type Sink interface {
 // produced when a sink asks. The Bus asks once, when it is made.
 type LineSink interface {
 	WantsLines() bool
+}
+
+// TraceSink is a Sink that records the trace its events belong to, as an
+// event log does. The Bus tells it once, when it is made, before any
+// event.
+type TraceSink interface {
+	Begin(TraceContext)
 }
 
 // Suspender is a Sink that draws on the terminal, and takes itself off it

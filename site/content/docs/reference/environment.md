@@ -11,6 +11,7 @@ weight: 2
 | `CLUSTERCTL_CONTEXT` | Selects the context, as `--context` does. |
 | `CLUSTERCTL_NODES` | The node set commands act on when neither `-n` nor a node set argument is given. An empty `-n` is an error, never a fall-back to it. |
 | `CLUSTERCTL_PROGRESS` | How progress is shown when `--progress` is not given: `auto`, `tty`, `counter`, `plain` or `none`. Empty is `auto`, the live tree on a terminal. `plain` suits a CI job's log. See [Output](../../guides/output/#progress-and-errors-go-to-stderr). |
+| `CLUSTERCTL_PROGRESS_LOG` | The file each command appends its progress events to, as JSON lines, when `--progress-log` is not given; created readable by you alone. Empty writes none. See [Output](../../guides/output/#the-event-log). |
 | `CLUSTERCTL_FANOUT` | `fanout.max` |
 | `CLUSTERCTL_CONNECT_TIMEOUT` | `ssh.connectTimeout` |
 | `CLUSTERCTL_COMMAND_TIMEOUT` | `fanout.commandTimeout` |
@@ -28,6 +29,17 @@ credential in the configuration says `fromEnv: BMC_PASSWORD`.
 colour anyway. `LC_ALL`, `LC_CTYPE` and `LANG`, the first one set, say whether
 the terminal shows UTF-8: in any other locale the live tree and the counter are
 drawn in ASCII.
+
+`TRACEPARENT` and `TRACESTATE` are the W3C trace context a CI system that
+traces its jobs may set. A valid `TRACEPARENT` gives a command's progress
+events its trace id, and the first line the command writes to the
+[event log](../../guides/output/#the-event-log) records the span it names,
+its trace flags and `TRACESTATE`, as they were given; one that is not valid
+is ignored. Nothing is sent to a tracing system, and both variables are
+taken out of the environment of the programs clusterctl runs, so none of
+them traces under a span that no tracing system holds. Under `clusterctl mcp`,
+`CLUSTERCTL_PROGRESS`, `CLUSTERCTL_PROGRESS_LOG` and `TRACEPARENT` are not
+read for the commands an agent runs: each tool call is a trace of its own.
 
 ## Where files live
 

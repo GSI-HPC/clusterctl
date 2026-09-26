@@ -10,7 +10,7 @@ renumbered.
 | --- | --- | --- |
 | `0` | Everything succeeded | |
 | `1` | clusterctl worked, at least one target failed | A command exited non-zero on a node; a service processor rejected an action |
-| `2` | Usage or configuration error | An unknown flag or subcommand, a missing or extra argument, an unparseable node set, a configuration that does not validate, a protected host, a node the inventory does not know |
+| `2` | Usage or configuration error | An unknown flag or subcommand, a missing or extra argument, an unparseable node set, a configuration that does not validate, a protected host, a node the inventory does not know, a `--progress` display where none can be drawn, a `--progress-log` file that cannot be used |
 | `3` | Transport | A host could not be reached, resolved or authenticated with, or stopped answering while its command ran |
 | `130` | Interrupted | Ctrl-C, or a confirmation declined |
 

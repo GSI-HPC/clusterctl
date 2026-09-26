@@ -505,10 +505,17 @@ func TestEventsHaveOneOrderUnderConcurrency(t *testing.T) {
 	}
 }
 
-// panicky panics on its nth event.
+// panicky panics on its nth event, or when asked for lines or told the
+// trace.
 type panicky struct {
-	n, seen int
-	lines   bool
+	n, seen      int
+	lines, begin bool
+}
+
+func (p *panicky) Begin(progress.TraceContext) {
+	if p.begin {
+		panic("the log could not begin")
+	}
 }
 
 func (p *panicky) Handle(progress.Event) {
@@ -556,6 +563,16 @@ func TestASinkThatPanicsIsRemoved(t *testing.T) {
 	}
 	span.End(nil)
 	lines.Close()
+
+	// A sink that panics when told the trace is sent nothing.
+	begins := &panicky{begin: true}
+	traced := progress.NewBus(progress.Options{Sinks: []progress.Sink{begins}, PanicLog: io.Discard})
+	_, span = progress.Start(progress.WithBus(context.Background(), traced), progress.KindCall, "ssh")
+	span.End(nil)
+	traced.Close()
+	if begins.seen != 0 {
+		t.Errorf("the sink that panicked when told the trace was sent %d events", begins.seen)
+	}
 }
 
 // terminal is a Suspender that records its calls, and checks that the Bus

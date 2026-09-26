@@ -103,15 +103,25 @@ depends on the standard library, `exitcode`, and `output` for escaping.
 - **Drawn only on a terminal.** Progress goes to standard error, never to
   standard output. `--progress` and `CLUSTERCTL_PROGRESS` choose the display,
   `auto` by default, which draws only when standard error is a terminal.
-  Under MCP the flag and the variable are ignored and nothing is drawn: the
-  agent is sent notifications.
+  Under MCP the variable is not read, `read_command` refuses the flag, and
+  nothing is drawn: the agent is sent notifications.
+- **The event log is an interface.** `--progress-log` writes the events as
+  JSON lines for readers outside the process, a converter or a CI job's
+  artifacts. Every line has `v`, 1 for now, which changes only when what a
+  key or a value means does: keys and values may be added under it, and a
+  reader leaves out those it does not know. `testdata/log-v1.jsonl` is
+  version 1, line for line, and a test fails when a value has no name in the
+  log or is missing from it.
 
 How a pool reports its targets is part of [ADR 0022](0022-bounded-pools-and-power-batches.md).
 
 ## Why
 
-- Every consumer is in the process. No trace context has to cross into
-  another program.
+- Every consumer that shows or sends progress is in the process; the one
+  outside it, a reader of the event log, reads a file whose format is
+  versioned. No trace context has to cross into another program: the one
+  clusterctl is given is recorded and taken out of the environment of the
+  programs it runs, and none of its own is handed on.
 - Two conditions have to hold, and are easier to guarantee in code we own
   than to verify in a dependency, the reasoning of ADRs
   [0002](0002-own-nodeset-engine.md) and [0005](0005-own-redfish-client.md):
@@ -136,9 +146,9 @@ How a pool reports its targets is part of [ADR 0022](0022-bounded-pools-and-powe
 - The event model, the displays, the sanitiser and its fuzz target are ours
   to maintain, and a terminal UI among them has tmux, narrow terminals and
   resizes to cope with.
-- There is no exporter and no propagation for free. Taking a trace id from
-  `TRACEPARENT` and a converter to OTLP are work of our own when they are
-  wanted.
+- There is no exporter and no propagation for free. Taking the trace id
+  from `TRACEPARENT` is code of our own, and so is a converter of the event
+  log to OTLP when one is wanted.
 - The helpers that reach hosts take a context, so that their spans nest
   under the step they belong to.
 - A display that is not on a terminal has to be asked for, so CI shows

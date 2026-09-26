@@ -52,7 +52,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | `internal/transport` | Driving the OpenSSH client, and generating the configuration it runs with. |
 | `internal/shellquote` | Rendering an argument vector so a remote shell reproduces it exactly. |
 | `internal/fanout` | Working on many targets at once, bounded and in order, or in batches with a pause between them, and reporting the work as it goes. |
-| `internal/progress` | Reporting the work under way: its steps, targets and calls as spans carried in the context, and every change to one as an event for a display or an agent. |
+| `internal/progress` | Reporting the work under way: its steps, targets and calls as spans carried in the context, and every change to one as an event for a display, an agent or the event log. |
 | `internal/safety` | Deciding whether a destructive action may proceed. |
 | `internal/fileutil` | Writing files atomically and under a lock, and the cache on disk. |
 
@@ -166,6 +166,27 @@ The MCP server gives each tool call a Bus of its own, before the call waits
 for its place, and sends what it counts to the client as MCP progress
 notifications when the client asks for them, all of them before the call's
 result; the call's trace goes into the audit log with each entry it writes.
+
+`--progress-log`, or `CLUSTERCTL_PROGRESS_LOG`, adds a `progress.Log` to the
+Bus, beside the display or without one, so `cli` makes a Bus whenever either
+is wanted. The log writes each event as one line of JSON, version 1 of its
+format, with the run it belongs to, into a buffer under the Bus's lock, and
+the buffer out in whole lines, when it is full, as a step ends, and a second
+after a line was kept at the latest, to a file `fileutil.AppendPrivate`
+opens: created readable by its owner alone, and not written when anyone else
+can read or write it, which refuses the command, before it runs, when the
+flag named the file, and is said once on standard error when the variable
+did. It copies each part of an event by name, and a test fails when
+a part is added that the log neither copies nor leaves out on purpose; the
+text of a line it always leaves out, and asks for no lines. A write that
+fails stops the log and nothing else, and is reported once, after the Bus is
+closed. A valid `TRACEPARENT` gives the Bus its trace id, and the log's
+first line the parent's span id, the trace flags and `TRACESTATE`; each Bus
+draws its own base of span ids all the same, so that commands continuing one
+trace never share one. `cli` reads the variables, not `progress`, as it
+builds the command tree, and takes them out of the process's environment,
+so that the programs clusterctl runs are handed none and the Buses of the
+MCP server, one per call, keep traces of their own.
 
 ## What runs where
 

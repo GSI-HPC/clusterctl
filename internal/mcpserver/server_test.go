@@ -387,6 +387,7 @@ func TestReadCommandRunsOnlyReadOnlyCommands(t *testing.T) {
 		{"node", "list", "-y"},
 		{"node", "list", "--force"},
 		{"node", "list", "--progress", "counter"},
+		{"node", "list", "--progress-log", "/tmp/progress.jsonl"},
 		{"slurm", "node"},
 		{"nonsense"},
 		{},

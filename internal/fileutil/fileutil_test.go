@@ -456,6 +456,139 @@ func TestCheckTrustedRefusesAnotherUsersFile(t *testing.T) {
 	}
 }
 
+// A private file is created for this user alone and appended to; one that
+// others can read or write is refused as it is found, and what is not a
+// regular file is written as it is.
+func TestAppendPrivate(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "progress.jsonl")
+	for _, line := range []string{"one\n", "two\n"} {
+		f, err := fileutil.AppendPrivate(path)
+		if err != nil {
+			t.Fatalf("AppendPrivate: %v", err)
+		}
+		if _, err := f.WriteString(line); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "one\ntwo\n" {
+		t.Errorf("content = %q, want both lines", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("created with mode %v, want 0600", info.Mode().Perm())
+	}
+
+	for _, mode := range []os.FileMode{0o640, 0o604, 0o620, 0o644} {
+		wide := filepath.Join(dir, "wide.jsonl")
+		if err := os.WriteFile(wide, []byte("kept\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(wide, mode); err != nil {
+			t.Fatal(err)
+		}
+		f, err := fileutil.AppendPrivate(wide)
+		if err == nil {
+			_ = f.Close()
+			t.Errorf("a file with mode %v was opened", mode)
+		} else if !strings.Contains(err.Error(), "chmod 600 "+wide) {
+			t.Errorf("mode %v: err = %v, want it to say how to make it private", mode, err)
+		}
+		if data, _ := os.ReadFile(wide); string(data) != "kept\n" {
+			t.Errorf("a refused file now holds %q", data)
+		}
+	}
+
+	if _, err := os.Stat(os.DevNull); err == nil {
+		f, err := fileutil.AppendPrivate(os.DevNull)
+		if err != nil {
+			t.Errorf("the null device, which anyone can write, was refused: %v", err)
+		} else {
+			_ = f.Close()
+		}
+	}
+	if _, err := fileutil.AppendPrivate(filepath.Join(dir, "missing", "progress.jsonl")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a file in a directory that is not there: err = %v, want it not to exist", err)
+	}
+}
+
+func TestAppendPrivateRefusesAnotherUsersFile(t *testing.T) {
+	t.Parallel()
+	uid, gid := otherIDs(t)
+
+	path := filepath.Join(t.TempDir(), "progress.jsonl")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(path, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fileutil.AppendPrivate(path); !errors.Is(err, fileutil.ErrUntrusted) {
+		t.Errorf("another user's file: err = %v, want ErrUntrusted", err)
+	}
+}
+
+// A link another user made on the way to the log is not followed: not to
+// a file of this user's it points at, which would be appended to, and not
+// to where a file is not, which would be created. A link of this user's is
+// followed, and so are the system's to a pipe or a terminal.
+func TestAppendPrivateRefusesAnotherUsersLink(t *testing.T) {
+	t.Parallel()
+	uid, gid := otherIDs(t)
+
+	dir := t.TempDir()
+	mine := filepath.Join(dir, "config")
+	if err := os.WriteFile(mine, []byte("kept\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, target string }{
+		{"to a file of mine", mine},
+		{"to nothing", filepath.Join(dir, "profile.sh")},
+	} {
+		link := filepath.Join(dir, "planted-"+filepath.Base(tc.target))
+		if err := os.Symlink(tc.target, link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Lchown(link, uid, gid); err != nil {
+			t.Fatal(err)
+		}
+		if f, err := fileutil.AppendPrivate(link); !errors.Is(err, fileutil.ErrUntrusted) {
+			if f != nil {
+				_ = f.Close()
+			}
+			t.Errorf("a link %s another user made: err = %v, want ErrUntrusted", tc.name, err)
+		}
+	}
+	if data, _ := os.ReadFile(mine); string(data) != "kept\n" {
+		t.Errorf("the file the link points at now holds %q", data)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "profile.sh")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the file the dangling link names was created: %v", err)
+	}
+
+	own := filepath.Join(dir, "own-link")
+	if err := os.Symlink(filepath.Join(dir, "progress.jsonl"), own); err != nil {
+		t.Fatal(err)
+	}
+	f, err := fileutil.AppendPrivate(own)
+	if err != nil {
+		t.Fatalf("a link of this user's: %v", err)
+	}
+	_ = f.Close()
+}
+
 func TestCacheKeepsAnAnswerForItsKeyAndTTL(t *testing.T) {
 	t.Parallel()
 

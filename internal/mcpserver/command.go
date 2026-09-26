@@ -30,10 +30,11 @@ const maxCommandOutput = 64 << 10
 
 // pinnedFlags are the global options the server sets itself. An agent that
 // could pass them could point a command at another configuration or cluster,
-// answer a confirmation, or open more connections at once than fanout.max
-// allows. --progress would draw nothing, since no display is drawn for an
-// agent, so it is refused rather than dropped without a word.
-var pinnedFlags = []string{"config", "context", "set", "yes", "force", "fanout", "progress"}
+// answer a confirmation, open more connections at once than fanout.max
+// allows, or have a file of its choosing written with --progress-log.
+// --progress would draw nothing, since no display is drawn for an agent, so
+// it is refused rather than dropped without a word.
+var pinnedFlags = []string{"config", "context", "set", "yes", "force", "fanout", "progress", "progress-log"}
 
 // readCommandTool is the name of the tool that runs the read-only commands.
 const readCommandTool = "read_command"

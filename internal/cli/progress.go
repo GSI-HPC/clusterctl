@@ -15,10 +15,12 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/display"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
+	"github.com/GSI-HPC/clusterctl/internal/version"
 )
 
 // traceLeaves has every leaf command of the tree run in a progress span of
@@ -65,9 +67,10 @@ var errPanicked = errors.New("the command panicked")
 //
 // The span is started under the Bus the command tree's context brought,
 // which an MCP call or a test gives it; the Bus is theirs to close. Without
-// one, the command gets the Bus of its own display, if --progress has it
-// drawn, which is closed, and the display taken off the terminal, before
-// the function's error is printed by report.
+// one, the command gets a Bus of its own when --progress has a display
+// drawn or --progress-log an event log written, which is closed, the
+// display taken off the terminal and the log written out, before the
+// function's error is printed by report.
 //
 // The span's context becomes the tree's before the command context is
 // built, so a.Context(), the gate and the group resolver all carry it, and
@@ -260,14 +263,39 @@ var startDisplay = func(mode string, term *display.Terminal, interrupted <-chan 
 	return counter
 }
 
+// takeTraceContext returns the W3C trace context clusterctl was started
+// with, TRACEPARENT and TRACESTATE, and takes both out of its environment.
+// The event log continues the trace; the programs clusterctl runs, ssh,
+// scp, sops and a credential helper, are handed none. clusterctl sends its
+// spans nowhere, so a child told to run under the caller's span, or under
+// one of clusterctl's, would hang what it traces under a parent no tracing
+// system holds.
+func takeTraceContext() (traceparent, tracestate string) {
+	for _, name := range []string{"TRACEPARENT", "TRACESTATE"} {
+		value, ok := os.LookupEnv(name)
+		if !ok {
+			continue
+		}
+		// Unsetenv fails only for a name the system cannot hold.
+		_ = os.Unsetenv(name)
+		if name == "TRACEPARENT" {
+			traceparent = value
+		} else {
+			tracestate = value
+		}
+	}
+	return traceparent, tracestate
+}
+
 // displayClock is the clock of a display's Bus.
 var displayClock = time.Now
 
-// display returns the Bus a command's progress is shown from when nothing
+// display returns the Bus a command's progress goes to when nothing
 // watches the command already, and what takes the display off the terminal,
-// puts the streams back and leaves the summary once the Bus is closed; no
-// Bus when --progress has nothing shown. An agent's commands never show
-// anything; the MCP server gives them a Bus of its own.
+// puts the streams back, leaves the summary and closes the event log once
+// the Bus is closed; no Bus when --progress shows nothing and no event log
+// is asked for. An agent's commands never get one; the MCP server gives
+// them a Bus of its own.
 //
 // Everything the command writes where the display shows goes through the
 // writers of its terminal, which take the tree or the counter off first,
@@ -278,59 +306,142 @@ var displayClock = time.Now
 // command context and cobra's alike, which printExec and the help write to.
 // They are put in place before the command context is built, which copies
 // the streams, and only while a display is shown: without one, nothing
-// stands between the command and its streams.
+// stands between the command and its streams, event log or not.
 //
 // The summary is one line on standard error once the display is gone, and
 // before the command's error, for a command that ran for a second or more:
 // how many of its targets ended how, and how long it ran. It says it is
 // clusterctl's, as the error does, so that it is not read as a host's. What
 // failed and why is the error's to say.
+//
+// The Bus continues the trace of TRACEPARENT when it is a valid one, as a
+// CI job may set it, so that the event log joins the job's trace.
 func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 	mode, modeNote, err := r.progressMode()
-	if modeNote != "" {
+	if err != nil {
+		return nil, nil, err
+	}
+	logFile, logNote, err := r.openProgressLog()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, note := range []string{modeNote, logNote} {
+		if note == "" {
+			continue
+		}
 		report := r.streams.Diag
 		if report == nil {
 			report = r.streams.Err
 		}
 		// A note that cannot be written changes nothing about the command.
-		_, _ = fmt.Fprintln(report, output.EscapeCell(modeNote))
+		_, _ = fmt.Fprintln(report, output.EscapeCell(note))
 	}
-	if err != nil || mode == progressNone {
-		return nil, nil, err
+	if mode == progressNone && logFile == nil {
+		return nil, nil, nil
 	}
-	term := display.NewTerminal(r.streams.Err, r.streams.Size)
-	term.PanicLog, term.Foreground = r.streams.Diag, r.streams.Foreground
-	if term.PanicLog == nil {
-		term.PanicLog = r.streams.Err
-	}
-	shown := startDisplay(mode, term, r.context().Done())
-	summary := &display.Summary{}
 
-	saved, top := r.streams, cmd.Root()
-	out, errOut := top.OutOrStdout(), top.ErrOrStderr()
-	if r.streams.OutIsTTY || mode == progressPlain {
-		r.streams.Out = term.Writer(r.streams.Out)
-		top.SetOut(term.Writer(out))
+	saved := r.streams
+	diag := r.streams.Diag
+	if diag == nil {
+		diag = r.streams.Err
 	}
-	r.streams.Err = term.Writer(r.streams.Err)
-	top.SetErr(term.Writer(errOut))
-	diag := r.streams.Err
-	if r.streams.Diag != nil {
-		r.streams.Diag = term.Writer(r.streams.Diag)
-		diag = r.streams.Diag
-	}
-	r.streams.Display = true
+	var sinks []progress.Sink
+	var shown renderer
+	var summary *display.Summary
+	var restore func()
+	if mode != progressNone {
+		term := display.NewTerminal(r.streams.Err, r.streams.Size)
+		term.PanicLog, term.Foreground = diag, r.streams.Foreground
+		shown = startDisplay(mode, term, r.context().Done())
+		summary = &display.Summary{}
+		sinks = append(sinks, shown, summary)
 
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{shown, summary}, Now: displayClock, PanicLog: diag})
+		top := cmd.Root()
+		out, errOut := top.OutOrStdout(), top.ErrOrStderr()
+		if r.streams.OutIsTTY || mode == progressPlain {
+			r.streams.Out = term.Writer(r.streams.Out)
+			top.SetOut(term.Writer(out))
+		}
+		r.streams.Err = term.Writer(r.streams.Err)
+		top.SetErr(term.Writer(errOut))
+		diag = r.streams.Err
+		if r.streams.Diag != nil {
+			r.streams.Diag = term.Writer(r.streams.Diag)
+			diag = r.streams.Diag
+		}
+		r.streams.Display = true
+		restore = func() {
+			r.streams = saved
+			top.SetOut(out)
+			top.SetErr(errOut)
+		}
+	}
+	var log *progress.Log
+	if logFile != nil {
+		log = progress.NewLog(logFile, progress.LogOptions{Version: version.Get().Version})
+		sinks = append(sinks, log)
+	}
+
+	tc, _ := progress.ParseTraceContext(r.traceparent, r.tracestate)
+	bus := progress.NewBus(progress.Options{
+		Sinks: sinks, Now: displayClock, PanicLog: diag,
+		Trace: tc.Trace, Parent: tc.Parent, TraceFlags: tc.Flags, TraceState: tc.State,
+	})
 	return bus, func() {
-		shown.Close()
-		r.streams = saved
-		top.SetOut(out)
-		top.SetErr(errOut)
-		if line := summary.Line(); line != "" {
-			// The summary is a courtesy; a line that cannot be written
-			// changes nothing about the command.
-			_, _ = fmt.Fprintln(saved.Err, "clusterctl: "+line)
+		if shown != nil {
+			shown.Close()
+			restore()
+		}
+		if log != nil {
+			err := log.Close()
+			if closeErr := logFile.Close(); err == nil {
+				err = closeErr
+			}
+			if err != nil {
+				// The log is a record of the work, not part of it: a log
+				// that cannot be written fails nothing, and is reported
+				// once.
+				report := saved.Diag
+				if report == nil {
+					report = saved.Err
+				}
+				_, _ = fmt.Fprintln(report, output.EscapeCell(fmt.Sprintf(
+					"clusterctl: the progress log %s stops short: %v", logFile.Name(), err)))
+			}
+		}
+		if summary != nil {
+			if line := summary.Line(); line != "" {
+				// The summary is a courtesy; a line that cannot be written
+				// changes nothing about the command.
+				_, _ = fmt.Fprintln(saved.Err, "clusterctl: "+line)
+			}
 		}
 	}, nil
+}
+
+// openProgressLog opens the event log --progress-log names, or else
+// CLUSTERCTL_PROGRESS_LOG, to append to; nil when neither names one, or the
+// flag names an empty one. The file is created readable by this user alone,
+// since the events name hosts and say why they failed, and one that others
+// can read or write is not written. When the flag names it, its name is
+// known before anything has run, so the command is refused too; the
+// variable's fails no command, as a display it asks for fails none, and
+// the note returned says, for standard error, that no log is written.
+func (r *root) openProgressLog() (f *os.File, note string, err error) {
+	path, from := r.progressLog, "--progress-log"
+	ambient := r.progressLogGiven == nil || !r.progressLogGiven()
+	if ambient {
+		path, from = os.Getenv(config.EnvProgressLog), config.EnvProgressLog
+	}
+	if path == "" {
+		return nil, "", nil
+	}
+	f, err = fileutil.AppendPrivate(path)
+	switch {
+	case err == nil:
+		return f, "", nil
+	case ambient:
+		return nil, fmt.Sprintf("clusterctl: %s names a progress log that cannot be used: %v; no log is written", from, err), nil
+	}
+	return nil, "", exitcode.Errorf(exitcode.Usage, "%s names a progress log that cannot be used: %w", from, err)
 }

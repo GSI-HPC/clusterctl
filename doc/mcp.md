@@ -62,10 +62,12 @@ asks the same question.
 `read_command` checks the command on a tree of its own before running it on
 another, and refuses the global options the server sets itself: `--config`,
 `--context`, `--set`, `--yes`, `--force`, `--fanout`, which would
-otherwise override `fanout.max`, and `--progress`: no progress display is
+otherwise override `fanout.max`, `--progress`: no progress display is
 drawn for an agent, and `CLUSTERCTL_PROGRESS` in the server's environment is
-ignored too. A `--timeout` may shorten the wait for a host but not lengthen it
-beyond the command's default.
+ignored too, and `--progress-log`, which would have the server append to a
+file the agent names; `CLUSTERCTL_PROGRESS_LOG` in the server's environment
+is not read for a call either. A `--timeout` may shorten the wait for a host
+but not lengthen it beyond the command's default.
 
 A read command still connects somewhere, so the names an agent passes are held
 to the same rule as any other selection: a node name has to be a host name.
@@ -195,20 +197,25 @@ confirmation come with it.
   progress sink, since a sink cannot fail what it watches.
 - **Progress.** Each run of a handler reports its progress on a Bus of its
   own, made before it waits for a place, so the wait is part of what it
-  reports, as `waiting for another tool call`. A tool is reported as a
-  command named after it, but for `read_command`, whose command reports
-  itself as it does at the command line. Calls share no state: two side by
-  side never count each other's work. When the client asks for a call's
-  progress, with a progress token, the server sends it as MCP progress
-  notifications: `progress` is how many of the targets the call expects have
-  ended, `total` how many it expects, the Totals of the steps that count
-  their targets taken together, which grows as another step starts but never
-  shrinks, and `message` a line such as `read the groups: 3/16 done, 1
-  failed`. They go out at most every half second and as each step ends, and
-  the last, which says that everything ended, before the call's result: none
-  follows it. A call that counts nothing sends none, and neither does one
-  whose client gave no token. None of it reaches the call's `notes`, and no
-  display is drawn for an agent.
+  reports, as `waiting for another tool call`. A tool is reported as a command
+  named after it, but for `read_command`, whose command reports itself as it
+  does at the command line. Calls share no state: two side by side never count
+  each other's work. When the client asks for a call's progress, with a
+  progress token, the server sends it as MCP progress notifications:
+  `progress` is how many of the targets the call expects have ended, `total`
+  how many it expects, the Totals of the steps that count their targets taken
+  together, which grows as another step starts but never shrinks, and
+  `message` a line such as `read the groups: 3/16 done, 1 failed`, ended by
+  what the numbers count in all, `; 6/12 in all`, once they count more than
+  the step it names. They go out at most every half second and as each step
+  ends, each with a `progress` above the last's, as MCP asks, and the last,
+  which says that everything ended, before the call's result: none follows it.
+  A call that counts nothing sends none, and neither does one whose client
+  gave no token. None of it reaches the call's `notes`, and no display is
+  drawn for an agent. Each call is a trace of its own: a `TRACEPARENT` in the
+  server's environment belongs to whatever started the server, not to the
+  calls an agent makes over hours, so it is not continued, and no event log is
+  written for a call; the audit log's trace is the call's own.
 - **Two calls at a time.** The SDK starts every tool call as soon as it
   arrives, and each call can reach as many hosts at once as `fanout.max`
   allows, so calls an agent sends side by side would multiply that. The

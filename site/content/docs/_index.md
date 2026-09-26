@@ -37,6 +37,7 @@ $ clusterctl [--context C] [-n NODESET] [-o FORMAT] [--dry-run] [-y] NOUN VERB
 | `--force` | Allow a protected host, or a node the inventory does not know, to be touched |
 | `--set` | Override one configuration value for this command |
 | `--progress` | `auto`, `tty`, `counter`, `plain` or `none`: how progress is shown on standard error |
+| `--progress-log` | A file to append the command's progress events to, as JSON lines |
 
 ## A note on safety
 

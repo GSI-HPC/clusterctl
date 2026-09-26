@@ -35,9 +35,10 @@ not follow a change of `currentContext` while it runs.
 
 It cannot run commands on the nodes, open shells, or start tunnels. The
 commands `read_command` runs reach only the site's own hosts: nodes in the
-inventory, and names in the site's `domains`. `CLUSTERCTL_NODES` and
-`CLUSTERCTL_PROGRESS` do not apply to them, and `--fanout` and `--progress`
-cannot be given.
+inventory, and names in the site's `domains`. `CLUSTERCTL_NODES`,
+`CLUSTERCTL_PROGRESS`, `CLUSTERCTL_PROGRESS_LOG` and `TRACEPARENT` do not
+apply to them, and `--fanout`, `--progress` and `--progress-log` cannot be
+given.
 
 The server works on two calls at a time, whichever tools they are. An agent
 that sends more at once is not refused: the rest wait their turn, so it never
