@@ -200,11 +200,23 @@ confirmation come with it.
   SDK asks and runs the handler again. A question left open holds no place,
   so two of them do not stop every other call; once answered, the apply may
   wait for a place like any other call before anything is sent.
+- **The reads of one call side by side.** `describe_nodes` reads the groups,
+  the Slurm state and the jobs at once, and the groups of up to four nodes
+  at a time; `plan_change` reads the state of the nodes and their jobs at
+  once. A call opens at most `fanout.PerHost`, four, sessions to one host at
+  a time, a jump host on the way counted too, so a group source that runs
+  on the login node shares the four with the Slurm clients there. What was
+  read is put together once everything is in, so the answer does not depend
+  on which part came first: the groups facet reports the first failure in
+  the order of the nodes, and the nodes after it still get their groups.
 - **A panic is a failed call.** A panic in a handler is recovered and
   reported as `failed:`, so it does not end the server and the plans waiting
   in it. A panic in the work for one node of a fan-out, which the handler's
   recover cannot reach, is that node's failure: the other nodes are
   reported, the command exits 1, and the stack goes to the server's log.
+  One in a read a call makes beside its others is that read's failure, and
+  `describe_nodes` reports it under `errors` like any facet it could not
+  read.
 
 ## Errors
 

@@ -9,14 +9,17 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -206,57 +209,133 @@ func (s *Server) describeNodes(ctx context.Context, _ *mcp.CallToolRequest, in d
 		byName[name] = view
 	}
 
+	// The groups, the Slurm state and the jobs are read side by side, and
+	// merged into the views once all of them are in.
+	r := newReads(ctx, a)
+	var groups *branch[[]map[string][]string]
 	if want("groups") {
 		if len(names) > maxGroupsOf {
 			out.Errors["groups"] = fmt.Sprintf("asked for %d nodes; the groups facet answers for at most %d", len(names), maxGroupsOf)
 		} else {
-			for _, name := range names {
-				// A failing source does not hide what the others found.
-				memberships, err := a.Groups.GroupsOf(name)
-				byName[name].Groups = memberships
-				if err != nil {
-					out.Errors["groups"] = err.Error()
-					break
-				}
-			}
+			groups = read(r, "the groups facet", nil, func() ([]map[string][]string, error) {
+				return readGroups(r, names)
+			})
 		}
 	}
-
+	var sl slurmReads
 	if want("slurm") || want("jobs") {
-		s.describeSlurm(ctx, a, described, byName, want, out.Errors)
+		sl = readSlurm(r, described, want)
 	}
+	r.wait()
+
+	if groups != nil {
+		for i, name := range names {
+			// A failing source does not hide what the others found, for
+			// this node or any other.
+			if i < len(groups.value) {
+				byName[name].Groups = groups.value[i]
+			}
+		}
+		if groups.err != nil {
+			out.Errors["groups"] = groups.err.Error()
+		}
+	}
+	sl.merge(described, byName, out.Errors)
 	if len(out.Errors) == 0 {
 		out.Errors = nil
 	}
 	return nil, out, nil
 }
 
-// describeSlurm fills in the Slurm facets. A workload manager that cannot be
-// reached is reported rather than failing the description, which is often
-// asked for precisely because something is down.
-func (s *Server) describeSlurm(ctx context.Context, a *app.App, ns *nodeset.NodeSet, byName map[string]*nodeView, want func(string) bool, errs map[string]string) {
-	c, err := a.Slurm()
+// readGroups reads the groups of every node, fanout.PerHost nodes at a
+// time, each holding a place on every host a group source sends its
+// commands to, and returns them in the order of the names, with the first
+// error in that order.
+func readGroups(r *reads, names []string) ([]map[string][]string, error) {
+	var on []string
+	for _, src := range r.a.Spec.Groups.Sources {
+		if src.Exec == nil {
+			continue
+		}
+		// A role that cannot be resolved fails the lookup, which says so.
+		if target, err := r.a.Role(src.Exec.Role); err == nil {
+			on = append(on, r.on(target)...)
+		}
+	}
+	outcomes := fanout.Map(r.ctx, names, fanout.Options[string]{
+		Step:     "read the groups",
+		Limit:    fanout.PerHost,
+		Describe: func(name string) (node, host, role string) { return name, "", "" },
+		PanicLog: r.a.Diag,
+		Acquire: func(ctx context.Context, _ string) (func(), error) {
+			return r.hosts.Acquire(ctx, on...)
+		},
+	}, func(ctx context.Context, name string) (map[string][]string, error) {
+		return r.a.Groups.GroupsOfContext(ctx, name)
+	})
+	memberships := make([]map[string][]string, len(names))
+	var first error
+	for i, o := range outcomes {
+		memberships[i] = o.Value
+		if first == nil {
+			first = o.Err
+		}
+	}
+	return memberships, first
+}
+
+// slurmReads are the Slurm facets of describe_nodes as they were read.
+type slurmReads struct {
+	// err is why the workload manager could not be asked at all.
+	err   error
+	nodes *branch[[]slurm.Node]
+	jobs  *branch[[]slurm.Job]
+}
+
+// readSlurm starts reading the Slurm facets asked for, sinfo and squeue side
+// by side. A workload manager that cannot be reached is reported rather
+// than failing the description, which is often asked for precisely because
+// something is down.
+func readSlurm(r *reads, ns *nodeset.NodeSet, want func(string) bool) slurmReads {
+	c, err := r.a.Slurm()
 	if err != nil {
-		errs["slurm"] = err.Error()
+		return slurmReads{err: err}
+	}
+	var sl slurmReads
+	on := r.on(c.Target)
+	if want("slurm") {
+		sl.nodes = read(r, "sinfo", on, func() ([]slurm.Node, error) { return c.Nodes(r.ctx, ns, nil) })
+	}
+	if want("jobs") {
+		sl.jobs = read(r, "squeue", on, func() ([]slurm.Job, error) {
+			return c.Jobs(r.ctx, slurm.JobFilter{Nodes: ns})
+		})
+	}
+	return sl
+}
+
+// merge fills the Slurm facets into the views, and what could not be read
+// into errs.
+func (sl slurmReads) merge(ns *nodeset.NodeSet, byName map[string]*nodeView, errs map[string]string) {
+	if sl.err != nil {
+		errs["slurm"] = sl.err.Error()
 		return
 	}
-	if want("slurm") {
-		nodes, err := c.Nodes(ctx, ns, nil)
-		if err != nil {
-			errs["slurm"] = err.Error()
+	if sl.nodes != nil {
+		if sl.nodes.err != nil {
+			errs["slurm"] = sl.nodes.err.Error()
 		}
-		for i := range nodes {
-			if view, ok := byName[nodes[i].Name]; ok {
-				view.Slurm = &nodes[i]
+		for i := range sl.nodes.value {
+			if view, ok := byName[sl.nodes.value[i].Name]; ok {
+				view.Slurm = &sl.nodes.value[i]
 			}
 		}
 	}
-	if want("jobs") {
-		jobs, err := c.Jobs(ctx, slurm.JobFilter{Nodes: ns})
-		if err != nil {
-			errs["jobs"] = err.Error()
+	if sl.jobs != nil {
+		if sl.jobs.err != nil {
+			errs["jobs"] = sl.jobs.err.Error()
 		}
-		for _, j := range jobs {
+		for _, j := range sl.jobs.value {
 			on, err := nodeset.Parse(j.Nodes)
 			if err != nil {
 				continue
@@ -270,6 +349,57 @@ func (s *Server) describeSlurm(ctx context.Context, a *app.App, ns *nodeset.Node
 			}
 		}
 	}
+}
+
+// reads are the reads one call makes side by side, each in a goroutine of
+// its own, and the places they hold on the hosts they go to: at most
+// fanout.PerHost sessions at a time to any one host, a jump host on the way
+// counted too, so that reads that go to one host, such as a group source
+// and the Slurm clients both on the login node, share its places.
+type reads struct {
+	ctx   context.Context
+	a     *app.App
+	hosts fanout.Hosts
+	wg    sync.WaitGroup
+}
+
+func newReads(ctx context.Context, a *app.App) *reads { return &reads{ctx: ctx, a: a} }
+
+// on returns the hosts a session to target opens a connection to.
+func (r *reads) on(target transport.Target) []string {
+	return append(r.a.SSH.JumpHosts(target.Host), target.Host)
+}
+
+// wait returns once every read has.
+func (r *reads) wait() { r.wg.Wait() }
+
+// branch is what one read came to, once reads.wait has returned.
+type branch[T any] struct {
+	value T
+	err   error
+}
+
+// read starts fn in a goroutine of r, once it holds a place on each of the
+// hosts in on. A panic in it becomes its error, with the stack in the
+// server's log: recover reaches only its own goroutine, and one bad call
+// must not end the server and the plans it holds.
+func read[T any](r *reads, what string, on []string, fn func() (T, error)) *branch[T] {
+	b := &branch[T]{}
+	r.wg.Go(func() {
+		defer func() {
+			if err := fanout.Recovered(r.a.Diag, what, recover()); err != nil {
+				b.err = err
+			}
+		}()
+		release, err := r.hosts.Acquire(r.ctx, on...)
+		if err != nil {
+			b.err = err
+			return
+		}
+		defer release()
+		b.value, b.err = fn()
+	})
+	return b
 }
 
 // slurmInput is the argument of query_slurm.
