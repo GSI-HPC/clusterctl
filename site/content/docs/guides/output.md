@@ -103,6 +103,44 @@ string as it is, like `jq -r`.
 Everything a program would parse goes to standard output; notes, progress and
 prompts go to standard error. Redirecting one does not lose the other.
 
+A command that has run for a second on a terminal says how far it has got on
+the last line of standard error, redrawn at most ten times a second:
+
+```console
+power on · batch 3/60 · 17/480 · 1 failed · 8 running · 0:41
+```
+
+The line names each step that works on many targets: how many of its targets
+are done, however they ended, of how many; how many of those failed, were
+interrupted or were left out; how many run now and how many wait their turn;
+`waiting` during the pause between two batches; and, last, how long the
+command has run. Steps under way side by side each get a part of the line,
+split by `|`. While no such step runs, the line names the step or the command
+that does. It is taken off before anything else is written and drawn again
+below it, it stays off while a question waits for its answer, and it is gone
+before the command ends, so what is left on the terminal is what the command
+printed.
+
+`--progress`, or `CLUSTERCTL_PROGRESS` when the flag is not given, chooses what
+is shown:
+
+| Value | Shows |
+| --- | --- |
+| `auto`, the default | The counter when standard error is a terminal and `TERM` is not `dumb`, and nothing otherwise |
+| `counter` | The counter; refused when standard error is not a terminal or `TERM` is `dumb` |
+| `none` | Nothing |
+
+Without a terminal, in a pipe, a file or a CI log, nothing is drawn: standard
+error holds exactly what it holds with `--progress none`. The format given with
+`-o` changes nothing here, since progress never touches standard output.
+scp's own progress meter is left off while the counter is drawn. The commands
+that hand the terminal to another program, such as `login` and the shells,
+draw nothing, and neither do the commands an agent runs through `clusterctl
+mcp`. ssh can still ask a question on the terminal by itself, a passphrase
+for instance, which clusterctl does not see; if the counter is drawn over it,
+the question still waits for its answer, and `--progress none` leaves the
+terminal to ssh.
+
 An error message often quotes what a node, a BMC or a group source said, so it
 is escaped the same way before it is printed, except that newlines and tabs are
 kept: some messages are several lines on purpose, such as the list of problems

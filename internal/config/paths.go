@@ -15,7 +15,8 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 )
 
-// Environment variables that steer where configuration and state live.
+// Environment variables that steer where configuration and state live, and
+// stand in for global flags that are not given.
 const (
 	// EnvConfig lists the configuration files or directories to read, most
 	// general first, separated the way PATH is. It replaces the search path
@@ -25,6 +26,9 @@ const (
 	EnvContext = "CLUSTERCTL_CONTEXT"
 	// EnvNodes holds the node set commands act on when -n is not given.
 	EnvNodes = "CLUSTERCTL_NODES"
+	// EnvProgress chooses how progress is shown when --progress is not
+	// given.
+	EnvProgress = "CLUSTERCTL_PROGRESS"
 )
 
 // listSeparator separates the entries of CLUSTERCTL_CONFIG.

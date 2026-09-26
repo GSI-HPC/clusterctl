@@ -31,8 +31,9 @@ const maxCommandOutput = 64 << 10
 // pinnedFlags are the global options the server sets itself. An agent that
 // could pass them could point a command at another configuration or cluster,
 // answer a confirmation, or open more connections at once than fanout.max
-// allows.
-var pinnedFlags = []string{"config", "context", "set", "yes", "force", "fanout"}
+// allows. --progress would draw nothing, since no display is drawn for an
+// agent, so it is refused rather than dropped without a word.
+var pinnedFlags = []string{"config", "context", "set", "yes", "force", "fanout", "progress"}
 
 func (s *Server) addCommandTool() {
 	mcp.AddTool(s.sdk, &mcp.Tool{

@@ -222,7 +222,7 @@ func uniqueWords(words []string) []string {
 }
 
 // registerCompletions wires shell completion for the flags whose values come
-// from the configuration.
+// from the configuration, or from a fixed list.
 func registerCompletions(cmd *cobra.Command, r *root) {
 	_ = cmd.RegisterFlagCompletionFunc("output",
 		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
@@ -230,6 +230,7 @@ func registerCompletions(cmd *cobra.Command, r *root) {
 		})
 	_ = cmd.RegisterFlagCompletionFunc("context", completeContexts(r))
 	_ = cmd.RegisterFlagCompletionFunc("nodes", completeGroups(r))
+	_ = cmd.RegisterFlagCompletionFunc("progress", fixed(progressModes...))
 }
 
 // complete offers the words names returns for the command context, and none

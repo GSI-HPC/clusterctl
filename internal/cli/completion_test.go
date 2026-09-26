@@ -58,6 +58,7 @@ func TestCompletionOfTheBuiltins(t *testing.T) {
 		{[]string{"__complete", "completion", ""}, []string{"bash", "zsh", "fish", "powershell"}},
 		{[]string{"__complete", "help", ""}, []string{"slurm", "node"}},
 		{[]string{"__complete", "help", "slurm", ""}, []string{"node", "job"}},
+		{[]string{"__complete", "--progress", ""}, []string{"auto", "counter", "none"}},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args[1:], " "), func(t *testing.T) {

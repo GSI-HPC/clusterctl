@@ -82,6 +82,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | Package | Owns |
 | --- | --- |
 | `internal/output` | Table, JSON, YAML, node set, name and jq rendering, and escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`). |
+| `internal/progress/display` | Drawing the progress of a command on the terminal of its standard error, and the writers that keep the command's own output clear of it. |
 | `internal/version` | The build provenance, which comes from the signed tag or the VCS stamps. |
 
 ## Dependency direction
@@ -95,9 +96,11 @@ test without a command tree.
 
 `progress` is a leaf that every layer may report through. It depends on
 nothing of clusterctl's but `exitcode`, and `output` for escaping, so
-`fanout`, `transport`, `redfish`, `credentials`, `safety` and `app` can each
-start and end the spans of their work without a cycle
-([ADR 0021](adr/0021-progress-as-our-own-events.md)).
+`fanout`, `transport`, `redfish`, `credentials`, `secrets`, `safety` and `app`
+can each start and end the spans of their work, and lend the terminal to a
+question, without a cycle
+([ADR 0021](adr/0021-progress-as-our-own-events.md)). `progress/display`
+depends on `progress` alone, and only `cli` uses it.
 
 Text that came from a node, a BMC, Slurm, a group source or an agent is
 escaped with `output.EscapeText`, or `output.EscapeCell` where it has to stay
@@ -130,7 +133,21 @@ are calls too, and so, hidden unless they fail or take long, are the plumbing:
 a credential read, a file read from a host, a group lookup and a decryption,
 each saying where its answer came from but never what it was. The
 confirmation is a wait, and a display is off the terminal while its question
-is asked and answered.
+is asked and answered, and so it is while a password is asked for, a
+credential helper that can reach the terminal runs, or sops looks for its
+keys there.
+
+What a command's progress looks like is `cli`'s choice, by `--progress` and
+`CLUSTERCTL_PROGRESS`: the counter of `progress/display`, drawn only on a
+standard error that is a terminal, or nothing. While it is drawn, the
+command's streams, and cobra's, are wrapped in writers that take its line off
+before they write and pass what they are given on unchanged; the wrapping is
+done before the command context is built, which copies the streams, and only
+then, so without a display nothing stands between a command and its streams.
+The counter counts the targets of each step the way `progress.Tally` does,
+which is also what `progresstest.Check` holds the events to. A Bus that comes
+with the context, as a test's or an MCP call's does, draws nothing of its own,
+and under `clusterctl mcp` the flag and the variable are not read.
 
 ## What runs where
 

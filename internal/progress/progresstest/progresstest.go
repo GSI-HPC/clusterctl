@@ -272,10 +272,7 @@ type span struct {
 	state   progress.State
 	total   int
 	open    int
-	done    int
 	running int
-	// targets counts the targets started below.
-	targets int
 	// ran is set once a target or a batch below this Fold step or batch
 	// has run.
 	ran bool
@@ -298,14 +295,15 @@ func violations(events []progress.Event) []string {
 	spans := map[progress.SpanID]*span{}
 	var order []*span
 	suspended := 0
-	// count adds n to the count of every span above s that keeps one.
-	count := func(s *span, n int) {
+	// The counts are the ones a display shows, kept by the display's
+	// own rules.
+	var tally progress.Tally
+	// overCounted reports every span above s whose count has passed its
+	// Total.
+	overCounted := func(s *span) {
 		for p := s.parent; p != nil; p = p.parent {
-			if p.counts() {
-				p.done += n
-				if p.done > p.total {
-					bad("%s counts %d targets, more than its Total of %d", p, p.done, p.total)
-				}
+			if c, ok := tally.Count(p.e.Span); ok && c.Done > c.Total {
+				bad("%s counts %d targets, more than its Total of %d", p, c.Done, c.Total)
 			}
 		}
 	}
@@ -326,6 +324,7 @@ func violations(events []progress.Event) []string {
 			bad("event %d has Seq %d", want, e.Seq)
 		}
 		checkText(e, bad)
+		ended, counted := tally.Add(e)
 
 		switch e.Type {
 		case progress.TypeSuspend:
@@ -379,13 +378,8 @@ func violations(events []progress.Event) []string {
 			}
 			spans[e.Span] = s
 			order = append(order, s)
-			if e.Kind == progress.KindTarget {
-				for p := s.parent; p != nil; p = p.parent {
-					p.targets++
-				}
-				if e.State == progress.StateRunning {
-					run(s, 1)
-				}
+			if e.Kind == progress.KindTarget && e.State == progress.StateRunning {
+				run(s, 1)
 			}
 			continue
 		}
@@ -435,13 +429,13 @@ func violations(events []progress.Event) []string {
 			if s.parent != nil {
 				s.parent.open--
 			}
-			switch {
-			case s.e.Kind == progress.KindTarget:
-				count(s, 1)
-			case s.counts() && s.targets == 0 && (e.Status == progress.StatusSkipped || e.Status == progress.StatusCanceled):
-				count(s, s.total)
-			case s.counts() && s.done != s.total:
-				bad("%s ends with %d of its Total of %d targets", s, s.done, s.total)
+			leftOut := counted && ended.Targets == 0 &&
+				(e.Status == progress.StatusSkipped || e.Status == progress.StatusCanceled)
+			if counted && !leftOut && ended.Done != ended.Total {
+				bad("%s ends with %d of its Total of %d targets", s, ended.Done, ended.Total)
+			}
+			if s.e.Kind == progress.KindTarget || leftOut {
+				overCounted(s)
 			}
 		default:
 			bad("event %d has no valid type", e.Seq)

@@ -21,6 +21,7 @@ import (
 	"filippo.io/age"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/secrets"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 )
@@ -684,4 +685,43 @@ func TestSopsIsNotNeededToInspect(t *testing.T) {
 
 func regexpReplace(s, expr, repl string) string {
 	return regexp.MustCompile(expr).ReplaceAllString(s, repl)
+}
+
+// suspending is a display that counts the times it is taken off the
+// terminal and put back.
+type suspending struct{ suspends, resumes int }
+
+func (s *suspending) Handle(progress.Event) {}
+func (s *suspending) Suspend()              { s.suspends++ }
+func (s *suspending) Resume()               { s.resumes++ }
+
+// sops keeps the terminal only when it looks for keys itself, and may ask
+// for a passphrase there, so the displays leave the terminal for that run
+// alone: a run with an identity of workstation.identities has none to ask
+// on.
+func TestSopsHasTheTerminalToItselfOnlyWhenItLooksForKeys(t *testing.T) {
+	id := newIdentity(t)
+	file := sopstest.Encrypt(t, secretDoc, id.Recipient().String())
+	for _, tc := range []struct {
+		name string
+		keys secrets.SopsKeys
+		want int
+	}{
+		{"an identity", secrets.SopsKeys{Identities: identities(t, id.String()+"\n")}, 0},
+		{"the keys sops finds", secrets.SopsKeys{Discover: true}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			display := &suspending{}
+			bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{display}})
+			defer bus.Close()
+			s, _ := fakeSops(t, "3.13.3", `cat >/dev/null; echo '{"data":{}}'`)
+			ctx := progress.WithBus(context.Background(), bus)
+			if _, err := secrets.DecryptSops(ctx, s, file, tc.keys, sections); err != nil {
+				t.Fatal(err)
+			}
+			if display.suspends != tc.want || display.resumes != tc.want {
+				t.Errorf("the display was taken off %d times and put back %d, want %d", display.suspends, display.resumes, tc.want)
+			}
+		})
+	}
 }

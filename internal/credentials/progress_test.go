@@ -57,3 +57,61 @@ call credential pdu source=env [hidden]: ok
 		}
 	}
 }
+
+// suspending is a display that logs when it is taken off the terminal and
+// put back, among what else the test logs.
+type suspending struct {
+	mu  sync.Mutex
+	log []string
+}
+
+func (s *suspending) Handle(progress.Event) {}
+func (s *suspending) Suspend()              { s.add("suspend") }
+func (s *suspending) Resume()               { s.add("resume") }
+
+func (s *suspending) add(what string) {
+	s.mu.Lock()
+	s.log = append(s.log, what)
+	s.mu.Unlock()
+}
+
+// A password prompt, and a helper that can reach the terminal, run with the
+// displays off it; a helper started in a session of its own, which has no
+// terminal to ask on, and a source that asks nobody, leave them where they
+// are.
+func TestTheDisplaysLeaveTheTerminalForAQuestion(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		source     v1alpha1.PasswordSource
+		noTerminal bool
+		want       string
+	}{
+		{"a prompt", v1alpha1.PasswordSource{Prompt: true}, false, "suspend ask resume"},
+		{"a helper at a terminal", v1alpha1.PasswordSource{Command: []string{"echo", "from-helper"}}, false, "suspend resume"},
+		{"a helper without one", v1alpha1.PasswordSource{Command: []string{"echo", "from-helper"}}, true, ""},
+		{"a variable", v1alpha1.PasswordSource{FromEnv: "BMC_PASSWORD"}, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			display := &suspending{}
+			bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{display}})
+			defer bus.Close()
+			r := &credentials.Resolver{
+				Credentials: map[string]v1alpha1.Credential{"bmc": {Username: "admin", Password: tc.source}},
+				Env:         func(string) string { return "from-env" },
+				Prompt: func(string) (string, error) {
+					display.add("ask")
+					return "typed", nil
+				},
+				NoTerminal: tc.noTerminal,
+			}
+			if _, err := r.Get(progress.WithBus(context.Background(), bus), "bmc"); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(display.log, " "); got != tc.want {
+				t.Errorf("the display saw %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
