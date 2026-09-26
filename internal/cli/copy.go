@@ -49,7 +49,7 @@ land in a directory of its own under it, named after the node.
 The nodes are copied in parallel, as many at once as the fan-out allows, and
 each transfer is bounded by --timeout. scp's progress meter is shown only when
 one transfer runs at a time, for one node or with --fanout 1, and no progress
-counter is drawn; --progress none leaves the line to scp.
+is shown; --progress none leaves the line to scp.
 
 A remote path is read by a shell under the legacy scp protocol, which OpenSSH
 used by default before 9.0, and taken literally under SFTP. A remote path

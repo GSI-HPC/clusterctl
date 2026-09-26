@@ -82,7 +82,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | Package | Owns |
 | --- | --- |
 | `internal/output` | Table, JSON, YAML, node set, name and jq rendering, and escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`). |
-| `internal/progress/display` | Drawing the progress of a command on the terminal of its standard error, and the writers that keep the command's own output clear of it. |
+| `internal/progress/display` | Showing the progress of a command on its standard error, as the counter on a terminal or as plain lines, the summary left once it has ended, and the writers that keep the command's own output clear of them. |
 | `internal/version` | The build provenance, which comes from the signed tag or the VCS stamps. |
 
 ## Dependency direction
@@ -139,15 +139,24 @@ keys there.
 
 What a command's progress looks like is `cli`'s choice, by `--progress` and
 `CLUSTERCTL_PROGRESS`: the counter of `progress/display`, drawn only on a
-standard error that is a terminal, or nothing. While it is drawn, the
-command's streams, and cobra's, are wrapped in writers that take its line off
-before they write and pass what they are given on unchanged; the wrapping is
-done before the command context is built, which copies the streams, and only
-then, so without a display nothing stands between a command and its streams.
-The counter counts the targets of each step the way `progress.Tally` does,
-which is also what `progresstest.Check` holds the events to. A Bus that comes
-with the context, as a test's or an MCP call's does, draws nothing of its own,
-and under `clusterctl mcp` the flag and the variable are not read.
+standard error that is a terminal, its plain lines, which need none, or
+nothing. While a display is shown, the command's streams, and cobra's, are
+wrapped in writers that take the counter's line off, or write the plain lines
+that came before, before they write, and pass what they are given on
+unchanged; the wrapping is done before the command context is built, which
+copies the streams, and only then, so without a display nothing stands
+between a command and its streams. A plain line is formatted as its event
+arrives and written from the display's own goroutine or by the next write of
+the command, never from the Bus. The counter and the plain lines count the
+targets of each step the way `progress.Tally` does, which is also what
+`progresstest.Check` holds the events to. Once the display is gone, and before
+the command's error, a summary line counts each node once, as the worst of its
+targets, and says how long the command ran; it says nothing of why a target
+failed, which the error does. A step that sums up the failures of its targets
+takes the progress class of the exit code it asks for, and ends canceled when
+the interrupt ended every target that failed. A Bus that comes with the
+context, as a test's or an MCP call's does, shows nothing of its own, and
+under `clusterctl mcp` the flag and the variable are not read.
 
 ## What runs where
 

@@ -1,18 +1,22 @@
 // SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
-// Package display draws the progress of a command on the terminal of its
-// standard error, from the events of its progress.Bus: for now the counter,
-// one line that says how far the work has got.
+// Package display shows the progress of a command on its standard error,
+// from the events of its progress.Bus: the counter, one line at the bottom
+// of a terminal that says how far the work has got; plain lines, one for
+// each thing worth a line, for a log as much as a terminal; and the summary
+// a display leaves behind once the command has ended.
 //
-// A display owns the bottom line of the terminal and nothing else. The
+// The counter owns the bottom line of the terminal and nothing else. The
 // command's own output goes to the terminal through the writers of the
-// Terminal, which take the display's line off before anything else is
+// Terminal, which take the counter's line off before anything else is
 // written, and let it back only once what was written ended a line, so that
-// a question waiting for its answer is never drawn over. The display leaves
-// the terminal altogether while a question is asked, through
-// progress.Suspend, and never hides the cursor, so a process killed while it
-// draws leaves a terminal that works.
+// a question waiting for its answer is never drawn over. The plain lines go
+// out through the Terminal too: never into a line the command has not
+// ended, and ahead of whatever the command writes after the events they
+// tell of. A display leaves the terminal altogether while a question is
+// asked, through progress.Suspend, and never hides the cursor, so a process
+// killed while it draws leaves a terminal that works.
 package display
 
 import (
@@ -48,6 +52,9 @@ type Terminal struct {
 	// suspended counts the Suspends not yet resumed.
 	suspended int
 	closed    bool
+	// held, when a display of lines is shown, returns the lines it has
+	// not written yet, and forgets them.
+	held func() string
 
 	// PanicLog receives the stack of a display that panicked while it
 	// drew, the front end's diagnostics; nil is the terminal itself.
@@ -100,6 +107,7 @@ func (w writer) Write(p []byte) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.erase()
+	t.release(false)
 	n, err := w.w.Write(p)
 	if n > 0 {
 		t.open = p[n-1] != '\n'
@@ -144,6 +152,31 @@ func (t *Terminal) erase() {
 	t.line = ""
 }
 
+// release writes the lines a display of lines holds, unless the terminal
+// is lent out or waiting for a line to end. forced, as the display closes,
+// it writes them all the same, after ending such a line. t.mu is held.
+func (t *Terminal) release(forced bool) {
+	if t.held == nil || t.closed || !forced && (t.suspended > 0 || t.open) {
+		return
+	}
+	text := t.held()
+	if text == "" {
+		return
+	}
+	if t.open {
+		text = "\n" + text
+	}
+	_, _ = io.WriteString(t.w, text)
+	t.open = false
+}
+
+// flush writes the lines a display of lines holds, when it may.
+func (t *Terminal) flush() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.release(false)
+}
+
 // width returns how many columns the terminal has. t.mu is held.
 func (t *Terminal) width() int {
 	if t.size != nil {
@@ -155,11 +188,12 @@ func (t *Terminal) width() int {
 }
 
 // suspend takes the display off the terminal until resume, for a question to
-// be asked there.
+// be asked there, once the lines it holds are written.
 func (t *Terminal) suspend() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.erase()
+	t.release(false)
 	t.suspended++
 }
 
@@ -172,14 +206,16 @@ func (t *Terminal) resume() {
 		t.suspended--
 	}
 	t.open = false
+	t.release(false)
 }
 
-// close takes the display off the terminal for good. The writers go on
-// writing.
+// close takes the display off the terminal for good, once the lines it
+// holds are written. The writers go on writing.
 func (t *Terminal) close() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.erase()
+	t.release(true)
 	t.closed = true
 }
 

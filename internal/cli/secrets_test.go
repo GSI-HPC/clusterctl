@@ -648,3 +648,20 @@ exe0003  /etc/bmc.pass         skipped: the command was interrupted
 		t.Errorf("output:\n%s\nwant:\n%s", got, want[1:])
 	}
 }
+
+// Plain lines of a push say how each node fared, not every file on every
+// node: a CI log of a push to many nodes would be a line per file each.
+func TestPlainLinesOfASecretsPushNameNoFile(t *testing.T) {
+	fakeDisplays(t)
+	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
+	h, err := runPlain(t, harnessOptions{config: []string{dir}, recorder: &transport.Recorder{}}, "secrets", "push", "-n", "exe[1-3]", "-y")
+	if err != nil {
+		t.Fatalf("secrets push: %v", err)
+	}
+	if strings.Contains(h.errOut.String(), "write /etc/") {
+		t.Errorf("plain lines name the files:\n%s", h.errOut)
+	}
+	if !strings.Contains(h.errOut.String(), "write the secrets: done") {
+		t.Errorf("plain lines do not say how the push ended:\n%s", h.errOut)
+	}
+}

@@ -10,7 +10,7 @@ weight: 2
 | `CLUSTERCTL_CONFIG` | Replaces the configuration search path. A `PATH`-style list of files and directories, most general first. |
 | `CLUSTERCTL_CONTEXT` | Selects the context, as `--context` does. |
 | `CLUSTERCTL_NODES` | The node set commands act on when neither `-n` nor a node set argument is given. An empty `-n` is an error, never a fall-back to it. |
-| `CLUSTERCTL_PROGRESS` | How progress is shown when `--progress` is not given: `auto`, `counter` or `none`. Empty is `auto`. See [Output](../../guides/output/#progress-and-errors-go-to-stderr). |
+| `CLUSTERCTL_PROGRESS` | How progress is shown when `--progress` is not given: `auto`, `counter`, `plain` or `none`. Empty is `auto`. `plain` suits a CI job's log. See [Output](../../guides/output/#progress-and-errors-go-to-stderr). |
 | `CLUSTERCTL_FANOUT` | `fanout.max` |
 | `CLUSTERCTL_CONNECT_TIMEOUT` | `ssh.connectTimeout` |
 | `CLUSTERCTL_COMMAND_TIMEOUT` | `fanout.commandTimeout` |
