@@ -103,6 +103,13 @@ takes its own Bus with `watch`. One test runs a set of commands with a Bus
 and without one and compares their standard output, standard error and exit
 status byte for byte, since progress must never reach either stream.
 
+**The counter** is tested on a terminal that is a buffer and a clock the test
+moves: `display.Counter.Draw` draws one frame, and the command tests replace
+`startCounter` with `fakeCounters`, whose counters are drawn only when the
+test says, from a fake transport's answer or a pause between batches. So a
+frame shows the same counts on every run, and no test waits for the counter's
+second or its ticks.
+
 **Command tests** drive the real command tree end to end and assert on what
 would be sent, not on whether the code compiles: that a glob and an apostrophe
 survive the trip, that a declined confirmation sends nothing, that a dry run

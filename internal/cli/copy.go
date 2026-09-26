@@ -48,7 +48,8 @@ land in a directory of its own under it, named after the node.
 
 The nodes are copied in parallel, as many at once as the fan-out allows, and
 each transfer is bounded by --timeout. scp's progress meter is shown only when
-one transfer runs at a time, for one node or with --fanout 1.
+one transfer runs at a time, for one node or with --fanout 1, and no progress
+counter is drawn; --progress none leaves the line to scp.
 
 A remote path is read by a shell under the legacy scp protocol, which OpenSSH
 used by default before 9.0, and taken literally under SFTP. A remote path
@@ -143,9 +144,11 @@ two, so it is refused. Globs and ~ work in both.
 			executor.Step = "copy"
 			// scp draws its progress meter on the terminal, redrawing one
 			// line. Only one transfer at a time can have that line; the
-			// meters of several side by side would overwrite each other.
+			// meters of several side by side would overwrite each other,
+			// and a meter would overwrite the progress display, which has
+			// the line while it is drawn.
 			var meter io.Writer
-			if len(targets) == 1 || executor.Max == 1 {
+			if (len(targets) == 1 || executor.Max == 1) && !a.Display {
 				meter = a.Err
 			}
 			executor.Runner = copyRunner{

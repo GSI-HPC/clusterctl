@@ -81,7 +81,9 @@ func (f Format) String() string {
 }
 
 // IsMachine reports whether the format is meant to be parsed by a program,
-// which is when progress and decoration are left out.
+// which is when the decoration of standard output, such as a note between
+// the rows, is left out. Progress has nothing to do with it: it is only
+// ever drawn on standard error, whatever the format.
 func (f Format) IsMachine() bool {
 	switch f.Kind {
 	case FormatTable, FormatWide:

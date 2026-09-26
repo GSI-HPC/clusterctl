@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // MinSopsVersion is the oldest sops clusterctl decrypts with: 3.10.0 is the
@@ -175,9 +176,10 @@ type SopsKeys struct {
 //
 // The data key is recovered with the files of keys.Identities that hold a
 // recipient of the file, one run each, and then, with keys.Discover, by
-// whatever sops finds itself. sops verifies the integrity of the whole file
-// before it writes anything. It writes the plaintext to a pipe, as JSON, so
-// that no value is typed again, and nothing reaches the disk.
+// whatever sops finds itself; that run keeps the terminal, and the progress
+// displays of ctx leave it meanwhile. sops verifies the integrity of the
+// whole file before it writes anything. It writes the plaintext to a pipe,
+// as JSON, so that no value is typed again, and nothing reaches the disk.
 //
 // No error says anything of the values: what sops prints is passed on only
 // when it could not open the data key, and then it lists the keys it tried.
@@ -237,7 +239,11 @@ func DecryptSops(ctx context.Context, s *Sops, data []byte, keys SopsKeys, secti
 	}
 	if keys.Discover {
 		cwd, _ := os.Getwd()
+		// This sops keeps the terminal, where it may ask for a passphrase,
+		// so the progress displays leave it while sops runs.
+		resume := progress.Suspend(ctx)
 		out, said, err := decrypt(ctx, command(ctx, found.Path, cwd, discovering(), true, decryptArgs...), data)
+		resume()
 		if err == nil {
 			return sectionValues(out, sections)
 		}

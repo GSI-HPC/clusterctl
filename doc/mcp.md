@@ -61,9 +61,11 @@ asks the same question.
 
 `read_command` checks the command on a tree of its own before running it on
 another, and refuses the global options the server sets itself: `--config`,
-`--context`, `--set`, `--yes`, `--force` and `--fanout`, which would
-otherwise override `fanout.max`. A `--timeout` may shorten the wait for a
-host but not lengthen it beyond the command's default.
+`--context`, `--set`, `--yes`, `--force`, `--fanout`, which would
+otherwise override `fanout.max`, and `--progress`: no progress display is
+drawn for an agent, and `CLUSTERCTL_PROGRESS` in the server's environment is
+ignored too. A `--timeout` may shorten the wait for a host but not lengthen it
+beyond the command's default.
 
 A read command still connects somewhere, so the names an agent passes are held
 to the same rule as any other selection: a node name has to be a host name.

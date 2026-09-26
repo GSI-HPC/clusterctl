@@ -44,6 +44,8 @@ func (a *App) Credentials() *credentials.Resolver {
 }
 
 // promptPassword reads a password from the terminal without echoing it.
+// The resolver has the progress display off the terminal until it returns,
+// so the question is not drawn over.
 //
 // Once the command has been interrupted nothing is asked: a prompt would be
 // put on the terminal only to be withdrawn, and the read it starts could not

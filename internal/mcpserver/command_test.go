@@ -95,6 +95,20 @@ func TestReadCommandIgnoresTheNodesVariable(t *testing.T) {
 	}
 }
 
+// No progress is drawn for an agent: CLUSTERCTL_PROGRESS in the server's
+// environment asks for a counter no agent could see, and is not read, so
+// the command neither fails for want of a terminal nor writes into the
+// notes.
+func TestReadCommandIgnoresTheProgressVariable(t *testing.T) {
+	t.Setenv(config.EnvProgress, "counter")
+	f := start(t, setup{})
+	var out commandResult
+	f.call(t, "read_command", map[string]any{"args": []string{"node", "fqdn", "-n", "exe1"}}, &out)
+	if out.ExitCode != 0 || out.Notes != "" {
+		t.Errorf("result = %+v, want success and no notes", out)
+	}
+}
+
 // 10.11: --fanout would override fanout.max, which --set may not.
 func TestReadCommandPinsTheFanout(t *testing.T) {
 	f := start(t, setup{})

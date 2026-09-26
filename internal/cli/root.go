@@ -44,6 +44,10 @@ type root struct {
 	fanout      int
 	// fanoutGiven tells a --fanout that was given from one that was not.
 	fanoutGiven func() bool
+	progress    string
+	// progressGiven tells a --progress that was given from one that was
+	// not, which leaves the choice to the environment.
+	progressGiven func() bool
 
 	// runner replaces the transport; only the tests set it.
 	runner transport.Runner
@@ -224,6 +228,10 @@ are about to do and ask before doing it.`),
 	flags.IntVar(&r.fanout, "fanout", 0,
 		"how many hosts to work on at once, at least 1; caps the service processors asked at once too (default: from the configuration)")
 	r.fanoutGiven = func() bool { return flags.Changed("fanout") }
+	flags.StringVar(&r.progress, "progress", "",
+		"how to show the progress of a command on standard error: "+strings.Join(progressModes, ", ")+
+			" (default: "+config.EnvProgress+", else auto, a counter when standard error is a terminal)")
+	r.progressGiven = func() bool { return flags.Changed("progress") }
 
 	registerCompletions(cmd, r)
 

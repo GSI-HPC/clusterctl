@@ -59,14 +59,16 @@ type Resolver struct {
 	AgeFile func(ctx context.Context, path string) ([]byte, error)
 	// Env reads environment variables; nil reads the process environment.
 	Env func(string) string
-	// Prompt asks the administrator for a password.
+	// Prompt asks the administrator for a password. The progress displays
+	// are off the terminal while it runs.
 	Prompt func(prompt string) (string, error)
 	// Secret reads a key of a Secret document for a secretRef source.
 	Secret func(ctx context.Context, ref v1alpha1.SecretKeyRef) ([]byte, error)
 	// NoTerminal says that nobody is at a terminal to answer a prompt, as
 	// under the MCP server. A command source then runs in a session of its
 	// own, so that a helper such as gpg's pinentry cannot ask on whatever
-	// terminal the process was started from.
+	// terminal the process was started from; otherwise the progress
+	// displays are off the terminal while it runs.
 	NoTerminal bool
 	// Stderr receives what a command source writes on its standard error;
 	// nil is the process's.
@@ -267,7 +269,14 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		if r.NoTerminal {
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		}
+		// A helper that can reach the terminal may ask on it, as gpg's
+		// pinentry does, so the displays leave it while the helper runs.
+		resume := func() {}
+		if !r.NoTerminal {
+			resume = progress.Suspend(ctx)
+		}
 		out, err := cmd.Output()
+		resume()
 		if err != nil {
 			return "", fmt.Errorf("credential %q: the helper failed: %w", name, err)
 		}
@@ -277,7 +286,11 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		if r.Prompt == nil {
 			return "", fmt.Errorf("credential %q asks on the terminal, but there is none", name)
 		}
+		// The question is asked on the terminal, with the displays off it
+		// until it has been answered.
+		resume := progress.Suspend(ctx)
 		value, err := r.Prompt(fmt.Sprintf("Password for %s@%s: ", r.Credentials[name].Username, name))
+		resume()
 		if err != nil {
 			return "", err
 		}

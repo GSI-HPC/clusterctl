@@ -188,10 +188,15 @@ func runWithPayload(ctx context.Context, a *app.App, targets []transport.Target,
 
 // readAll reads the payload of --stdin. A read that fails, even part way
 // through, stops the command: a truncated file replayed to every node is
-// worse than none.
+// worse than none. Typed at a terminal, it is read with the progress
+// display off the terminal, as a question is, so that what is typed is not
+// drawn over.
 func readAll(a *app.App) ([]byte, error) {
 	if a.In == nil {
 		return nil, exitcode.Errorf(exitcode.Usage, "--stdin was given but there is nothing to read")
+	}
+	if a.IsTTY {
+		defer progress.Suspend(a.Context())()
 	}
 	type input struct {
 		payload []byte

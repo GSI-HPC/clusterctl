@@ -72,6 +72,17 @@ type Streams struct {
 	// asked afresh on every call so that a resized window is seen. It is nil
 	// when standard error is not a terminal.
 	Size func() (w, h int, err error)
+	// Foreground reports whether the process is the job in the foreground
+	// of the terminal on standard error, asked afresh on every call, so that
+	// nothing is drawn while it runs in the background under the shell's
+	// prompt. It is nil when standard error is not a terminal, or there are
+	// no jobs to tell apart.
+	Foreground func() bool
+	// Display says a progress display is drawn on standard error while the
+	// command runs, through Out and Err, which take it off before they
+	// write. Nothing else may draw there then: scp's progress meter is left
+	// off.
+	Display bool
 
 	StateDir string
 	CacheDir string
@@ -108,6 +119,7 @@ func fileStreams(in, out, errOut *os.File) Streams {
 	}
 	if streams.ErrIsTTY {
 		streams.Size = func() (int, int, error) { return term.GetSize(int(errOut.Fd())) }
+		streams.Foreground = foreground(errOut)
 	}
 	if info, err := out.Stat(); err == nil {
 		streams.OutIsPipe = info.Mode()&(fs.ModeNamedPipe|fs.ModeSocket) != 0
