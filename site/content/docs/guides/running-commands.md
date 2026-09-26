@@ -148,6 +148,11 @@ widen it for its processors. A `--fanout` below that lowers it too, so
 `--fanout 1` asks one processor at a time; one above it does not raise it, so
 `--fanout 64` still asks 8 at once.
 
+`dns lookup` resolves `services.dns.maxConcurrent` names at a time, 16 by
+default, since a site's resolver may limit how fast it is asked. The same rule
+applies: a lower `--fanout` lowers it, a higher one does not raise it, and
+`fanout.max` does not change it.
+
 `fanout.max` and `--fanout` have to be at least 1. A `0` or a negative value
 is refused, by `config validate` with the file and line it was written on,
 rather than quietly read as the default.

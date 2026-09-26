@@ -179,8 +179,10 @@ is much slower than a node and a wide fan-out to them achieves nothing. A
 processor also has few connections to give, so a client closes its connection
 once its request is answered, and any it has left idle for as long as a
 request may take, rather than keep it for a request that may not come. The
-MCP server works on two tool calls at once, so that an agent sending calls
-side by side does not multiply these bounds.
+names `dns lookup` resolves are bounded by `services.dns.maxConcurrent`, since
+a site's resolver may limit how fast it is asked. The MCP server works on two
+tool calls at once, so that an agent sending calls side by side does not
+multiply these bounds.
 
 Every such pool is one loop, `fanout.Each`, which starts nothing once the
 command is interrupted, and `fanout.Map` runs any kind of work on it, the

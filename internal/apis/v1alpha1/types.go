@@ -436,6 +436,10 @@ type DNSService struct {
 	Server string `json:"server,omitempty" yaml:"server,omitempty"`
 	// Timeout bounds one query.
 	Timeout Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	// MaxConcurrent bounds how many names dns lookup resolves at once. A
+	// lower --fanout lowers it for one command; fanout.max does not change
+	// it.
+	MaxConcurrent int `json:"maxConcurrent,omitempty" yaml:"maxConcurrent,omitempty" jsonschema:"minimum=1,description=How many names dns lookup resolves at once; a lower --fanout lowers it and fanout.max does not change it"`
 	// Aliases are the names dns aliases resolves and reports.
 	Aliases []string `json:"aliases,omitempty" yaml:"aliases,omitempty"`
 }

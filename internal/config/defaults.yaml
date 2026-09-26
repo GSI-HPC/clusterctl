@@ -88,3 +88,4 @@ services:
     binary: cinc-solo
   dns:
     timeout: 5s
+    maxConcurrent: 16
