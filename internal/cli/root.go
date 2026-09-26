@@ -230,7 +230,7 @@ are about to do and ask before doing it.`),
 	r.fanoutGiven = func() bool { return flags.Changed("fanout") }
 	flags.StringVar(&r.progress, "progress", "",
 		"how to show the progress of a command on standard error: "+strings.Join(progressModes, ", ")+
-			" (default: "+config.EnvProgress+", else auto, a counter when standard error is a terminal; plain writes lines for a log)")
+			" (default: "+config.EnvProgress+", else auto, a live tree when standard error is a terminal; plain writes lines for a log)")
 	r.progressGiven = func() bool { return flags.Changed("progress") }
 
 	registerCompletions(cmd, r)

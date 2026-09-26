@@ -182,8 +182,8 @@ that runs over is reported as failed and the other nodes carry on.
 scp draws its progress meter on standard error only when one transfer runs at
 a time, for one node or with `--fanout 1`, and no progress is shown. The meter
 redraws one line of the terminal, so the meters of transfers running side by
-side would overwrite each other, the counter's line, and plain lines; none is
-drawn then. `--progress none` leaves the line to scp.
+side would overwrite each other, the live tree, the counter's line, and plain
+lines; none is drawn then. `--progress none` leaves the line to scp.
 
 A remote path must not hold whitespace, quotes or shell syntax such as `$`,
 `;` or `(`. The legacy scp protocol, which OpenSSH used by default before 9.0

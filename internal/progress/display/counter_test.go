@@ -395,7 +395,7 @@ func TestCloseTakesTheCounterOff(t *testing.T) {
 // returns, as a Bus goes on without a sink that panics.
 func TestADisplayThatPanicsWhileItDrawsStops(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"counter"} {
+	for _, name := range []string{"counter", "tree"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			var log screen
@@ -406,6 +406,9 @@ func TestADisplayThatPanicsWhileItDrawsStops(t *testing.T) {
 				Start()
 				Close()
 			} = display.NewCounter(term, display.CounterOptions{Now: c.Now})
+			if name == "tree" {
+				d = display.NewTree(term, display.TreeOptions{Now: c.Now})
+			}
 			c.Add(2 * time.Second)
 			d.Start()
 			deadline := time.Now().Add(5 * time.Second)

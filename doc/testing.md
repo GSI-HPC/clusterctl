@@ -105,15 +105,23 @@ standard error and exit status byte for byte, since progress must never reach
 either stream.
 
 **The displays** are tested on a terminal that is a buffer and a clock the
-test moves: `display.Counter.Draw` draws one frame, `display.Plain.Draw`
-writes the lines held and the heartbeats due, and the command tests replace
-`startDisplay` with `fakeDisplays`, whose displays are drawn only when the
-test says, from a fake transport's answer or a pause between batches, on a
-clock the displays' Bus reads too. So a frame or a plain line shows the same
-counts and times on every run, and no test waits for the counter's second,
-a heartbeat's ten or their ticks. The plain lines of a fan-out, a power-on in
-batches and a reinstall that fails are compared whole, the summary among
-them.
+test moves: `display.Tree.Draw` and `display.Counter.Draw` draw one frame,
+`display.Plain.Draw` writes the lines held and the heartbeats due, and the
+command tests replace `startDisplay` with `fakeDisplays`, whose displays are
+drawn only when the test says, from a fake transport's answer or a pause
+between batches, on a clock the displays' Bus reads too. So a frame or a plain
+line shows the same counts and times on every run, and no test waits for the
+display's second, a heartbeat's ten or their ticks. `progresstest.Screen` is
+the terminal the tree is drawn on: it applies the carriage returns, the rows
+moved up to and erased and the rest of the screen cleared the way a terminal
+does, keeps what scrolled off, and wraps a row at its width, so a test
+compares what a person would see, frame by frame, and a row drawn too wide
+shows as the two it would be. The frames of a wide fan-out, failures grouped,
+a hidden lookup that turns slow, a step that fails at once, a power-on in
+batches, two steps side by side, a terminal too small for the tree, the ASCII
+marks, an interrupt, a question and a write in the middle of a frame are
+compared whole, and so are the plain lines of a fan-out, a power-on in
+batches and a reinstall that fails, the summary among them.
 
 **Command tests** drive the real command tree end to end and assert on what
 would be sent, not on whether the code compiles: that a glob and an apostrophe

@@ -103,8 +103,61 @@ string as it is, like `jq -r`.
 Everything a program would parse goes to standard output; notes, progress and
 prompts go to standard error. Redirecting one does not lose the other.
 
-A command that has run for a second on a terminal says how far it has got on
-the last line of standard error, redrawn at most ten times a second:
+A command that has run for a second on a terminal shows the work under way as a
+live tree, a few rows at the bottom of standard error redrawn at most ten times
+a second:
+
+```console
+✓ configuring the network boot  2.3s
+provision reinstall · 4:12
+  setting the machines to boot from the network once  312/480 · 1 failed · 8 running · 159 queued
+    ✗ exe0007  transport: {}: dial tcp: i/o timeout
+    ▸ exe0313  4s  PATCH /redfish/v1/Systems/1
+    ▸ exe0314  3s  GET /redfish/v1/Systems/1
+    … 6 more running
+    ✓ exe[0001-0006,0008-0312]
+```
+
+The first row names the command and says how long it has run. Each step under
+way has a row under it: how many of its targets are done, however they ended,
+of how many; how many of those failed, were interrupted or were left out; and
+how many run now and how many wait their turn. Under a step, the targets that
+failed alike share a row, with the class of the failure and the error, each
+target's own name written `{}`; those interrupted and those left out get a row
+each; those running are listed, the longest running first, with how long they
+have run, against the bound of the request they wait for when it has one
+(`3m12s/10m`), and what that request is, or, for `exec` and `cinc run`, the
+last line the node printed; and those that are done are one node set. A batch
+of a staggered action has a row of its own under the step, and the pause
+before the next one counts down. The lookups a command makes before it asks,
+such as reading a file from a host or running a group source's command, are
+drawn only once they have taken a second. The tree takes a third of the
+terminal at most, and six on a small one; the running targets that do not fit
+are counted instead, `… 6 more running`, and a row is cut at the right edge.
+Once a step is over, it leaves a line above the tree with how long it took and
+how its targets ended, and the failures under it; a step that succeeded at
+once, with nothing under it, leaves none.
+
+After Ctrl-C, the first row says `interrupting`, with how many of the targets
+running will stop and how many of those waiting will not start.
+
+The tree is taken off before anything else is written and drawn again below
+it, it stays off while a question waits for its answer, and it is gone before
+the command ends, so what is left on the terminal is the lines of the steps,
+what the command printed, and one line more for a command that ran for
+a second or longer or whose targets did not all succeed:
+
+```console
+provision reinstall: 478 ok, 2 failed in 18m03s
+```
+
+It counts each node once, as the worst of the ways it fared in the command's
+steps, and says how long the command ran; the error after it says which nodes
+failed and why.
+
+On a terminal of fewer than 8 rows or 40 columns, as it is at each redraw, the
+counter is drawn instead, and `--progress counter` always draws it: one line at
+the bottom of standard error that says how far the work has got:
 
 ```console
 power on · batch 3/60 · 17/480 · 1 failed · 8 running · 0:41
@@ -116,19 +169,13 @@ interrupted or were left out; how many run now and how many wait their turn;
 `waiting` during the pause between two batches; and, last, how long the
 command has run. Steps under way side by side each get a part of the line,
 split by `|`. While no such step runs, the line names the step or the command
-that does. It is taken off before anything else is written and drawn again
-below it, it stays off while a question waits for its answer, and it is gone
-before the command ends, so what is left on the terminal is what the command
-printed, and one line more for a command that ran for a second or longer or
-whose targets did not all succeed:
+that does. It comes and goes the way the tree does, and leaves the same summary
+behind.
 
-```console
-provision reinstall: 478 ok, 2 failed in 18m03s
-```
-
-It counts each node once, as the worst of the ways it fared in the command's
-steps, and says how long the command ran; the error after it says which nodes
-failed and why.
+Neither draws in colour or hides the cursor, so a command killed while it
+draws leaves a terminal that works. Outside a UTF-8 locale, as `LC_ALL`,
+`LC_CTYPE` or `LANG` names it, they draw with ASCII alone: `+` for done, `x`
+for failed, `>` for running and ` - ` between the parts of a row.
 
 Plain lines are for a log, a CI job's for instance, as much as for a terminal:
 a line for each thing worth one, with the time since the command started in
@@ -149,7 +196,7 @@ ten seconds, one for each step under way that works on many targets, with how
 far it has got. The lookups a command makes before it asks, the single
 requests and what the hosts print get none: `exec` prints the output at the
 end, and `-o json` and `-o yaml` carry it whole. The summary comes last, as it
-does after the counter. The lines are written to standard error ahead of
+does after the tree. The lines are written to standard error ahead of
 whatever the command writes after the work they tell of, never into the middle
 of a line, and not while a question waits for its answer.
 
@@ -158,7 +205,8 @@ is shown:
 
 | Value | Shows |
 | --- | --- |
-| `auto`, the default | The counter when standard error is a terminal and `TERM` is not `dumb`, and nothing otherwise |
+| `auto`, the default | The live tree when standard error is a terminal and `TERM` is not `dumb`, and nothing otherwise |
+| `tty` | The live tree, or the counter on a terminal too small for it; refused when standard error is not a terminal or `TERM` is `dumb` |
 | `counter` | The counter; refused when standard error is not a terminal or `TERM` is `dumb` |
 | `plain` | Plain lines, with or without a terminal |
 | `none` | Nothing |
@@ -171,8 +219,8 @@ while progress is shown. The commands that hand the terminal to another
 program, such as `login` and the shells, show nothing, and neither do the
 commands an agent runs through `clusterctl mcp`. ssh can still ask a question
 on the terminal by itself, a passphrase for instance, which clusterctl does not
-see; if the counter is drawn over it, the question still waits for its answer,
-and `--progress none` leaves the terminal to ssh.
+see; if the tree or the counter is drawn over it, the question still waits for
+its answer, and `--progress none` leaves the terminal to ssh.
 
 An error message often quotes what a node, a BMC or a group source said, so it
 is escaped the same way before it is printed, except that newlines and tabs are
