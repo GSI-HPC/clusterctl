@@ -36,6 +36,7 @@ type Counter struct {
 	term  *Terminal
 	now   func() time.Time
 	start time.Time
+	g     glyphs
 
 	mu    sync.Mutex
 	tally progress.Tally
@@ -56,12 +57,15 @@ type named struct {
 type CounterOptions struct {
 	// Now is the clock the time on the line is read from; nil is time.Now.
 	Now func() time.Time
+	// ASCII splits the parts of the line with " - " rather than " · ",
+	// for a terminal whose locale is not UTF-8.
+	ASCII bool
 }
 
 // NewCounter returns a counter that draws on term once Start is called. The
 // time on its line is counted from now.
 func NewCounter(term *Terminal, o CounterOptions) *Counter {
-	c := &Counter{term: term, now: o.Now}
+	c := &Counter{term: term, now: o.Now, g: glyphsFor(o.ASCII)}
 	if c.now == nil {
 		c.now = time.Now
 	}
@@ -101,7 +105,7 @@ func (c *Counter) Draw() {
 		defer c.mu.Unlock()
 		return c.line(now)
 	}()
-	c.term.draw(line)
+	c.term.draw([]string{line})
 }
 
 // Close stops the drawing and takes the line off the terminal. Closing a
@@ -150,7 +154,7 @@ func (c *Counter) line(now time.Time) string {
 	var segments []string
 	for _, root := range c.tally.Roots() {
 		if root.Flags&progress.Hidden == 0 {
-			segments = append(segments, segment(root))
+			segments = append(segments, segment(root, c.g.sep))
 		}
 	}
 	if len(segments) == 0 && len(c.named) > 0 {
@@ -158,13 +162,13 @@ func (c *Counter) line(now time.Time) string {
 	}
 	line := strings.Join(segments, " | ")
 	if line != "" {
-		line += " · "
+		line += c.g.sep
 	}
 	return line + elapsed(now.Sub(c.start))
 }
 
-// segment says how far one counted step has got.
-func segment(n progress.Count) string {
+// segment says how far one counted step has got, its parts split by sep.
+func segment(n progress.Count, sep string) string {
 	parts := []string{n.Name}
 	if n.Batch != "" {
 		parts = append(parts, "batch "+n.Batch)
@@ -187,7 +191,7 @@ func segment(n progress.Count) string {
 	if n.Waits > 0 {
 		parts = append(parts, "waiting")
 	}
-	return strings.Join(parts, " · ")
+	return strings.Join(parts, sep)
 }
 
 // elapsed reads d as minutes and seconds, or hours, minutes and seconds.

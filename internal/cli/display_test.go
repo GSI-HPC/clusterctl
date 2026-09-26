@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/progress/display"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -22,7 +24,7 @@ import (
 // time, which the displays' Bus reads too.
 type displays struct {
 	mu    sync.Mutex
-	made  int
+	modes []string
 	last  interface{ Draw() }
 	clock time.Time
 }
@@ -32,19 +34,22 @@ func fakeDisplays(t *testing.T) *displays {
 	t.Helper()
 	c := &displays{clock: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)}
 	saved, savedClock := startDisplay, displayClock
-	startDisplay = func(mode string, term *display.Terminal) renderer {
+	startDisplay = func(mode string, term *display.Terminal, interrupted <-chan struct{}) renderer {
 		var shown interface {
 			renderer
 			Draw()
 		}
-		if mode == progressPlain {
+		switch mode {
+		case progressPlain:
 			shown = display.NewPlain(term, display.PlainOptions{Now: c.now})
-		} else {
+		case progressTTY:
+			shown = display.NewTree(term, display.TreeOptions{Now: c.now, Interrupted: interrupted})
+		default:
 			shown = display.NewCounter(term, display.CounterOptions{Now: c.now})
 		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		c.made++
+		c.modes = append(c.modes, mode)
 		c.last = shown
 		return shown
 	}
@@ -73,7 +78,14 @@ func (c *displays) draw() {
 func (c *displays) count() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.made
+	return len(c.modes)
+}
+
+// shown returns the modes of the displays made, in the order they were.
+func (c *displays) shown() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.Join(c.modes, ",")
 }
 
 // onTerminal has standard error, and standard output with out, be a
@@ -85,10 +97,10 @@ func onTerminal(out bool) func(*app.Streams) {
 	}
 }
 
-// The counter is drawn where it can be: auto draws it on a terminal that
-// is not a dumb one and nowhere else, counter from the flag insists on one,
-// plain lines need none, and none draws nothing. The variable fails no
-// command: what it asks for where it cannot be drawn, or does not name,
+// The live tree is drawn where it can be: auto draws it on a terminal that
+// is not a dumb one and nowhere else, tty and counter from the flag insist
+// on one, plain lines need none, and none draws nothing. The variable fails
+// no command: what it asks for where it cannot be drawn, or does not name,
 // draws nothing. --progress wins over the variable. A Bus the context
 // brought, as a test's or an MCP call's, draws nothing of its own, whatever
 // the flag and the variable say.
@@ -101,29 +113,35 @@ func TestTheProgressDisplayIsDrawnWhereItCan(t *testing.T) {
 		args     []string
 		watched  bool
 		code     int
-		drawn    bool
+		shown    string
 		msg      string
 	}{
-		{"auto on a terminal", true, "xterm", "", nil, false, exitcode.OK, true, ""},
-		{"auto without a terminal", false, "xterm", "", nil, false, exitcode.OK, false, ""},
-		{"auto on a dumb terminal", true, "dumb", "", nil, false, exitcode.OK, false, ""},
-		{"counter on a terminal", true, "xterm", "", []string{"--progress", "counter"}, false, exitcode.OK, true, ""},
-		{"counter without a terminal", false, "xterm", "", []string{"--progress", "counter"}, false, exitcode.Usage, false,
-			"--progress asks for a counter, but standard error is not a terminal"},
-		{"counter on a dumb terminal", true, "dumb", "", []string{"--progress=counter"}, false, exitcode.Usage, false,
+		{"auto on a terminal", true, "xterm", "", nil, false, exitcode.OK, progressTTY, ""},
+		{"auto without a terminal", false, "xterm", "", nil, false, exitcode.OK, "", ""},
+		{"auto on a dumb terminal", true, "dumb", "", nil, false, exitcode.OK, "", ""},
+		{"tty on a terminal", true, "xterm", "", []string{"--progress", "tty"}, false, exitcode.OK, progressTTY, ""},
+		{"tty without a terminal", false, "xterm", "", []string{"--progress", "tty"}, false, exitcode.Usage, "",
+			"--progress asks for a live tree, but standard error is not a terminal"},
+		{"tty on a dumb terminal", true, "dumb", "", []string{"--progress=tty"}, false, exitcode.Usage, "",
 			"TERM is dumb"},
-		{"plain without a terminal", false, "xterm", "", []string{"--progress", "plain"}, false, exitcode.OK, true, ""},
-		{"plain on a dumb terminal", true, "dumb", "", []string{"--progress=plain"}, false, exitcode.OK, true, ""},
-		{"none on a terminal", true, "xterm", "", []string{"--progress", "none"}, false, exitcode.OK, false, ""},
-		{"the variable", true, "xterm", "none", nil, false, exitcode.OK, false, ""},
-		{"the variable without a terminal", false, "xterm", "counter", nil, false, exitcode.OK, false, ""},
-		{"the variable for a counter on a dumb terminal", true, "dumb", "counter", nil, false, exitcode.OK, false, ""},
-		{"the variable for plain lines without a terminal", false, "xterm", "plain", nil, false, exitcode.OK, true, ""},
-		{"the flag over the variable", false, "xterm", "counter", []string{"--progress", "none"}, false, exitcode.OK, false, ""},
-		{"a value it does not know", true, "xterm", "", []string{"--progress", "tree"}, false, exitcode.Usage, false,
-			`--progress is "tree"; it takes one of auto, counter, plain, none`},
-		{"a variable it does not know", true, "xterm", "fancy", nil, false, exitcode.OK, false, ""},
-		{"a Bus from the context", false, "xterm", "counter", []string{"--progress", "counter"}, true, exitcode.OK, false, ""},
+		{"counter on a terminal", true, "xterm", "", []string{"--progress", "counter"}, false, exitcode.OK, progressCounter, ""},
+		{"counter without a terminal", false, "xterm", "", []string{"--progress", "counter"}, false, exitcode.Usage, "",
+			"--progress asks for a counter, but standard error is not a terminal"},
+		{"counter on a dumb terminal", true, "dumb", "", []string{"--progress=counter"}, false, exitcode.Usage, "",
+			"TERM is dumb"},
+		{"plain without a terminal", false, "xterm", "", []string{"--progress", "plain"}, false, exitcode.OK, progressPlain, ""},
+		{"plain on a dumb terminal", true, "dumb", "", []string{"--progress=plain"}, false, exitcode.OK, progressPlain, ""},
+		{"none on a terminal", true, "xterm", "", []string{"--progress", "none"}, false, exitcode.OK, "", ""},
+		{"the variable", true, "xterm", "none", nil, false, exitcode.OK, "", ""},
+		{"the variable for a counter", true, "xterm", "counter", nil, false, exitcode.OK, progressCounter, ""},
+		{"the variable without a terminal", false, "xterm", "tty", nil, false, exitcode.OK, "", ""},
+		{"the variable for a counter on a dumb terminal", true, "dumb", "counter", nil, false, exitcode.OK, "", ""},
+		{"the variable for plain lines without a terminal", false, "xterm", "plain", nil, false, exitcode.OK, progressPlain, ""},
+		{"the flag over the variable", false, "xterm", "counter", []string{"--progress", "none"}, false, exitcode.OK, "", ""},
+		{"a value it does not know", true, "xterm", "", []string{"--progress", "tree"}, false, exitcode.Usage, "",
+			`--progress is "tree"; it takes one of auto, tty, counter, plain, none`},
+		{"a variable it does not know", true, "xterm", "fancy", nil, false, exitcode.OK, "", ""},
+		{"a Bus from the context", false, "xterm", "tty", []string{"--progress", "tty"}, true, exitcode.OK, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TERM", tc.term)
@@ -138,8 +156,102 @@ func TestTheProgressDisplayIsDrawnWhereItCan(t *testing.T) {
 			if err != nil && !strings.Contains(err.Error(), tc.msg) {
 				t.Errorf("error = %v, want it to say %q", err, tc.msg)
 			}
-			if drawn := c.count() > 0; drawn != tc.drawn {
-				t.Errorf("a counter was made: %v, want %v", drawn, tc.drawn)
+			if got := c.shown(); got != tc.shown {
+				t.Errorf("displays made: %q, want %q", got, tc.shown)
+			}
+		})
+	}
+}
+
+// auto draws nothing while standard output goes into a pipe, whose reader
+// writes to the terminal the tree would be drawn on; the tree asked for is
+// drawn all the same, and so are plain lines.
+func TestAutoDrawsNothingWhileTheOutputGoesIntoAPipe(t *testing.T) {
+	t.Setenv("TERM", "xterm")
+	t.Setenv(config.EnvProgress, "")
+	intoAPipe := func(s *app.Streams) {
+		onTerminal(false)(s)
+		s.OutIsPipe = true
+	}
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		shown string
+	}{
+		{"auto", nil, ""},
+		{"tty", []string{"--progress", "tty"}, progressTTY},
+		{"plain", []string{"--progress", "plain"}, progressPlain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fakeDisplays(t)
+			if _, err := run(t, harnessOptions{unwatched: true, streams: intoAPipe}, append(tc.args, "node", "fqdn", "-n", "exe1")...); err != nil {
+				t.Fatal(err)
+			}
+			if got := c.shown(); got != tc.shown {
+				t.Errorf("displays made: %q, want %q", got, tc.shown)
+			}
+		})
+	}
+}
+
+// A value of the variable that names no display is said once on standard
+// error, and the command runs as it would with none; one that asks for a
+// display where it cannot be drawn is not said at all, since the cron job
+// or the CI step that inherited it never asked. Standard output is left
+// alone either way.
+func TestTheVariableFailsNoCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name, env, errOut string
+	}{
+		{"a value it does not know", "plian",
+			"clusterctl: " + config.EnvProgress + ` is "plian"; it takes one of auto, tty, counter, plain, none; no progress is shown` + "\n"},
+		{"a tree without a terminal", "tty", ""},
+		{"a counter without a terminal", "counter", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(config.EnvProgress, tc.env)
+			c := fakeDisplays(t)
+			quiet, err := run(t, harnessOptions{unwatched: true}, "--progress=none", "node", "fqdn", "-n", "exe1")
+			if err != nil {
+				t.Fatalf("node fqdn with --progress=none: %v", err)
+			}
+			h, err := run(t, harnessOptions{unwatched: true}, "node", "fqdn", "-n", "exe1")
+			if err != nil {
+				t.Fatalf("node fqdn with %s=%s: %v", config.EnvProgress, tc.env, err)
+			}
+			if c.count() != 0 {
+				t.Errorf("%d displays made, want none", c.count())
+			}
+			if got := h.errOut.String(); got != quiet.errOut.String()+tc.errOut {
+				t.Errorf("standard error = %q, want %q", got, quiet.errOut.String()+tc.errOut)
+			}
+			if h.out.String() != quiet.out.String() {
+				t.Errorf("standard output = %q, want %q", h.out, quiet.out)
+			}
+		})
+	}
+}
+
+// The live tree draws its marks in UTF-8 only where the locale says the
+// terminal shows it, as the C library reads the locale, and in ASCII
+// elsewhere.
+func TestTheTreeDrawsInTheLocalesCharacters(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want bool
+	}{
+		{"no locale", nil, false},
+		{"a UTF-8 language", map[string]string{"LANG": "en_US.UTF-8"}, true},
+		{"the C locale in UTF-8", map[string]string{"LANG": "C.utf8"}, true},
+		{"a language in Latin-1", map[string]string{"LANG": "de_DE.ISO-8859-1"}, false},
+		{"the character type over the language", map[string]string{"LANG": "en_US.UTF-8", "LC_CTYPE": "C"}, false},
+		{"all over the rest", map[string]string{"LANG": "C", "LC_CTYPE": "C", "LC_ALL": "de_DE.UTF-8"}, true},
+		{"an empty variable is none", map[string]string{"LC_ALL": "", "LANG": "en_GB.UTF-8"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := utf8Locale(func(name string) string { return tc.env[name] }); got != tc.want {
+				t.Errorf("utf8Locale(%v) = %v, want %v", tc.env, got, tc.want)
 			}
 		})
 	}
@@ -161,10 +273,11 @@ func TestAnAgentsCommandsDrawNothing(t *testing.T) {
 }
 
 // With nothing drawn, standard output and standard error carry the bytes
-// they would without progress, and so they do while a counter is made but
+// they would without progress, and so they do while the tree is made but
 // not yet drawn, as for a command done within its first second: the
-// writers in front of the streams pass on what they are given. The one line
-// the counter adds is the summary it leaves behind, since a target failed.
+// writers in front of the streams pass on what they are given, and the
+// lines of the steps that finished are never written. The one line the
+// display adds is the summary it leaves behind, since a target failed.
 func TestNoDisplayLeavesTheStreamsAsTheyWere(t *testing.T) {
 	fakeDisplays(t)
 	rec := func() *transport.Recorder {
@@ -184,7 +297,7 @@ func TestNoDisplayLeavesTheStreamsAsTheyWere(t *testing.T) {
 	for name, opts := range map[string]harnessOptions{
 		"no terminal":           {unwatched: true},
 		"none on a terminal":    {unwatched: true, streams: onTerminal(true)},
-		"a counter not yet due": {unwatched: true, streams: onTerminal(true)},
+		"a display not yet due": {unwatched: true, streams: onTerminal(true)},
 	} {
 		opts.recorder = rec()
 		line := args
@@ -261,7 +374,7 @@ func TestTheCounterIsTakenOffBeforeEveryWrite(t *testing.T) {
 		return &transport.Result{Target: tg, Stdout: "up 3 days\n"}, nil
 	}}
 	tty, err := runOnTerminal(t, harnessOptions{recorder: rec},
-		"--fanout", "1", "exec", "-n", "exe[1-3]", "-y", "--", "uptime")
+		"--progress", "counter", "--fanout", "1", "exec", "-n", "exe[1-3]", "-y", "--", "uptime")
 	wantCode(t, err, exitcode.TargetFailed)
 	want := `
 <erase>run · 0/3 · 1 running · 2 queued · 0:01
@@ -299,7 +412,7 @@ func TestTheCounterOfAPowerOnInBatches(t *testing.T) {
 		return answer(tg, req)
 	}}
 	tty, err := runOnTerminal(t, harnessOptions{recorder: rec},
-		append(noSlurm, "-o", "name", "bmc", "power", "on", "--ipmi", "--batch", "2", "-y", "-n", "exe[1-4]")...)
+		append(noSlurm, "--progress", "counter", "-o", "name", "bmc", "power", "on", "--ipmi", "--batch", "2", "-y", "-n", "exe[1-4]")...)
 	wantCode(t, err, exitcode.TargetFailed)
 	want := `powering on exe[0001-0002] (1 of 2)
 
@@ -333,7 +446,7 @@ func TestTheCounterLeavesTheQuestionAlone(t *testing.T) {
 		return cluster.reply(tg, req)
 	}}
 	tty, err := runOnTerminal(t, harnessOptions{recorder: rec, tty: true, stdin: "y\n"},
-		"slurm", "node", "drain", "ticket 4711: failing DIMM", "-n", "exe0007")
+		"--progress", "counter", "slurm", "node", "drain", "ticket 4711: failing DIMM", "-n", "exe0007")
 	if err != nil {
 		t.Fatalf("slurm node drain failed: %v", err)
 	}
@@ -349,6 +462,165 @@ clusterctl: slurm node drain: done in 2.0s
 `
 	if got := tty.String(); got != want {
 		t.Errorf("terminal:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// typing is standard input typed at a terminal: each read draws the
+// display first, as a second passing while the administrator types would.
+type typing struct {
+	c    *displays
+	text []string
+}
+
+func (in *typing) Read(p []byte) (int, error) {
+	if len(in.text) == 0 {
+		return 0, io.EOF
+	}
+	in.c.draw()
+	n := copy(p, in.text[0])
+	in.text = in.text[1:]
+	return n, nil
+}
+
+// exec --stdin typed at a terminal is read with the counter off it, as a
+// question is: what is typed is not drawn over.
+func TestTheCounterLeavesTypedInputAlone(t *testing.T) {
+	c := fakeDisplays(t)
+	c.draw()
+	in := &typing{c: c, text: []string{"hello\n", "world\n"}}
+	tty, err := runOnTerminal(t, harnessOptions{recorder: &transport.Recorder{}, tty: true, in: in},
+		"--progress", "counter", "exec", "--stdin", "-y", "-n", "exe1", "--", "tee", "/tmp/x")
+	if err != nil {
+		t.Fatalf("exec --stdin failed: %v", err)
+	}
+	if got := tty.String(); strings.Contains(got, "exec ·") {
+		t.Errorf("the counter was drawn while the input was typed:\n%s", got)
+	}
+}
+
+// runOnScreen runs a command line with standard output and standard error
+// on screen, a terminal 100 columns wide and 40 rows high that echoes what
+// is read from standard input, and prints its error there the way the
+// command line does.
+func runOnScreen(t *testing.T, screen *progresstest.Screen, opts harnessOptions, args ...string) error {
+	t.Helper()
+	opts.unwatched = true
+	opts.streams = func(s *app.Streams) {
+		s.In = io.TeeReader(s.In, screen)
+		s.Out, s.Err = screen, screen
+		onTerminal(true)(s)
+	}
+	_, cmd := build(t, opts, args...)
+	cmd.SetOut(screen)
+	cmd.SetErr(screen)
+	err := cmd.Execute()
+	if err != nil {
+		report(context.Background(), app.Streams{Err: screen}, err)
+	}
+	return err
+}
+
+// On a terminal the live tree is drawn by default: the command, the step
+// with how its targets stand, and the one running with the request it waits
+// for, against its bound. What the command prints lands above it, and once
+// the command is over the tree is gone: the step's line, with the target
+// that failed, the command's output, the summary and the error are what is
+// left.
+func TestTheTreeIsDrawnByDefault(t *testing.T) {
+	c := fakeDisplays(t)
+	screen := &progresstest.Screen{Width: 100}
+	var frames []string
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		c.draw()
+		frames = append(frames, screen.String())
+		if tg.Name == "exe0002" {
+			return transport.ExitResult(tg, 1, "", "uptime: not found\n"), nil
+		}
+		return &transport.Result{Target: tg, Stdout: "up 3 days\n"}, nil
+	}}
+	err := runOnScreen(t, screen, harnessOptions{recorder: rec}, "--fanout", "1", "exec", "-n", "exe[1-3]", "-y", "--", "uptime")
+	wantCode(t, err, exitcode.TargetFailed)
+	want := []string{`
+exec · 0:01
+  run  0/3 · 1 running · 2 queued
+    ▸ exe0001  1s/10m  ssh
+`, `
+exec · 0:02
+  run  1/3 · 1 running · 1 queued
+    ▸ exe0002  1s/10m  ssh
+    ✓ exe0001
+`, `
+exec · 0:03
+  run  2/3 · 1 failed · 1 running
+    ✗ exe0002  target: {} ({}): command exited 1
+    ▸ exe0003  1s/10m  ssh
+    ✓ exe0001
+`}
+	for i, frame := range frames {
+		if i < len(want) && frame != want[i][1:] {
+			t.Errorf("frame %d:\n%s\nwant:\n%s", i+1, frame, want[i][1:])
+		}
+	}
+	if len(frames) != len(want) {
+		t.Errorf("%d frames, want %d", len(frames), len(want))
+	}
+	end := `
+✗ run  3.0s  2 ok, 1 failed
+  ✗ exe0002  target: {} ({}): command exited 1
+exe0001: up 3 days
+exe0003: up 3 days
+exe0002: exit 1: uptime: not found
+clusterctl: exec: failed in 3.0s: 2 ok, 1 failed
+clusterctl: 1 of 3 hosts failed: exe0002
+`
+	if got := screen.String(); got != end[1:] {
+		t.Errorf("terminal:\n%s\nwant:\n%s", got, end[1:])
+	}
+}
+
+// The confirmation is never drawn over: the tree leaves the terminal before
+// the preview and the question, and comes back below them once the question
+// has been answered. A call made for the command itself, the drain on the
+// Slurm controller, has a row of its own.
+func TestTheTreeLeavesTheQuestionAlone(t *testing.T) {
+	c := fakeDisplays(t)
+	cluster := newSlurmCluster()
+	screen := &progresstest.Screen{Width: 100}
+	var frames []string
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		c.draw()
+		frames = append(frames, screen.String())
+		return cluster.reply(tg, req)
+	}}
+	err := runOnScreen(t, screen, harnessOptions{recorder: rec, tty: true, stdin: "y\n"},
+		"slurm", "node", "drain", "ticket 4711: failing DIMM", "-n", "exe0007")
+	if err != nil {
+		t.Fatalf("slurm node drain failed: %v", err)
+	}
+	want := []string{`
+slurm node drain · 0:01
+  ssh login  1s/10m
+`, `
+About to drain 1 host: exe0007
+  reason: "ticket 4711: failing DIMM"
+Continue? [y/N] y
+slurm node drain · 0:02
+  ssh login  1s/10m
+`}
+	for i, frame := range frames {
+		if i < len(want) && frame != want[i][1:] {
+			t.Errorf("frame %d:\n%s\nwant:\n%s", i+1, frame, want[i][1:])
+		}
+	}
+	end := `
+About to drain 1 host: exe0007
+  reason: "ticket 4711: failing DIMM"
+Continue? [y/N] y
+drained exe0007
+clusterctl: slurm node drain: done in 2.0s
+`
+	if got := screen.String(); got != end[1:] {
+		t.Errorf("terminal:\n%s\nwant:\n%s", got, end[1:])
 	}
 }
 

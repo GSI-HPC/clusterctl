@@ -29,7 +29,8 @@ const (
 //	[0:10] bmc power › power off: 312/480 done, 1 failed, 8 running, 160 queued
 //	[0:18] bmc power › power off: failed in 18s: 478 ok, 2 failed
 //
-// A line names the span it tells of by the path to it from the command. It
+// A line names the span it tells of by the path to it from the command,
+// its parts joined by "›", or by ">" with PlainOptions.ASCII. It
 // is written as a step or a batch starts and ends, as a pause of a known
 // length starts, and as a wait fails or is interrupted; for each
 // target that fails, once; and, every ten seconds, for each counted step
@@ -46,6 +47,8 @@ type Plain struct {
 	term  *Terminal
 	now   func() time.Time
 	start time.Time
+	// between is what the parts of a span's path are written with between.
+	between string
 
 	mu    sync.Mutex
 	tally progress.Tally
@@ -89,12 +92,18 @@ type PlainOptions struct {
 	// of a line counted from; nil is time.Now. The Bus's clock should be
 	// the same.
 	Now func() time.Time
+	// ASCII writes the path to a span with ">" between its parts, for a
+	// locale that is not UTF-8, rather than "›".
+	ASCII bool
 }
 
 // NewPlain returns a display of plain lines on term, which counts the time
 // in front of its lines from now.
 func NewPlain(term *Terminal, o PlainOptions) *Plain {
-	p := &Plain{term: term, now: o.Now, spans: map[progress.SpanID]*plainSpan{}}
+	p := &Plain{term: term, now: o.Now, spans: map[progress.SpanID]*plainSpan{}, between: " › "}
+	if o.ASCII {
+		p.between = " > "
+	}
 	if p.now == nil {
 		p.now = time.Now
 	}
@@ -224,7 +233,7 @@ func (p *Plain) begin(e progress.Event) {
 			name = "batch " + name
 		}
 		if s.path != "" {
-			name = s.path + " › " + name
+			name = s.path + p.between + name
 		}
 		s.path = name
 	}

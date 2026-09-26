@@ -134,9 +134,13 @@ func (interrupted) ProgressClass() progress.Class { return progress.ClassCancele
 
 // The ways --progress shows the progress of a command.
 const (
-	// progressAuto is the counter where it can be drawn, and nothing
+	// progressAuto is the live tree where it can be drawn, and nothing
 	// elsewhere.
 	progressAuto = "auto"
+	// progressTTY is the live tree: a few rows at the bottom of the
+	// terminal, redrawn as the work goes on, or the counter's line on a
+	// terminal too small for them.
+	progressTTY = "tty"
 	// progressCounter is one line on standard error, redrawn as the work
 	// goes on.
 	progressCounter = "counter"
@@ -149,27 +153,27 @@ const (
 )
 
 // progressModes are the values --progress takes.
-var progressModes = []string{progressAuto, progressCounter, progressPlain, progressNone}
+var progressModes = []string{progressAuto, progressTTY, progressCounter, progressPlain, progressNone}
 
 // progressMode returns how a command's progress is shown: as --progress
-// says, else CLUSTERCTL_PROGRESS, else auto, which draws the counter where
+// says, else CLUSTERCTL_PROGRESS, else auto, which draws the live tree where
 // it can be drawn, on a standard error that is a terminal and not a dumb
 // one, and shows nothing elsewhere: in a pipe, a file or a script's
 // capture, standard error is left as it would be without progress. Nor
 // does auto draw while standard output goes into a pipe, since what reads
-// it, grep or less, writes to the same terminal, over the counter's line,
-// and nothing keeps the two apart; asked for, the counter is drawn all the
-// same. A counter --progress asks for where it cannot be drawn is refused
-// rather than dropped, so that the one who asked finds out why nothing
-// shows. Plain
-// lines need no terminal, and are shown wherever they are asked for.
+// it, grep or less, writes to the same terminal, over the tree and under
+// it, and nothing keeps the two apart; asked for, the tree is drawn all
+// the same. The tree or the counter --progress asks for where it cannot be
+// drawn is refused rather than dropped, so that the one who asked finds
+// out why nothing shows. Plain lines need no terminal, and are shown
+// wherever they are asked for.
 //
 // The variable is set once, in a profile, and inherited by the cron jobs
 // and CI steps whose standard error is no terminal, which never asked for
-// anything: what it asks for fails no command. The counter it asks for
-// where none can be drawn shows nothing, as auto would, and a value it does
-// not take shows nothing either, with the note returned to say why, for
-// standard error.
+// anything: what it asks for fails no command. The tree or the counter it
+// asks for where neither can be drawn shows nothing, as auto would, and a
+// value it does not take shows nothing either, with the note returned to
+// say why, for standard error.
 func (r *root) progressMode() (mode, note string, err error) {
 	mode, from := r.progress, "--progress"
 	ambient := r.progressGiven == nil || !r.progressGiven()
@@ -191,16 +195,20 @@ func (r *root) progressMode() (mode, note string, err error) {
 		if unfit != "" || r.streams.OutIsPipe {
 			return progressNone, "", nil
 		}
-		return progressCounter, "", nil
-	case progressCounter:
+		return progressTTY, "", nil
+	case progressTTY, progressCounter:
 		if unfit == "" {
-			return progressCounter, "", nil
+			return mode, "", nil
 		}
 		if ambient {
 			return progressNone, "", nil
 		}
+		what := "a live tree"
+		if mode == progressCounter {
+			what = "a counter"
+		}
 		return "", "", exitcode.Errorf(exitcode.Usage,
-			"%s asks for a counter, but %s; use none, or auto to draw one only where it can be", from, unfit)
+			"%s asks for %s, but %s; use none, or auto to draw one only where it can be", from, what, unfit)
 	case progressPlain, progressNone:
 		return mode, "", nil
 	}
@@ -211,6 +219,19 @@ func (r *root) progressMode() (mode, note string, err error) {
 	return "", "", exitcode.Errorf(exitcode.Usage, "%s", unknown)
 }
 
+// utf8Locale reports whether the locale the environment names, through
+// getenv, writes text as UTF-8, which the marks of the live tree need:
+// LC_ALL, else LC_CTYPE, else LANG, the way the C library reads them. With
+// none of them set the locale is C, and the tree is drawn in ASCII.
+func utf8Locale(getenv func(string) string) bool {
+	for _, name := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		if locale := strings.ToLower(getenv(name)); locale != "" {
+			return strings.Contains(locale, "utf-8") || strings.Contains(locale, "utf8")
+		}
+	}
+	return false
+}
+
 // renderer is a display a command's progress is shown by: a sink of its
 // Bus, closed once the Bus is.
 type renderer interface {
@@ -219,15 +240,22 @@ type renderer interface {
 }
 
 // startDisplay makes the display a command's progress is shown by in mode,
-// on term, and starts it. The tests replace it to draw the frames
+// on term, and starts it; interrupted is closed once the command has been
+// interrupted, which the tree says. The tests replace it to draw the frames
 // themselves, on a clock of their own that they make displayClock too.
-var startDisplay = func(mode string, term *display.Terminal) renderer {
-	if mode == progressPlain {
-		plain := display.NewPlain(term, display.PlainOptions{Now: displayClock})
+var startDisplay = func(mode string, term *display.Terminal, interrupted <-chan struct{}) renderer {
+	ascii := !utf8Locale(os.Getenv)
+	switch mode {
+	case progressPlain:
+		plain := display.NewPlain(term, display.PlainOptions{Now: displayClock, ASCII: ascii})
 		plain.Start()
 		return plain
+	case progressTTY:
+		tree := display.NewTree(term, display.TreeOptions{Now: displayClock, ASCII: ascii, Interrupted: interrupted})
+		tree.Start()
+		return tree
 	}
-	counter := display.NewCounter(term, display.CounterOptions{Now: displayClock})
+	counter := display.NewCounter(term, display.CounterOptions{Now: displayClock, ASCII: ascii})
 	counter.Start()
 	return counter
 }
@@ -242,10 +270,11 @@ var displayClock = time.Now
 // anything; the MCP server gives them a Bus of its own.
 //
 // Everything the command writes where the display shows goes through the
-// writers of its terminal, which take the counter off first, or write the
-// plain lines that came before: standard error, the diagnostics, and
-// standard output when it shows on the terminal too, or wherever it goes
-// for plain lines, which a log may keep along with the output; those of the
+// writers of its terminal, which take the tree or the counter off first,
+// and write the lines of the steps that finished, or the plain lines, that
+// came before: standard error, the diagnostics, and standard output when it
+// shows on the terminal too, or wherever it goes for plain lines, which a
+// log may keep along with the output; those of the
 // command context and cobra's alike, which printExec and the help write to.
 // They are put in place before the command context is built, which copies
 // the streams, and only while a display is shown: without one, nothing
@@ -274,7 +303,7 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 	if term.PanicLog == nil {
 		term.PanicLog = r.streams.Err
 	}
-	shown := startDisplay(mode, term)
+	shown := startDisplay(mode, term, r.context().Done())
 	summary := &display.Summary{}
 
 	saved, top := r.streams, cmd.Root()

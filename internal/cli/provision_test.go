@@ -779,7 +779,7 @@ func TestProvisionStatusAsksTheProcessorsAndTheNodesAtOnce(t *testing.T) {
 	}
 
 	tty, err := runOnTerminal(t, harnessOptions{recorder: h.rec, config: []string{h.layer}},
-		"--set", "services.pxesrv.root="+h.root, "--set", "ssh.knownHostsFile="+h.knownHosts,
+		"--progress", "counter", "--set", "services.pxesrv.root="+h.root, "--set", "ssh.knownHostsFile="+h.knownHosts,
 		"--fanout", "1", "provision", "status", "-n", "exe[0001-0003]")
 	if err != nil {
 		t.Fatalf("provision status failed: %v\n%s", err, tty)

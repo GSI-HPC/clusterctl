@@ -37,9 +37,17 @@ type plainFixture struct {
 
 func newPlainFixture(t *testing.T, command string) *plainFixture {
 	t.Helper()
+	return newPlainFixtureWith(t, command, display.PlainOptions{})
+}
+
+// newPlainFixtureWith is newPlainFixture with the options o, on the
+// fixture's clock.
+func newPlainFixtureWith(t *testing.T, command string, o display.PlainOptions) *plainFixture {
+	t.Helper()
 	f := &plainFixture{screen: &screen{}, clock: &clock{now: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)}}
 	f.term = display.NewTerminal(f.screen, nil)
-	f.plain = display.NewPlain(f.term, display.PlainOptions{Now: f.clock.Now})
+	o.Now = f.clock.Now
+	f.plain = display.NewPlain(f.term, o)
 	f.summary = &display.Summary{}
 	f.capture = &progresstest.Capture{}
 	f.bus = progress.NewBus(progress.Options{Sinks: []progress.Sink{f.capture, f.plain, f.summary}, Now: f.clock.Now})
@@ -315,5 +323,19 @@ func TestPlainStartWritesTheLinesAsTheyCome(t *testing.T) {
 	step.End(nil)
 	if got := f.end(nil); !strings.HasSuffix(got, "exec › run: done in 0.0s\n") {
 		t.Errorf("Close did not write the last line:\n%s", got)
+	}
+}
+
+// Outside a UTF-8 locale the parts of a path are joined by ">", so that a
+// CI log read in the C locale shows nothing it cannot print.
+func TestPlainLinesInASCII(t *testing.T) {
+	t.Parallel()
+	f := newPlainFixtureWith(t, "exec", display.PlainOptions{ASCII: true})
+	_, step := progress.Start(f.ctx, progress.KindStep, "run")
+	step.End(nil)
+	f.draw(0)
+	want := "[0:00] exec > run: start\n[0:00] exec > run: done in 0.0s\n"
+	if got := f.end(nil); got != want {
+		t.Errorf("plain lines:\n%s\nwant:\n%s", got, want)
 	}
 }
