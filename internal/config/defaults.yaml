@@ -20,6 +20,7 @@ bmc:
     ipmipowerPath: /usr/sbin/ipmipower
     ipmitoolPath: /usr/bin/ipmitool
     timeout: 60s
+    maxConcurrent: 8
   redfish:
     timeout: 30s
     maxConcurrent: 8

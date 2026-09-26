@@ -17,8 +17,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -62,6 +64,11 @@ type Backend struct {
 	// Username and Password authenticate with the service processors.
 	Username string
 	Password string
+	// Fanout is the --fanout of the command line, 0 when none was given:
+	// ipmipower then asks no more processors than that at once, which it
+	// otherwise decides by itself. ipmitool keeps to Spec.MaxConcurrent,
+	// which --fanout has lowered already.
+	Fanout int
 	// Answered, when it is set, is told the status of each processor as
 	// the line that answers for it arrives, before Power returns, so that
 	// a display can count the processor done then. It is called from the
@@ -96,9 +103,11 @@ type Status struct {
 // Power runs a power action against a set of service processors, and
 // returns one status for every processor of the set, in the order of the set.
 //
-// The whole set is handed to the backend in one call, because both tools take
-// a host list and contacting a thousand processors one ssh connection at a
-// time is what made the shell version unusable at scale.
+// The whole set is handed to the backend in one call, because contacting a
+// thousand processors one ssh connection at a time is what made the shell
+// version unusable at scale: ipmipower takes a host list and fans out by
+// itself, and ipmitool, which takes one host, is run for
+// Spec.MaxConcurrent processors at a time on the backend's host.
 //
 // A processor counts as answered only when the backend printed an answer
 // known to mean success for this action. Anything else it printed is the
@@ -219,7 +228,11 @@ func (b *Backend) runIpmipower(ctx context.Context, action string, bmcs *nodeset
 	driver := cmp.Or(b.Spec.Driver, "LAN_2_0")
 
 	argv := []string{binary, "--config-file", passwordFilePlaceholder,
-		"--driver-type", driver, "--hostname", bmcs.Hostlist(), flag}
+		"--driver-type", driver, "--hostname", bmcs.Hostlist()}
+	if b.Fanout > 0 {
+		argv = append(argv, "--fanout", strconv.Itoa(b.Fanout))
+	}
+	argv = append(argv, flag)
 
 	// FreeIPMI reads the account out of a configuration file, so neither the
 	// user nor the password reaches the argument vector.
@@ -232,9 +245,35 @@ func (b *Backend) runIpmipower(ctx context.Context, action string, bmcs *nodeset
 	return b.collect(result, bmcs, answer), nil
 }
 
-// ipmitoolHostTimeout bounds one ipmitool run inside the loop. With one
+// ipmitoolHostTimeout bounds one ipmitool run on the gateway. With one
 // retry, an unreachable processor gives up after a few seconds.
 const ipmitoolHostTimeout = 20 * time.Second
+
+// ipmitoolKillAfter is how long timeout(1) waits after its signal before it
+// kills a run that has not ended.
+const ipmitoolKillAfter = 5 * time.Second
+
+// ipmitoolLine is how many bytes of a processor's line are printed, its
+// name among them, before the newline; a line cut there reads as cut. A
+// write to a pipe of no more than PIPE_BUF bytes, which is never less than
+// 512, is never mixed with another, and the runs side by side write their
+// lines into one pipe.
+const ipmitoolLine = 400
+
+// ipmitoolRun is the program xargs runs for one processor, with the tool,
+// the user and the password file as its first three arguments and the
+// processor as its fourth, so that nothing the configuration or the node
+// set says is ever read as shell text; the bound and the subcommand are
+// the constants and the words ipmitoolAction allows. The run is bounded
+// on its own, and the processor's whole line, with the exit code when it
+// is not 0 and the last line ipmitool printed, is printed with one printf
+// once ipmitool has returned, so that one processor that hangs neither
+// stops the others nor passes for an answer, and a line is never cut into
+// by another.
+const ipmitoolRun = `out=$(timeout -k %d %d "$1" -I lanplus -R 1 -U "$2" -f "$3" -H "$4" chassis power %s 2>&1) && rc=0 || rc=$?
+last=$(printf "%%s\n" "$out" | tail -n1)
+if [ "$rc" -eq 0 ]; then line="$4: $last"; else line="$4: exit $rc: $last"; fi
+printf "%%.%ds\n" "$line"`
 
 func (b *Backend) runIpmitool(ctx context.Context, action string, bmcs *nodeset.NodeSet) ([]Status, error) {
 	sub, err := ipmitoolAction(action)
@@ -242,36 +281,63 @@ func (b *Backend) runIpmitool(ctx context.Context, action string, bmcs *nodeset.
 		return nil, err
 	}
 	binary := cmp.Or(b.Spec.IpmitoolPath, "/usr/bin/ipmitool")
+	parallel := max(1, b.Spec.MaxConcurrent)
 
-	// ipmitool takes one host per invocation, so the loop runs on the
-	// gateway rather than opening one ssh connection per processor. Each
-	// run is bounded on its own and its exit code is printed with its last
-	// line, so that one processor that hangs neither stops the others nor
-	// passes for an answer.
+	// ipmitool takes one host per invocation, so xargs runs it on the
+	// gateway, for bmc.ipmi.maxConcurrent processors at a time, rather
+	// than clusterctl opening one ssh connection per processor. The
+	// processors are handed to it as arguments, one to a run, each ended
+	// by a NUL, which no name can hold.
+	run := fmt.Sprintf(ipmitoolRun, int(ipmitoolKillAfter/time.Second), int(ipmitoolHostTimeout/time.Second),
+		sub, ipmitoolLine)
 	var script strings.Builder
-	fmt.Fprintf(&script, "for h in %s; do\n", shellquote.Join(bmcs.Expand()))
-	fmt.Fprintf(&script, "  out=$(timeout -k 5 %d %s -I lanplus -R 1 -U %s -f %s -H \"$h\" chassis power %s 2>&1) && rc=0 || rc=$?\n",
-		int(ipmitoolHostTimeout/time.Second), shellquote.Quote(binary), shellquote.Quote(b.Username),
-		passwordFilePlaceholder, shellquote.Quote(sub))
-	script.WriteString("  last=$(printf '%s\\n' \"$out\" | tail -n1)\n")
-	script.WriteString("  if [ \"$rc\" -eq 0 ]; then printf '%s: %s\\n' \"$h\" \"$last\"; " +
-		"else printf '%s: exit %s: %s\\n' \"$h\" \"$rc\" \"$last\"; fi\n")
-	script.WriteString("done\n")
+	fmt.Fprintf(&script, "printf '%%s\\0' %s |\n", shellquote.Join(bmcs.Expand()))
+	fmt.Fprintf(&script, "  xargs -0 -n 1 -P %d sh -c %s sh %s %s %s\n",
+		parallel, shellquote.Quote(run), shellquote.Quote(binary), shellquote.Quote(b.Username),
+		passwordFilePlaceholder)
 
-	// The whole loop may take every run's bound, and the configured timeout
-	// on top for the connection.
-	timeout := b.Spec.Timeout.Get() + time.Duration(bmcs.Len())*(ipmitoolHostTimeout+5*time.Second)
+	// The runs may each take their whole bound, as many rounds of them as
+	// the set needs at that many at a time, and the configured timeout on
+	// top for the connection.
+	rounds := (bmcs.Len() + parallel - 1) / parallel
+	timeout := b.Spec.Timeout.Get() + time.Duration(rounds)*(ipmitoolHostTimeout+ipmitoolKillAfter)
 	answer := func(text string) (string, bool) {
 		if strings.HasPrefix(text, "exit ") {
 			return "", false
 		}
 		return ipmitoolAnswer(action, text)
 	}
-	result, err := b.runScript(ctx, script.String(), b.Password+"\n", timeout, b.onLine(bmcs, answer))
+	onLine := b.onLine(bmcs, answer)
+	if onLine != nil {
+		inner := onLine
+		onLine = func(stream progress.Stream, line string) { inner(stream, uncut(line)) }
+	}
+	result, err := b.runScript(ctx, script.String(), b.Password+"\n", timeout, onLine)
 	if err != nil {
 		return nil, err
 	}
+	lines := strings.Split(result.Stdout, "\n")
+	for i, line := range lines {
+		lines[i] = uncut(line)
+	}
+	result.Stdout = strings.Join(lines, "\n")
 	return b.collect(result, bmcs, answer), nil
+}
+
+// uncut marks a line of ipmitoolRun's that printf cut at ipmitoolLine
+// bytes with an ellipsis, and leaves out what the cut left of a character
+// it went through.
+func uncut(line string) string {
+	if len(line) < ipmitoolLine {
+		return line
+	}
+	for range utf8.UTFMax - 1 {
+		if r, size := utf8.DecodeLastRuneInString(line); r != utf8.RuneError || size != 1 {
+			break
+		}
+		line = line[:len(line)-1]
+	}
+	return line + "…"
 }
 
 // collect reads the answer of every processor of the set out of what the

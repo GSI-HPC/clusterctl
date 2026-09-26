@@ -103,21 +103,53 @@ func TestIpmipowerTakesTheWholeHostList(t *testing.T) {
 	if !strings.Contains(runner.script, "--driver-type LAN_2_0") {
 		t.Errorf("the driver is missing:\n%s", runner.script)
 	}
-}
-
-func TestIpmitoolLoopsOnTheGateway(t *testing.T) {
-	t.Parallel()
-
-	b, runner := backend(t, v1alpha1.IPMISpec{Backend: ipmi.BackendIpmitool}, "")
-	_, err := b.Power(context.Background(), ipmi.ActionReset, nodeset.MustParse("bmc[1-2]"))
-	if err != nil {
+	// ipmipower decides its fan-out by itself unless --fanout was given.
+	if strings.Contains(runner.script, "--fanout") {
+		t.Errorf("a fan-out was given though --fanout was not:\n%s", runner.script)
+	}
+	b.Fanout = 2
+	if _, err := b.Power(context.Background(), ipmi.ActionOff, nodeset.MustParse("bmc[1-4]")); err != nil {
 		t.Fatalf("Power failed: %v", err)
 	}
-	if !strings.Contains(runner.script, "for h in bmc1 bmc2") {
-		t.Errorf("the loop does not run on the gateway:\n%s", runner.script)
+	if !strings.Contains(runner.script, "--fanout 2") {
+		t.Errorf("--fanout 2 was not handed on:\n%s", runner.script)
 	}
-	if !strings.Contains(runner.script, "chassis power reset") {
-		t.Errorf("the action is missing:\n%s", runner.script)
+}
+
+// ipmitool takes one host at a time, so xargs runs it on the gateway,
+// bmc.ipmi.maxConcurrent processors at once, with the processors handed to
+// it as arguments; a site that sets no bound runs one at a time.
+func TestIpmitoolRunsOnTheGatewaySeveralAtOnce(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		limit int
+		want  string
+	}{
+		{"bmc.ipmi.maxConcurrent", 3, "xargs -0 -n 1 -P 3 sh -c "},
+		{"no bound", 0, "xargs -0 -n 1 -P 1 sh -c "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b, runner := backend(t, v1alpha1.IPMISpec{Backend: ipmi.BackendIpmitool, MaxConcurrent: tc.limit}, "")
+			_, err := b.Power(context.Background(), ipmi.ActionReset, nodeset.MustParse("bmc[1-2]"))
+			if err != nil {
+				t.Fatalf("Power failed: %v", err)
+			}
+			if !strings.Contains(runner.script, "printf '%s\\0' bmc1 bmc2 |") {
+				t.Errorf("the processors are not handed to xargs:\n%s", runner.script)
+			}
+			if !strings.Contains(runner.script, tc.want) {
+				t.Errorf("the runs are not bounded by %d:\n%s", tc.limit, runner.script)
+			}
+			if !strings.Contains(runner.script, "chassis power reset") {
+				t.Errorf("the action is missing:\n%s", runner.script)
+			}
+			if strings.Contains(runner.script, `-H "$h"`) || strings.Contains(runner.script, "for h in") {
+				t.Errorf("the processors are still asked one after the other:\n%s", runner.script)
+			}
+		})
 	}
 }
 
@@ -439,21 +471,38 @@ func TestArgumentErrorsAreUsageErrors(t *testing.T) {
 	}
 }
 
-// ipmitool is run once per processor in a loop, so one timeout for the
-// whole loop ran out after a few dozen unreachable processors.
+// ipmitool is run once per processor, so one timeout for the whole run ran
+// out after a few dozen unreachable processors. The run may take each
+// processor's bound once for every round of bmc.ipmi.maxConcurrent
+// processors, and the configured timeout on top.
 func TestIpmitoolTimeoutScalesWithTheSet(t *testing.T) {
 	t.Parallel()
 
-	b, runner := backend(t, v1alpha1.IPMISpec{Backend: ipmi.BackendIpmitool}, "")
-	b.Spec.Timeout = v1alpha1.Duration(time.Minute)
-	if _, err := b.Power(context.Background(), ipmi.ActionOff, nodeset.MustParse("bmc[1-40]")); err != nil {
-		t.Fatalf("Power failed: %v", err)
-	}
-	if runner.timeout < 40*20*time.Second {
-		t.Errorf("the loop over 40 processors is bounded by %s", runner.timeout)
-	}
-	if !strings.Contains(runner.script, "timeout ") {
-		t.Errorf("each ipmitool run is not bounded on its own:\n%s", runner.script)
+	for _, tc := range []struct {
+		name  string
+		limit int
+		set   string
+		want  time.Duration
+	}{
+		{"one at a time", 1, "bmc[1-40]", time.Minute + 40*25*time.Second},
+		{"eight at a time", 8, "bmc[1-40]", time.Minute + 5*25*time.Second},
+		{"a last round not full", 8, "bmc[1-41]", time.Minute + 6*25*time.Second},
+		{"fewer than the bound", 8, "bmc[1-3]", time.Minute + 25*time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b, runner := backend(t, v1alpha1.IPMISpec{Backend: ipmi.BackendIpmitool, MaxConcurrent: tc.limit}, "")
+			b.Spec.Timeout = v1alpha1.Duration(time.Minute)
+			if _, err := b.Power(context.Background(), ipmi.ActionOff, nodeset.MustParse(tc.set)); err != nil {
+				t.Fatalf("Power failed: %v", err)
+			}
+			if runner.timeout != tc.want {
+				t.Errorf("the run over %s is bounded by %s, want %s", tc.set, runner.timeout, tc.want)
+			}
+			if !strings.Contains(runner.script, "timeout -k 5 20 ") {
+				t.Errorf("each ipmitool run is not bounded on its own:\n%s", runner.script)
+			}
+		})
 	}
 }
 

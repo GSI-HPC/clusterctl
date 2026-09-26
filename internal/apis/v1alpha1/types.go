@@ -186,6 +186,11 @@ type IPMISpec struct {
 	IpmipowerPath string   `json:"ipmipowerPath,omitempty" yaml:"ipmipowerPath,omitempty" jsonschema:"minLength=1"`
 	IpmitoolPath  string   `json:"ipmitoolPath,omitempty" yaml:"ipmitoolPath,omitempty" jsonschema:"minLength=1"`
 	Timeout       Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	// MaxConcurrent bounds how many processors ipmitool is run for at once
+	// on the host Via names. A lower --fanout lowers it for one command;
+	// fanout.max does not change it. ipmipower is handed the whole set and
+	// fans out by itself.
+	MaxConcurrent int `json:"maxConcurrent,omitempty" yaml:"maxConcurrent,omitempty" jsonschema:"minimum=1,description=How many service processors ipmitool is run for at once; a lower --fanout lowers it and fanout.max does not change it; ipmipower fans out by itself, as far as --fanout lets it"`
 }
 
 // RedfishSpec configures the native Redfish client.
