@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -724,5 +726,98 @@ func TestProvisionStatusReportsEveryNode(t *testing.T) {
 	}
 	if s := states[2]; s.BootPath != "none" {
 		t.Errorf("exe0003 = %+v, want no boot path", s)
+	}
+}
+
+// provision status read the power states and only then asked the nodes, so
+// a set of dead processors held back the ssh half by their timeouts. Both
+// halves run at once now, each within its own bound, and a counter shows
+// both of them side by side: the first request to a processor waits until
+// the first node has been asked, and that node's answer waits until the
+// request is under way, which neither could while one half waited for the
+// other.
+func TestProvisionStatusAsksTheProcessorsAndTheNodesAtOnce(t *testing.T) {
+	h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
+	c := fakeCounters(t)
+	processorAsked, drawn := make(chan struct{}), make(chan struct{})
+	var firstRequest, firstNode sync.Once
+	fake := provisionClient
+	provisionClient = func(a *app.App, ctx context.Context, node string) (*redfish.Client, error) {
+		client, err := fake(a, ctx, node)
+		if err != nil {
+			return nil, err
+		}
+		inner := client.Transport
+		client.Transport = roundTrip(func(req *http.Request) (*http.Response, error) {
+			firstRequest.Do(func() {
+				close(processorAsked)
+				select {
+				case <-drawn:
+				case <-time.After(5 * time.Second):
+					t.Error("no node was asked while a processor was")
+				}
+			})
+			return inner.RoundTrip(req)
+		})
+		return client, nil
+	}
+	t.Cleanup(func() { provisionClient = fake })
+	uptime := h.rec.Reply
+	h.rec.Reply = func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if len(req.Argv) > 0 && req.Argv[0] == "uptime" {
+			firstNode.Do(func() {
+				select {
+				case <-processorAsked:
+				case <-time.After(5 * time.Second):
+					t.Error("no processor was asked while a node was")
+				}
+				c.draw()
+				close(drawn)
+			})
+		}
+		return uptime(tg, req)
+	}
+
+	tty, err := runOnTerminal(t, harnessOptions{recorder: h.rec, config: []string{h.layer}},
+		"--set", "services.pxesrv.root="+h.root, "--set", "ssh.knownHostsFile="+h.knownHosts,
+		"--fanout", "1", "provision", "status", "-n", "exe[0001-0003]")
+	if err != nil {
+		t.Fatalf("provision status failed: %v\n%s", err, tty)
+	}
+	var counter string
+	for line := range strings.SplitSeq(tty.String(), "\n") {
+		if strings.HasPrefix(line, "<erase>") && strings.Contains(line, " · ") {
+			counter = strings.TrimPrefix(line, "<erase>")
+		}
+	}
+	// The halves are shown in the order they started, which either may
+	// have done first, and the line is cut at the terminal's width.
+	halves := strings.Split(counter, " | ")
+	slices.Sort(halves)
+	if len(halves) != 2 ||
+		!strings.HasPrefix(halves[0], "read the power state · 0/3 · 1 running · 2 queued") ||
+		!strings.HasPrefix(halves[1], "read the uptime · 0/3 · 1 running · 2 queued") {
+		t.Errorf("the counter read %q, want both halves side by side, each with one node running", counter)
+	}
+}
+
+// The nodes are named before either half starts: a node the naming rules
+// cannot name stopped the command only once every processor had been
+// asked. The processors here have addresses of their own, so that only the
+// nodes' names are missing, and the processors could be asked.
+func TestProvisionStatusNamesTheNodesFirst(t *testing.T) {
+	inventory := "    - nodes: exe0001\n      bmcAddress: 10.9.0.1\n" +
+		"    - nodes: exe0002\n      address: 10.0.2.2\n      bmcAddress: 10.9.0.2\n" +
+		"    - nodes: exe0003\n      address: 10.0.2.3\n      bmcAddress: 10.9.0.3\n"
+	h := newReinstallHost(t, pxeOptions{inventory: inventory})
+	_, err := h.run(t, harnessOptions{}, "--set", `domains.hpc=""`, "provision", "status", "-n", "exe[0001-0003]")
+	wantCode(t, err, exitcode.Usage)
+	if err == nil || !strings.Contains(err.Error(), "a domain it refers to is not set") {
+		t.Errorf("error = %v, want the node the rules cannot name", err)
+	}
+	h.bmcs.mu.Lock()
+	defer h.bmcs.mu.Unlock()
+	if len(h.bmcs.seen) != 0 {
+		t.Errorf("the processors were asked before the command stopped: %q", h.bmcs.seen)
 	}
 }

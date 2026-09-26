@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -1382,6 +1383,10 @@ Show, for each node, the boot path its link on the PXE service points at,
 the power state its service processor reports and whether it answers over
 ssh yet.
 
+The processors and the nodes are asked at the same time, each within its
+own bound: fanout.max nodes at once, and bmc.redfish.maxConcurrent
+processors, or fewer when --fanout is lower.
+
 Every node is listed. A node that does not answer over ssh is shown as such
 and does not fail the command, since a machine that is reinstalling does not
 answer. A boot path or a power state that cannot be read is shown as
@@ -1397,6 +1402,13 @@ credential, and 1 when a host refused.`,
 			}
 			root := a.Spec.Services.PXESrv.Root
 			ns, err := selection(a, args)
+			if err != nil {
+				return err
+			}
+			// The nodes are named before anything is asked, so that one the
+			// naming rules cannot name stops the command before a host or a
+			// processor is.
+			targets, err := a.NodeTargets(ns)
 			if err != nil {
 				return err
 			}
@@ -1426,6 +1438,8 @@ credential, and 1 when a host refused.`,
 				}
 			}
 
+			// The credentials are looked up before either half starts,
+			// so that a prompt for one never comes while either runs.
 			clients := make([]*redfish.Client, len(nodes))
 			for i, s := range states {
 				// A node whose client fails is reported and the rest go
@@ -1443,22 +1457,36 @@ credential, and 1 when a host refused.`,
 				}
 				clients[i], s.BMC = c, c.Host
 			}
-			calls := redfishEach(a.Context(), a, "read the power state", nodes, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
-				return c.PowerState(ctx)
+
+			// The processors and the nodes are asked side by side, each
+			// half within its own bound, and what they answered is taken
+			// in once both are done, the processors' first.
+			var (
+				calls   []redfishCall[string]
+				results []*transport.Result
+				halves  sync.WaitGroup
+			)
+			halves.Go(func() {
+				calls = redfishEach(a.Context(), a, "read the power state", nodes, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+					return c.PowerState(ctx)
+				})
 			})
+			halves.Go(func() {
+				// A node ssh does not reach is an answer, the table's no,
+				// not a failure of the command.
+				executor := a.Executor()
+				executor.Step, executor.Answers = "read the uptime", true
+				results = executor.Run(a.Context(), targets, a.Collect(transport.Request{
+					Argv:    []string{"uptime", "-p"},
+					Timeout: 30 * time.Second,
+				}))
+			})
+			halves.Wait()
 			for i, s := range states {
 				if calls[i].err != nil {
 					s.fail(calls[i].err)
 				}
 				s.Power = output.EscapeCell(calls[i].value)
-			}
-
-			results, err := runOnNodes(a.Context(), a, ns, transport.Request{
-				Argv:    []string{"uptime", "-p"},
-				Timeout: 30 * time.Second,
-			})
-			if err != nil {
-				return err
 			}
 			byName := map[string]*transport.Result{}
 			for _, res := range results {

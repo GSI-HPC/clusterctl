@@ -46,6 +46,11 @@ type Executor struct {
 	// PanicLog receives the stack of a panic in a worker; nil is the
 	// process's standard error.
 	PanicLog io.Writer
+	// Answers says that a result that failed is an answer all the same,
+	// for a command that reports it, as provision status reports which
+	// nodes ssh reaches: every target ends well, but for one the context
+	// ended. The results are the same either way.
+	Answers bool
 }
 
 // Run executes the same request on every target.
@@ -75,6 +80,9 @@ func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, buil
 		}
 		if err != nil && result.Err == nil {
 			result.Err = err
+		}
+		if e.Answers && ctx.Err() == nil {
+			return result, nil
 		}
 		return result, resultError(result)
 	})

@@ -128,8 +128,10 @@ $ clusterctl dhcp log
 ```
 
 The boot path is the node's link on the PXE service, which the installation
-consumes, so `none` once the machine has fetched it. A node that does not
-answer over ssh yet is not an error. A boot path or power state that cannot
+consumes, so `none` once the machine has fetched it. The service processors
+and the nodes are asked at the same time, so processors that do not answer do
+not hold back the answers over ssh. A node that does not answer over ssh yet
+is not an error. A boot path or power state that cannot
 be read is, and fails the command with exit code `3` when the host could not
 be reached; the JSON output lists every node, with an `error` field for the
 ones that failed.
