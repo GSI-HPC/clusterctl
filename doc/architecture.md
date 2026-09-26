@@ -156,7 +156,11 @@ failed, which the error does. A step that sums up the failures of its targets
 takes the progress class of the exit code it asks for, and ends canceled when
 the interrupt ended every target that failed. A Bus that comes with the
 context, as a test's or an MCP call's does, shows nothing of its own, and
-under `clusterctl mcp` the flag and the variable are not read.
+under `clusterctl mcp` the flag and the variable are not read. The MCP
+server gives each tool call a Bus of its own, before the call waits for its
+place, and sends what it counts to the client as MCP progress notifications
+when the client asks for them, all of them before the call's result; the
+call's trace goes into the audit log with each entry it writes.
 
 ## What runs where
 

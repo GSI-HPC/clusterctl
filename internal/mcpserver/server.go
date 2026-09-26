@@ -37,6 +37,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // ConfirmMode says who answers the confirmation gate before a plan is
@@ -238,30 +239,77 @@ func (s *Server) recoverPanics(next mcp.MethodHandler) mcp.MethodHandler {
 // call, or, for a client on an older protocol, the SDK asks and runs the
 // handler again. So a call waiting for a person holds no place, and two
 // questions left unanswered do not stop every other call.
+//
+// Each run reports its progress on a Bus of its own, made before the place
+// is taken, so that the wait for one is a wait of the run's; the progress
+// is sent to the client when it asked for it, and all of it before the
+// handler returns. A tool is reported as a command named after it, but for
+// read_command, whose command reports itself.
 func limited[In, Out any](s *Server, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
-	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
-		var err error
-		select {
-		case <-ctx.Done():
-			err = ctx.Err()
-		case s.calls <- struct{}{}:
-			// When a place and the cancellation are both ready, select
-			// picks either, so the context is asked again, once: the place
-			// is given back on the answer the call is turned away with.
-			if err = ctx.Err(); err != nil {
-				<-s.calls
-			}
-		}
+	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (result *mcp.CallToolResult, out Out, err error) {
+		ctx, done := s.watch(ctx, req)
+		defer done()
+		release, err := s.place(ctx, req.Params.Name)
 		if err != nil {
-			s.logf("%s was given up on while it waited for one of the %d calls worked on at once to end",
-				req.Params.Name, maxCalls)
-			var none Out
-			return nil, none, callError(fmt.Errorf(
-				"cancelled while waiting for one of the %d calls the server works on at once to end: %w", maxCalls, err))
+			return nil, out, err
 		}
-		defer func() { <-s.calls }()
+		defer release()
+		if req.Params.Name != readCommandTool {
+			var span *progress.Span
+			ctx, span = progress.Start(ctx, progress.KindCommand, req.Params.Name)
+			returned := false
+			defer func() {
+				ended := err
+				if !returned {
+					ended = errPanicked
+				}
+				span.End(ended)
+			}()
+			result, out, err = handler(ctx, req, in)
+			returned = true
+			return result, out, err
+		}
 		return handler(ctx, req, in)
 	}
+}
+
+// errPanicked ends the span of a tool whose handler panicked, which the
+// recoverPanics middleware turns into a failed call.
+var errPanicked = errors.New("the tool panicked")
+
+// place waits for a place among the calls the server works on at once, as
+// a wait of the call's when none is free, and returns what gives it back.
+func (s *Server) place(ctx context.Context, tool string) (release func(), err error) {
+	release = func() { <-s.calls }
+	if ctx.Err() == nil {
+		select {
+		case s.calls <- struct{}{}:
+			return release, nil
+		default:
+		}
+	}
+	_, wait := progress.Start(ctx, progress.KindWait, "waiting for another tool call",
+		progress.Message(fmt.Sprintf("at most %d calls are worked on at once", maxCalls)))
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
+	case s.calls <- struct{}{}:
+		// When a place and the cancellation are both ready, select
+		// picks either, so the context is asked again, once: the place
+		// is given back on the answer the call is turned away with.
+		if err = ctx.Err(); err != nil {
+			<-s.calls
+		}
+	}
+	if err != nil {
+		wait.End(err)
+		s.logf("%s was given up on while it waited for one of the %d calls worked on at once to end",
+			tool, maxCalls)
+		return nil, callError(fmt.Errorf(
+			"cancelled while waiting for one of the %d calls the server works on at once to end: %w", maxCalls, err))
+	}
+	wait.End(nil)
+	return release, nil
 }
 
 // callError renders an error for the agent, led by the kind of failure so
@@ -295,11 +343,13 @@ type auditLog struct {
 	mu   sync.Mutex
 }
 
-// auditEntry is one line of the audit log.
+// auditEntry is one line of the audit log. Its trace is that of the call
+// it was written in, which the call's progress events belong to.
 type auditEntry struct {
 	Time    time.Time `json:"time"`
 	Event   string    `json:"event"`
 	Context string    `json:"context"`
+	Trace   string    `json:"trace,omitempty"`
 	Plan    string    `json:"plan,omitempty"`
 	Action  string    `json:"action,omitempty"`
 	Nodes   string    `json:"nodes,omitempty"`

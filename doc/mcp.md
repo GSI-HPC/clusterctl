@@ -183,10 +183,32 @@ confirmation come with it.
   their ssh agent. A shared server reachable over HTTP would change whose
   keys act on the cluster, so that is a separate decision.
 - **An audit trail.** Every plan, refusal and apply is appended to
-  `$XDG_STATE_HOME/clusterctl/mcp/audit.jsonl`: time, context, plan, action,
-  nodes, count, and outcome. An apply writes two lines, `applying` before
-  anything is sent and then `applied` or `failed`. A plan or an apply that
-  cannot be recorded is refused; a refusal that cannot be recorded says so.
+  `$XDG_STATE_HOME/clusterctl/mcp/audit.jsonl`: time, context, the call's
+  trace, plan, action, nodes, count, and outcome. An apply writes two lines,
+  `applying` before anything is sent and then `applied` or `failed`. A plan or
+  an apply that cannot be recorded is refused; a refusal that cannot be
+  recorded says so. The trace names the call: its lines share it, and no other
+  call's do. Nothing outside the audit log carries it, since no event log is
+  written for a call and the notifications do not name it. A plan and its
+  apply are two calls with two traces, which the plan id links; the two lines
+  of one apply share one. The log is written by the server itself, not as a
+  progress sink, since a sink cannot fail what it watches.
+- **Progress.** Each run of a handler reports its progress on a Bus of its
+  own, made before it waits for a place, so the wait is part of what it
+  reports, as `waiting for another tool call`. A tool is reported as a
+  command named after it, but for `read_command`, whose command reports
+  itself as it does at the command line. Calls share no state: two side by
+  side never count each other's work. When the client asks for a call's
+  progress, with a progress token, the server sends it as MCP progress
+  notifications: `progress` is how many of the targets the call expects have
+  ended, `total` how many it expects, the Totals of the steps that count
+  their targets taken together, which grows as another step starts but never
+  shrinks, and `message` a line such as `read the groups: 3/16 done, 1
+  failed`. They go out at most every half second and as each step ends, and
+  the last, which says that everything ended, before the call's result: none
+  follows it. A call that counts nothing sends none, and neither does one
+  whose client gave no token. None of it reaches the call's `notes`, and no
+  display is drawn for an agent.
 - **Two calls at a time.** The SDK starts every tool call as soon as it
   arrives, and each call can reach as many hosts at once as `fanout.max`
   allows, so calls an agent sends side by side would multiply that. The

@@ -44,6 +44,13 @@ that sends more at once is not refused: the rest wait their turn, so it never
 has more than two commands reaching the site at once. A question waiting for
 your answer does not take a turn.
 
+A client that asks for the progress of a call is told it as the call runs,
+at most every half second and as each step ends: how many of the nodes,
+names or ports the call works on are done, of how many, and a line such as
+`read the groups: 3/16 done, 1 failed`. Everything has been told by the time
+the call returns. Whether your client shows it, and where, is up to the
+client.
+
 ## How a change is confirmed
 
 Ask the agent to drain a node, and it plans the change first:
@@ -86,7 +93,9 @@ Every plan, refusal and apply is recorded, one JSON object per line, in
 `~/.local/state/clusterctl/mcp/audit.jsonl` (under `$XDG_STATE_HOME` when it
 is set). An apply is recorded as `applying` before anything is sent, and
 again with how it ended. When the file cannot be written, plans and applies
-are refused.
+are refused. Each line names the `trace` of the call it was written in, the
+one the call's progress belongs to; a plan and its apply are two calls, with
+two traces, linked by the plan's id.
 
 ```console
 $ jq -c '[.time, .event, .action, .nodes, .outcome]' ~/.local/state/clusterctl/mcp/audit.jsonl

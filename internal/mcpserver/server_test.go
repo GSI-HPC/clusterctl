@@ -106,6 +106,10 @@ type setup struct {
 	// ctx is what the server's side of the session is connected with, for
 	// a test that gives the calls a progress Bus.
 	ctx context.Context
+	// wire records what goes between the client and the server.
+	wire *wire
+	// progress receives the progress notifications the client is sent.
+	progress func(*mcp.ProgressNotificationParams)
 }
 
 type fixture struct {
@@ -151,6 +155,11 @@ func start(t *testing.T, s setup) *fixture {
 	}
 
 	opts := &mcp.ClientOptions{}
+	if s.progress != nil {
+		opts.ProgressNotificationHandler = func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+			s.progress(req.Params)
+		}
+	}
 	if s.answer != nil {
 		opts.ElicitationHandler = func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
 			f.asked = append(f.asked, req.Params.Message)
@@ -163,7 +172,11 @@ func start(t *testing.T, s setup) *fixture {
 	if s.ctx != nil {
 		connect = s.ctx
 	}
-	if _, err := server.SDK().Connect(connect, serverSide, nil); err != nil {
+	var transport mcp.Transport = serverSide
+	if s.wire != nil {
+		transport = s.wire.watch(serverSide)
+	}
+	if _, err := server.SDK().Connect(connect, transport, nil); err != nil {
 		t.Fatalf("server Connect failed: %v", err)
 	}
 	session, err := client.Connect(ctx, clientSide, &mcp.ClientSessionOptions{ProtocolVersion: s.protocol})

@@ -35,9 +35,12 @@ const maxCommandOutput = 64 << 10
 // agent, so it is refused rather than dropped without a word.
 var pinnedFlags = []string{"config", "context", "set", "yes", "force", "fanout", "progress"}
 
+// readCommandTool is the name of the tool that runs the read-only commands.
+const readCommandTool = "read_command"
+
 func (s *Server) addCommandTool() {
 	mcp.AddTool(s.sdk, &mcp.Tool{
-		Name:  "read_command",
+		Name:  readCommandTool,
 		Title: "Run a read-only clusterctl command",
 		Description: "Run one clusterctl command that only reads, for what the other tools do not cover. " +
 			"args are the words after clusterctl, for example [\"dhcp\", \"hosts\", \"-n\", \"exe[1-4]\"] or " +

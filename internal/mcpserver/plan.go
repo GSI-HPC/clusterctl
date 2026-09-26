@@ -270,7 +270,7 @@ type planOutput struct {
 }
 
 func (s *Server) planChange(ctx context.Context, _ *mcp.CallToolRequest, in planInput) (*mcp.CallToolResult, *planOutput, error) {
-	entry := auditEntry{Event: "plan", Context: s.context, Action: in.Action, Nodes: in.Nodes}
+	entry := auditEntry{Event: "plan", Context: s.context, Trace: trace(ctx), Action: in.Action, Nodes: in.Nodes}
 	p, out, err := s.preparePlan(ctx, in, &entry)
 	if err != nil {
 		entry.Outcome = "refused: " + err.Error()
@@ -399,7 +399,7 @@ type applyOutput struct {
 }
 
 func (s *Server) applyPlan(ctx context.Context, req *mcp.CallToolRequest, in applyInput) (*mcp.CallToolResult, *applyOutput, error) {
-	entry := auditEntry{Event: "apply", Context: s.context, Plan: in.PlanID, Nodes: in.Nodes, Count: in.Count}
+	entry := auditEntry{Event: "apply", Context: s.context, Trace: trace(ctx), Plan: in.PlanID, Nodes: in.Nodes, Count: in.Count}
 	result, out, err := s.apply(ctx, req, in, &entry)
 	if err != nil {
 		if entry.Outcome == "" {
