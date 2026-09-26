@@ -103,6 +103,9 @@ type setup struct {
 	force bool
 	// log receives the server's log; nil discards it.
 	log io.Writer
+	// ctx is what the server's side of the session is connected with, for
+	// a test that gives the calls a progress Bus.
+	ctx context.Context
 }
 
 type fixture struct {
@@ -156,7 +159,11 @@ func start(t *testing.T, s setup) *fixture {
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, opts)
 	serverSide, clientSide := mcp.NewInMemoryTransports()
-	if _, err := server.SDK().Connect(ctx, serverSide, nil); err != nil {
+	connect := ctx
+	if s.ctx != nil {
+		connect = s.ctx
+	}
+	if _, err := server.SDK().Connect(connect, serverSide, nil); err != nil {
 		t.Fatalf("server Connect failed: %v", err)
 	}
 	session, err := client.Connect(ctx, clientSide, &mcp.ClientSessionOptions{ProtocolVersion: s.protocol})

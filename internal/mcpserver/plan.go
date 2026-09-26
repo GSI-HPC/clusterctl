@@ -356,13 +356,17 @@ func (s *Server) preparePlan(ctx context.Context, in planInput, entry *auditEntr
 
 	// The current state helps the administrator judge the plan. When the
 	// workload manager does not answer the plan still stands, and says so.
-	nodes, nodesErr := c.Nodes(ctx, ns, nil)
-	jobs, jobsErr := c.Jobs(ctx, slurm.JobFilter{Nodes: ns})
-	if err := errors.Join(nodesErr, jobsErr); err != nil {
+	// The nodes and the jobs are read side by side.
+	r := newReads(ctx, a)
+	on := r.on(c.Target)
+	nodes := read(r, "sinfo", on, func() ([]slurm.Node, error) { return c.Nodes(ctx, ns, nil) })
+	jobs := read(r, "squeue", on, func() ([]slurm.Job, error) { return c.Jobs(ctx, slurm.JobFilter{Nodes: ns}) })
+	r.wait()
+	if err := errors.Join(nodes.err, jobs.err); err != nil {
 		out.Warnings = append(out.Warnings, "the current state could not be read: "+err.Error())
 	} else {
-		out.CurrentState = statesOf(nodes)
-		out.Warnings = append(out.Warnings, ch.warn(nodes, jobs, ns)...)
+		out.CurrentState = statesOf(nodes.value)
+		out.Warnings = append(out.Warnings, ch.warn(nodes.value, jobs.value, ns)...)
 	}
 	return p, out, nil
 }

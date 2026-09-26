@@ -357,10 +357,18 @@ func (r *Resolver) execFailed(q *asking, name, group string, err error) error {
 // that could not be asked. A source that has no way to list its groups is
 // left out without an error.
 func (r *Resolver) GroupsOf(node string) (map[string][]string, error) {
+	return r.GroupsOfContext(r.ctx, node)
+}
+
+// GroupsOfContext is GroupsOf with its lookups made, and reported, under
+// ctx, such as the target of the node they are for in a pool, rather than
+// under the resolver's own context. A lookup another caller made first is
+// reported where that one made it.
+func (r *Resolver) GroupsOfContext(ctx context.Context, node string) (map[string][]string, error) {
 	out := map[string][]string{}
 	var errs []error
 	for _, name := range r.Sources() {
-		member, err := r.groupsIn(name, node)
+		member, err := r.groupsIn(ctx, name, node)
 		if len(member) > 0 {
 			out[name] = member
 		}
@@ -371,18 +379,19 @@ func (r *Resolver) GroupsOf(node string) (map[string][]string, error) {
 	return out, errors.Join(errs...)
 }
 
-// groupsIn returns the groups of one node in one source.
-func (r *Resolver) groupsIn(name, node string) ([]string, error) {
+// groupsIn returns the groups of one node in one source, looked up under
+// ctx.
+func (r *Resolver) groupsIn(ctx context.Context, name, node string) ([]string, error) {
 	src := r.sources[name]
 	if src.Exec != nil && len(src.Exec.Reverse) > 0 {
-		answer, err := r.exec(&asking{ctx: r.ctx}, src.Exec, src.Exec.Reverse, map[string]string{PlaceholderNode: node})
+		answer, err := r.exec(&asking{ctx: ctx}, src.Exec, src.Exec.Reverse, map[string]string{PlaceholderNode: node})
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", name, err)
 		}
 		return fields(answer), nil
 	}
 
-	groups, err := r.List(name)
+	groups, err := r.list(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +400,7 @@ func (r *Resolver) groupsIn(name, node string) ([]string, error) {
 		errs   []error
 	)
 	for _, group := range groups {
-		expr, err := r.resolveIn(r.ctx, name, group)
+		expr, err := r.resolveIn(ctx, name, group)
 		if err != nil {
 			errs = append(errs, err)
 			continue
