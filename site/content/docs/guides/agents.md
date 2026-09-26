@@ -1,6 +1,6 @@
 ---
 title: Working with an agent
-weight: 8
+weight: 9
 ---
 
 `clusterctl mcp serve` offers clusterctl to an AI agent in an MCP client
@@ -50,7 +50,7 @@ at most every half second and as each step ends: how many of the nodes,
 names or ports the call works on are done, of how many, and a line such as
 `read the groups: 3/16 done, 1 failed`. Everything has been told by the time
 the call returns. Whether your client shows it, and where, is up to the
-client.
+client. See [Progress](../progress/#progress-for-an-agent).
 
 ## How a change is confirmed
 

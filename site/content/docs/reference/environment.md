@@ -10,9 +10,9 @@ weight: 2
 | `CLUSTERCTL_CONFIG` | Replaces the configuration search path. A `PATH`-style list of files and directories, most general first. |
 | `CLUSTERCTL_CONTEXT` | Selects the context, as `--context` does. |
 | `CLUSTERCTL_NODES` | The node set commands act on when neither `-n` nor a node set argument is given. An empty `-n` is an error, never a fall-back to it. |
-| `CLUSTERCTL_PROGRESS` | How progress is shown when `--progress` is not given: `auto`, `tty`, `counter`, `plain` or `none`. Empty is `auto`, the live tree on a terminal. `plain` suits a CI job's log. See [Output](../../guides/output/#progress-and-errors-go-to-stderr). |
-| `CLUSTERCTL_PROGRESS_LOG` | The file each command appends its progress events to, as JSON lines, when `--progress-log` is not given; created readable by you alone. Empty writes none. See [Output](../../guides/output/#the-event-log). |
-| `CLUSTERCTL_FANOUT` | `fanout.max` |
+| `CLUSTERCTL_PROGRESS` | How progress is shown when `--progress` is not given: `auto`, `tty`, `counter`, `plain` or `none`. Empty is `auto`, the live tree on a terminal. `plain` suits a CI job's log. Unlike the flag it fails no command: a display where none can be drawn shows nothing, and a value it does not take shows nothing, with a line on standard error. See [Progress](../../guides/progress/). |
+| `CLUSTERCTL_PROGRESS_LOG` | The file each command appends its progress events to, as JSON lines, when `--progress-log` is not given; created readable by you alone. Empty writes none. Unlike the flag it fails no command: a file that cannot be used is not written, with a line on standard error. See [the event log](../../guides/progress/#the-event-log). |
+| `CLUSTERCTL_FANOUT` | `fanout.max`, how many hosts ssh works on at once. Unlike `--fanout`, it leaves the service processors and the names asked at once to their own settings, `bmc.redfish.maxConcurrent`, `bmc.ipmi.maxConcurrent` and `services.dns.maxConcurrent`. |
 | `CLUSTERCTL_CONNECT_TIMEOUT` | `ssh.connectTimeout` |
 | `CLUSTERCTL_COMMAND_TIMEOUT` | `fanout.commandTimeout` |
 | `CLUSTERCTL_KNOWN_HOSTS` | `ssh.knownHostsFile` |
@@ -33,7 +33,7 @@ drawn in ASCII.
 `TRACEPARENT` and `TRACESTATE` are the W3C trace context a CI system that
 traces its jobs may set. A valid `TRACEPARENT` gives a command's progress
 events its trace id, and the first line the command writes to the
-[event log](../../guides/output/#the-event-log) records the span it names,
+[event log](../../guides/progress/#the-event-log) records the span it names,
 its trace flags and `TRACESTATE`, as they were given; one that is not valid
 is ignored. Nothing is sent to a tracing system, and both variables are
 taken out of the environment of the programs clusterctl runs, so none of

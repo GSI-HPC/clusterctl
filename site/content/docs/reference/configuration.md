@@ -95,12 +95,12 @@ contexts:
 | `hosts` | Infrastructure roles: `host`, `user`, `forwardAgent`, `forwardX11`, `proxyJump`, `controlMaster`, `legacyAlgorithms`, `options`, `description` |
 | `networks` | Named CIDRs, used by tunnels |
 | `credentials` | Named accounts and where their password is read from |
-| `bmc` | Out-of-band access: `credential`, `order`, `ipmi` (ipmitool is run for `ipmi.maxConcurrent` processors at once, fewer when `--fanout` is lower; `fanout.max` does not change it, and ipmipower fans out by itself), `redfish` (`redfish.maxConcurrent` processors at once, the same way), `pdu`, `vendors` |
+| `bmc` | Out-of-band access: `credential`, `order`, `ipmi` (ipmitool is run for `ipmi.maxConcurrent` processors at once, 8 by default, fewer when `--fanout` is lower; `fanout.max` does not change it, and ipmipower fans out by itself, `--fanout` at once when it is given; the key is new after v0.3.0, which refuses a configuration that sets it), `redfish` (`redfish.maxConcurrent` processors at once, 8 by default, the same way), `pdu`, `vendors` |
 | `ssh` | Transport: `knownHostsFile`, `include`, timeouts, `sendEnv`, `options`, `binary` |
 | `tunnels` | sshuttle profiles: `remote`, `subnets`, `excludes`, `dns`, `method` |
 | `safety` | `protectedHosts`, `confirmAbove`, `slurmAware`, `powerOnBatch`, `powerOnStagger` |
-| `fanout` | `max`, `commandTimeout` (enforced on the node; ssh is stopped locally once a command outlives it by 5 s and the time `ssh.connectTimeout` × `ssh.connectionAttempts` lets reaching the node take, per jump host) |
-| `services` | `dhcp`, `pxesrv`, `tftp`, `http`, `cinc`, `fabric`, `dns` (`dns.maxConcurrent` names at once, fewer when `--fanout` is lower; `fanout.max` does not change it) |
+| `fanout` | `max`, `commandTimeout` (enforced on the node; ssh is stopped locally once a command outlives it by 5 s and the time `ssh.connectTimeout` × `ssh.connectionAttempts` lets reaching the node take, per jump host, as a role's `ConnectTimeout` and `ConnectionAttempts` options set them for its hosts, and twice that for a role with a `ProxyCommand`; a backup to ssh's keepalives, not a bound of its own; `provision cinc run` waits 30 minutes when it is shorter, and `copy` bounds each transfer with `--timeout`) |
+| `services` | `dhcp`, `pxesrv`, `tftp`, `http`, `cinc`, `fabric`, `dns` (`dns.maxConcurrent` names at once, 16 by default, fewer when `--fanout` is lower; `fanout.max` does not change it; the key is new after v0.3.0, which refuses a configuration that sets it) |
 
 ### Naming templates
 

@@ -18,13 +18,19 @@ so calls side by side multiply every one of these.
 The executor, the Redfish fan-out and the host key scans each kept a
 semaphore of their own until `5413ac7`, and the scan went on dialling every
 host after an interrupt. `fanout.Each` has been the one loop since. Other
-loops still reach one host at a time and are to become pools: the names of
+loops reached one host at a time, however many there were: the names of
 `dns lookup`, the processors ipmitool reaches from the role `bmc.ipmi.via`
-names, the checks of `doctor --remote`.
+names, the checks of `doctor --remote`, the ports `fabric state` asks the
+fabric host about and the groups `describe_nodes` reads. `provision status`,
+`describe_nodes` and `plan_change` made reads that do not depend on each
+other one after the other, and `secrets push` waited for the slowest node
+before it wrote the next file. This record makes each loop a pool, or, where
+one session asks a far host about many things, has the host run them side by
+side, and puts the reads side by side.
 
-`--fanout` is the command line's layer of `fanout.max`. It bounds ssh and
-scp to nodes and the host key scans; the Redfish fan-out is bounded by
-`bmc.redfish.maxConcurrent`, whatever `--fanout` says.
+`--fanout` is the command line's layer of `fanout.max`. It bounded ssh and
+scp to nodes and the host key scans; the Redfish fan-out was bounded by
+`bmc.redfish.maxConcurrent`, whatever `--fanout` said.
 
 A rack powering on at once trips its breaker, so a power-on is sent in
 batches. A design for the pools proposed batching `reset`, `bmc redfish
@@ -43,7 +49,10 @@ partly failed, and cutting a batch down to the pool's limit.
   returns what each item came to in the order the items were given, those
   left out with the context's error. A panic in one call becomes that
   item's failure, through `fanout.Recovered`, with its stack in the front
-  end's diagnostics.
+  end's diagnostics. Where one ssh session asks a far host about many
+  things, ipmitool on `bmc.ipmi.via` for each processor and `ibportstate`
+  on the fabric host for each port, `xargs -P` runs them side by side
+  there, under the same bounds.
 - **A bound for each kind of work.** One a site can set has a default of its
   own in `defaults.yaml`, not derived from `fanout.max`:
 
@@ -53,7 +62,7 @@ partly failed, and cutting a batch down to the pool's limit.
   | Redfish requests | `bmc.redfish.maxConcurrent` | 8 |
   | ipmitool, for the processors it reaches from `bmc.ipmi.via` | `bmc.ipmi.maxConcurrent` | 8 |
   | The names of `dns lookup` | `services.dns.maxConcurrent` | 16 |
-  | Sessions to one role host, such as `doctor --remote`'s | `fanout.PerHost` | 4 |
+  | Sessions to one role host, such as `doctor --remote`'s, and the ports `fabric state` asks about at once | `fanout.PerHost` | 4 |
   | MCP tool calls, across the server | fixed | 2 |
 
 - **`--fanout` lowers the other bounds and never raises them.** Given on the

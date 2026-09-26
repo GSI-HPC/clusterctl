@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-weight: 9
+weight: 10
 ---
 
 ## Start here
@@ -150,13 +150,44 @@ $ clusterctl exec -n '@compute' --timeout 5m -- ./slow-check
 
 ## Everything is slow
 
+Watch where the time goes first. On a terminal the live tree names the step a
+command is in and, under it, the targets that have run longest, with the
+request each one waits for; a lookup that takes more than a second shows up
+too. `--progress plain` says the same in lines, which a CI log keeps, and
+`--progress-log` keeps when every step, target and request started and ended,
+and how:
+
 ```console
-$ clusterctl exec --fanout 32 -n '@compute' -- uptime
+$ clusterctl --progress plain bmc status -n '@compute'
+$ clusterctl --progress-log slow.jsonl bmc status -n '@compute'
+$ jq -c 'select(.type == "end" and .class == "timeout") | [.name, .host, .err]' slow.jsonl
 ```
 
-The default fan-out is conservative because connections through a tunnel or a
-jump host are fragile and a wide fan-out trips sshd's `MaxStartups`. Raise it
-when the path is direct.
+See [Progress](../progress/). How many hosts are worked on at once depends
+on the kind of work, and each kind has a bound of its own:
+
+| Work | Bound | Default |
+| --- | --- | --- |
+| ssh and scp to nodes, host key scans | `fanout.max`, or `--fanout` | 16 |
+| Redfish requests | `bmc.redfish.maxConcurrent` | 8 |
+| ipmitool, on the host `bmc.ipmi.via` names | `bmc.ipmi.maxConcurrent` | 8 |
+| The names of `dns lookup` | `services.dns.maxConcurrent` | 16 |
+
+```console
+$ clusterctl exec --fanout 32 -n '@compute' -- uptime
+$ clusterctl --set bmc.redfish.maxConcurrent=16 bmc status -n '@compute'
+```
+
+`--fanout` sets the first, and lowers the others where it is lower, but never
+raises them; raise one of those in the site's configuration, or with `--set`
+for one command. The default fan-out is conservative because connections
+through a tunnel or a jump host are fragile and a wide fan-out trips sshd's
+`MaxStartups`. Raise it when the path is direct. A service processor is far
+slower than a node and has few connections to give, and a site's resolver
+may limit how fast it is asked, so raise theirs with care. A power-on or a
+power cycle is slow on purpose: it is sent in batches of
+`safety.powerOnBatch`, with `safety.powerOnStagger` between them, and
+`--batch` and `--stagger` change both for one command.
 
 ## Something changed that should not have
 
