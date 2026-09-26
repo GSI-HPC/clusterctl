@@ -9,8 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // cancelledLate is a context that is not cancelled the first times it is
@@ -49,21 +47,25 @@ func TestAPlaceIsNeverKeptByACallTurnedAway(t *testing.T) {
 		}
 		ctx := &cancelledLate{Context: context.Background(), waiting: make(chan struct{})}
 		ctx.until.Store(until)
-		handler := limited(s, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
-			return nil, struct{}{}, nil
-		})
-		done := make(chan error)
+		type placed struct {
+			release func()
+			err     error
+		}
+		got := make(chan placed)
 		go func() {
-			_, _, err := handler(ctx, &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "describe_nodes"}}, struct{}{})
-			done <- err
+			release, err := s.place(ctx, "describe_nodes")
+			got <- placed{release, err}
 		}()
 		// The waiting call takes the place another call gives back.
 		<-ctx.waiting
 		<-s.calls
-		err := <-done
+		p := <-got
+		if p.err == nil {
+			p.release()
+		}
 		if n := len(s.calls); n != maxCalls-1 {
 			t.Errorf("cancelled after %d questions (err %v): %d places taken once the call was done, want %d",
-				until, err, n, maxCalls-1)
+				until, p.err, n, maxCalls-1)
 		}
 	}
 }

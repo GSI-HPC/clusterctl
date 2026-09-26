@@ -112,7 +112,7 @@ func TestDescribeNodesReadsItsFacetsAtOnceWithinTheHostsBound(t *testing.T) {
 	}
 	// Each node's lookups sit under its target; only sinfo and squeue are
 	// the command's own.
-	if n := strings.Count("\n"+c.Tree(), "\ncall ssh "); n != 2 {
+	if n := strings.Count(c.Tree(), "\n  call ssh "); n != 2 {
 		t.Errorf("%d ssh calls sit outside the targets, want sinfo and squeue alone:\n%s", n, c.Tree())
 	}
 }
