@@ -65,7 +65,9 @@ the whole command tree can be driven without a cluster. A reply is handed the
 payload a command streamed on standard input, so a test can run the script a
 command sends in a real shell, in a temporary directory, and look at what it
 left behind: that is how `cinc config` is shown to write a file that is safe
-to source and never truncated. A fan-out makes its calls in any order, so a
+to source and never truncated. Its answer is handed to the request's `OnLine`
+a line at a time, as a real run hands on what ssh prints, so a parser of the
+lines can be driven with prepared output. A fan-out makes its calls in any order, so a
 test that prepares answers for several nodes keys each to its node with
 `ByTarget` rather than listing them in `Responses`, compares the recorded
 calls in node set order with `Sorted`, and writes a `Reply` that is safe to

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -27,6 +28,11 @@ type Call struct {
 //
 // It backs --dry-run, where the point is to show exactly what would be sent,
 // and the tests, where a real ssh is neither available nor wanted.
+//
+// Whatever answers a call, its standard output and then its standard error
+// are handed to the request's OnLine a line at a time, only the lines that
+// ended, and to a display that shows the lines, as Client.Run hands on the
+// output of ssh as it arrives.
 type Recorder struct {
 	// Responses are returned in the order the calls arrive; once they run
 	// out, an empty successful result is returned. A fan-out makes its
@@ -50,7 +56,16 @@ type Recorder struct {
 }
 
 // Run implements Runner.
-func (r *Recorder) Run(_ context.Context, target Target, req Request) (*Result, error) {
+func (r *Recorder) Run(ctx context.Context, target Target, req Request) (*Result, error) {
+	result, err := r.answer(target, req)
+	if result != nil {
+		replay(ctx, req, result)
+	}
+	return result, err
+}
+
+// answer records a call and returns the answer prepared for it.
+func (r *Recorder) answer(target Target, req Request) (*Result, error) {
 	command, err := RemoteCommand(req)
 	if err != nil {
 		return nil, err
@@ -94,6 +109,27 @@ func (r *Recorder) Run(_ context.Context, target Target, req Request) (*Result, 
 		return &result, nil
 	}
 	return &Result{Target: target}, nil
+}
+
+// replay hands the output of a result on as Run hands on the output of
+// ssh: each line to the request's OnLine and, when the span in ctx shows
+// lines, to the display. The two streams are handed on side by side, each
+// from a goroutine of its own, as ssh's two pipes are read, so that a
+// parser that is not safe for the two at once fails under -race here as
+// it would against a host.
+func replay(ctx context.Context, req Request, r *Result) {
+	var streams sync.WaitGroup
+	for _, out := range []struct {
+		stream progress.Stream
+		text   string
+	}{{progress.Stdout, r.Stdout}, {progress.Stderr, r.Stderr}} {
+		if out.text != "" {
+			streams.Go(func() {
+				_, _ = io.WriteString(progress.Tee(ctx, io.Discard, out.stream, req.OnLine), out.text)
+			})
+		}
+	}
+	streams.Wait()
 }
 
 // Calls returns the recorded requests.

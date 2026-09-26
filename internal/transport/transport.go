@@ -125,6 +125,18 @@ type Request struct {
 	// MaxOutput bounds how much of each of standard output and standard
 	// error Run keeps; zero keeps up to DefaultMaxOutput.
 	MaxOutput int
+	// OnLine, when it is set, is handed each line of standard output and
+	// standard error Run reads, as it arrives, for a parser that reports
+	// on the items of a command that prints one line for each, such as a
+	// target a display can end before the command has. It is handed only
+	// lines that ended, without the "\n" and a "\r" before it; a line the
+	// end of the output cut off, or one longer than 64 KiB, is none. It is
+	// called from the goroutines that read the two streams, possibly at
+	// the same time, and every call has returned before Run does. The
+	// lines are the host's: nothing in them may be trusted. What Run
+	// keeps of the output is not changed by it, and neither is MaxOutput,
+	// which does not bound what OnLine is handed.
+	OnLine func(stream progress.Stream, line string)
 	// NoShell says the host's command line is not a POSIX shell, as on a
 	// power distribution unit, so the command is sent without the guard that
 	// tells its exit status 255 from ssh's, which it could not run. A 255
@@ -475,6 +487,14 @@ func duration(d time.Duration) string {
 
 // Run executes a request and captures its output.
 //
+// The output is also cut into lines as it arrives, for the request's
+// OnLine and for a display that shows the lines of the span the context
+// carries, which is the call a Traced runner reports. Run returns only
+// once ssh has exited and both streams have been read to the end, which
+// Wait does before it returns, so the call is still open when the last of
+// the output reaches the display, and a line the output ended without a
+// newline is shown before the call's end.
+//
 // A request with a timeout is bounded here as well as on the host. timeout(1)
 // ends the command only once it has reached the host, and only a host that
 // still answers can say so, so a connection that hangs while it is made, or
@@ -503,8 +523,12 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 	}
 	stdout, stderr := &capture{limit: limit}, &capture{limit: limit}
 	cmd := c.command(runCtx, args)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	// The lines are cut out of what ssh writes, before the bound drops
+	// any of it: a parser and a display see the whole of the output,
+	// the result keeps what the bound lets it. Standard input, which
+	// carries secrets, is never looked at.
+	cmd.Stdout = progress.Tee(ctx, stdout, progress.Stdout, req.OnLine)
+	cmd.Stderr = progress.Tee(ctx, stderr, progress.Stderr, req.OnLine)
 	cmd.Stdin = req.Stdin
 	if cmd.Stdin == nil {
 		// Without this ssh inherits the terminal and a remote command may

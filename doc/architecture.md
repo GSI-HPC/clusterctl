@@ -121,6 +121,11 @@ command reports nests under it. `app.New` wraps both runners in
 `transport.Traced`, which reports every request as an `ssh` call under the
 span its context carries: a dry run's recorded requests end skipped, and its
 lookups through `ReadRunner`, which reach the host, end as they came back.
+`Client.Run` cuts what ssh prints into lines as it arrives, before the bound
+on the output drops any of it: a display is shown them where a step shows
+lines, as exec's does, and a parser is handed those that ended through
+`Request.OnLine`, so that it can end a target before the command has. Standard
+input, which carries secrets, is never looked at.
 
 ## What runs where
 
