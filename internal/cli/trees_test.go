@@ -95,8 +95,8 @@ func sealAge(t *testing.T, keyFile, path, content string) {
 	}
 }
 
-// provision status asks the processors and then the nodes, two steps side
-// by side, each counting every node.
+// provision status asks the processors and the nodes at once, two steps
+// side by side, each counting every node.
 func TestProvisionStatusReportsBothHalves(t *testing.T) {
 	h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
 	h.link(t, "10.0.2.1", h.exePath())
@@ -113,12 +113,45 @@ command provision status: failed (transport): where the reinstallation of exe000
       call redfish host={} method=GET path=/redfish/v1/Systems/1: failed (transport): {}: dial tcp: connection refused
     target exe[0001,0003]: ok
       call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
-  step run total=3 limit=24 [fold]: ok
+  step read the uptime total=3 limit=24 [fold]: ok
     target exe[0001-0003]: ok
       call ssh node={} host={} timeout=30s exit=0: ok
 `
 	if got := tree(); got != want[1:] {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want[1:])
+	}
+}
+
+// A node ssh does not reach is an answer provision status reports, the
+// table's no, and not a failure: its target ends well, and the display
+// counts it done.
+func TestProvisionStatusCountsANodeSshDoesNotReachAsAnswered(t *testing.T) {
+	h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
+	h.link(t, "10.0.2.1", h.exePath())
+	answer := h.rec.Reply
+	h.rec.Reply = func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if len(req.Argv) > 0 && req.Argv[0] == "uptime" && tg.Name == "exe0002" {
+			return &transport.Result{Target: tg, ExitCode: 255,
+				Err: exitcode.Errorf(exitcode.Transport, "exe0002: ssh: connect to host exe0002.hpc.example.org port 22: No route to host")}, nil
+		}
+		return answer(tg, req)
+	}
+	ctx, tree := watch(t)
+	out, err := h.run(t, harnessOptions{ctx: ctx}, "-o", "json", "provision", "status", "-n", "exe[0001-0003]")
+	if err != nil {
+		t.Fatalf("provision status: %v", err)
+	}
+	if !strings.Contains(out.out.String(), `"sshError"`) {
+		t.Errorf("the table does not say why exe0002 was not reached:\n%s", out.out)
+	}
+	want := `
+  step read the uptime total=3 limit=24 [fold]: ok
+    target exe0002: ok
+      call ssh node={} host={} timeout=30s exit=255: failed (transport): {}: ssh: connect to host {} port 22: No route to host
+    target exe[0001,0003]: ok
+`
+	if got := tree(); !strings.Contains(got, want[1:]) {
+		t.Errorf("progress:\n%s\nwant the uptime step and all three targets ok:\n%s", got, want[1:])
 	}
 }
 
