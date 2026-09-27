@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
@@ -738,5 +739,297 @@ func TestCloseTakesTheTreeOff(t *testing.T) {
 	checkScreen(t, f.screen.String(), `
 ✓ run  1.0s
 clusterctl: interrupted
+`)
+}
+
+// A tree given no clock reads the real one, and draws from its own ticker
+// once the command has run for a second.
+func TestTheTreeReadsTheRealClock(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := &progresstest.Screen{}
+		tree := display.NewTree(display.NewTerminal(s, func() (int, int, error) { return 100, 24, nil }), display.TreeOptions{})
+		capture := &progresstest.Capture{}
+		bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{capture, tree}})
+		_, command := progress.Start(progress.WithBus(context.Background(), bus), progress.KindCommand, "exec")
+		tree.Start()
+		time.Sleep(999 * time.Millisecond)
+		synctest.Wait()
+		if got := s.String(); got != "" {
+			t.Fatalf("the tree was drawn within its first second:\n%s", got)
+		}
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		checkScreen(t, s.String(), `
+exec · 0:01
+`)
+		command.End(nil)
+		bus.Close()
+		tree.Close()
+		progresstest.Check(t, capture.Events())
+	})
+}
+
+// Two steps side by side share the rows there are: a short list of running
+// targets that fits whole is drawn whole, and the long one gets what is
+// left.
+func TestTheTreeDrawsAShortListWhole(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "provision status", treeSetup{})
+	start := func(name string, n int) {
+		ctx, _ := progress.Start(f.ctx, progress.KindStep, name, progress.WithFlags(progress.Fold), progress.Total(n))
+		_, spans := targets(ctx, nodes(n)...)
+		for _, span := range spans {
+			span.Run()
+		}
+	}
+	start("read the power state", 2)
+	start("read the uptime", 10)
+	checkScreen(t, f.draw(time.Second), `
+provision status · 0:01
+  read the power state  0/2 · 2 running
+    ▸ exe1  1s
+    ▸ exe2  1s
+  read the uptime  0/10 · 10 running
+    ▸ exe1  1s
+    ▸ exe2  1s
+    … 8 more running
+`)
+}
+
+// When the failures do not fit either, they are cut too, once the running
+// targets are, and the row that says how many are left out counts the
+// targets of each row left out, not the rows.
+func TestTheTreeCutsTheFailures(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "exec", treeSetup{})
+	ctx, _ := progress.Start(f.ctx, progress.KindStep, "run", progress.WithFlags(progress.Fold), progress.Total(14))
+	_, spans := targets(ctx, nodes(14)...)
+	for _, span := range spans {
+		span.Run()
+	}
+	for i, span := range spans[:13] {
+		// The last three fail alike: they share a row.
+		span.End(fmt.Errorf("command exited %d", min(i+1, 11)))
+	}
+	checkScreen(t, f.draw(time.Second), `
+exec · 0:01
+  run  13/14 · 13 failed · 1 running
+    ✗ exe1  target: command exited 1
+    ✗ exe2  target: command exited 2
+    ✗ exe3  target: command exited 3
+    ✗ exe4  target: command exited 4
+    ✗ … 9 more failed
+    … 1 running
+`)
+}
+
+// Rows that are never cut, those of the spans under way, are cut off at
+// the bottom of the region once they do not fit, the last row saying that
+// there is more.
+func TestTheTreeCutsOffWhatNeverFits(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "provision status", treeSetup{})
+	for i := range 10 {
+		progress.Start(f.ctx, progress.KindStep, fmt.Sprintf("step %d", i+1))
+	}
+	checkScreen(t, f.draw(time.Second), `
+provision status · 0:01
+  step 1  1s
+  step 2  1s
+  step 3  1s
+  step 4  1s
+  step 5  1s
+  step 6  1s
+…
+`)
+}
+
+// A span right under the command has a row of its own: a call says what it
+// does and with which node, and a wait without a bound counts up; both say
+// their message, and a message the span is updated with shows at the next
+// frame. A wait that has only just started, with nothing below it, is not
+// drawn yet.
+func TestTheTreeDrawsSpansUnderTheCommand(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "provision reinstall", treeSetup{})
+	f.clock.Add(time.Second)
+	progress.Start(f.ctx, progress.KindCall, "ssh", progress.Node("install"), progress.Message("reading the inventory"))
+	_, wait := progress.Start(f.ctx, progress.KindWait, "settle")
+	checkScreen(t, f.draw(50*time.Millisecond), `
+provision reinstall · 0:01
+`)
+	wait.Update(progress.Message("for exe3 to boot"))
+	checkScreen(t, f.draw(2*time.Second), `
+provision reinstall · 0:03
+  ssh install reading the inventory  2s
+  settle  2s  for exe3 to boot
+`)
+}
+
+// A counted step that makes a call of its own, rather than one for a
+// target, says what the call does after how its targets stand.
+func TestTheTreeDrawsTheCallOfACountedStep(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "provision reinstall", treeSetup{})
+	ctx, _ := progress.Start(f.ctx, progress.KindStep, "boot", progress.WithFlags(progress.Fold), progress.Total(1))
+	targets(ctx, "exe1")
+	progress.Start(ctx, progress.KindCall, "ssh", progress.Node("install"), progress.Timeout(30*time.Second))
+	checkScreen(t, f.draw(3*time.Second), `
+provision reinstall · 0:03
+  boot  0/1 · 1 queued  3s/30s  ssh install
+`)
+}
+
+// The bound of a request reads as it would be written, in whole hours when
+// it is, and in tenths of a second when it is not whole seconds; a target
+// that has run for over an hour says its hours and minutes.
+func TestTheTreeReadsTheBoundOfARequest(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "cinc run", treeSetup{})
+	ctx, _ := progress.Start(f.ctx, progress.KindStep, "run", progress.WithFlags(progress.Fold), progress.Total(2))
+	ctxs, spans := targets(ctx, "exe1", "exe2")
+	for _, span := range spans {
+		span.Run()
+	}
+	progress.Start(ctxs[0], progress.KindCall, "ssh", progress.Timeout(2*time.Hour))
+	f.clock.Add(time.Hour + 2*time.Minute)
+	progress.Start(ctxs[1], progress.KindCall, "redfish", progress.Timeout(1500*time.Millisecond))
+	checkScreen(t, f.draw(time.Second), `
+cinc run · 1:02:01
+  run  0/2 · 2 running
+    ▸ exe1  1h02m/2h  ssh
+    ▸ exe2  1s/1.5s  redfish
+`)
+}
+
+// A step left out before it ran says why in its line, and one that was
+// interrupted has the mark of that.
+func TestTheLinesOfStepsLeftOutAndInterrupted(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "provision reinstall", treeSetup{})
+	f.draw(time.Second)
+	_, left := progress.Start(f.ctx, progress.KindStep, "disarming", progress.Queued())
+	left.Skip("nothing was armed")
+	_, step := progress.Start(f.ctx, progress.KindStep, "configuring the network boot")
+	f.clock.Add(time.Second)
+	step.End(context.Canceled)
+	checkScreen(t, f.draw(0), `
+– disarming  skipped: nothing was armed
+⊘ configuring the network boot  1.0s
+provision reinstall · 0:02
+`)
+}
+
+// What batches that are over folded is folded into their step: the targets
+// left out for different reasons share a row that gives none, and a batch
+// interrupted before it ran is its nodes, canceled.
+func TestTheTreeFoldsWhatBatchesLeftOut(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "bmc power on", treeSetup{})
+	ctx, step := progress.Start(f.ctx, progress.KindStep, "power on", progress.WithFlags(progress.Fold), progress.Total(6))
+	batch := func(i int, set string) (context.Context, *progress.Span) {
+		return progress.Start(ctx, progress.KindBatch, fmt.Sprintf("%d/3", i), progress.Queued(),
+			progress.Batch(i, 3), progress.Node(set), progress.Total(2))
+	}
+	firstCtx, first := batch(1, "exe[1-2]")
+	secondCtx, second := batch(2, "exe[3-4]")
+	_, third := batch(3, "exe[5-6]")
+	run := func(ctx context.Context, b *progress.Span, reasons map[string]string, set ...string) {
+		b.Run()
+		_, spans := targets(ctx, set...)
+		for i, span := range spans {
+			span.Run()
+			if reason := reasons[set[i]]; reason != "" {
+				span.Skip(reason)
+			} else {
+				span.End(nil)
+			}
+		}
+		b.End(nil)
+	}
+	run(firstCtx, first, map[string]string{"exe1": "no answer"}, "exe1", "exe2")
+	run(secondCtx, second, map[string]string{"exe3": "powered on already", "exe4": "in maintenance"}, "exe3", "exe4")
+	third.End(context.Canceled)
+	checkScreen(t, f.draw(time.Second), `
+bmc power on · 0:01
+  power on  6/6 · 2 canceled · 3 skipped
+    ⊘ exe[5-6]  canceled
+    – exe[1,3-4]  skipped
+    ✓ exe2
+`)
+	step.End(context.Canceled)
+}
+
+// Targets that are left out for different reasons share a row that gives
+// none, and a target whose name does not read as a node set is listed after
+// the set.
+func TestTheTreeFoldsTargetsThatAreNoNodeSet(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "switch status", treeSetup{})
+	ctx, _ := progress.Start(f.ctx, progress.KindStep, "read the ports", progress.WithFlags(progress.Fold), progress.Total(5))
+	_, spans := targets(ctx, "exe1", "exe2", "port 10", "exe3", "exe4")
+	for _, span := range spans {
+		span.Run()
+	}
+	for _, span := range spans[:3] {
+		span.End(nil)
+	}
+	spans[3].Skip("unplugged")
+	spans[4].Skip("disabled")
+	checkScreen(t, f.draw(time.Second), `
+switch status · 0:01
+  read the ports  5/5 · 2 skipped
+    – exe[3-4]  skipped
+    ✓ exe[1-2],port 10
+`)
+}
+
+// Once the command has ended, the next frame takes the region off.
+func TestTheRegionComesOffOnceTheCommandHasEnded(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "exec", treeSetup{})
+	checkScreen(t, f.draw(time.Second), `
+exec · 0:01
+`)
+	f.command.End(nil)
+	if got := f.draw(time.Second); got != "" {
+		t.Errorf("the region is still drawn:\n%s", got)
+	}
+}
+
+// The tree takes events that no Bus sends but a Sink may be sent: a span
+// started a second time is the one it was, a batch with no step above it
+// folds into nothing, and a target that failed with neither class nor
+// error reads as failed.
+func TestTheTreeTakesEventsNoBusSends(t *testing.T) {
+	t.Parallel()
+	s := &progresstest.Screen{}
+	term := display.NewTerminal(s, func() (int, int, error) { return 100, 24, nil })
+	c := &clock{now: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)}
+	tree := display.NewTree(term, display.TreeOptions{Now: c.Now})
+	t.Cleanup(tree.Close)
+	for _, e := range []progress.Event{
+		{Type: progress.TypeStart, Span: 1, Kind: progress.KindCommand, Name: "exec", State: progress.StateRunning},
+		{Type: progress.TypeStart, Span: 2, Parent: 1, Kind: progress.KindStep, Name: "run", Flags: progress.Fold,
+			State: progress.StateRunning, Fields: progress.Fields{Total: 1}},
+		{Type: progress.TypeStart, Span: 2, Parent: 1, Kind: progress.KindStep, Name: "run again", State: progress.StateRunning},
+		{Type: progress.TypeStart, Span: 3, Parent: 2, Kind: progress.KindTarget, Name: "exe1", State: progress.StateQueued},
+		{Type: progress.TypeRun, Span: 3, Parent: 2, Kind: progress.KindTarget, Name: "exe1", State: progress.StateRunning},
+		{Type: progress.TypeEnd, Span: 3, Parent: 2, Kind: progress.KindTarget, Name: "exe1", State: progress.StateEnded,
+			Status: progress.StatusFailed},
+		{Type: progress.TypeStart, Span: 4, Kind: progress.KindBatch, Name: "1/1", State: progress.StateRunning},
+		{Type: progress.TypeEnd, Span: 4, Kind: progress.KindBatch, Name: "1/1", State: progress.StateEnded,
+			Status: progress.StatusSkipped},
+	} {
+		e.Time = c.Now()
+		tree.Handle(e)
+	}
+	c.Add(time.Second)
+	tree.Draw()
+	checkScreen(t, s.String(), `
+exec · 0:01
+  run  1/1 · 1 failed
+    ✗ exe1  failed
 `)
 }

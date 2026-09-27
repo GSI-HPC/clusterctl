@@ -10,6 +10,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
@@ -324,6 +325,146 @@ func TestPlainStartWritesTheLinesAsTheyCome(t *testing.T) {
 	if got := f.end(nil); !strings.HasSuffix(got, "exec › run: done in 0.0s\n") {
 		t.Errorf("Close did not write the last line:\n%s", got)
 	}
+}
+
+// A Plain given no clock reads the real one: once started, it writes a line
+// as it comes, and a heartbeat as it falls due, from its own ticker.
+func TestPlainReadsTheRealClock(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := &screen{}
+		plain := display.NewPlain(display.NewTerminal(s, nil), display.PlainOptions{})
+		capture := &progresstest.Capture{}
+		bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{capture, plain}})
+		ctx, command := progress.Start(progress.WithBus(context.Background(), bus), progress.KindCommand, "exec")
+		plain.Start()
+		ctx, step := progress.Start(ctx, progress.KindStep, "run", progress.WithFlags(progress.Fold), progress.Total(1))
+		_, target := progress.Start(ctx, progress.KindTarget, "exe1", progress.Queued(), progress.Node("exe1"))
+		target.Run()
+		synctest.Wait()
+		if got, want := s.String(), "[0:00] exec › run: start, 1 host\n"; got != want {
+			t.Errorf("once the step started, the screen shows:\n%s\nwant:\n%s", got, want)
+		}
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		target.End(nil)
+		step.End(nil)
+		command.End(nil)
+		bus.Close()
+		plain.Close()
+		progresstest.Check(t, capture.Events())
+		checkScreen(t, s.String(), `
+[0:00] exec › run: start, 1 host
+[0:10] exec › run: 0/1 done, 1 running
+[0:10] exec › run: done in 10s: 1 ok
+`)
+	})
+}
+
+// Lines that come while a Plain is busy drawing are all written, those
+// that came after the first as well, although it is told of them only once.
+func TestPlainWritesTheLinesThatComeWhileItDraws(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := &screen{}
+		// The clock holds up every Draw until gate is closed.
+		gate := make(chan struct{})
+		made := false
+		now := func() time.Time {
+			if made {
+				<-gate
+			}
+			return time.Now()
+		}
+		plain := display.NewPlain(display.NewTerminal(s, nil), display.PlainOptions{Now: now})
+		made = true
+		capture := &progresstest.Capture{}
+		bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{capture, plain}})
+		ctx, command := progress.Start(progress.WithBus(context.Background(), bus), progress.KindCommand, "exec")
+		plain.Start()
+		// The first tick finds the Plain drawing, held up by the clock.
+		time.Sleep(time.Second)
+		synctest.Wait()
+		_, step := progress.Start(ctx, progress.KindStep, "run")
+		step.End(nil)
+		close(gate)
+		command.End(nil)
+		bus.Close()
+		plain.Close()
+		progresstest.Check(t, capture.Events())
+		checkScreen(t, s.String(), `
+[0:01] exec › run: start
+[0:01] exec › run: done in 0.0s
+`)
+	})
+}
+
+// A counted step says it is waiting while a pause below it runs; a wait
+// that fails says so with its class, a step that is interrupted says it
+// was canceled, and one left out once it ran says it was skipped.
+func TestPlainLinesOfAWaitThatFails(t *testing.T) {
+	t.Parallel()
+	f := newPlainFixture(t, "bmc power on")
+	ctx, step := progress.Start(f.ctx, progress.KindStep, "power on", progress.WithFlags(progress.Fold), progress.Total(1))
+	_, target := progress.Start(ctx, progress.KindTarget, "exe1", progress.Queued(), progress.Node("exe1"))
+	_, wait := progress.Start(ctx, progress.KindWait, "stagger", progress.Timeout(30*time.Second))
+	f.draw(10 * time.Second)
+	wait.End(unreachable("the clock of exe1.mgmt stopped"))
+	target.Run()
+	target.End(nil)
+	step.End(nil)
+	_, slurm := progress.Start(f.ctx, progress.KindStep, "check Slurm jobs")
+	f.clock.Add(time.Second)
+	slurm.End(context.Canceled)
+	_, drain := progress.Start(f.ctx, progress.KindStep, "drain")
+	drain.Skip("no jobs to drain")
+	checkScreen(t, f.end(context.Canceled), `
+[0:00] bmc power on › power on: start, 1 host
+[0:00] bmc power on › power on › stagger: waiting 30s
+[0:10] bmc power on › power on: 0/1 done, 1 queued, waiting
+[0:10] bmc power on › power on › stagger: failed (transport)
+[0:10] bmc power on › power on: done in 10s: 1 ok
+[0:10] bmc power on › check Slurm jobs: start
+[0:11] bmc power on › check Slurm jobs: canceled in 1.0s
+[0:11] bmc power on › drain: start
+[0:11] bmc power on › drain: skipped in 0.0s
+bmc power on: canceled in 11s: 1 ok
+`)
+}
+
+// A Plain takes events that no Bus sends but a Sink may be sent: a step
+// whose start comes twice says so twice, but no heartbeat falls due for it
+// once it has ended; and an end that says no status reads as the Status
+// itself does.
+func TestPlainTakesEventsNoBusSends(t *testing.T) {
+	t.Parallel()
+	s := &screen{}
+	c := &clock{now: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)}
+	plain := display.NewPlain(display.NewTerminal(s, nil), display.PlainOptions{Now: c.Now})
+	t.Cleanup(plain.Close)
+	for _, e := range []progress.Event{
+		{Type: progress.TypeStart, Span: 1, Kind: progress.KindCommand, Name: "exec", State: progress.StateRunning},
+		{Type: progress.TypeStart, Span: 2, Parent: 1, Kind: progress.KindStep, Name: "run", Flags: progress.Fold,
+			State: progress.StateRunning},
+		{Type: progress.TypeStart, Span: 2, Parent: 1, Kind: progress.KindStep, Name: "run", Flags: progress.Fold,
+			State: progress.StateRunning},
+		{Type: progress.TypeEnd, Span: 2, Parent: 1, Kind: progress.KindStep, Name: "run", Flags: progress.Fold,
+			State: progress.StateEnded, Status: progress.StatusOK},
+		{Type: progress.TypeStart, Span: 3, Parent: 1, Kind: progress.KindStep, Name: "check", State: progress.StateRunning},
+		{Type: progress.TypeEnd, Span: 3, Parent: 1, Kind: progress.KindStep, Name: "check", State: progress.StateEnded},
+	} {
+		e.Time = c.Now()
+		plain.Handle(e)
+	}
+	c.Add(10 * time.Second)
+	plain.Draw()
+	checkScreen(t, s.String(), `
+[0:00] exec › run: start
+[0:00] exec › run: start
+[0:00] exec › run: done in 0.0s: 0 ok
+[0:00] exec › check: start
+[0:00] exec › check: status(0) in 0.0s
+`)
 }
 
 // Outside a UTF-8 locale the parts of a path are joined by ">", so that a
