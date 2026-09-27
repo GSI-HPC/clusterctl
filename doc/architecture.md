@@ -257,7 +257,8 @@ for it queued. Both are those of `internal/clikit/fanout`, which
 `internal/fanout` gives clusterctl's name, the class of an error by its exit
 code and `fanout.Summarize`, the error a step ends with, which asks for the
 exit code `exitcode.Worst` gives its items' errors and names them as a node
-set. Each kind of work has a bound of its own, which
+set, or as a list where a name is not one host name. Each kind of work has a
+bound of its own, which
 `fanout.max` in the configuration does not change and a lower `--fanout`
 lowers, through `App.Bound`
 ([ADR 0022](adr/0022-bounded-pools-and-power-batches.md)). A power-on and a
