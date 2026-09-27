@@ -227,15 +227,14 @@ func (rs *rangeSet) list(autostep int) string {
 }
 
 // arithmeticRun finds the longest run starting at i with a constant step
-// greater than one and values that read the same at the width of the first.
+// and values that read the same at the width of the first. list calls it only
+// where no run of consecutive values starts, so the step is greater than one.
 func (rs *rangeSet) arithmeticRun(i int) (end, step int) {
 	vals, pads := rs.values, rs.pads
 	if i+2 >= len(vals) || !fits(vals[i+1], pads[i+1], pads[i]) {
 		return i, 0
 	}
-	if step = vals[i+1] - vals[i]; step < 2 {
-		return i, 0
-	}
+	step = vals[i+1] - vals[i]
 	j := i + 2
 	for j < len(vals) && vals[j]-vals[j-1] == step && fits(vals[j], pads[j], pads[i]) {
 		j++

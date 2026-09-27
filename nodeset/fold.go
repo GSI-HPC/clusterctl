@@ -165,20 +165,19 @@ func (v vector) render(autostep int) string {
 
 // sortVectors orders folded names by their lowest value in each dimension, so
 // that output is deterministic.
+//
+// The vectors are those of one pattern, so they have the same number of
+// dimensions, and no two hold the same host, so no two have the same lowest
+// value in every dimension. Two vectors of one pattern without dimensions
+// would be one host, so there are dimensions to compare whenever sorting
+// compares anything.
 func sortVectors(vectors []vector) {
 	sort.Slice(vectors, func(i, j int) bool {
-		a, b := vectors[i], vectors[j]
-		if a.pattern != b.pattern {
-			return a.pattern < b.pattern
+		a, b := vectors[i].dims, vectors[j].dims
+		d := 0
+		for d < len(a)-1 && a[d].values[0] == b[d].values[0] {
+			d++
 		}
-		for d := range a.dims {
-			if d >= len(b.dims) {
-				return false
-			}
-			if av, bv := a.dims[d].values[0], b.dims[d].values[0]; av != bv {
-				return av < bv
-			}
-		}
-		return false
+		return a[d].values[0] < b[d].values[0]
 	})
 }
