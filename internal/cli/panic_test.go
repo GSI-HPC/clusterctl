@@ -6,10 +6,13 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -96,5 +99,57 @@ func TestAPanicWritingOneSecretFailsOnlyThatWrite(t *testing.T) {
 	}
 	if log := h.errOut.String(); !strings.Contains(log, "panic while working on exe0002") || !strings.Contains(log, "goroutine") {
 		t.Errorf("the stack of the panic was not written to standard error:\n%s", log)
+	}
+}
+
+// A panic on one node while the work for another asks a question on the
+// terminal, a password for a credential, say, waits until the question has
+// been answered: its stack goes through the display's Lines, and never
+// lands inside the question.
+func TestAPanicWaitsForTheQuestionAnotherNodeAsks(t *testing.T) {
+	c := fakeDisplays(t)
+	asking, stacked := make(chan struct{}), make(chan struct{})
+	var tty *terminal
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		switch tg.Name {
+		case "exe0002":
+			<-asking
+			defer close(stacked)
+			panic("index out of range [3] with length 3")
+		case "exe0001":
+			c.mu.Lock()
+			shown := c.last.(interface {
+				Suspend()
+				Resume()
+			})
+			c.mu.Unlock()
+			shown.Suspend()
+			_, _ = io.WriteString(tty, "Password for bmc@exe0001: ")
+			close(asking)
+			<-stacked
+			// Long enough for the other worker to have written its stack,
+			// which it does as its panic unwinds.
+			time.Sleep(100 * time.Millisecond)
+			_, _ = io.WriteString(tty, "\n")
+			shown.Resume()
+		}
+		return &transport.Result{Target: tg, Stdout: "Dell|R650|Dell|0A1B|Dell|2.1|2026-01-01|MT4123\n"}, nil
+	}}
+	tty = &terminal{}
+	opts := harnessOptions{recorder: rec, unwatched: true}
+	opts.streams = func(s *app.Streams) {
+		s.Out, s.Err = tty, tty
+		onTerminal(true)(s)
+	}
+	_, cmd := build(t, opts, "--progress", "counter", "node", "hw", "-n", "exe[0001-0002]")
+	cmd.SetOut(tty)
+	cmd.SetErr(tty)
+	wantCode(t, cmd.Execute(), exitcode.TargetFailed)
+
+	got := tty.String()
+	question := strings.Index(got, "Password for bmc@exe0001: \n")
+	stack := strings.Index(got, "clusterctl: panic while working on exe0002")
+	if question < 0 || stack < question {
+		t.Errorf("the stack was not written after the question was answered:\n%s", got)
 	}
 }

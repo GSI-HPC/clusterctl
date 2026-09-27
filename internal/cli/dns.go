@@ -442,7 +442,7 @@ nodes whatever order the answers came in.
 				Describe: func(i int) (node, host, role string) {
 					return nodes[i], hosts[i], ""
 				},
-				PanicLog: a.Diag,
+				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, i int) (dnsAnswer, error) {
 				chain, addresses, err := res.lookupHost(ctx, hosts[i])
 				return dnsAnswer{CNAMEs: chain, Addresses: addresses}, err

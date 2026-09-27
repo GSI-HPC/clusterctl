@@ -158,7 +158,7 @@ This overwrites files on the nodes, so it asks first.
 				Describe: func(k int) (node, host, role string) {
 					return targets[k].Name, targets[k].Host, targets[k].Role
 				},
-				PanicLog: a.Diag,
+				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, k int) (struct{}, error) {
 				return struct{}{}, push.node(ctx, targets[k], written[k])
 			})
@@ -292,7 +292,7 @@ func (p secretPush) write(ctx context.Context, tg transport.Target, i int) (res 
 		return &transport.Result{Target: tg, ExitCode: -1, Err: err}
 	}
 	defer func() {
-		if err := fanout.Recovered(p.a.Diag, tg.Name, recover()); err != nil {
+		if err := fanout.Recovered(p.a.WorkerDiag, tg.Name, recover()); err != nil {
 			res = &transport.Result{Target: tg, ExitCode: -1, Err: err}
 		}
 	}()

@@ -266,7 +266,7 @@ func readGroups(r *reads, names []string) ([]map[string][]string, error) {
 		Step:     "read the groups",
 		Limit:    fanout.PerHost,
 		Describe: func(name string) (node, host, role string) { return name, "", "" },
-		PanicLog: r.a.Diag,
+		PanicLog: r.a.WorkerDiag,
 		Acquire: func(ctx context.Context, _ string) (func(), error) {
 			return r.hosts.Acquire(ctx, on...)
 		},
@@ -387,7 +387,7 @@ func read[T any](r *reads, what string, on []string, fn func() (T, error)) *bran
 	b := &branch[T]{}
 	r.wg.Go(func() {
 		defer func() {
-			if err := fanout.Recovered(r.a.Diag, what, recover()); err != nil {
+			if err := fanout.Recovered(r.a.WorkerDiag, what, recover()); err != nil {
 				b.err = err
 			}
 		}()

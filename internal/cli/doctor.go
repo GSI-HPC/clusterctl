@@ -342,7 +342,7 @@ func remoteChecks(ctx context.Context, a *app.App) []check {
 		Describe: func(i int) (node, host, role string) {
 			return roles[i], targets[i].Host, roles[i]
 		},
-		PanicLog: a.Diag,
+		PanicLog: a.WorkerDiag,
 		Acquire: func(ctx context.Context, i int) (func(), error) {
 			return hosts.Acquire(ctx, append(a.SSH.JumpHosts(targets[i].Host), targets[i].Host)...)
 		},
