@@ -4,15 +4,12 @@
 package fanout
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 
-	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -34,6 +31,18 @@ type Options[T any] struct {
 	// PanicLog receives the stack of a panic in the work, the front end's
 	// diagnostics; nil is the process's standard error.
 	PanicLog io.Writer
+	// Program names the program in the line that says the work panicked,
+	// and in the error a panic becomes, as Recovered does.
+	Program string
+	// Classify is the fallback of progress.Classify for the errors of the
+	// items, which tells an item that ends canceled: the program's own
+	// rule, as progress.Options.Classify is the Bus's; nil is ClassTarget.
+	Classify func(error) progress.Class
+	// Summarize sums up the items that failed of the n, as the error the
+	// step ends with; nil is Failure, with no noun. A program gives it
+	// the error its commands exit with, as Failure's text with an exit
+	// code of its own.
+	Summarize func(n int, names []string, errs []error, interrupted bool) error
 	// Acquire, when it is set, takes what an item's work needs besides its
 	// place in the pool, such as a place on each host it goes to (Hosts),
 	// and returns the function that gives that back once the work is done.
@@ -61,7 +70,8 @@ type Outcome[R any] struct {
 // in. An item that fails does not stop the others. It runs on Each: once
 // ctx ends no further item is started, and those left out come back with
 // the context's error. A panic in fn becomes that item's error, with its
-// stack in o.PanicLog. Map returns once every call has returned.
+// stack in o.PanicLog, as Recovered has it. Map returns once every call has
+// returned.
 //
 // The work is reported under the span ctx carries as a step, o.Step, with
 // a target for each item, as every pool reports it: every target is
@@ -69,8 +79,9 @@ type Outcome[R any] struct {
 // it takes its place and ended before it gives the place up, so that a
 // display never counts more running than the limit; those never started
 // end canceled, so that the count reaches its total; and the step ends once
-// the last has, naming the items that failed, canceled when every one of
-// them ended canceled, as an interrupt leaves a pool. fn is called with the context
+// the last has, with what o.Summarize makes of the items that failed,
+// canceled when every one of them ended canceled, as an interrupt leaves a
+// pool. fn is called with the context
 // of its item's target, so that the calls it makes are reported under it.
 // An item that failed once the context had ended is reported canceled,
 // since the interrupt is what ended it, and its outcome keeps the error fn
@@ -106,7 +117,7 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 		}
 		defer release()
 		spans[i].Run()
-		value, err := call(ctxs[i], o.PanicLog, names[i], items[i], fn)
+		value, err := call(ctxs[i], o.PanicLog, o.Program, names[i], items[i], fn)
 		out[i] = Outcome[R]{Value: value, Err: err, Started: true}
 		var skip *skipped
 		if errors.As(err, &skip) {
@@ -116,7 +127,7 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 		if err != nil && ctxs[i].Err() != nil {
 			err = ctxs[i].Err()
 		}
-		canceled[i] = endsCanceled(err)
+		canceled[i] = o.endsCanceled(err)
 		spans[i].End(err)
 	})
 	var failed []string
@@ -127,7 +138,7 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 			if out[i].Err == nil || ctx.Err() != nil {
 				out[i].Err = ctx.Err()
 			}
-			canceled[i] = endsCanceled(out[i].Err)
+			canceled[i] = o.endsCanceled(out[i].Err)
 			spans[i].End(out[i].Err)
 		}
 		if out[i].Err != nil && !IsSkipped(out[i].Err) {
@@ -135,13 +146,19 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 			interrupted = interrupted && canceled[i]
 		}
 	}
-	step.End(failure("", len(items), failed, errs, interrupted))
+	summarize := o.Summarize
+	if summarize == nil {
+		summarize = func(n int, names []string, errs []error, interrupted bool) error {
+			return Failure("", n, names, errs, interrupted)
+		}
+	}
+	step.End(summarize(len(items), failed, errs, interrupted))
 	return out
 }
 
 // endsCanceled reports whether a target that ends with err ends canceled.
-func endsCanceled(err error) bool {
-	return err != nil && progress.Classify(err, exitcode.Class) == progress.ClassCanceled
+func (o Options[T]) endsCanceled(err error) bool {
+	return err != nil && progress.Classify(err, o.Classify) == progress.ClassCanceled
 }
 
 // Skip returns the error of work that leaves its item out on purpose:
@@ -178,7 +195,7 @@ func (o Options[T]) acquire(ctx context.Context, name string, item T) (release f
 		return func() {}, nil
 	}
 	defer func() {
-		if p := Recovered(o.PanicLog, name, recover()); p != nil {
+		if p := Recovered(o.PanicLog, o.Program, name, recover()); p != nil {
 			release, err = nil, p
 		}
 	}()
@@ -191,9 +208,9 @@ func (o Options[T]) acquire(ctx context.Context, name string, item T) (release f
 
 // call calls fn with one item. A panic in it becomes the item's error
 // rather than the end of the process, with its stack written to log.
-func call[T, R any](ctx context.Context, log io.Writer, name string, item T, fn func(context.Context, T) (R, error)) (value R, err error) {
+func call[T, R any](ctx context.Context, log io.Writer, program, name string, item T, fn func(context.Context, T) (R, error)) (value R, err error) {
 	defer func() {
-		if p := Recovered(log, name, recover()); p != nil {
+		if p := Recovered(log, program, name, recover()); p != nil {
 			var zero R
 			value, err = zero, p
 		}
@@ -201,67 +218,55 @@ func call[T, R any](ctx context.Context, log io.Writer, name string, item T, fn 
 	return fn(ctx, item)
 }
 
-// FailureError turns the targets of a fan-out that failed into the error the
-// command exits with: "k of n hosts failed: <node set>", with the code
-// exitcode.Worst gives their errors, or TargetFailed when none of them says,
-// since a command that exited non-zero is a target that failed. The errors
-// are kept underneath, not only their text, so that a caller can still tell
-// a cancellation from a failure. It is nil when every target succeeded.
-func FailureError(results []*transport.Result) error {
-	var names []string
-	var errs []error
-	for _, r := range Failures(results) {
-		names, errs = append(names, r.Target.Name), append(errs, r.Err)
-	}
-	return failure("hosts", len(results), names, errs, false)
-}
-
-// failure sums up the items of a fan-out of n that failed: "k of n <noun>
-// failed: <node set>", with their names as a node set and each error that
-// is not nil underneath. Its progress class is that of its exit code, or
-// canceled when the items were interrupted, as their targets ended: the
-// error of an item is what its work returned, which does not always say
-// that an interrupt stopped it. It is nil when none failed.
-func failure(noun string, n int, names []string, errs []error, interrupted bool) error {
+// Failure sums up the items of a fan-out of n that failed, named names,
+// with the errors errs: "k of n <noun> failed: <names>", or "k of n failed:
+// <names>" without a noun, with each error that is not nil underneath, so
+// that errors.Is and errors.As still find a cancellation among them. The
+// names are written as a node set. Its progress
+// class is ClassCanceled when interrupted says that the interrupt ended the
+// items, since the error of an item is what its work returned, which need
+// not say so, and ClassTarget otherwise. It is nil when none failed.
+func Failure(noun string, n int, names []string, errs []error, interrupted bool) error {
 	if len(names) == 0 {
 		return nil
 	}
 	set := nodeset.New()
-	var kept []error
-	for i, name := range names {
+	for _, name := range names {
 		_ = set.Add(name)
-		if errs[i] != nil {
-			kept = append(kept, errs[i])
+	}
+	var kept []error
+	for _, err := range errs {
+		if err != nil {
+			kept = append(kept, err)
 		}
 	}
 	what := "failed"
 	if noun != "" {
 		what = noun + " failed"
 	}
-	code := cmp.Or(exitcode.Worst(kept...), exitcode.TargetFailed)
-	class := exitcode.CodeClass(code)
+	class := progress.ClassTarget
 	if interrupted {
 		class = progress.ClassCanceled
 	}
-	return &exitcode.Error{Code: code, Err: &failedTargets{
+	return &failedItems{
 		message: fmt.Sprintf("%d of %d %s: %s", len(names), n, what, set),
 		errs:    kept,
 		class:   class,
-	}}
+	}
 }
 
-// failedTargets is the summary of a fan-out that did not succeed
-// everywhere, with the error of each target that failed underneath it.
-type failedTargets struct {
+// failedItems is the summary of a fan-out that did not succeed everywhere,
+// with the error of each item that failed underneath it.
+type failedItems struct {
 	message string
 	errs    []error
 	class   progress.Class
 }
 
-func (e *failedTargets) Error() string { return e.message }
+func (e *failedItems) Error() string { return e.message }
 
-func (e *failedTargets) Unwrap() []error { return e.errs }
+func (e *failedItems) Unwrap() []error { return e.errs }
 
-// ProgressClass says why the fan-out failed as its exit code does, rather
-// than as whichever of its targets' errors says a class first.
-func (e *failedTargets) ProgressClass() progress.Class { return e.class }
+// ProgressClass says why the fan-out failed as a whole, rather than as
+// whichever of its items' errors says a class first.
+func (e *failedItems) ProgressClass() progress.Class { return e.class }

@@ -73,8 +73,11 @@ round tripper sends and the connections a host key scan dials. A fake that
 answers at once rarely has two calls under way together, so each call is held
 until one more than the limit are, which a fan-out that keeps to its limit
 never allows: the test sees exactly the limit in flight, and one call too many
-when the limit is broken. `fanout.Map`, the executor, the Redfish fan-out and
-the host key scans are tested this way.
+when the limit is broken. The executor, the Redfish fan-out and the host key
+scans are tested this way. `Map` in `internal/clikit/fanout`, which cannot
+import it, is held to its limit on the fake clock of `testing/synctest`
+instead: every call waits a second, which passes only once every call that can
+start has.
 
 **Progress events.** `progress/progresstest` holds a command to what it
 reports. `Capture` is a sink that keeps the events of a Bus, and `Check` tests

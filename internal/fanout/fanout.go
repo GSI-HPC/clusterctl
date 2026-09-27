@@ -1,7 +1,15 @@
 // SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
-// Package fanout works on many targets at once.
+// Package fanout works on many targets at once, as clusterctl does: the
+// executor that runs a request on every target, the status and the groups
+// of their results, the bound on each host, and the exit code a fan-out
+// that failed somewhere asks for.
+//
+// The pools themselves, Each, Map and Batches, are those of
+// internal/clikit/fanout, which knows no program; this package gives them
+// clusterctl's name, its rule for the class of an error (exitcode.Class)
+// and the error its commands exit with (Summarize).
 //
 // The degree of parallelism is bounded and conservative by default: a
 // connection through a tunnel or a jump host is far more fragile than a local
@@ -16,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"sync"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
@@ -24,9 +31,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
-
-// DefaultMax is used when nothing configures the fan-out.
-const DefaultMax = 16
 
 // defaultStep names the step of an executor that names none.
 const defaultStep = "run"
@@ -111,34 +115,6 @@ func resultError(r *transport.Result) error {
 		return r.Err
 	}
 	return fmt.Errorf("%s: command exited %d", cmp.Or(r.Target.Name, r.Target.Host), r.ExitCode)
-}
-
-// Each calls work with every index below n, at most limit at a time, and
-// returns once every call has returned. When ctx ends, no further call is
-// started, so an interrupt stops a fan-out the same way wherever it is; the
-// caller tells what was left out by what work did not record.
-func Each(ctx context.Context, n, limit int, work func(i int)) {
-	sem := make(chan struct{}, max(1, min(limit, n)))
-	var wg sync.WaitGroup
-	for i := range n {
-		select {
-		case <-ctx.Done():
-		case sem <- struct{}{}:
-			// When a slot and the cancellation are both ready, select
-			// picks either, so the context is asked again.
-			if ctx.Err() != nil {
-				<-sem
-			}
-		}
-		if ctx.Err() != nil {
-			break
-		}
-		wg.Go(func() {
-			defer func() { <-sem }()
-			work(i)
-		})
-	}
-	wg.Wait()
 }
 
 // Failures returns the results that did not succeed.

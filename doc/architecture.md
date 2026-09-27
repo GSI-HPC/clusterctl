@@ -52,7 +52,8 @@ subsystems it drives and calls them itself, with what `app` built.
 | --- | --- |
 | `internal/transport` | Driving the OpenSSH client, and generating the configuration it runs with. |
 | `internal/shellquote` | Rendering an argument vector so a remote shell reproduces it exactly. |
-| `internal/fanout` | Working on many targets at once, bounded and in order, or in batches with a pause between them, and reporting the work as it goes. |
+| `internal/fanout` | Working on many targets at once: the executor, the status and grouping of results, the bound on each host, and the exit code a fan-out that failed somewhere asks for, on the pools of `internal/clikit/fanout`. |
+| `internal/clikit/fanout` | The pools: working on many items at once, bounded and in order, or in batches with a pause between them, and reporting the work as it goes. It knows no program: the program's name, its rule for the class of an error and the error a step ends with are options, and it imports nothing of clusterctl's but `progress` and `nodeset`, so that it can move into a module of its own by a change of path. |
 | `internal/progress` | Reporting the work under way: its steps, targets and calls as spans carried in the context, and every change to one as an event for a display, an agent or the event log. |
 | `internal/safety` | Deciding whether a destructive action may proceed. |
 | `internal/fileutil` | Writing files atomically and under a lock, and the cache on disk. |
@@ -252,7 +253,11 @@ such as `describe_nodes`, holds its sessions to one host to the same four.
 Every such pool is one loop, `fanout.Each`, which starts nothing once the
 command is interrupted, and `fanout.Map` runs any kind of work on it, the
 executor's among them, an item that needs a place on a host as well waiting
-for it queued. Each kind of work has a bound of its own, which
+for it queued. Both are those of `internal/clikit/fanout`, which
+`internal/fanout` gives clusterctl's name, the class of an error by its exit
+code and `fanout.Summarize`, the error a step ends with, which asks for the
+exit code `exitcode.Worst` gives its items' errors and names them as a node
+set. Each kind of work has a bound of its own, which
 `fanout.max` in the configuration does not change and a lower `--fanout`
 lowers, through `App.Bound`
 ([ADR 0022](adr/0022-bounded-pools-and-power-batches.md)). A power-on and a
