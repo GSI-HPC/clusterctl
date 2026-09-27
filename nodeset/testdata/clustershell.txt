@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 #
 # A differential corpus: each line is an expression, what ClusterShell expands
-# it to (the host names, or "error", or "-" for none), and, where clusterctl
-# decides otherwise on purpose, the divergence doc/nodeset.md lists for it.
+# it to (the host names, or "error", or "-" for none), and, where this package
+# decides otherwise on purpose, the divergence the language reference in doc/
+# lists for it.
 # Columns are separated by one tab. clustershell.py rewrites the second column.
 # Recorded with ClusterShell 1.10.1.
 exe1	exe1

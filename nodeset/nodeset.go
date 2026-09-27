@@ -26,8 +26,8 @@ type NodeSet struct {
 type Option func(*NodeSet)
 
 // WithAutostep folds arithmetic progressions of at least n elements into
-// "first-last/step" form. ClusterShell disables this by default and so does
-// clusterctl; n below 2 keeps it disabled.
+// "first-last/step" form. ClusterShell disables this by default, and so does
+// this package; n below 2 keeps it disabled.
 func WithAutostep(n int) Option {
 	return func(ns *NodeSet) { ns.autostep = n }
 }
@@ -150,8 +150,8 @@ func (ns *NodeSet) sorted() []node {
 	return nodes
 }
 
-// String renders the set in folded form, the representation clusterctl prints
-// and accepts. An empty set renders as the empty string.
+// String renders the set in folded form, which Parse reads back as the same
+// set, every host spelled as before. An empty set renders as the empty string.
 func (ns *NodeSet) String() string { return ns.fold() }
 
 // Union returns the hosts in either set.
