@@ -105,10 +105,9 @@ func parseExpression(expr string, res Resolver, depth int, b *budget) (*NodeSet,
 		} else {
 			apply(result, op, ts)
 		}
+		// The result needs no cap of its own: it holds no more hosts
+		// than its terms named together, which b already caps.
 		op, operand, pendingOp = opUnion, true, false
-		if result.Len() > maxSetElements {
-			return fmt.Errorf("%q expands to more than %d hosts", expr, maxSetElements)
-		}
 		return nil
 	}
 

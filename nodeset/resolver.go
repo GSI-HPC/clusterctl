@@ -117,13 +117,10 @@ func (m *MapResolver) All(source string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	groups := m.Groups[cmp.Or(source, m.Default)]
 	parts := make([]string, 0, len(names))
 	for _, name := range names {
-		expr, err := m.Resolve(source, name)
-		if err != nil {
-			return "", err
-		}
-		parts = append(parts, expr)
+		parts = append(parts, groups[name])
 	}
 	return strings.Join(parts, ","), nil
 }

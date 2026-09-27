@@ -5,6 +5,7 @@ package nodeset
 
 import (
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -120,11 +121,12 @@ func (ns *NodeSet) lookup(name string) (node, bool) {
 	if err != nil || len(other.nodes) != 1 {
 		return node{}, false
 	}
+	var key string
 	for k := range other.nodes {
-		n, ok := ns.nodes[k]
-		return n, ok
+		key = k
 	}
-	return node{}, false
+	n, ok := ns.nodes[key]
+	return n, ok
 }
 
 // Expand returns the host names in ascending order: by pattern first, then by
@@ -250,15 +252,7 @@ func lessNode(a, b node) bool {
 	if a.pattern != b.pattern {
 		return a.pattern < b.pattern
 	}
-	for i := range a.vals {
-		if i >= len(b.vals) {
-			return false
-		}
-		if a.vals[i] != b.vals[i] {
-			return a.vals[i] < b.vals[i]
-		}
-	}
-	return len(a.vals) < len(b.vals)
+	return slices.Compare(a.vals, b.vals) < 0
 }
 
 // Hostlist renders the set in the syntax Slurm and FreeIPMI accept: one
