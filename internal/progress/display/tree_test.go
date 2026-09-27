@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/display"
@@ -63,7 +62,7 @@ func newTreeFixture(t *testing.T, command string, o treeSetup) *treeFixture {
 	f.tree = display.NewTree(f.term, display.TreeOptions{Now: f.clock.Now, ASCII: o.ascii, Interrupted: o.interrupted})
 	f.summary = &display.Summary{}
 	f.capture = &progresstest.Capture{}
-	f.bus = progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{f.capture, f.tree, f.summary}, Now: f.clock.Now})
+	f.bus = progress.NewBus(progress.Options{Sinks: []progress.Sink{f.capture, f.tree, f.summary}, Now: f.clock.Now})
 	t.Cleanup(func() {
 		f.close()
 		progresstest.Check(t, f.capture.Events())
@@ -168,7 +167,7 @@ func TestTheTreeOfAFanOutWithManyQueued(t *testing.T) {
 	end := func(i int) {
 		var err error
 		if i == 40 {
-			err = exitcode.Errorf(exitcode.Transport, "exe41.mgmt: dial tcp: i/o timeout")
+			err = unreachable("exe41.mgmt: dial tcp: i/o timeout")
 		}
 		spans[i].End(err)
 	}
@@ -219,7 +218,7 @@ func TestTheTreeGroupsFailures(t *testing.T) {
 		node := fmt.Sprintf("exe%d", i+1)
 		switch i % 3 {
 		case 0:
-			span.End(exitcode.Errorf(exitcode.Transport, "%s.mgmt: dial tcp: i/o timeout", node))
+			span.End(unreachable("%s.mgmt: dial tcp: i/o timeout", node))
 		case 1:
 			span.End(fmt.Errorf("%s.mgmt: 400 Bad Request: refused", node))
 		default:
@@ -257,7 +256,7 @@ func TestTheTreeGroupsFailuresThatNameTheirAddresses(t *testing.T) {
 	}
 	f.draw(2 * time.Second)
 	for i, span := range spans {
-		span.End(exitcode.Errorf(exitcode.Transport,
+		span.End(unreachable(
 			"Post \"https://exe%d.mgmt/redfish/v1\": dial tcp 10.0.0.%d:443: connect: connection refused", i+1, i+7))
 	}
 	step.End(errors.New("3 of 3 failed: exe[1-3]"))
@@ -290,7 +289,7 @@ provision reinstall · 0:02
 	slow.End(nil)
 	_, failed := progress.Start(f.ctx, progress.KindStep, "check Slurm jobs", progress.WithFlags(progress.Hidden))
 	f.clock.Add(10 * time.Millisecond)
-	failed.End(exitcode.Errorf(exitcode.Transport, "login: connection refused"))
+	failed.End(unreachable("login: connection refused"))
 	checkScreen(t, f.draw(time.Second), `
 ✓ check the boot paths  1.5s
 ✗ check Slurm jobs  0.0s
@@ -315,7 +314,7 @@ func TestAFastFailureKeepsItsLine(t *testing.T) {
 		step.End(err)
 	}
 	quick("forgetting the host keys", nil, false)
-	quick("configuring the network boot", exitcode.Errorf(exitcode.Transport, "install: connection refused"), false)
+	quick("configuring the network boot", unreachable("install: connection refused"), false)
 	quick("disarming", nil, true)
 	checkScreen(t, f.draw(time.Second), `
 ✗ configuring the network boot  0.0s

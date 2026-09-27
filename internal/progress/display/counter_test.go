@@ -461,3 +461,15 @@ func TestNothingIsDrawnInTheBackground(t *testing.T) {
 	}
 	counter.Close()
 }
+
+// transportError is the error of a host that could not be reached, which
+// says its class itself, as the errors of a program's transport do.
+type transportError struct{ msg string }
+
+func (e transportError) Error() string               { return e.msg }
+func (transportError) ProgressClass() progress.Class { return progress.ClassTransport }
+
+// unreachable returns a transportError that says what format and args do.
+func unreachable(format string, args ...any) error {
+	return transportError{fmt.Sprintf(format, args...)}
+}
