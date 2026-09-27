@@ -5,10 +5,33 @@
 // as a tree that does not depend on the order concurrent work happened in,
 // and checks that they keep the promises the progress package makes to
 // every sink.
+//
+// Checked and Watch give a test a context with a Bus of its own. Both keep
+// one rule: Check runs on the events as the work left them, before the Bus
+// is closed, since Close would end a span the work left open as canceled
+// and hide that it never ended. Checked runs it when the test ends; Watch
+// when the test asks for the tree.
+//
+// # What Check holds an emitter to
+//
+// A package that reports progress, a library's or a program's, keeps the
+// promises Check lists. Three of them shape how work that runs in parallel
+// is reported, and are the ones a pool written by hand most often breaks:
+//
+//   - Every target of a Fold step or a batch, and every batch of a step, is
+//     announced queued, with progress.Queued, before the first of them
+//     runs. A pool that starts each target from its own goroutine as it
+//     takes its place, as errgroup.Go does, breaks this: start them all
+//     first, then run them; the pools of the fanout package do.
+//   - When a Fold step or a batch ends, the targets under it that ended are
+//     its Total, however they ended, so a counter always reaches its total;
+//     no count passes its Total, and a Total never shrinks.
+//   - No more targets run at once below a span than its Limit.
 package progresstest
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -46,6 +69,56 @@ func (c *Capture) Events() []progress.Event {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return slices.Clone(c.events)
+}
+
+// An Option sets up the Bus that Checked and Watch make.
+type Option func(*progress.Options)
+
+// Classify has the Bus class an error that says no class of its own by
+// fallback, as progress.Options.Classify does, so that the events carry the
+// classes the program's own Bus would give them.
+func Classify(fallback func(error) progress.Class) Option {
+	return func(o *progress.Options) { o.Classify = fallback }
+}
+
+// Checked returns ctx with a Bus of its own, whose events a Capture keeps
+// and Check checks when the test ends, before the Bus is closed. The
+// Capture asks for the lines of output, as a live display does, so that
+// they are checked too; it is returned for a test that reads the events,
+// or their Tree, while the work is under way.
+func Checked(ctx context.Context, t testing.TB, opts ...Option) (context.Context, *Capture) {
+	t.Helper()
+	c := &Capture{Lines: true}
+	bus := newBus(c, opts)
+	t.Cleanup(func() {
+		Check(t, c.Events())
+		bus.Close()
+	})
+	return progress.WithBus(ctx, bus), c
+}
+
+// Watch returns ctx with a Bus of its own, whose events a Capture keeps,
+// and a function to call once the work is done: it runs Check on the
+// events, closes the Bus and returns their Tree. The Capture asks for no
+// lines.
+func Watch(ctx context.Context, t testing.TB, opts ...Option) (context.Context, func() string) {
+	t.Helper()
+	c := &Capture{}
+	bus := newBus(c, opts)
+	return progress.WithBus(ctx, bus), func() string {
+		t.Helper()
+		Check(t, c.Events())
+		bus.Close()
+		return c.Tree()
+	}
+}
+
+func newBus(c *Capture, opts []Option) *progress.Bus {
+	o := progress.Options{Sinks: []progress.Sink{c}}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return progress.NewBus(o)
 }
 
 // Tree draws the spans of the events kept so far, one line each, indented
@@ -235,7 +308,8 @@ func digits(s string) int {
 }
 
 // Check reports, as errors of t, every promise the events break. Call it
-// once the Bus is closed, when every span has ended:
+// once the work is done, before the Bus is closed, so that a span the work
+// left open is reported rather than ended by Close:
 //
 //  1. Seq runs from 1 with no gaps. Every span starts once and ends once,
 //     and no span id is zero or used twice.

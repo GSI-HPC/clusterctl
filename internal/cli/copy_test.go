@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
 
 // fakeScp writes a script standing in for scp. Each run records its
@@ -216,7 +218,7 @@ func TestCopyReportsEachTransferAsACall(t *testing.T) {
 *exe0002*) echo "scp: /etc/hosts: Permission denied" >&2; exit 1 ;;
 *exe0003*) exec sleep 30 ;;
 esac`)
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := run(t, harnessOptions{ctx: ctx}, "--set", "ssh.scpBinary="+binary, "-y",
 		"copy", "-n", "exe[1-3]", "--timeout", "1s", "/etc/hosts", "/etc/hosts")
 	wantCode(t, err, exitcode.Transport)

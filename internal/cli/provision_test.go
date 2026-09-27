@@ -21,6 +21,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -617,7 +618,7 @@ command provision reinstall: failed (target): configuring the network boot faile
 		t.Run(tc.name, func(t *testing.T) {
 			h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
 			tc.setup(h)
-			ctx, tree := watch(t)
+			ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 			_, err := h.run(t, harnessOptions{ctx: ctx}, "provision", "reinstall", "-n", "exe[0001-0003]", "-y")
 			wantCode(t, err, tc.code)
 			if got := tree(); got != tc.want[1:] {

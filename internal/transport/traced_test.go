@@ -23,21 +23,6 @@ func (f runnerFunc) Run(ctx context.Context, t transport.Target, req transport.R
 	return f(ctx, t, req)
 }
 
-// watch returns a context whose Bus sends its events to a capture. tree
-// closes the Bus, checks every promise the events make and returns their
-// tree.
-func watch(t *testing.T) (context.Context, func() string) {
-	t.Helper()
-	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
-	return progress.WithBus(context.Background(), bus), func() string {
-		t.Helper()
-		bus.Close()
-		progresstest.Check(t, c.Events())
-		return c.Tree()
-	}
-}
-
 // Every request is a call, which says where it went and how it ended in a
 // word: a dry run's recorded one is skipped, a host that could not be
 // reached is the transport's failure, and a command timeout(1) ended ran
@@ -71,7 +56,7 @@ func TestTracedReportsEveryCall(t *testing.T) {
 			"call ssh node=exe1 host=exe1.example.org role=compute timeout=10s [dry-run]: skipped: dry run: not sent\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, tree := watch(t)
+			ctx, tree := progresstest.Watch(context.Background(), t, progresstest.Classify(exitcode.Class))
 			var inner *progress.Span
 			runner := transport.Traced(runnerFunc(func(ctx context.Context, _ transport.Target, _ transport.Request) (*transport.Result, error) {
 				inner = progress.SpanFrom(ctx)

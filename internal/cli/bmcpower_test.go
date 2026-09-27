@@ -498,7 +498,7 @@ command bmc power: failed (target): 1 of 3 service processors failed
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, tree := watch(t)
+			ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 			_, err := run(t, harnessOptions{ctx: ctx, recorder: tc.recorder}, append(noSlurm, tc.args...)...)
 			wantCode(t, err, exitcode.TargetFailed)
 			if got := tree(); got != tc.want[1:] {
@@ -616,7 +616,7 @@ command bmc power: canceled (canceled): interrupted, 3 not sent: exe[0004-0006]
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			watched, tree := watch(t)
+			watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
 			ctx, cancel := context.WithCancel(watched)
 			defer cancel()
 			var pauses []time.Duration
@@ -685,7 +685,7 @@ func TestBMCPowerKeepsTheAnswersThatCameBeforeAnInterrupt(t *testing.T) {
 		cancel()
 		return &transport.Result{Target: tg, ExitCode: 255, Err: exitcode.Wrap(exitcode.Interrupted, context.Canceled)}, nil
 	}}
-	watched, tree := watch(t)
+	watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	ctx2, cancel2 := context.WithCancel(watched)
 	defer cancel2()
 	go func() { <-ctx.Done(); cancel2() }()

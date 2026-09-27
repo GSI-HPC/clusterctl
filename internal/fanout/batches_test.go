@@ -14,6 +14,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -235,7 +236,7 @@ func TestBatchesReportTheirWork(t *testing.T) {
 
 	t.Run("a failed batch", func(t *testing.T) {
 		t.Parallel()
-		ctx, tree := watch(t)
+		ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 		s := &sender{fail: map[string]bool{"exe5": true}}
 		fanout.Batches(ctx, set(t, "exe[1-7]"), s.options(3, 5*time.Second), s.run)
 		want := `step power on total=7 [fold]: failed (target): exe5: no answer
@@ -254,7 +255,7 @@ func TestBatchesReportTheirWork(t *testing.T) {
 
 	t.Run("an interrupt during a pause", func(t *testing.T) {
 		t.Parallel()
-		ctx, tree := watch(t)
+		ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 		ctx, cancel := context.WithCancel(ctx)
 		s := &sender{}
 		o := s.options(2, 5*time.Second)
@@ -276,7 +277,7 @@ func TestBatchesReportTheirWork(t *testing.T) {
 	// left out for the interrupt, not for that failure.
 	t.Run("an interrupt during a batch", func(t *testing.T) {
 		t.Parallel()
-		ctx, tree := watch(t)
+		ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 		ctx, cancel := context.WithCancel(ctx)
 		s := &sender{fail: map[string]bool{"exe4": true}}
 		run := func(ctx context.Context, batch *nodeset.NodeSet) error {
@@ -307,7 +308,7 @@ func TestBatchesReportTheirWork(t *testing.T) {
 	// interrupt does: canceled, counted as their Total, not failed.
 	t.Run("a deadline during a pause", func(t *testing.T) {
 		t.Parallel()
-		ctx, tree := watch(t)
+		ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 		ctx, cancel := context.WithDeadline(ctx, time.Now().Add(time.Hour))
 		defer cancel()
 		deadline, stop := context.WithTimeout(ctx, 0)

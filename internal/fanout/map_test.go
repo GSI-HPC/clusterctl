@@ -29,27 +29,9 @@ func nodes(n int) []string {
 	return out
 }
 
-// watch returns a context whose Bus sends to a capture. close closes the
-// Bus, checks every promise the events make and returns their tree.
-func watch(t *testing.T) (ctx context.Context, tree func() string) {
-	t.Helper()
-	_, ctx, tree = watchCapture(t)
-	return ctx, tree
-}
-
-// watchCapture is watch, and gives the capture too, for a test that reads
-// the events while the work is under way.
-func watchCapture(t *testing.T) (c *progresstest.Capture, ctx context.Context, tree func() string) {
-	t.Helper()
-	c = &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
-	return c, progress.WithBus(context.Background(), bus), func() string {
-		t.Helper()
-		bus.Close()
-		progresstest.Check(t, c.Events())
-		return c.Tree()
-	}
-}
+// byExitCode has a test's Bus class errors by the exit code they ask for,
+// as the Bus of a command does.
+var byExitCode = progresstest.Classify(exitcode.Class)
 
 // onBMC describes a node by its service processor.
 func onBMC(node string) (string, string, string) { return node, node + ".mgmt.example.org", "" }
@@ -96,7 +78,7 @@ func TestMapKeepsToItsLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			calls := &fanouttest.InFlight{Hold: tc.want + 1}
-			ctx, tree := watch(t)
+			ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 			fanout.Map(ctx, nodes(tc.items), fanout.Options[string]{Step: "scan", Limit: tc.limit},
 				func(context.Context, string) (struct{}, error) {
 					defer calls.Enter()()
@@ -205,7 +187,7 @@ func TestMapTurnsAPanicIntoThatItemsFailure(t *testing.T) {
 func TestMapReportsItsWork(t *testing.T) {
 	t.Parallel()
 
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	fanout.Map(ctx, nodes(5), fanout.Options[string]{Step: "reset the machines", Limit: 2, Describe: onBMC},
 		func(ctx context.Context, node string) (struct{}, error) {
 			_, call := progress.Start(ctx, progress.KindCall, "redfish", progress.HTTP("POST", "/redfish/v1/Systems/1"))
@@ -233,7 +215,7 @@ func TestMapReportsItsWork(t *testing.T) {
 func TestMapReportsAnInterrupt(t *testing.T) {
 	t.Parallel()
 
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	ctx, cancel := context.WithCancel(ctx)
 	fanout.Map(ctx, nodes(6), fanout.Options[string]{Step: "reset the machines", Limit: 1},
 		func(_ context.Context, node string) (struct{}, error) {
@@ -258,7 +240,7 @@ func TestMapReportsAnInterrupt(t *testing.T) {
 func TestMapEndsAStepTheInterruptEndedCanceled(t *testing.T) {
 	t.Parallel()
 
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	ctx, cancel := context.WithCancel(ctx)
 	fanout.Map(ctx, nodes(2), fanout.Options[string]{Step: "read the power state", Limit: 2},
 		func(_ context.Context, node string) (struct{}, error) {
@@ -283,7 +265,7 @@ func TestMapEndsAStepTheInterruptEndedCanceled(t *testing.T) {
 func TestMapStepSaysTheClassOfItsExitCode(t *testing.T) {
 	t.Parallel()
 
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	fanout.Map(ctx, nodes(3), fanout.Options[string]{Step: "copy", Limit: 1},
 		func(_ context.Context, node string) (struct{}, error) {
 			switch node {
@@ -310,7 +292,7 @@ func TestMapStepSaysTheClassOfItsExitCode(t *testing.T) {
 func TestExecutorReportsItsTargets(t *testing.T) {
 	t.Parallel()
 
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	rec := &transport.Recorder{ByTarget: map[string]*transport.Result{"exe2": {ExitCode: 1}}}
 	e := &fanout.Executor{Runner: rec, Max: 2, Flags: progress.ShowLines}
 	results := e.Run(ctx, targets("exe1", "exe2", "exe3"), transport.Request{Argv: []string{"uptime"}})
@@ -332,7 +314,7 @@ func TestExecutorReportsItsTargets(t *testing.T) {
 func TestMapEndsAnItemLeftOutSkipped(t *testing.T) {
 	t.Parallel()
 
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	outcomes := fanout.Map(ctx, nodes(3), fanout.Options[string]{Step: "write /etc/munge/munge.key", Limit: 2},
 		func(_ context.Context, node string) (struct{}, error) {
 			switch node {

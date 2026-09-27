@@ -13,6 +13,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
 
 // Each host is bounded on its own: work on one host waits for a place
@@ -121,7 +122,7 @@ func TestHostsGiveBackWhatTheyTookWhenTheContextEnds(t *testing.T) {
 func TestMapWaitsQueuedForWhatAnItemNeeds(t *testing.T) {
 	t.Parallel()
 
-	c, ctx, tree := watchCapture(t)
+	ctx, c := progresstest.Checked(context.Background(), t, byExitCode)
 	hosts := &fanout.Hosts{}
 	calls := &fanouttest.InFlight{Hold: fanout.PerHost + 1}
 	refused := errors.New("no place for exe2")
@@ -153,7 +154,7 @@ func TestMapWaitsQueuedForWhatAnItemNeeds(t *testing.T) {
   target exe2: failed (target): no place for {}
   target exe[1,3-8]: ok
 `
-	if got := tree(); got != want {
+	if got := c.Tree(); got != want {
 		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
 	}
 }

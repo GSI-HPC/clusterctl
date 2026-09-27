@@ -18,6 +18,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
 
 // fakeDNS serves a fixed zone over UDP on the loopback address and returns
@@ -406,7 +407,7 @@ func TestDNSLookupReportsEachName(t *testing.T) {
 		silent: map[string]bool{"exe0003.hpc.example.org.": true},
 	}
 	server := s.serve(t)
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := run(t, harnessOptions{ctx: ctx}, "dns", "lookup", "-n", "exe[0001-0003]",
 		"--set", "services.dns.server="+server, "--set", "services.dns.timeout=200ms")
 	wantCode(t, err, exitcode.TargetFailed)
@@ -436,7 +437,7 @@ func TestDNSLookupStopsWhenInterrupted(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		s.silent[fmt.Sprintf("exe%04d.hpc.example.org.", i)] = true
 	}
-	watched, tree := watch(t)
+	watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	ctx, cancel := context.WithCancel(watched)
 	defer cancel()
 	// The interrupt comes once both names under way have been asked.
