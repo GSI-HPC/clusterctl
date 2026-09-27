@@ -6,8 +6,6 @@ package progress
 import (
 	"context"
 	"errors"
-
-	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 )
 
 // Classify tells why work failed from its error. The first rule that
@@ -18,14 +16,16 @@ import (
 //  2. context.Canceled is ClassCanceled;
 //  3. context.DeadlineExceeded, or an error that reports Timeout, such as
 //     a network timeout, is ClassTimeout;
-//  4. the exit code the error asks for, as CodeClass tells.
+//  4. what fallback says of the error, the program's own rule, such as
+//     one that reads the exit code the error asks for; a nil fallback
+//     says ClassTarget.
 //
-// A nil error is ClassNone.
+// A nil error is ClassNone, and fallback is not asked.
 //
-// An error that sums up the failures of many targets says its own class,
-// the class of the exit code it asks for, since the first of its targets'
-// errors that says one is no more the whole's than any other.
-func Classify(err error) Class {
+// An error that sums up the failures of many targets is best a Classifier
+// of its own, since the first of its targets' errors that says a class is
+// no more the whole's than any other.
+func Classify(err error, fallback func(error) Class) Class {
 	if err == nil {
 		return ClassNone
 	}
@@ -42,24 +42,8 @@ func Classify(err error) Class {
 	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &t) && t.Timeout() {
 		return ClassTimeout
 	}
-	return CodeClass(exitcode.From(err))
-}
-
-// CodeClass is the class of work that failed with the exit code code:
-// exitcode.Transport is ClassTransport, exitcode.Usage ClassUsage,
-// exitcode.Interrupted ClassCanceled, and any other but exitcode.OK, which
-// is no failure, ClassTarget.
-func CodeClass(code int) Class {
-	switch code {
-	case exitcode.OK:
-		return ClassNone
-	case exitcode.Transport:
-		return ClassTransport
-	case exitcode.Usage:
-		return ClassUsage
-	case exitcode.Interrupted:
-		return ClassCanceled
-	default:
+	if fallback == nil {
 		return ClassTarget
 	}
+	return fallback(err)
 }

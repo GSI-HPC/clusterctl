@@ -425,7 +425,7 @@ func TestARefusedRequestSaysWhyItWasRefused(t *testing.T) {
 		if got := exitcode.From(err); got != tc.code {
 			t.Errorf("%d: exit code = %d, want %d", tc.status, got, tc.code)
 		}
-		if got := progress.Classify(err); got != tc.class {
+		if got := progress.Classify(err, exitcode.Class); got != tc.class {
 			t.Errorf("%d: class = %s, want %s", tc.status, got, tc.class)
 		}
 		var refused *redfish.StatusError
@@ -441,7 +441,7 @@ func TestARefusedRequestSaysWhyItWasRefused(t *testing.T) {
 	if got, want := fmt.Sprint(err), "example.com: 401 Unauthorized: "; got != want {
 		t.Errorf("a wrong password: error = %q, want %q", got, want)
 	}
-	if got := progress.Classify(err); got != progress.ClassAuth {
+	if got := progress.Classify(err, exitcode.Class); got != progress.ClassAuth {
 		t.Errorf("a wrong password: class = %s, want %s", got, progress.ClassAuth)
 	}
 }
@@ -685,7 +685,7 @@ func TestPinningRefusesAChangedCertificate(t *testing.T) {
 	if got, want := exitcode.From(err), exitcode.Transport; got != want {
 		t.Errorf("exit code = %d, want %d", got, want)
 	}
-	if got, want := progress.Classify(err), progress.ClassPin; got != want {
+	if got, want := progress.Classify(err, exitcode.Class), progress.ClassPin; got != want {
 		t.Errorf("class = %s, want %s", got, want)
 	}
 	if got := f.requests.Load(); got != 0 {

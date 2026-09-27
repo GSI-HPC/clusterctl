@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
@@ -108,10 +107,10 @@ func TestTheEventLogWritesEveryEventOnALineOfItsOwn(t *testing.T) {
 		two.Run()
 		_, get := progress.Start(ctx2, progress.KindCall, "redfish", progress.HTTP("GET", "/redfish/v1/Systems/1"),
 			progress.Host("exe0002.mgmt"))
-		get.End(exitcode.Errorf(exitcode.Transport, "exe0002.mgmt: no answer"), progress.HTTPStatus(503))
-		two.End(exitcode.Errorf(exitcode.Transport, "exe0002.mgmt: no answer"))
+		get.End(classed{progress.ClassTransport, "exe0002.mgmt: no answer"}, progress.HTTPStatus(503))
+		two.End(classed{progress.ClassTransport, "exe0002.mgmt: no answer"})
 		step.Update(progress.Message("1 of 2 failed"))
-		step.End(exitcode.Errorf(exitcode.TargetFailed, "1 of 2 hosts failed: exe0002"))
+		step.End(classed{progress.ClassTarget, "1 of 2 hosts failed: exe0002"})
 
 		// A staggered power on in two batches: the first ends each way a
 		// target can fail, and the second is left out.
@@ -131,11 +130,11 @@ func TestTheEventLogWritesEveryEventOnALineOfItsOwn(t *testing.T) {
 			targets[i].Run()
 			targets[i].End(classed{class, nodes[i] + ": " + class.String()})
 		}
-		first.End(exitcode.Errorf(exitcode.TargetFailed, "5 of 5 hosts failed"))
+		first.End(classed{progress.ClassTarget, "5 of 5 hosts failed"})
 		second.Skip("not tried: an earlier batch failed")
 		_, pause := progress.Start(powerCtx, progress.KindWait, "stagger", progress.Timeout(30*time.Second))
 		pause.End(context.Canceled)
-		power.End(exitcode.Errorf(exitcode.TargetFailed, "5 of 6 hosts failed"))
+		power.End(classed{progress.ClassTarget, "5 of 6 hosts failed"})
 
 		waitCtx, wait := progress.Start(ctx, progress.KindWait, "confirm", progress.Message("reset 2 hosts"))
 		progress.Suspend(waitCtx)()

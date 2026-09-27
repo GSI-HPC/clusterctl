@@ -226,12 +226,12 @@ func TestRunBoundsACommandWithATimeout(t *testing.T) {
 			if tc.code != exitcode.Interrupted && errors.Is(result.Err, context.Canceled) {
 				t.Errorf("error = %v, which reads as an interrupt", result.Err)
 			}
-			if got := progress.Classify(result.Err); got != tc.class {
+			if got := progress.Classify(result.Err, exitcode.Class); got != tc.class {
 				t.Errorf("class = %s, want %s (error %v)", got, tc.class, result.Err)
 			}
-			if err := result.Check(""); progress.Classify(err) != tc.class || exitcode.From(err) != tc.code {
+			if err := result.Check(""); progress.Classify(err, exitcode.Class) != tc.class || exitcode.From(err) != tc.code {
 				t.Errorf("Check = %v, class %s, exit code %d; want class %s, exit code %d",
-					err, progress.Classify(err), exitcode.From(err), tc.class, tc.code)
+					err, progress.Classify(err, exitcode.Class), exitcode.From(err), tc.class, tc.code)
 			}
 			if elapsed < tc.atLeast || elapsed > tc.atLeast+10*time.Second {
 				t.Errorf("Run returned after %v, want %v or a little more", elapsed, tc.atLeast)
@@ -368,7 +368,7 @@ func TestAStatusOfTimeoutCountsOnlyAfterTheTimeout(t *testing.T) {
 				if got := exitcode.From(err); got != exitcode.TargetFailed {
 					t.Errorf("%s: exit code = %d, want %d", what, got, exitcode.TargetFailed)
 				}
-				if got := progress.Classify(err); got != tc.class {
+				if got := progress.Classify(err, exitcode.Class); got != tc.class {
 					t.Errorf("%s: class = %s, want %s", what, got, tc.class)
 				}
 				var timedOut *transport.TimeoutError
@@ -382,7 +382,7 @@ func TestAStatusOfTimeoutCountsOnlyAfterTheTimeout(t *testing.T) {
 			if got := fmt.Sprint(err); got != want {
 				t.Errorf("Interactive: error = %q, want %q", got, want)
 			}
-			if got := progress.Classify(err); got != tc.class {
+			if got := progress.Classify(err, exitcode.Class); got != tc.class {
 				t.Errorf("Interactive: class = %s, want %s", got, tc.class)
 			}
 		})

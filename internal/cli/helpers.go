@@ -175,7 +175,7 @@ func (e *hostFailures) Error() string { return e.message }
 func (e *hostFailures) Unwrap() []error { return e.errs }
 
 // ProgressClass says why the hosts failed as the exit code does.
-func (e *hostFailures) ProgressClass() progress.Class { return progress.CodeClass(e.code) }
+func (e *hostFailures) ProgressClass() progress.Class { return exitcode.CodeClass(e.code) }
 
 func firstLine(s string) string {
 	before, _, _ := strings.Cut(s, "\n")

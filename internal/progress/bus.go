@@ -35,6 +35,11 @@ type Options struct {
 	// PanicLog receives the stack of a sink that panicked, the front
 	// end's diagnostics; nil is the process's standard error.
 	PanicLog io.Writer
+	// Classify is the fallback of the classes End gives the errors of
+	// spans, asked for an error that none of Classify's first three rules
+	// fits, such as a program's rule for its exit codes; nil is
+	// ClassTarget.
+	Classify func(error) Class
 }
 
 // Bus hands the events of one command's spans to its sinks. It is safe for
@@ -50,6 +55,7 @@ type Bus struct {
 	lines    bool
 	now      func() time.Time
 	panicLog io.Writer
+	classify func(error) Class
 	trace    TraceContext
 	base     uint64
 	started  uint64
@@ -67,6 +73,7 @@ func NewBus(o Options) *Bus {
 		sinks:    slices.Clone(o.Sinks),
 		now:      o.Now,
 		panicLog: o.PanicLog,
+		classify: o.Classify,
 		trace:    TraceContext{Trace: o.Trace, Parent: o.Parent, Flags: o.TraceFlags, State: o.TraceState},
 	}
 	if b.now == nil {
@@ -289,25 +296,26 @@ func (s *Span) Update(opts ...Option) {
 }
 
 // End ends a span with the outcome of its work: ok for a nil error,
-// otherwise failed or canceled as Classify tells from err, whose text
-// becomes the span's one-line Err. The options set the fields that are
-// known only at the end, such as Exit. Only the first End or Skip of a span
+// otherwise failed or canceled as Classify tells from err, with the
+// Bus's Options.Classify as its fallback, and err's text becomes the
+// span's one-line Err. The options set the fields that are known only at
+// the end, such as Exit. Only the first End or Skip of a span
 // counts. Spans started under it that are still open end first, as
 // canceled, "not finished".
 func (s *Span) End(err error, opts ...Option) {
 	if s == nil {
 		return
 	}
+	b := s.bus
 	status, class, text := StatusOK, ClassNone, ""
 	if err != nil {
-		class = Classify(err)
+		class = Classify(err, b.classify)
 		status = StatusFailed
 		if class == ClassCanceled {
 			status = StatusCanceled
 		}
 		text = Sanitize(err.Error(), MaxErr)
 	}
-	b := s.bus
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {

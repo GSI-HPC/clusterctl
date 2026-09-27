@@ -63,7 +63,7 @@ func newTreeFixture(t *testing.T, command string, o treeSetup) *treeFixture {
 	f.tree = display.NewTree(f.term, display.TreeOptions{Now: f.clock.Now, ASCII: o.ascii, Interrupted: o.interrupted})
 	f.summary = &display.Summary{}
 	f.capture = &progresstest.Capture{}
-	f.bus = progress.NewBus(progress.Options{Sinks: []progress.Sink{f.capture, f.tree, f.summary}, Now: f.clock.Now})
+	f.bus = progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{f.capture, f.tree, f.summary}, Now: f.clock.Now})
 	t.Cleanup(func() {
 		f.close()
 		progresstest.Check(t, f.capture.Events())

@@ -686,3 +686,27 @@ func TestADisplayThatPanicsWhenSuspendedIsRemoved(t *testing.T) {
 func equal(a, b []string) bool {
 	return strings.Join(a, "\n") == strings.Join(b, "\n")
 }
+
+// End classes an error that none of Classify's first rules fits by the
+// Bus's fallback, and as the target's without one.
+func TestEndClassesByTheFallbackOfTheBus(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		fallback func(error) progress.Class
+		want     progress.Class
+	}{
+		{"no fallback", nil, progress.ClassTarget},
+		{"a fallback", byCode, progress.ClassTransport},
+	} {
+		ctx, bus, capture := watched(t, progress.Options{Classify: tc.fallback})
+		_, span := progress.Start(ctx, progress.KindTarget, "exe0001")
+		span.End(errUnreachable)
+		bus.Close()
+		events := capture.Events()
+		if end := events[len(events)-1]; end.Class != tc.want || end.Status != progress.StatusFailed {
+			t.Errorf("%s: the span ended %s, %s; want failed, %s", tc.name, end.Status, end.Class, tc.want)
+		}
+	}
+}

@@ -65,8 +65,12 @@ cores at 2.8 GHz.
 ## Decision
 
 Progress is reported as events of our own, in `internal/progress`, which
-depends on the standard library, `exitcode`, and `termtext` for escaping,
-first-party and with no third-party module but `golang.org/x/text`.
+depends on the standard library, and on `termtext` for escaping,
+first-party and with no third-party module but `golang.org/x/text`. It knows
+no exit codes: the class of an error that says none of its own, and is
+neither canceled nor a timeout, is the Bus's `Options.Classify` fallback's to
+tell, and clusterctl's is `exitcode.Class`, so that ADR 0020's rule stays
+with the exit codes.
 
 - **Spans in the context.** Work is a tree of spans at six levels: command,
   step, batch, target, call and wait. A span travels in the
