@@ -20,6 +20,12 @@
 // question is asked, through progress.Suspend, and never hides the cursor,
 // so a process killed while it draws leaves a terminal that works, at worst
 // with the rows of its last frame on it.
+//
+// Lines from goroutines that run beside the command, the stack of a panic
+// a pool's worker recovered from or a log line, go through the Terminal's
+// Lines writers, which hold them, whole lines only, while a question is
+// asked or the command has a line open, so that none lands inside the
+// question, and write them above the region once they may.
 package display
 
 import (
@@ -32,6 +38,10 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/termtext"
 )
+
+// maxWaiting is the most the lines of the Lines writers may hold, in
+// bytes, while they wait, and the longest line they wait for the end of.
+const maxWaiting = 256 << 10
 
 const (
 	// eraseLine takes the line the cursor is on off the terminal, and
@@ -66,6 +76,16 @@ type Terminal struct {
 	// tree's finished steps, returns the lines it has not written yet,
 	// and forgets them.
 	held func() string
+	// waiting are the whole lines the Lines writers were given while the
+	// terminal could not take them, in order, and waitingBytes their
+	// length; dropped counts those left out once waitingBytes would have
+	// passed maxWaiting, which a line written to droppedTo says.
+	waiting      []waitingLines
+	waitingBytes int
+	dropped      int
+	droppedTo    io.Writer
+	// liners are the Lines writers, whose unfinished lines Close ends.
+	liners []*lines
 
 	// PanicLog receives the stack of a display that panicked while it
 	// drew, the front end's diagnostics; nil is the terminal itself.
@@ -106,7 +126,9 @@ func (t *Terminal) recovered() {
 		prefix = t.Program + ": "
 	}
 	// The stack is a courtesy; one that cannot be written changes nothing.
-	_, _ = fmt.Fprintf(t.Writer(log), "%sthe progress display stopped: %v\n%s", prefix, p, debug.Stack())
+	// It is a line from beside the command, which may be asking a
+	// question, so it waits until the question has been answered.
+	_, _ = fmt.Fprintf(t.Lines(log), "%sthe progress display stopped: %v\n%s", prefix, p, debug.Stack())
 }
 
 // Writer returns a writer to w, a stream that shows on the terminal, such as
@@ -129,20 +151,131 @@ func (w writer) Write(p []byte) (int, error) {
 	t.release(false)
 	n, err := w.w.Write(p)
 	if n > 0 {
+		wasOpen := t.open
 		t.open = p[n-1] != '\n'
+		if wasOpen && !t.open && t.suspended == 0 {
+			// The line the lines waited for has ended.
+			t.writeWaiting()
+		}
 	}
 	return n, err
 }
 
+// Lines returns a writer to w, a stream that shows on the terminal, for
+// lines that come from beside the command, from goroutines that may write
+// at any moment: the stack of a panic a pool's worker recovered from, or a
+// log line. It writes whole lines only: at once where no region is drawn,
+// and otherwise with the next frame, above it. It holds them while a
+// question is asked, between progress.Suspend and its resume, and while
+// the command has a line open, such as a question it asks itself; the next
+// frame, the write that ends the open line, the resume and Close write
+// them, in order, and so does a write of the command's, before its own
+// bytes. A line that does not end waits for its end, and Close ends it. What waits is bounded, 256 KiB: a line past that is
+// left out, and a line written with the others says how many were.
+//
+// w must not be a writer of the Terminal's own. What is written is not
+// changed, and Write reports it all written: the lines are a courtesy.
+func (t *Terminal) Lines(w io.Writer) io.Writer {
+	l := &lines{t: t, w: w}
+	t.mu.Lock()
+	t.liners = append(t.liners, l)
+	t.mu.Unlock()
+	return l
+}
+
+// lines is a writer Lines returns.
+type lines struct {
+	t *Terminal
+	w io.Writer
+	// partial is the line begun and not yet ended. t.mu guards it.
+	partial []byte
+}
+
+// waitingLines are whole lines for w, each ended by a newline.
+type waitingLines struct {
+	w    io.Writer
+	text string
+}
+
+func (l *lines) Write(p []byte) (int, error) {
+	t := l.t
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	l.partial = append(l.partial, p...)
+	var text string
+	if end := strings.LastIndexByte(string(l.partial), '\n') + 1; end > 0 {
+		text = string(l.partial[:end])
+		l.partial = slices.Clone(l.partial[end:])
+	}
+	if len(l.partial) >= maxWaiting {
+		// A line that does not end within the bound is cut, and ends.
+		text += string(l.partial) + "\n"
+		l.partial = nil
+	}
+	if text == "" {
+		return len(p), nil
+	}
+	if t.suspended > 0 || t.open || len(t.rows) > 0 {
+		t.wait(l.w, text)
+		return len(p), nil
+	}
+	t.writeWaiting()
+	// The lines are a courtesy; one that cannot be written changes nothing
+	// about the command.
+	_, _ = io.WriteString(l.w, text)
+	return len(p), nil
+}
+
+// wait keeps text, whole lines for w, until the terminal may take it, as
+// many of its lines as fit within maxWaiting. t.mu is held.
+func (t *Terminal) wait(w io.Writer, text string) {
+	for text != "" {
+		line, rest, _ := strings.Cut(text, "\n")
+		line += "\n"
+		if t.waitingBytes+len(line) > maxWaiting {
+			t.dropped += 1 + strings.Count(rest, "\n")
+			t.droppedTo = w
+			return
+		}
+		t.waiting = append(t.waiting, waitingLines{w: w, text: line})
+		t.waitingBytes += len(line)
+		text = rest
+	}
+}
+
+// writeWaiting writes the lines the Lines writers hold, in the order they
+// were given, and the line that says how many were left out. The region
+// is off the terminal and no line is open. t.mu is held.
+func (t *Terminal) writeWaiting() {
+	for _, l := range t.waiting {
+		// The lines are a courtesy; one that cannot be written changes
+		// nothing about the command.
+		_, _ = io.WriteString(l.w, l.text)
+	}
+	t.waiting, t.waitingBytes = nil, 0
+	if t.dropped > 0 {
+		prefix := ""
+		if t.Program != "" {
+			prefix = t.Program + ": "
+		}
+		_, _ = fmt.Fprintf(t.droppedTo, "%s%d lines were left out while the terminal was busy\n", prefix, t.dropped)
+		t.dropped, t.droppedTo = 0, nil
+	}
+}
+
 // draw puts rows on the terminal in place of the display's region, each cut
-// to the width, once the lines a display holds are written above it,
-// unless the terminal is lent out, closed or waiting for a line to end. No
-// rows take the region off.
+// to the width, once the lines of the Lines writers and those a display
+// holds are written above it, unless the terminal is lent out, closed or
+// waiting for a line to end. No rows take the region off.
 func (t *Terminal) draw(rows []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed || t.suspended > 0 || t.open {
 		return
+	}
+	if len(t.waiting) > 0 || t.dropped > 0 {
+		t.erase()
+		t.writeWaiting()
 	}
 	if t.Foreground != nil && !t.Foreground() {
 		// The rows drawn before are the shell's now, to write over.
@@ -189,22 +322,29 @@ func (t *Terminal) erase() {
 	t.rows = nil
 }
 
-// release writes the lines a display holds, unless the terminal
-// is lent out or waiting for a line to end. forced, as the display closes,
-// it writes them all the same, after ending such a line. t.mu is held.
+// release writes the lines a display holds, and then those of the Lines
+// writers, unless the terminal is lent out or waiting for a line to end.
+// forced, as the display closes, it writes them all the same, after ending
+// such a line. t.mu is held.
 func (t *Terminal) release(forced bool) {
-	if t.held == nil || t.closed || !forced && (t.suspended > 0 || t.open) {
+	if !forced && (t.suspended > 0 || t.open) {
 		return
 	}
-	text := t.held()
-	if text == "" {
+	text := ""
+	if t.held != nil && !t.closed {
+		text = t.held()
+	}
+	if text == "" && len(t.waiting) == 0 && t.dropped == 0 {
 		return
 	}
 	if t.open {
 		text = "\n" + text
 	}
-	_, _ = io.WriteString(t.w, text)
+	if text != "" {
+		_, _ = io.WriteString(t.w, text)
+	}
 	t.open = false
+	t.writeWaiting()
 }
 
 // flush writes the lines a display holds, when it may.
@@ -249,10 +389,17 @@ func (t *Terminal) resume() {
 }
 
 // close takes the display off the terminal for good, once the lines it
-// holds are written. The writers go on writing.
+// holds are written, and those of the Lines writers, a line one of them
+// has not ended ended with a newline. The writers go on writing.
 func (t *Terminal) close() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	for _, l := range t.liners {
+		if len(l.partial) > 0 {
+			t.wait(l.w, string(l.partial)+"\n")
+			l.partial = nil
+		}
+	}
 	t.erase()
 	t.release(true)
 	t.closed = true
