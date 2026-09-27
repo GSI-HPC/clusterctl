@@ -38,6 +38,7 @@ counterpart in this design.
 | [mcp.md](mcp.md) | The MCP server: its tools, plan and apply, and who answers the gate |
 | [requirements.md](requirements.md) | What the program has to do, and where each requirement is met |
 | [testing.md](testing.md) | What is tested, how, and what cannot be |
+| [nodeset-testing.md](nodeset-testing.md) | How the node set engine is tested: fuzzing, the ClusterShell corpus, size and cost |
 | [release.md](release.md) | Versioning, the release workflow, the documentation site and dependency updates |
 | [migration.md](migration.md) | Moving a site from the shell toolkit to clusterctl |
 | [adr/](adr/) | The decisions, each with its context and consequences |

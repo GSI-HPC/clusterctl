@@ -11,35 +11,23 @@ under the race detector, and `make lint` vets and checks formatting.
 **Unit tests** cover the packages that hold the logic: node set parsing and
 folding, configuration merging and validation, naming, the inventory, quoting,
 output formatting, the DHCP parser, the host key store and the safety gate.
+The node set engine has a document of its own,
+[nodeset-testing.md](nodeset-testing.md): its fuzz target, the ClusterShell
+corpus and the tests of size.
 
 **A real shell** checks the quoting. `shellquote` is the one place where being
 subtly wrong is invisible until it eats a production command, so every vector
 in the test is quoted, run through `sh -c 'printf %s\n ...'`, and compared with
 what went in.
 
-**A fuzz target** checks the two properties a node set expression must satisfy:
-parsing never panics, and folding is idempotent. It compares the hosts before
-and after folding name by name, so a fold that renamed `exe3` to `exe03` would
-be caught, which a padding-blind membership check would not. It runs in CI for a bounded
-time and locally with `go test -fuzz`. It is how the adjacent-numeric-parts
-ambiguity was found. A fuzzing worker gives up on any input that runs for ten
-seconds, so the target lowers the expansion limits to 2¹² and skips inputs
-longer than a kilobyte: every input stays cheap, and the time goes into
-variety. Size is a separate test, which folds sets of a quarter of a million
-hosts and would take more than a minute if folding were quadratic. A second
-target checks that the DHCP parser never panics on any input. CI runs it for a
-minute on every change, and `go test ./internal/dhcp/ -fuzz FuzzParse` runs it
-locally. A third checks `progress.Sanitize`, which every remote line and error
-passes through before a display may draw it: whatever the input, what comes
-out holds nothing a terminal would act on and keeps to its bound. CI runs it
-for a minute too, and `go test ./internal/progress/ -fuzz FuzzSanitize` runs it
-locally.
-
-**A differential corpus** holds node set expressions with the answer
-ClusterShell gave for each, in `nodeset/testdata/clustershell.txt`. A test
-checks that clusterctl names the same hosts, except on the lines marked as one
-of the divergences `doc/nodeset.md` lists, where it checks that the answers
-still differ. `clustershell.py` next to it records the answers again.
+**Fuzz targets** check what must hold for any input. The node set parser's is
+described with the engine. Another checks that the DHCP parser never panics on
+any input. CI runs it for a minute on every change, and
+`go test ./internal/dhcp/ -fuzz FuzzParse` runs it locally. A third checks
+`progress.Sanitize`, which every remote line and error passes through before a
+display may draw it: whatever the input, what comes out holds nothing a
+terminal would act on and keeps to its bound. CI runs it for a minute too, and
+`go test ./internal/progress/ -fuzz FuzzSanitize` runs it locally.
 
 **A fake BMC** serves the Redfish surface clusterctl uses, over TLS, from
 `httptest`. It is how the reset-type check, the once-only action and the boot
@@ -154,8 +142,9 @@ reference for node set output.
 ## Coverage
 
 Coverage is reported per package and is not a target in itself. The packages
-that hold the logic sit between 70 and 96 per cent; the command tree is lower
-because much of it is the last step before a remote host.
+that hold the logic sit between 70 and 96 per cent, and the node set engine
+is covered completely; the command tree is lower because much of it is the
+last step before a remote host.
 
 Two rules keep the number meaningful:
 
