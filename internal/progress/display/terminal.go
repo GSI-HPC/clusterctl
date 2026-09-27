@@ -70,6 +70,10 @@ type Terminal struct {
 	// PanicLog receives the stack of a display that panicked while it
 	// drew, the front end's diagnostics; nil is the terminal itself.
 	PanicLog io.Writer
+	// Program names the program in the line that says a display stopped,
+	// "clusterctl: …", so that it is not read as the command's own; empty
+	// leaves the name out.
+	Program string
 	// Foreground, when it is set, reports whether the process is the job
 	// in the terminal's foreground. A job in the background draws nothing:
 	// the shell's prompt and what is typed at it are on the rows a frame
@@ -97,8 +101,12 @@ func (t *Terminal) recovered() {
 	if log == nil {
 		log = t.w
 	}
+	prefix := ""
+	if t.Program != "" {
+		prefix = t.Program + ": "
+	}
 	// The stack is a courtesy; one that cannot be written changes nothing.
-	_, _ = fmt.Fprintf(t.Writer(log), "clusterctl: the progress display stopped: %v\n%s", p, debug.Stack())
+	_, _ = fmt.Fprintf(t.Writer(log), "%sthe progress display stopped: %v\n%s", prefix, p, debug.Stack())
 }
 
 // Writer returns a writer to w, a stream that shows on the terminal, such as

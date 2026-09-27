@@ -49,6 +49,8 @@ type Plain struct {
 	start time.Time
 	// between is what the parts of a span's path are written with between.
 	between string
+	// noun says how many targets n are.
+	noun func(n int) string
 
 	mu    sync.Mutex
 	tally progress.Tally
@@ -95,17 +97,24 @@ type PlainOptions struct {
 	// ASCII writes the path to a span with ">" between its parts, for a
 	// locale that is not UTF-8, rather than "›".
 	ASCII bool
+	// Noun says how many targets a step or a batch expects, n of them,
+	// in the line that starts it: "480 hosts"; nil is "1 host" and "%d
+	// hosts".
+	Noun func(n int) string
 }
 
 // NewPlain returns a display of plain lines on term, which counts the time
 // in front of its lines from now.
 func NewPlain(term *Terminal, o PlainOptions) *Plain {
-	p := &Plain{term: term, now: o.Now, spans: map[progress.SpanID]*plainSpan{}, between: " › "}
+	p := &Plain{term: term, now: o.Now, spans: map[progress.SpanID]*plainSpan{}, between: " › ", noun: o.Noun}
 	if o.ASCII {
 		p.between = " > "
 	}
 	if p.now == nil {
 		p.now = time.Now
+	}
+	if p.noun == nil {
+		p.noun = hosts
 	}
 	p.start = p.now()
 	term.mu.Lock()
@@ -251,7 +260,7 @@ func (p *Plain) run(e progress.Event, s *plainSpan) {
 	}
 	switch e.Kind {
 	case progress.KindStep, progress.KindBatch:
-		p.line(e.Time, s.path+": start"+sizes(e.Fields))
+		p.line(e.Time, s.path+": start"+p.sizes(e.Fields))
 		if s.counts && !s.below {
 			p.beats = append(p.beats, beat{span: e.Span, due: e.Time.Add(plainBeat)})
 		}
@@ -335,17 +344,18 @@ func (p *Plain) line(t time.Time, text string) {
 
 // sizes says how many targets a step or a batch expects, and how many of
 // them it works on at once when that is fewer.
-func sizes(f progress.Fields) string {
+func (p *Plain) sizes(f progress.Fields) string {
 	if f.Total <= 0 {
 		return ""
 	}
-	text := ", " + hosts(f.Total)
+	text := ", " + p.noun(f.Total)
 	if f.Limit > 0 && f.Limit < f.Total {
 		text += fmt.Sprintf(", %d at a time", f.Limit)
 	}
 	return text
 }
 
+// hosts is the noun of a Plain that was given none: n hosts.
 func hosts(n int) string {
 	if n == 1 {
 		return "1 host"

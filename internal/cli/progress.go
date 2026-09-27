@@ -351,7 +351,7 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 	var restore func()
 	if mode != progressNone {
 		term := display.NewTerminal(r.streams.Err, r.streams.Size)
-		term.PanicLog, term.Foreground = diag, r.streams.Foreground
+		term.PanicLog, term.Foreground, term.Program = diag, r.streams.Foreground, "clusterctl"
 		shown = startDisplay(mode, term, r.context().Done())
 		summary = &display.Summary{}
 		sinks = append(sinks, shown, summary)
