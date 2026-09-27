@@ -57,7 +57,7 @@ hyphen) or an IP address, and the account has to be spelled in the portable
 user name alphabet, letters, digits, `.`, `_` and `-`, not beginning with `-`.
 Anything else is refused with exit code 2 before ssh runs. Node names are
 checked earlier still, when they are selected; see
-[node sets](nodeset.md#names-are-host-names).
+[selecting nodes](selection.md#names-are-host-names).
 
 ## The generated ssh configuration
 

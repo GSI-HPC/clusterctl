@@ -22,9 +22,10 @@ cmd/clusterctl        the process: signals, exit code
 ```
 
 A command never builds an ssh command line or formats its own output. It asks
-the `app.App` it is given for a node set, for targets, for an executor and for
-the clients of the subsystems, reads what else it needs from the resolved
-configuration, `a.Spec`, does its work, and hands one `output.Result` back.
+the `app.App` it is given for a node set ([selection.md](selection.md)), for
+targets, for an executor and for the clients of the subsystems, reads what else
+it needs from the resolved configuration, `a.Spec`, does its work, and hands
+one `output.Result` back.
 That is why `-o json`, `--dry-run` and the confirmation gate behave identically
 in every command rather than in the ones that remembered to implement them.
 
@@ -37,7 +38,7 @@ subsystems it drives and calls them itself, with what `app` built.
 
 | Package | Owns |
 | --- | --- |
-| `nodeset` | The node set language: parsing, folding, expansion, set operations, groups. The only package outside `internal/`. |
+| `nodeset` | The node set language ([nodeset.md](nodeset.md)): parsing, folding, expansion, set operations, and group references through a resolver the caller supplies. The only package outside `internal/`. |
 | `internal/apis/v1alpha1` | The configuration document kinds and the effective configuration they merge into. |
 | `internal/config` | Finding, validating, merging and resolving configuration, and remembering where every value came from. |
 | `internal/inventory` | What is known about the nodes: attributes, racks, addresses, boot paths. |
@@ -69,7 +70,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | --- | --- |
 | `internal/redfish` | The Redfish client, its certificate pinning and its reset semantics. |
 | `internal/ipmi` | The FreeIPMI and ipmitool backends, run on a host that can reach the service network. |
-| `internal/groups` | Resolving `@group` references from tables, node attributes or commands run on a host role, and caching what the commands answered. |
+| `internal/groups` | Resolving `@group` references from tables, node attributes or commands run on a host role, and caching what the commands answered ([selection.md](selection.md#groups)). |
 | `internal/credentials` | Resolving an account and its password from a configured source. |
 | `internal/secrets` | Decrypting age encrypted files into memory, reading the sops metadata of a Secret document, and having the `sops` command decrypt it into memory. |
 | `internal/slurm` | Reading and changing the state of the workload manager. |

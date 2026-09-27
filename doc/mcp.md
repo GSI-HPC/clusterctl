@@ -75,7 +75,7 @@ to the same rule as any other selection: a node name has to be a host name.
 One beginning with `-` would otherwise reach ssh as an option, and one with a
 `:`, `@`, `/`, `?` or `#` would send a Redfish read, and the site's BMC
 password, to a host and port of the agent's choosing. See
-[node sets](nodeset.md#names-are-host-names).
+[selecting nodes](selection.md#names-are-host-names).
 
 The names are also held to the site. At a terminal the administrator may name
 any host; through `read_command` a node has to be in the inventory, or have a
