@@ -305,3 +305,93 @@ func TestMapEndsAnItemLeftOutSkipped(t *testing.T) {
 		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// Acquire takes what an item needs before its work starts: one it refuses
+// ends as never started, with the reason; one it panics on is that item's
+// failure; and one it gives no release for goes on all the same.
+func TestMapAcquiresWhatAnItemNeeds(t *testing.T) {
+	t.Parallel()
+
+	var log strings.Builder
+	refused := errors.New("no place for exe2")
+	var released atomic.Int32
+	ctx, tree := progresstest.Watch(context.Background(), t)
+	outcomes := fanout.Map(ctx, nodes(4), fanout.Options[string]{
+		Step: "check", Limit: 2, PanicLog: &log,
+		Acquire: func(_ context.Context, node string) (func(), error) {
+			switch node {
+			case "exe2":
+				return nil, refused
+			case "exe3":
+				panic("the host has no slots")
+			case "exe4":
+				return nil, nil
+			}
+			return func() { released.Add(1) }, nil
+		},
+	}, func(context.Context, string) (struct{}, error) { return struct{}{}, nil })
+
+	var p *fanout.PanicError
+	switch {
+	case !outcomes[0].Started || outcomes[0].Err != nil:
+		t.Errorf("exe1 = %+v, want it done", outcomes[0])
+	case outcomes[1].Started || !errors.Is(outcomes[1].Err, refused):
+		t.Errorf("exe2 = %+v, want it never started, with the refusal", outcomes[1])
+	case outcomes[2].Started || !errors.As(outcomes[2].Err, &p):
+		t.Errorf("exe3 = %+v, want it never started, with the panic", outcomes[2])
+	case !outcomes[3].Started || outcomes[3].Err != nil:
+		t.Errorf("exe4 = %+v, want it done without a release", outcomes[3])
+	}
+	if got := released.Load(); got != 1 {
+		t.Errorf("%d releases were called, want the one given", got)
+	}
+	want := `step check total=4 limit=2 [fold]: failed (target): 2 of 4 failed: exe[2-3]
+  target exe2: failed (target): no place for {}
+  target exe3: failed (target): the program panicked; this is a bug, please report it: "the host has no slots"
+  target exe[1,4]: ok
+`
+	if got := tree(); got != want {
+		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
+	}
+	if !strings.HasPrefix(log.String(), `panic while working on exe3: "the host has no slots"`) {
+		t.Errorf("the log reads %q, want the panic of exe3 without a program's name", log.String())
+	}
+}
+
+// A program's Summarize is the error the step ends with, and its Classify
+// the rule that tells an item canceled.
+func TestMapTakesTheProgramsRules(t *testing.T) {
+	t.Parallel()
+
+	stopped := errors.New("exe2: stopped")
+	summary := errors.New("the program's summary")
+	classify := func(err error) progress.Class {
+		if errors.Is(err, stopped) {
+			return progress.ClassCanceled
+		}
+		return progress.ClassTarget
+	}
+	// The program's Bus classes the items' errors by the same rule.
+	ctx, tree := progresstest.Watch(context.Background(), t, progresstest.Classify(classify))
+	fanout.Map(ctx, nodes(2), fanout.Options[string]{
+		Step: "stop", Limit: 1, Classify: classify,
+		Summarize: func(n int, names []string, errs []error, interrupted bool) error {
+			if n != 2 || len(names) != 1 || !errors.Is(errs[0], stopped) || !interrupted {
+				t.Errorf("Summarize(%d, %q, %v, %t)", n, names, errs, interrupted)
+			}
+			return summary
+		},
+	}, func(_ context.Context, node string) (struct{}, error) {
+		if node == "exe2" {
+			return struct{}{}, stopped
+		}
+		return struct{}{}, nil
+	})
+	want := `step stop total=2 limit=1 [fold]: failed (target): the program's summary
+  target exe1: ok
+  target exe2: canceled (canceled): {}: stopped
+`
+	if got := tree(); got != want {
+		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
+	}
+}

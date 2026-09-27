@@ -158,3 +158,21 @@ func TestMapWaitsQueuedForWhatAnItemNeeds(t *testing.T) {
 		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// A host with no name takes no place: work that goes to no host of its own
+// is bounded by the pool alone.
+func TestHostsTakeNoPlaceForNoHost(t *testing.T) {
+	t.Parallel()
+
+	hosts := &fanout.Hosts{Limit: 1}
+	release, err := hosts.Acquire(context.Background(), "", "gw.example.org")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := hosts.Acquire(context.Background(), "")
+	if err != nil {
+		t.Fatalf("a second work with no host had to wait: %v", err)
+	}
+	second()
+	release()
+}
