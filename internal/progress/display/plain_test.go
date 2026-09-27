@@ -6,6 +6,7 @@ package display_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -338,4 +339,36 @@ func TestPlainLinesInASCII(t *testing.T) {
 	if got := f.end(nil); got != want {
 		t.Errorf("plain lines:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+// A program whose targets are not hosts names them with a noun of its own,
+// one and many.
+func TestPlainLinesSayTheNounTheyAreGiven(t *testing.T) {
+	t.Parallel()
+	nodes := func(n int) string {
+		if n == 1 {
+			return "1 node"
+		}
+		return fmt.Sprintf("%d nodes", n)
+	}
+	f := newPlainFixtureWith(t, "create cluster", display.PlainOptions{Noun: nodes})
+	for _, n := range []int{1, 4} {
+		ctx, step := progress.Start(f.ctx, progress.KindStep, "start", progress.WithFlags(progress.Fold), progress.Total(n))
+		targets := make([]*progress.Span, n)
+		for i := range targets {
+			_, targets[i] = progress.Start(ctx, progress.KindTarget, fmt.Sprintf("worker-%d", i), progress.Queued())
+		}
+		for _, target := range targets {
+			target.Run()
+			target.End(nil)
+		}
+		step.End(nil)
+	}
+	f.draw(0)
+	checkScreen(t, f.end(nil), `
+[0:00] create cluster › start: start, 1 node
+[0:00] create cluster › start: done in 0.0s: 1 ok
+[0:00] create cluster › start: start, 4 nodes
+[0:00] create cluster › start: done in 0.0s: 4 ok
+`)
 }

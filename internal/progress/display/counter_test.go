@@ -406,8 +406,10 @@ func TestADisplayThatPanicsWhileItDrawsStops(t *testing.T) {
 				Start()
 				Close()
 			} = display.NewCounter(term, display.CounterOptions{Now: c.Now})
+			prefix := ""
 			if name == "tree" {
 				d = display.NewTree(term, display.TreeOptions{Now: c.Now})
+				term.Program, prefix = "sind", "sind: "
 			}
 			c.Add(2 * time.Second)
 			d.Start()
@@ -419,6 +421,9 @@ func TestADisplayThatPanicsWhileItDrawsStops(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 			}
 			d.Close()
+			if !strings.HasPrefix(log.String(), prefix+"the progress display stopped") {
+				t.Errorf("the panic is not written as the program's: %q", log.String())
+			}
 			if !strings.Contains(log.String(), "goroutine") {
 				t.Errorf("the stack is not written: %q", log.String())
 			}
