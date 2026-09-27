@@ -8,8 +8,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/clusterctl/internal/termtext"
 )
 
 func TestSanitize(t *testing.T) {
@@ -75,7 +75,7 @@ func FuzzSanitize(f *testing.F) {
 		if !utf8.ValidString(got) {
 			t.Fatalf("Sanitize(%q, %d) = %q, which is not UTF-8", in, max, got)
 		}
-		if output.EscapeCell(got) != got || strings.ContainsAny(got, "\r\n\t\x1b") {
+		if termtext.EscapeCell(got) != got || strings.ContainsAny(got, "\r\n\t\x1b") {
 			t.Fatalf("Sanitize(%q, %d) = %q, which still holds a control character", in, max, got)
 		}
 		if max > 0 && len(got) > max {
@@ -87,7 +87,7 @@ func FuzzSanitize(f *testing.F) {
 		if again := progress.Sanitize(got, max); again != got {
 			t.Fatalf("Sanitize is not idempotent for %q: %q, then %q", in, got, again)
 		}
-		if !strings.Contains(in, "\r") && output.EscapeCell(in) == in && (max == 0 || len(in) <= max) && got != in {
+		if !strings.Contains(in, "\r") && termtext.EscapeCell(in) == in && (max == 0 || len(in) <= max) && got != in {
 			t.Fatalf("Sanitize(%q, %d) = %q changed text that needed nothing", in, max, got)
 		}
 	})

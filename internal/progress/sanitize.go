@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/termtext"
 )
 
 // Sanitize makes text from elsewhere, a remote line or an error, safe to
@@ -18,7 +18,7 @@ import (
 // back to the start of the line and what follows overwrites what was
 // there, so "50%\r100%" reads "100%", "abcdef\r12" reads "12cdef", and a
 // line that ends in "\r\n" loses nothing. What is left is escaped by
-// output.EscapeCell, the one escaper, which shows every other control
+// termtext.EscapeCell, the one escaper, which shows every other control
 // character, an escape sequence's introducer, a bidirectional control, a
 // newline and bytes that are not UTF-8 as a visible escape such as \x1b.
 // The result is cut on a rune boundary.
@@ -31,7 +31,7 @@ func Sanitize(s string, max int) string {
 	if max > 0 && len(s) > max {
 		s = s[:runeCut(s, max)]
 	}
-	s = output.EscapeCell(s)
+	s = termtext.EscapeCell(s)
 	if max > 0 && len(s) > max {
 		s = s[:runeCut(s, max)]
 	}

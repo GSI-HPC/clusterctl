@@ -12,9 +12,3 @@ func EscapeText(s string) string { return termtext.EscapeText(s) }
 // EscapeCell is termtext.EscapeCell: untrusted text made safe for one line
 // of a terminal.
 func EscapeCell(s string) string { return termtext.EscapeCell(s) }
-
-// RuneWidth is termtext.RuneWidth: how many columns a terminal gives r.
-func RuneWidth(r rune) int { return termtext.RuneWidth(r) }
-
-// Width is termtext.Width: how many columns s takes on a terminal.
-func Width(s string) int { return termtext.Width(s) }
