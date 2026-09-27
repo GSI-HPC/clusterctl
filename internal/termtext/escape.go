@@ -10,15 +10,12 @@ import (
 )
 
 // EscapeText makes untrusted text safe to write to a terminal, keeping its
-// lines.
-//
-// Output from a node, a BMC, Slurm or an agent is not trusted: a carriage
-// return or a cursor movement can overwrite the line printed for another
-// node, and an escape sequence can retitle the terminal or write the
-// clipboard. EscapeText replaces every C0 and C1 control character, DEL,
-// the Unicode controls that reorder or break lines, and bytes that are not
-// UTF-8 with a visible escape such as \x1b or \u009b. Newline and tab are
-// kept, since they cannot move the cursor back over text already printed.
+// lines: untrusted text from a remote host or a container, say, whose
+// control characters would otherwise act on the terminal. It replaces every
+// rune the package's escape policy names with a visible escape such as
+// \x1b or \u009b, and a byte that is not UTF-8 with one such as \xff.
+// Newline and tab are kept, since they cannot move the cursor back over
+// text already written.
 //
 // Text that holds none of these is returned unchanged.
 func EscapeText(s string) string {
@@ -27,8 +24,7 @@ func EscapeText(s string) string {
 
 // EscapeCell is EscapeText for a value that has to stay on one line, such as
 // a table cell or a name in a header: newline and tab are escaped too, as \n
-// and \t, so that a value cannot start a row that seems to belong to another
-// node.
+// and \t, so that a value cannot start a row that seems to be another.
 func EscapeCell(s string) string {
 	return escape(s, true)
 }
