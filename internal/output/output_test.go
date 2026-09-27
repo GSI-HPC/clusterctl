@@ -101,6 +101,25 @@ func TestTableAlignsAndDoesNotTruncate(t *testing.T) {
 	}
 }
 
+// A column holding wide characters, as CJK text and emoji are, is measured
+// by the columns a terminal gives them, so the next column still lines up.
+func TestTableAlignsWideCharacters(t *testing.T) {
+	t.Parallel()
+
+	tbl := output.NewTable(output.Cols("NODE", "REASON", "STATE")...)
+	tbl.Add("exe1", "失败", "down")
+	tbl.Add("exe2", "✅ ok", "idle")
+	tbl.Add("exe3", "plain", "idle")
+	got := render(t, "table", output.Result{Table: tbl})
+	want := "NODE  REASON  STATE\n" +
+		"exe1  失败    down\n" +
+		"exe2  ✅ ok   idle\n" +
+		"exe3  plain   idle\n"
+	if got != want {
+		t.Errorf("the columns are not aligned:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestJSONAndYAML(t *testing.T) {
 	t.Parallel()
 
