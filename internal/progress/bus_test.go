@@ -550,7 +550,7 @@ func TestASinkThatPanicsIsRemoved(t *testing.T) {
 	if n := len(capture.Events()); n != 6 {
 		t.Errorf("the other sink was sent %d events, want 6", n)
 	}
-	if !strings.Contains(log.String(), `panicked and was stopped: "drawing went wrong"`) || !strings.Contains(log.String(), "goroutine") {
+	if !strings.HasPrefix(log.String(), `a progress display panicked and was stopped: "drawing went wrong"`) || !strings.Contains(log.String(), "goroutine") {
 		t.Errorf("the panic log reads %q, want the panic and its stack", log.String())
 	}
 
@@ -708,5 +708,20 @@ func TestEndClassesByTheFallbackOfTheBus(t *testing.T) {
 		if end := events[len(events)-1]; end.Class != tc.want || end.Status != progress.StatusFailed {
 			t.Errorf("%s: the span ended %s, %s; want failed, %s", tc.name, end.Status, end.Class, tc.want)
 		}
+	}
+}
+
+// The line that says a sink panicked names the program, when the Bus was
+// told its name, so that it is not read as a line of the work's.
+func TestThePanicLogNamesTheProgram(t *testing.T) {
+	t.Parallel()
+
+	var log bytes.Buffer
+	ctx, bus, _ := watched(t, progress.Options{Sinks: []progress.Sink{&panicky{n: 1}}, PanicLog: &log, Program: "sind"})
+	_, span := progress.Start(ctx, progress.KindCall, "docker ps")
+	span.End(nil)
+	bus.Close()
+	if want := `sind: a progress display panicked and was stopped: "drawing went wrong"`; !strings.HasPrefix(log.String(), want) {
+		t.Errorf("the panic log reads %q, want it to start with %q", log.String(), want)
 	}
 }

@@ -47,7 +47,7 @@ func (s *Server) watch(ctx context.Context, req *mcp.CallToolRequest) (context.C
 			sinks = append(sinks, n)
 		}
 	}
-	bus := progress.NewBus(progress.Options{Sinks: sinks, PanicLog: s.opts.Log, Classify: exitcode.Class})
+	bus := progress.NewBus(progress.Options{Sinks: sinks, PanicLog: s.opts.Log, Program: "clusterctl", Classify: exitcode.Class})
 	if n != nil {
 		n.start()
 	}

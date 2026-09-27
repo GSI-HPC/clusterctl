@@ -35,6 +35,10 @@ type Options struct {
 	// PanicLog receives the stack of a sink that panicked, the front
 	// end's diagnostics; nil is the process's standard error.
 	PanicLog io.Writer
+	// Program names the program in the line that says a sink panicked,
+	// "clusterctl: …", so that it is not read as a line of the work's;
+	// empty leaves the name out.
+	Program string
 	// Classify is the fallback of the classes End gives the errors of
 	// spans, asked for an error that none of Classify's first three rules
 	// fits, such as a program's rule for its exit codes; nil is
@@ -55,6 +59,7 @@ type Bus struct {
 	lines    bool
 	now      func() time.Time
 	panicLog io.Writer
+	program  string
 	classify func(error) Class
 	trace    TraceContext
 	base     uint64
@@ -73,6 +78,7 @@ func NewBus(o Options) *Bus {
 		sinks:    slices.Clone(o.Sinks),
 		now:      o.Now,
 		panicLog: o.PanicLog,
+		program:  o.Program,
 		classify: o.Classify,
 		trace:    TraceContext{Trace: o.Trace, Parent: o.Parent, Flags: o.TraceFlags, State: o.TraceState},
 	}
@@ -512,8 +518,12 @@ func (b *Bus) safely(f func()) (ok bool) {
 			if log == nil {
 				log = os.Stderr
 			}
+			prefix := ""
+			if b.program != "" {
+				prefix = b.program + ": "
+			}
 			// The log is a courtesy; a write that fails changes nothing.
-			_, _ = fmt.Fprintf(log, "clusterctl: a progress display panicked and was stopped: %q\n%s", fmt.Sprint(v), debug.Stack())
+			_, _ = fmt.Fprintf(log, "%sa progress display panicked and was stopped: %q\n%s", prefix, fmt.Sprint(v), debug.Stack())
 			ok = false
 		}
 	}()

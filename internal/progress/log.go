@@ -41,8 +41,8 @@ const (
 // system.
 //
 // The first line is the run, the trace its events belong to, where the
-// trace came from when another program handed it on, and the version of
-// clusterctl that wrote it:
+// trace came from when another program handed it on, and the program and
+// its version that wrote it, as LogOptions name them:
 //
 //	{"v":1,"type":"trace","run":"5d0c…a1f3","trace":"4bf9…4736","parent":"00f067aa0ba902b7","traceFlags":"01","traceState":"rojo=00f067aa0ba902b7","version":"v0.4.0"}
 //
@@ -92,7 +92,10 @@ var errBehind = errors.New("the lines were not written as fast as the work went 
 
 // LogOptions configure a Log.
 type LogOptions struct {
-	// Version is the version of clusterctl that writes the log, which its
+	// Program names the program that writes the log, which its first line
+	// names as "program"; empty leaves the key out.
+	Program string
+	// Version is the version of the program that writes the log, which its
 	// first line names.
 	Version string
 	// Run names the run on every line; empty draws 16 hexadecimal digits
@@ -139,6 +142,7 @@ type logTrace struct {
 	Parent     string `json:"parent,omitempty"`
 	TraceFlags string `json:"traceFlags,omitempty"`
 	TraceState string `json:"traceState,omitempty"`
+	Program    string `json:"program,omitempty"`
 	Version    string `json:"version,omitempty"`
 }
 
@@ -185,7 +189,7 @@ func (l *Log) Begin(tc TraceContext) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.trace = tc.Trace.String()
-	line := logTrace{V: LogVersion, Type: "trace", Run: l.run, Trace: l.trace, Version: l.o.Version}
+	line := logTrace{V: LogVersion, Type: "trace", Run: l.run, Trace: l.trace, Program: l.o.Program, Version: l.o.Version}
 	if tc.Parent != 0 {
 		line.Parent = tc.Parent.String()
 		line.TraceFlags = fmt.Sprintf("%02x", tc.Flags)

@@ -651,3 +651,20 @@ func TestTwoRunsAppendingToOneFileCanBeToldApart(t *testing.T) {
 		}
 	}
 }
+
+// The first line names the program that wrote the log when the log was
+// told it, and leaves the key out otherwise, as the fixture shows.
+func TestTheEventLogNamesTheProgram(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	log := progress.NewLog(&out, progress.LogOptions{Run: "0123456789abcdef", Program: "sind", Version: "v1.2.3"})
+	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{log}})
+	bus.Close()
+	if err := log.Close(); err != nil {
+		t.Fatalf("closing the log: %v", err)
+	}
+	first, _, _ := strings.Cut(out.String(), "\n")
+	if !strings.HasSuffix(first, `,"program":"sind","version":"v1.2.3"}`) {
+		t.Errorf("the first line is %s, want the program before the version", first)
+	}
+}
