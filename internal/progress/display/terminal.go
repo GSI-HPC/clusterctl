@@ -30,7 +30,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/termtext"
 )
 
 const (
@@ -144,7 +144,7 @@ func (t *Terminal) draw(rows []string) {
 	width, _ := t.dims()
 	cutRows := make([]string, 0, len(rows))
 	for _, row := range rows {
-		cutRows = append(cutRows, cut(row, width-1))
+		cutRows = append(cutRows, termtext.Truncate(row, width-1))
 	}
 	var held string
 	if t.held != nil {
@@ -248,27 +248,4 @@ func (t *Terminal) close() {
 	t.erase()
 	t.release(true)
 	t.closed = true
-}
-
-// cut shortens s to at most n columns, so that a row never wraps: erasing
-// it would take off only the last line of it. A wide character, as CJK
-// text and emoji are, takes two, and one that would reach past n is left
-// out whole.
-func cut(s string, n int) string {
-	if n < 1 {
-		return ""
-	}
-	if output.Width(s) <= n {
-		return s
-	}
-	var b strings.Builder
-	for _, r := range s {
-		w := output.RuneWidth(r)
-		if w > n {
-			break
-		}
-		b.WriteRune(r)
-		n -= w
-	}
-	return b.String()
 }

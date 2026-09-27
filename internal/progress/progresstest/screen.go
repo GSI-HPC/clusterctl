@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/termtext"
 )
 
 // Screen is a terminal for a test to draw on and read back: it shows what
@@ -145,7 +145,7 @@ const wideRest = rune(0)
 // CJK text and emoji are, takes two columns, and wraps when only one is
 // left, as it does on a terminal.
 func (s *Screen) put(r rune) {
-	w := max(1, output.RuneWidth(r))
+	w := max(1, termtext.RuneWidth(r))
 	if s.Width > 0 && s.col+w > s.Width {
 		s.row++
 		s.col = 0
