@@ -8,7 +8,8 @@ import (
 	"io"
 	"slices"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/GSI-HPC/clusterctl/internal/termtext"
 )
 
 // Column is one column of a table.
@@ -161,11 +162,11 @@ func writeTable(w io.Writer, t *Table, wide bool) error {
 
 	widths := make([]int, len(keep))
 	for j, heading := range headings {
-		widths[j] = utf8.RuneCountInString(heading)
+		widths[j] = termtext.Width(heading)
 	}
 	for _, cells := range rows {
 		for j, value := range cells {
-			if n := utf8.RuneCountInString(value); n > widths[j] {
+			if n := termtext.Width(value); n > widths[j] {
 				widths[j] = n
 			}
 		}
@@ -181,7 +182,7 @@ func writeTable(w io.Writer, t *Table, wide bool) error {
 			if j > 0 {
 				b.WriteString("  ")
 			}
-			pad := widths[j] - utf8.RuneCountInString(value)
+			pad := widths[j] - termtext.Width(value)
 			last := j == len(keep)-1
 			switch {
 			case t.Columns[keep[j]].Right:
