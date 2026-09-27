@@ -4,13 +4,14 @@
 # Node sets
 
 A node set expression names a set of hosts. The syntax is ClusterShell's,
-because that is what the team already types and what the cluster's other tools
-accept. The semantics follow ClusterShell except in the corners listed under
+because that is what administrators of HPC clusters already type and what
+their other tools accept. The semantics follow ClusterShell except in the
+corners listed under
 [Where this differs from ClusterShell](#where-this-differs-from-clustershell).
 
-The engine is in `nodeset/`, the one package this module offers to other
-programs: when this was written, Go had no node set implementation, and porting
-ClusterShell's semantics is the kind of work that should be done once.
+The Go package `nodeset` implements the language, and this document is its
+reference: the syntax, the rules chosen where an implementation has to
+choose, and the limits. The package documentation covers the API.
 
 ## Syntax
 
@@ -24,7 +25,7 @@ rack[1-2]node[01-04]      two numeric dimensions
 exe[1-4].hpc.example.org  a name with a domain
 @compute                  a group
 @slurm:main               a group from a named source
-@*                        every host the default source knows
+@*                        every host of the default source
 ```
 
 Set operators combine expressions:
@@ -45,9 +46,9 @@ space and parsed in one call.
 
 `!`, `&` and `^` need an operand on each side. `@rack:R02&`, `exe[1-10]!,exe5`,
 `exe[1-10]&&exe5` and `!exe5` are errors. The first is what
-`-n "@rack:R02&$(clusterctl slurm node nodeset idle)"` leaves behind when no
-node is idle, and reading it as `@rack:R02` would select the whole rack instead
-of nothing. A union tolerates an empty operand, because a union with nothing is
+`"@rack:R02&$(idle-nodes)"` leaves behind when a command that lists the idle
+nodes prints none, and reading it as `@rack:R02` would select the whole rack
+instead of nothing. A union tolerates an empty operand, because a union with nothing is
 what was meant: `exe1,` is `exe1`.
 
 ## Semantics chosen here
@@ -69,18 +70,12 @@ same way again. This property is checked by a fuzz test.
 and `exe0001`, are **one host**. `exe1,exe01` names one host, `exe[1-3]!exe02`
 is `exe[1,3]`, and a set holding `exe0001` contains `exe1`.
 
-This is what lets an administrator type `exe1` and reach the machine an
-inventory wrote as `exe0001`, and see it under the name the site gave it,
-because a selection is canonicalised against the inventory. The price is that
-a site cannot have two machines whose names differ only in padding: they would
-be one host to every command, so an inventory holding such a pair has to be
-rejected rather than one of them picked. The inventory also refuses an entry
-that names a host with other padding, or other case, than the entry that first
-named it: `exe1` after `exe[0001-0010]` could be a refinement of `exe0001` or a
-second machine, and which one was meant cannot be told. It refuses capitals
-outright: every lookup of a node lowercases the name it is given, and the node
-set does not fold case, so `EXE0001` would never be found and would lose its
-`bmcAddress` to the naming rules.
+This is what lets someone type `exe1` and reach the machine a list of hosts
+wrote as `exe0001`. The price is that one set cannot hold two hosts whose names
+differ only in padding: they are one member. A set does not report that it was
+given one host under two spellings, so a program for which that is an error,
+such as two machines in an inventory, checks its names itself before it builds
+a set.
 
 Padding is still never thrown away. Each host keeps the spelling it was first
 given, and a set never shows a host under a name it was not given:
@@ -109,6 +104,15 @@ lose a host. Separate numeric parts with a literal character.
 `-oProxyCommand=x` is an error. No host name begins with `-`, and ssh and most
 other tools a name is handed to would read one as an option.
 
+### Otherwise a name is not checked
+
+The language accepts more than a host name may contain, because a set is also
+used for things that are not hosts: of the host name rules, the parser
+enforces only that a name does not begin with `-`. A program that hands a name
+to ssh or puts it in a URL, where `:`, `@`, `/`, `?` and `#` mean something,
+checks it against the rules for host names first, the names a group resolves
+to included.
+
 ### Steps are read but not written
 
 `exe[1-10/2]` parses. Folding does not produce a step unless it is asked for,
@@ -118,10 +122,11 @@ prints as it is.
 ## Where this differs from ClusterShell
 
 ClusterShell 1.10.1 was run over the corpus in
-`nodeset/testdata/clustershell.txt`, and a test checks that clusterctl agrees
-with it on every other line of that corpus and differs on these:
+`testdata/clustershell.txt` next to the package, and a test checks that the
+package agrees with it on every other line of that corpus and differs on
+these:
 
-| Expression | ClusterShell | clusterctl |
+| Expression | ClusterShell | `nodeset` |
 | --- | --- | --- |
 | `exe1,exe01` | two hosts, `exe[1,01]` | one host, `exe1` (padding identity) |
 | `exe[1-3]!exe02` | `exe[1-3]` | `exe[1,3]` (padding identity) |
@@ -134,109 +139,25 @@ with it on every other line of that corpus and differs on these:
 Both reject `exe[1-010]`, `exe[001-10]`, a dangling `!`, `&` or `^`, and a set
 operator with no left operand. On the other lines of the corpus both name the
 same hosts. Folded output may still be ordered differently: ClusterShell prints
-`exe[3,01-02]` where clusterctl prints `exe[01-02,3]`.
+`exe[3,01-02]` where the package prints `exe[01-02,3]`.
 
 ## Groups
 
-A `@group` reference is resolved by a source. Three kinds exist:
+`@group` and `@source:group` are resolved by a `Resolver` the program
+supplies; parsing without one rejects every group reference. The source is
+handed over as it was written, empty for a bare `@group`, so the resolver
+decides what that means: its default source, or a search of several. `@*` and
+`@source:*` ask it for every host of a source.
 
-```yaml
-groups:
-  defaultSource: inventory
-  sources:
-    inventory:
-      # One group per value of a node attribute: @exe, @wlm, @dbm.
-      # This is what the genders file provided.
-      attribute: class
-    static:
-      # A table written in the configuration. A group may name others.
-      static:
-        infra: wlm01,dbm01
-        compute: "@inventory:exe"
-    slurm:
-      # Asked of the workload manager, cached for a minute.
-      cacheTtl: 60s
-      exec:
-        role: login
-        map: [sinfo, -h, -o, "%N", -p, $GROUP]
-        all: [sinfo, -h, -o, "%N"]
-        list: [sinfo, -h, -o, "%R"]
-        reverse: [sinfo, -h, -N, -o, "%R", -n, $NODE]
-```
-
-A bare `@group` searches the default source first and then the others, so a
-single-source installation never needs a prefix. `@source:group` names one.
-
-The search moves on only when a source answers that it has no such group: a
-table or an attribute that does not have it, or an `exec` source whose `list`
-command succeeds and does not name it. A source that cannot be asked, whose
-command fails, or that returns no nodes for a group it lists stops the search
-with its own error, and the command fails with that error's exit code, 3 for
-a host that could not be reached. Another source's group of the same name is
-never used in its place. An `exec` source without a `list` command cannot say
-that a group is not its own, so a bare name that reaches it stops there; name
-the source of a group that lives further down the search order.
-
-An `exec` source runs on the host role it names, which is required, and each
-command is bounded by `fanout.commandTimeout` on that host. A cached answer is
-stored under a key made of the site, the cluster and the context, the host
-the command ran on and the exact argument vector, so no two clusters, and no
-two group names, ever share an entry.
-
-Within one command each lookup is made once. Callers that ask for the same
-group, listing or `@source:*` at the same time wait for one command and share
-its answer, a failure included. A group's nodes, and that a source has no
-such group, are then kept for the rest of the command, whatever `cacheTtl`
-says; a source that could not be asked, or a lookup an interrupt stopped, is
-not, and the next caller asks again. Whether a group is not an `exec`
-source's is decided on a listing made during the command, never on one from
-the cache, since that may predate the group: it is made once, however many
-groups the command finds missing.
-
-A source that fails does not hide what the others found: `node groups` and
-`node describe` print the memberships and groups that could be read, name the
-failed source on the error stream and exit non-zero.
-
-An `exec` source is given an **argument vector**, not a command line, and
-`$GROUP` and `$NODE` are substituted as whole arguments. A group name holding a
-semicolon stays a group name.
-
-Groups may refer to groups. A cycle is reported after sixteen levels rather
-than looping.
-
-### Names are host names
-
-The node set language accepts more than a host name may contain, because a
-set is also used for things that are not hosts; of the host name rules, the
-parser itself enforces only that a name does not begin with `-`. A node name, though, becomes
-an ssh destination and the host of a Redfish URL, where a leading `-` is an
-option and `:`, `@`, `/`, `?` and `#` set the port, the account, the path, the
-query and the fragment. So `App.Select`, which every command and the MCP
-server use to turn an expression into nodes, refuses a selection with any name
-that is not a host name: dot separated labels of ASCII letters, digits and
-hyphens, none empty, none longer than 63 characters, none beginning or ending
-with a hyphen, and at most 253 characters in all, with an optional final dot.
-The check runs on every name the expression resolves to, so names from a group
-source or the inventory are held to it too. It lives in `internal/hostname`,
-and ssh and the Redfish client apply it again to the host they are given.
-
-### Names are machines
-
-`App.Select` then replaces each name with the name the inventory uses for the
-machine it refers to (`App.canonicalize`). Case and one final dot are dropped;
-a name written with other padding is resolved; and the host name and the
-service processor name the naming rules give an inventory node, and its
-`address` and `bmcAddress`, are that node. A dotted name the inventory does not
-list is reduced to its short name when it is the host name or service processor
-name the rules give that short name. Anything else is kept, lowercased.
-Because the result is a set, one machine named several ways is one member. An
-alias two inventory nodes share names neither, and an inventory name is never
-taken over by another node's alias.
+The expression a resolver returns is parsed in turn, with the same resolver,
+so a group may refer to other groups. Nesting is cut off after sixteen levels,
+which also reports a cycle rather than looping. The hosts of every group an
+expression refers to count towards its [limits](#limits).
 
 ## Rendering for other tools
 
-`clusterctl node select` prints the folded form. Anything handed to Slurm or
-FreeIPMI goes through `NodeSet.Hostlist()` instead, which folds each pattern
+`NodeSet.String()` gives the folded form. For Slurm or FreeIPMI,
+`NodeSet.Hostlist()` gives a host list instead, which folds each pattern
 along the one dimension that gives the fewest names, the last one on a tie, and
 never writes a step. `rack[1-2]node[001-100]` becomes
 `rack1node[001-100],rack2node[001-100]`, and a BMC name such as

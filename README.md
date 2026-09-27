@@ -110,6 +110,9 @@ fmt.Println(ns)          // exe[0001-0002,0004-0010]
 fmt.Println(ns.Len())    // 9
 ```
 
+[`doc/nodeset.md`](doc/nodeset.md) describes the language and the rules chosen
+where it differs from ClusterShell.
+
 ## Contributing
 
 The repository carries a `mise.toml`, so the toolchain comes from

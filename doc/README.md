@@ -31,7 +31,8 @@ counterpart in this design.
 | --- | --- |
 | [architecture.md](architecture.md) | The packages, what each owns, and how a command flows through them |
 | [configuration.md](configuration.md) | The six document kinds, the merge layers and where a value came from |
-| [nodeset.md](nodeset.md) | The node set language and the semantics chosen for it |
+| [nodeset.md](nodeset.md) | The node set language and the semantics chosen for it, as the `nodeset` package implements it |
+| [selection.md](selection.md) | How an expression becomes nodes: group sources, the host name check and the inventory's names |
 | [transport.md](transport.md) | How a command reaches a host and why it is quoted the way it is |
 | [safety.md](safety.md) | What a destructive command has to pass before it runs |
 | [mcp.md](mcp.md) | The MCP server: its tools, plan and apply, and who answers the gate |
