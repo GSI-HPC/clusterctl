@@ -134,6 +134,11 @@ func newBus(c *Capture, opts []Option) *progress.Bus {
 // one line naming them as a node set; siblings are sorted by what they
 // read, with numbers in their numeric order; and neither ids, times nor
 // lines of output are drawn. A span not ended reads as its state.
+//
+// Tests compare trees whole, so the format is kept: a field is drawn only
+// when it has a value, and a field added to progress.Fields is drawn after
+// those drawn before it. Changing how an existing field is drawn changes
+// what every such test compares.
 func (c *Capture) Tree() string {
 	return tree(c.Events())
 }
