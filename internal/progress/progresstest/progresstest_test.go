@@ -209,6 +209,11 @@ func TestCheckFindsBrokenPromises(t *testing.T) {
 		{"text that is not escaped", events{}.add(start, 1, 0, call).add(end, 1, 0, call, func(e *progress.Event) { e.Err = "\x1b[2J" }), "error that is not escaped"},
 		{"text that is too long", events{}.add(start, 1, 0, call, func(e *progress.Event) { e.Message = strings.Repeat("x", 300) }).add(end, 1, 0, call),
 			"message of 300 bytes"},
+		{"a kind of no name", events{}.add(start, 1, 0, progress.Kind(99)).add(end, 1, 0, progress.Kind(99)), "has no valid kind"},
+		{"a start that is already over", events{}.add(start, 1, 0, call, func(e *progress.Event) { e.State = progress.StateEnded }).add(end, 1, 0, call),
+			"starts ended"},
+		{"a line of no stream", events{}.add(start, 1, 0, call).add(progress.TypeLine, 1, 0, call).add(end, 1, 0, call), "a line of no stream"},
+		{"a type of no name", events{}.add(start, 1, 0, call).add(progress.Type(99), 1, 0, call).add(end, 1, 0, call), "has no valid type"},
 	}
 	for _, tc := range tests {
 		problems := strings.Join(violations(tc.events), "\n")

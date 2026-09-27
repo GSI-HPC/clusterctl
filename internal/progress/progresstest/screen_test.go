@@ -36,6 +36,9 @@ func TestScreenShowsWhatATerminalWould(t *testing.T) {
 		{"split across writes", 0, []string{"✓ a\r\x1b", "[2", "K\xe2\x9c", "\x93 b"}, "✓ b\n"},
 		{"a row too long wraps", 4, []string{"abcdef", "\r\x1b[2K"}, "abcd\n"},
 		{"a row as long as the width does not", 4, []string{"abcd", "\r\x1b[2K"}, ""},
+		{"an escape that starts no sequence", 0, []string{"\x1b7saved\n"}, "^[7saved\n"},
+		{"a wide rune takes two columns", 0, []string{"失败\rX\n"}, "X败\n"},
+		{"a wide rune wraps when one column is left", 4, []string{"a失败"}, "a失\n败\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &Screen{Width: tc.width}
