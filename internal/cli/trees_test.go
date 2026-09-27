@@ -46,7 +46,7 @@ func TestSecretsPushReportsItsDecryptionsAndEachFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := run(t, harnessOptions{ctx: ctx, config: []string{dir}, recorder: &transport.Recorder{Reply: exe0002Unreachable}},
 		"secrets", "push", "-n", "exe[1-3]", "-y")
 	wantCode(t, err, exitcode.Transport)
@@ -105,7 +105,7 @@ func TestProvisionStatusReportsBothHalves(t *testing.T) {
 	h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
 	h.link(t, "10.0.2.1", h.exePath())
 	h.bmcs.down["exe0002"] = true
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := h.run(t, harnessOptions{ctx: ctx}, "provision", "status", "-n", "exe[0001-0003]")
 	wantCode(t, err, exitcode.Transport)
 	want := `
@@ -140,7 +140,7 @@ func TestProvisionStatusCountsANodeSshDoesNotReachAsAnswered(t *testing.T) {
 		}
 		return answer(tg, req)
 	}
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	out, err := h.run(t, harnessOptions{ctx: ctx}, "-o", "json", "provision", "status", "-n", "exe[0001-0003]")
 	if err != nil {
 		t.Fatalf("provision status: %v", err)
@@ -170,7 +170,7 @@ func TestDoctorRemoteReportsTheCallsOfEachRole(t *testing.T) {
 		}
 		return &transport.Result{Target: tg}, nil
 	}}
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	_, _ = run(t, harnessOptions{ctx: ctx, recorder: rec}, "doctor", "--remote")
 	// How many checks failed depends on the machine as well, on whether
 	// ssh, scp and sops are installed, so the command's own line is only
@@ -220,7 +220,7 @@ func TestADryRunLooksUpItsGroupsAndRecordsTheRest(t *testing.T) {
 		t.Errorf("a dry run sent %q to %s", req.Argv, tg)
 		return &transport.Result{Target: tg}, nil
 	}}
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := run(t, harnessOptions{ctx: ctx, recorder: rec}, "node", "hw", "--dry-run", "-n", "@slurm:batch")
 	if err != nil {
 		t.Fatal(err)

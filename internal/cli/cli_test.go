@@ -89,7 +89,11 @@ func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.
 		ctx = context.Background()
 	}
 	if progress.BusFrom(ctx) == nil && !opts.unwatched {
-		ctx = checked(t, ctx)
+		// Every command a test runs is given a Bus whose events are
+		// checked once the test is over, unless the test watches them
+		// itself, so that a command test is also a test of what the
+		// command reports.
+		ctx, _ = progresstest.Checked(ctx, t, byExitCode)
 	}
 	cmd := NewRootCommand(ctx, streams)
 	cmd.SetOut(h.out)
@@ -113,38 +117,9 @@ func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.
 	return h, cmd
 }
 
-// checked returns ctx with a Bus whose events are kept, which every command
-// a test runs is given unless the test watches the events itself: once the
-// test is over, the events are checked against every promise they make, so
-// that a command test is also a test of what the command reports. The
-// capture asks for the lines of output too, as a live display does.
-func checked(t *testing.T, ctx context.Context) context.Context {
-	t.Helper()
-	c := &progresstest.Capture{Lines: true}
-	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
-	t.Cleanup(func() {
-		// Checked before the Bus is closed, which would end what the
-		// command left open.
-		progresstest.Check(t, c.Events())
-		bus.Close()
-	})
-	return progress.WithBus(ctx, bus)
-}
-
-// watch returns a context whose Bus sends a command's progress events to a
-// capture, for harnessOptions.ctx. tree closes the Bus, checks every promise
-// the events make and returns their tree.
-func watch(t *testing.T) (ctx context.Context, tree func() string) {
-	t.Helper()
-	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
-	return progress.WithBus(context.Background(), bus), func() string {
-		t.Helper()
-		bus.Close()
-		progresstest.Check(t, c.Events())
-		return c.Tree()
-	}
-}
+// byExitCode has a test's Bus class errors by the exit code they ask for,
+// as the Bus of a command does.
+var byExitCode = progresstest.Classify(exitcode.Class)
 
 // exampleFiles lists the files of the example configuration, leaving out
 // those that a directory in extra holds a file of the same name for: that

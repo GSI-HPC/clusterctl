@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -57,7 +58,7 @@ command exec [dry-run]: ok
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, tree := watch(t)
+			ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 			_, err := run(t, harnessOptions{ctx: ctx, recorder: tc.recorder}, tc.args...)
 			wantCode(t, err, tc.code)
 			if got := tree(); got != tc.want[1:] {
@@ -71,7 +72,7 @@ command exec [dry-run]: ok
 // failed with says, as report tells it, and so does a step whose targets
 // the interrupt ended.
 func TestAnInterruptedCommandEndsCanceled(t *testing.T) {
-	watched, tree := watch(t)
+	watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	ctx, cancel := context.WithCancel(watched)
 	defer cancel()
 	rec := &transport.Recorder{Reply: func(t transport.Target, _ transport.Request) (*transport.Result, error) {
@@ -95,7 +96,7 @@ func TestAnInterruptedCommandEndsCanceled(t *testing.T) {
 // An interactive command hands the terminal to another program, so it
 // reports nothing, not even itself.
 func TestAnInteractiveCommandReportsNothing(t *testing.T) {
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	if _, err := run(t, harnessOptions{ctx: ctx}, "login", "--dry-run", "install", "--", "uptime"); err != nil {
 		t.Fatalf("login --dry-run failed: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestAnInteractiveCommandReportsNothing(t *testing.T) {
 // interactive one; a command that only holds others runs in none, since
 // it only prints its help.
 func TestEveryLeafButAnInteractiveOneRunsInASpan(t *testing.T) {
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	r := &root{ctx: ctx}
 	ran := map[string]bool{}
 	note := func(c *cobra.Command, _ []string) error {

@@ -4,10 +4,12 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -43,7 +45,7 @@ func TestBMCPingReadsTheSweepCarefully(t *testing.T) {
 // one call that asks them all; fping says which answered only once it is
 // done, so there is no target for each.
 func TestBMCPingReportsTheSweepAsAStep(t *testing.T) {
-	ctx, tree := watch(t)
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "exe0001.mgmt.hpc.example.org\n", ExitCode: 1}}}
 	_, err := run(t, harnessOptions{ctx: ctx, recorder: rec}, "bmc", "ping", "-n", "exe[0001-0002]")
 	wantCode(t, err, exitcode.TargetFailed)
