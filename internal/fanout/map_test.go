@@ -42,7 +42,7 @@ func watch(t *testing.T) (ctx context.Context, tree func() string) {
 func watchCapture(t *testing.T) (c *progresstest.Capture, ctx context.Context, tree func() string) {
 	t.Helper()
 	c = &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
 	return c, progress.WithBus(context.Background(), bus), func() string {
 		t.Helper()
 		bus.Close()
@@ -401,7 +401,7 @@ func TestFailureError(t *testing.T) {
 			if got := exitcode.From(err); got != tc.code {
 				t.Errorf("exit code %d, want %d", got, tc.code)
 			}
-			if got := progress.Classify(err); got != tc.class {
+			if got := progress.Classify(err, exitcode.Class); got != tc.class {
 				t.Errorf("class %s, want %s", got, tc.class)
 			}
 			if tc.code == exitcode.Transport && !errors.Is(err, down) {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/credentials"
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
@@ -22,7 +23,7 @@ import (
 func TestAReadIsReportedOnceWithoutItsValue(t *testing.T) {
 	t.Parallel()
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
 	ctx := progress.WithBus(context.Background(), bus)
 	r := &credentials.Resolver{
 		Credentials: map[string]v1alpha1.Credential{
@@ -95,7 +96,7 @@ func TestTheDisplaysLeaveTheTerminalForAQuestion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			display := &suspending{}
-			bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{display}})
+			bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{display}})
 			defer bus.Close()
 			r := &credentials.Resolver{
 				Credentials: map[string]v1alpha1.Credential{"bmc": {Username: "admin", Password: tc.source}},

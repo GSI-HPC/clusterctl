@@ -121,7 +121,7 @@ func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.
 func checked(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
 	c := &progresstest.Capture{Lines: true}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
 	t.Cleanup(func() {
 		// Checked before the Bus is closed, which would end what the
 		// command left open.
@@ -137,7 +137,7 @@ func checked(t *testing.T, ctx context.Context) context.Context {
 func watch(t *testing.T) (ctx context.Context, tree func() string) {
 	t.Helper()
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
 	return progress.WithBus(context.Background(), bus), func() string {
 		t.Helper()
 		bus.Close()

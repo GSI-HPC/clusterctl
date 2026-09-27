@@ -465,7 +465,7 @@ func TestCheckSaysWhyACommandFailed(t *testing.T) {
 		if got := fmt.Sprint(err); tc.want != "" && got != tc.want {
 			t.Errorf("%s: error = %q, want %q", tc.name, got, tc.want)
 		}
-		if got := progress.Classify(err); got != tc.class {
+		if got := progress.Classify(err, exitcode.Class); got != tc.class {
 			t.Errorf("%s: class = %s, want %s", tc.name, got, tc.class)
 		}
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
@@ -46,7 +47,7 @@ func (s *Server) watch(ctx context.Context, req *mcp.CallToolRequest) (context.C
 			sinks = append(sinks, n)
 		}
 	}
-	bus := progress.NewBus(progress.Options{Sinks: sinks, PanicLog: s.opts.Log})
+	bus := progress.NewBus(progress.Options{Sinks: sinks, PanicLog: s.opts.Log, Classify: exitcode.Class})
 	if n != nil {
 		n.start()
 	}

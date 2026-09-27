@@ -384,7 +384,7 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 
 	tc, _ := progress.ParseTraceContext(r.traceparent, r.tracestate)
 	bus := progress.NewBus(progress.Options{
-		Sinks: sinks, Now: displayClock, PanicLog: diag,
+		Sinks: sinks, Now: displayClock, PanicLog: diag, Classify: exitcode.Class,
 		Trace: tc.Trace, Parent: tc.Parent, TraceFlags: tc.Flags, TraceState: tc.State,
 	})
 	return bus, func() {

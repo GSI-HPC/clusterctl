@@ -53,7 +53,7 @@ func TestAHostWithoutAKeyDidNotAnswer(t *testing.T) {
 			if got := exitcode.From(err); got != exitcode.Transport {
 				t.Errorf("exit code = %d, want %d (%v)", got, exitcode.Transport, err)
 			}
-			if got := progress.Classify(err); got != tc.class {
+			if got := progress.Classify(err, exitcode.Class); got != tc.class {
 				t.Errorf("class = %s, want %s (%v)", got, tc.class, err)
 			}
 		})

@@ -327,7 +327,7 @@ func (e *bmcFailures) Error() string { return e.message }
 func (e *bmcFailures) Unwrap() []error { return e.errs }
 
 // ProgressClass says why the processors failed as the exit code does.
-func (e *bmcFailures) ProgressClass() progress.Class { return progress.CodeClass(e.code) }
+func (e *bmcFailures) ProgressClass() progress.Class { return exitcode.CodeClass(e.code) }
 
 // bmcPlan is how each node of a set is reached: its processor, and the
 // transports to try in order.

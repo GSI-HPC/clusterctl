@@ -12,7 +12,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
@@ -29,6 +28,19 @@ type timeout struct{}
 func (timeout) Error() string { return "i/o timeout" }
 func (timeout) Timeout() bool { return true }
 
+// errUnreachable is an error a program's own rule, byCode below, says is
+// the transport's, as an exit code of 3 is clusterctl's.
+var errUnreachable = errors.New("exe0001: no route to host")
+
+// byCode is a program's fallback: the transport's for errUnreachable,
+// the target's for the rest.
+func byCode(err error) progress.Class {
+	if errors.Is(err, errUnreachable) {
+		return progress.ClassTransport
+	}
+	return progress.ClassTarget
+}
+
 func TestClassify(t *testing.T) {
 	t.Parallel()
 
@@ -39,41 +51,39 @@ func TestClassify(t *testing.T) {
 	}{
 		{"no error", nil, progress.ClassNone},
 		{"an error that says nothing is the target's", errors.New("command exited 1"), progress.ClassTarget},
-		{"an exit code of 1", exitcode.Errorf(exitcode.TargetFailed, "refused"), progress.ClassTarget},
-		{"unreachable", exitcode.Errorf(exitcode.Transport, "exe0001: no route to host"), progress.ClassTransport},
-		{"refused before anything was sent", exitcode.Errorf(exitcode.Usage, "no such node"), progress.ClassUsage},
-		{"interrupted by its exit code", exitcode.Errorf(exitcode.Interrupted, "exe0001: interrupted"), progress.ClassCanceled},
-		{"an interrupt however wrapped", exitcode.Wrap(exitcode.Transport, fmt.Errorf("exe0001: %w", context.Canceled)), progress.ClassCanceled},
+		{"the fallback's class", fmt.Errorf("ssh: %w", errUnreachable), progress.ClassTransport},
+		{"an interrupt however wrapped", fmt.Errorf("%w: %w", errUnreachable, context.Canceled), progress.ClassCanceled},
 		{"a deadline", fmt.Errorf("exe0001: %w", context.DeadlineExceeded), progress.ClassTimeout},
 		{"a network timeout", &url.Error{Op: "Get", URL: "https://bmc", Err: timeout{}}, progress.ClassTimeout},
-		{"a dial that timed out", exitcode.Wrap(exitcode.Transport, &net.OpError{Op: "dial", Err: os.ErrDeadlineExceeded}), progress.ClassTimeout},
-		{"a network error that is no timeout", exitcode.Wrap(exitcode.Transport, &net.OpError{Op: "dial", Err: errors.New("connection refused")}), progress.ClassTransport},
+		{"a dial that timed out", fmt.Errorf("%w: %w", errUnreachable, &net.OpError{Op: "dial", Err: os.ErrDeadlineExceeded}), progress.ClassTimeout},
+		{"a network error that is no timeout", fmt.Errorf("%w: %w", errUnreachable, &net.OpError{Op: "dial", Err: errors.New("connection refused")}), progress.ClassTransport},
 		{"an error that says its class", fmt.Errorf("bmc: %w", classified{progress.ClassPin}), progress.ClassPin},
-		{"its class before the exit code", exitcode.Wrap(exitcode.Transport, classified{progress.ClassAuth}), progress.ClassAuth},
+		{"its class before the fallback", fmt.Errorf("%w: %w", errUnreachable, classified{progress.ClassAuth}), progress.ClassAuth},
 		{"its class before an interrupt", fmt.Errorf("%w: %w", classified{progress.ClassTimeout}, context.Canceled), progress.ClassTimeout},
-		{"a class of none leaves the rules", exitcode.Wrap(exitcode.Transport, classified{progress.ClassNone}), progress.ClassTransport},
+		{"a class of none leaves the rules", fmt.Errorf("%w: %w", errUnreachable, classified{progress.ClassNone}), progress.ClassTransport},
 	}
 	for _, tc := range tests {
-		if got := progress.Classify(tc.err); got != tc.want {
+		if got := progress.Classify(tc.err, byCode); got != tc.want {
 			t.Errorf("%s: Classify(%v) = %s, want %s", tc.name, tc.err, got, tc.want)
 		}
 	}
 }
 
-// An exit code has the class the last rule of Classify gives it, and a
-// success none.
-func TestCodeClass(t *testing.T) {
+// Without a fallback, an error the first rules do not class is the
+// target's, and the fallback is never asked about a nil error.
+func TestClassifyWithoutAFallback(t *testing.T) {
 	t.Parallel()
-	for code, want := range map[int]progress.Class{
-		exitcode.OK:           progress.ClassNone,
-		exitcode.TargetFailed: progress.ClassTarget,
-		exitcode.Usage:        progress.ClassUsage,
-		exitcode.Transport:    progress.ClassTransport,
-		exitcode.Interrupted:  progress.ClassCanceled,
-		42:                    progress.ClassTarget,
-	} {
-		if got := progress.CodeClass(code); got != want {
-			t.Errorf("CodeClass(%d) = %s, want %s", code, got, want)
-		}
+	if got := progress.Classify(errUnreachable, nil); got != progress.ClassTarget {
+		t.Errorf("Classify(%v, nil) = %s, want %s", errUnreachable, got, progress.ClassTarget)
+	}
+	if got := progress.Classify(context.Canceled, nil); got != progress.ClassCanceled {
+		t.Errorf("Classify(%v, nil) = %s, want %s", context.Canceled, got, progress.ClassCanceled)
+	}
+	asked := func(error) progress.Class {
+		t.Error("the fallback was asked about a nil error")
+		return progress.ClassTarget
+	}
+	if got := progress.Classify(nil, asked); got != progress.ClassNone {
+		t.Errorf("Classify(nil) = %s, want %s", got, progress.ClassNone)
 	}
 }

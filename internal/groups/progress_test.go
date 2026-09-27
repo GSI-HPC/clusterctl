@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/groups"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
@@ -22,7 +23,7 @@ import (
 func TestEveryLookupIsReportedOnce(t *testing.T) {
 	t.Parallel()
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
 	rec := &transport.Recorder{Reply: func(target transport.Target, req transport.Request) (*transport.Result, error) {
 		switch {
 		case slices.Contains(req.Argv, "down"):

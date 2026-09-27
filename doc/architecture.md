@@ -44,7 +44,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | `internal/inventory` | What is known about the nodes: attributes, racks, addresses, boot paths. |
 | `internal/naming` | Turning a short node name into a host name and a service processor name. |
 | `internal/hostname` | Deciding whether a name may be handed to ssh or put into a URL as a host. |
-| `internal/exitcode` | The exit codes the command line contract fixes, which every layer that can fail uses to say which one it asks for. |
+| `internal/exitcode` | The exit codes the command line contract fixes, which every layer that can fail uses to say which one it asks for, and the progress class of each (`CodeClass`, `Class`). |
 
 ### Getting things done
 
@@ -98,13 +98,18 @@ needs. And none imports `cli` or `app`, so a subsystem can be exercised in a
 test without a command tree.
 
 `progress` is a leaf that every layer may report through. It depends on
-nothing of clusterctl's but `exitcode`, and `termtext` for escaping, so
-`fanout`, `transport`, `redfish`, `credentials`, `secrets`, `safety` and `app`
-can each start and end the spans of their work, and lend the terminal to a
-question, without a cycle
-([ADR 0021](adr/0021-progress-as-our-own-events.md)). `progress/display`
-depends on `progress` and on `nodeset`, which folds the targets of the tree,
-and only `cli` uses it.
+nothing of clusterctl's but `termtext`, for escaping, so `fanout`,
+`transport`, `redfish`, `credentials`, `secrets`, `safety` and `app` can each
+start and end the spans of their work, and lend the terminal to a question,
+without a cycle ([ADR 0021](adr/0021-progress-as-our-own-events.md)).
+`progress/display` depends on `progress` and on `nodeset`, which folds the
+targets of the tree, and only `cli` uses it.
+
+`progress` knows no exit codes. An error that says no class of
+its own, and is neither canceled nor a timeout, takes the class the Bus's
+`Options.Classify` gives it: on every Bus clusterctl makes that is
+`exitcode.Class`, the class of the exit code the error asks for, so
+`exitcode` imports `progress` and not the other way round.
 
 Text that came from a node, a BMC, Slurm, a group source or an agent is
 escaped with `termtext.EscapeText`, or `termtext.EscapeCell` where it has to

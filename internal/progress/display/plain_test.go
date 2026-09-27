@@ -50,7 +50,7 @@ func newPlainFixtureWith(t *testing.T, command string, o display.PlainOptions) *
 	f.plain = display.NewPlain(f.term, o)
 	f.summary = &display.Summary{}
 	f.capture = &progresstest.Capture{}
-	f.bus = progress.NewBus(progress.Options{Sinks: []progress.Sink{f.capture, f.plain, f.summary}, Now: f.clock.Now})
+	f.bus = progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{f.capture, f.plain, f.summary}, Now: f.clock.Now})
 	t.Cleanup(func() {
 		f.close()
 		progresstest.Check(t, f.capture.Events())

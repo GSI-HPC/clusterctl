@@ -29,7 +29,7 @@ func (f runnerFunc) Run(ctx context.Context, t transport.Target, req transport.R
 func watch(t *testing.T) (context.Context, func() string) {
 	t.Helper()
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
 	return progress.WithBus(context.Background(), bus), func() string {
 		t.Helper()
 		bus.Close()

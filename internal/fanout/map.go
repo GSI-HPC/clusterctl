@@ -141,7 +141,7 @@ func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx con
 
 // endsCanceled reports whether a target that ends with err ends canceled.
 func endsCanceled(err error) bool {
-	return err != nil && progress.Classify(err) == progress.ClassCanceled
+	return err != nil && progress.Classify(err, exitcode.Class) == progress.ClassCanceled
 }
 
 // Skip returns the error of work that leaves its item out on purpose:
@@ -239,7 +239,7 @@ func failure(noun string, n int, names []string, errs []error, interrupted bool)
 		what = noun + " failed"
 	}
 	code := cmp.Or(exitcode.Worst(kept...), exitcode.TargetFailed)
-	class := progress.CodeClass(code)
+	class := exitcode.CodeClass(code)
 	if interrupted {
 		class = progress.ClassCanceled
 	}
