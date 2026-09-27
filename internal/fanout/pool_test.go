@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -14,6 +16,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
+	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // nodes names n nodes, exe1 to exeN.
@@ -127,5 +130,43 @@ func TestFailureError(t *testing.T) {
 				t.Errorf("the error of the unreachable host is not kept underneath: %v", err)
 			}
 		})
+	}
+}
+
+// The pools clusterctl runs are internal/clikit/fanout's, named as
+// clusterctl's: a panic is clusterctl's, and asks for the exit code of a
+// target that failed, whether it came in Map or a worker of its own.
+func TestThePoolsAreClusterctls(t *testing.T) {
+	t.Parallel()
+
+	var log strings.Builder
+	outcomes := fanout.Map(context.Background(), nodes(1), fanout.Options[string]{PanicLog: &log},
+		func(context.Context, string) (struct{}, error) { panic("boom") })
+	err := outcomes[0].Err
+	if exitcode.From(err) != exitcode.TargetFailed || !exitcode.Has(err) ||
+		err.Error() != `clusterctl panicked; this is a bug, please report it: "boom"` {
+		t.Errorf("the panic became %v, want clusterctl's, exiting 1", err)
+	}
+	if !strings.HasPrefix(log.String(), `clusterctl: panic while working on exe1: "boom"`) {
+		t.Errorf("the log reads %q", log.String())
+	}
+
+	err = fanout.Recovered(io.Discard, "exe2", "boom")
+	if exitcode.From(err) != exitcode.TargetFailed || !exitcode.Has(err) {
+		t.Errorf("Recovered = %v, want an error that asks for exit 1", err)
+	}
+	if fanout.Recovered(io.Discard, "exe2", nil) != nil {
+		t.Error("Recovered returned an error when nothing panicked")
+	}
+
+	var ran []int
+	fanout.Each(context.Background(), 3, 1, func(i int) { ran = append(ran, i) })
+	if len(ran) != 3 {
+		t.Errorf("Each ran %v, want every index", ran)
+	}
+	batches := fanout.Batches(context.Background(), nodeset.MustParse("exe[1-2]"), fanout.BatchOptions{Step: "power on"},
+		func(context.Context, *nodeset.NodeSet) error { return fanout.Skip("dry run") })
+	if len(batches) != 1 || !fanout.IsSkipped(batches[0].Err) {
+		t.Errorf("Batches = %+v, want one batch left out on purpose", batches)
 	}
 }

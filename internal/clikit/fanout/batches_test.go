@@ -10,6 +10,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/clikit/fanout"
@@ -325,6 +326,22 @@ func TestBatchesReportTheirWork(t *testing.T) {
 `
 		if got := tree(); got != want {
 			t.Errorf("tree:\n%s\nwant:\n%s", got, want)
+		}
+	})
+}
+
+// Without an After of its own, the pause between two batches is one of the
+// clock's, which testing/synctest's fake clock lets pass at once.
+func TestBatchesPauseOnTheClockWithoutAnAfter(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := &sender{}
+		o := s.options(2, 30*time.Second)
+		o.After = nil
+		start := time.Now()
+		fanout.Batches(context.Background(), set(t, "exe[1-4]"), o, s.run)
+		if got := time.Since(start); got != 30*time.Second {
+			t.Errorf("the batches took %s, want the pause of 30s", got)
 		}
 	})
 }

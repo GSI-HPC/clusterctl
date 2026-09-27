@@ -150,8 +150,6 @@ func Batches(ctx context.Context, nodes *nodeset.NodeSet, o BatchOptions, run fu
 // so that it counts as its Total.
 type leftOut struct{ error }
 
-func (e leftOut) Unwrap() error { return e.error }
-
 // ProgressClass says that the batch was left out, not that it failed.
 func (leftOut) ProgressClass() progress.Class { return progress.ClassCanceled }
 

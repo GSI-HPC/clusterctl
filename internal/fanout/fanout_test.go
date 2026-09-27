@@ -15,6 +15,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
+	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -294,7 +295,8 @@ func TestRunTurnsAPanicIntoThatTargetsFailure(t *testing.T) {
 func TestGroupByOutputRefusesWhatIsNotAHostName(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"exe[2-3]", "exe2,exe3", "a,b["} {
+	// The last is a host name, but its number is too large for a node set.
+	for _, name := range []string{"exe[2-3]", "exe2,exe3", "a,b[", "exe99999999999999999999999"} {
 		results := []*transport.Result{
 			{Target: transport.Target{Name: "exe1"}, Stdout: "yes\n"},
 			{Target: transport.Target{Name: name}, Stdout: "yes\n"},
@@ -307,5 +309,50 @@ func TestGroupByOutputRefusesWhatIsNotAHostName(t *testing.T) {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("%q: error = %v, want it to name the target", name, err)
 		}
+	}
+}
+
+// The executor makes a result of whatever the runner gave: none at all, or
+// one without the error the runner returned, which it then carries. Under
+// Answers a target whose command failed is an answer and ends well, and
+// one the interrupt ended is not.
+func TestRunMakesAResultOfWhatTheRunnerGave(t *testing.T) {
+	t.Parallel()
+
+	refused := errors.New("connection refused")
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		switch tg.Name {
+		case "exe1":
+			return nil, refused
+		case "exe2":
+			return &transport.Result{Target: tg, ExitCode: 255}, refused
+		}
+		return &transport.Result{Target: tg, ExitCode: 1}, nil
+	}}
+	results := (&fanout.Executor{Runner: rec, Max: 3}).Run(context.Background(), targets("exe1", "exe2", "exe3"), transport.Request{})
+	for i, r := range results[:2] {
+		if r.Target.Name != fmt.Sprintf("exe%d", i+1) || !errors.Is(r.Err, refused) || !r.Failed() {
+			t.Errorf("result %d = %+v, want exe%d, failed with the runner's error", i, r, i+1)
+		}
+	}
+
+	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	(&fanout.Executor{Runner: rec, Max: 3, Answers: true}).Run(ctx, targets("exe3", "exe4"), transport.Request{})
+	if got, want := tree(), "step run total=2 limit=3 [fold]: ok\n  target exe[3-4]: ok\n"; got != want {
+		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// Status says "no result" of none, and "failed" of a result that failed
+// without an exit status, a code or a cancellation to say more.
+func TestStatusOfWhatSaysNothingMore(t *testing.T) {
+	t.Parallel()
+
+	if got := fanout.Status(nil); got != "no result" {
+		t.Errorf("Status(nil) = %q", got)
+	}
+	r := &transport.Result{ExitCode: -1, Err: errors.New("the runner gave up")}
+	if got := fanout.Status(r); got != "failed" {
+		t.Errorf("Status(%+v) = %q, want failed", r, got)
 	}
 }
