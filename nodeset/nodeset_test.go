@@ -51,6 +51,9 @@ func TestParseExpand(t *testing.T) {
 		{"exe[08-10]!exe09", []string{"exe08", "exe10"}},
 		{"exe1 & exe[1-2]", []string{"exe1"}},
 		{"exe[1-3],,exe5,", []string{"exe1", "exe2", "exe3", "exe5"}},
+		// A percent sign is an ordinary character of a name.
+		{"a%b", []string{"a%b"}},
+		{"50%[1-2]", []string{"50%1", "50%2"}},
 	}
 
 	for _, tc := range tests {
@@ -181,6 +184,26 @@ func TestAutostep(t *testing.T) {
 	if got, want := plain.String(), "exe[1,3,5,7,9]"; got != want {
 		t.Errorf("without autostep String() = %q, want %q", got, want)
 	}
+
+	// A progression shorter than the threshold, or one whose values read
+	// differently at the width of its first, is left as it is.
+	for expr, want := range map[string]string{
+		"exe[1,3,5,7,9,20,22]": "exe[1-9/2,20,22]",
+		"exe[1,03,5,7]":        "exe[1,03,5,7]",
+	} {
+		if got := nodeset.MustParse(expr, nodeset.WithAutostep(3)).String(); got != want {
+			t.Errorf("String() of %q = %q, want %q", expr, got, want)
+		}
+	}
+
+	// A set built with New folds the same way.
+	built := nodeset.New(nodeset.WithAutostep(3))
+	if err := built.Add("exe[1,3,5]"); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if got, want := built.String(), "exe[1-5/2]"; got != want {
+		t.Errorf("String() of a set from New = %q, want %q", got, want)
+	}
 }
 
 func TestSetOperations(t *testing.T) {
@@ -278,10 +301,36 @@ func TestGroupErrors(t *testing.T) {
 	}
 
 	res := nodeset.NewMapResolver("local", map[string]string{"compute": "exe[1-2]"})
-	for _, expr := range []string{"@missing", "@other:compute", "@"} {
+	for _, expr := range []string{"@missing", "@other:compute", "@", "@other:*"} {
 		if _, err := nodeset.ParseWith(expr, res); err == nil {
 			t.Errorf("ParseWith(%q) should fail", expr)
 		}
+	}
+}
+
+func TestMapResolverLists(t *testing.T) {
+	t.Parallel()
+
+	res := &nodeset.MapResolver{
+		Groups: map[string]map[string]string{
+			"local": {"submit": "sub[1-2]", "compute": "exe[1-4]"},
+		},
+		Default: "local",
+	}
+	if got, want := res.DefaultSource(), "local"; got != want {
+		t.Errorf("DefaultSource() = %q, want %q", got, want)
+	}
+	for _, source := range []string{"", "local"} {
+		got, err := res.List(source)
+		if err != nil {
+			t.Fatalf("List(%q) failed: %v", source, err)
+		}
+		if want := []string{"compute", "submit"}; !equal(got, want) {
+			t.Errorf("List(%q) = %v, want %v", source, got, want)
+		}
+	}
+	if _, err := res.List("other"); err == nil {
+		t.Error("List of an unknown source should fail")
 	}
 }
 
@@ -290,8 +339,11 @@ func TestParseErrors(t *testing.T) {
 
 	exprs := []string{
 		"exe[1-", "exe1]", "exe[]", "exe[5-1]", "exe[1-2/0]",
-		"exe[a-b]", "exe[1-2/x]", "exe[3/2]", "exe[1,,2]",
+		"exe[a-b]", "exe[1-b]", "exe[1-2/x]", "exe[3/2]", "exe[1,,2]",
 		"exe[1-100000000]",
+		// A number is at most eighteen digits long, written bare or in
+		// brackets.
+		"exe1234567890123456789",
 		// A step is a plain decimal number like a bound, so it can neither
 		// carry a sign nor be large enough to wrap around.
 		"exe[1-9/+2]", "exe[5-999999999999999999/9223372036854775807]",
@@ -308,7 +360,7 @@ func TestParseErrors(t *testing.T) {
 		"&exe1", "!exe1", " ^exe1",
 		// A host name never begins with a dash; ssh would read it as an
 		// option.
-		"-oProxyCommand=x", "exe1 -exe2", "exe1,-exe[1-2]",
+		"-oProxyCommand=x", "exe1 -exe2", "exe1,-exe[1-2]", "-exe1 exe2",
 	}
 	for _, expr := range exprs {
 		t.Run(expr, func(t *testing.T) {
@@ -399,7 +451,7 @@ func TestAddAndContains(t *testing.T) {
 	if !ns.Contains("exe01") {
 		t.Error("exe01 and exe1 name the same host, so Contains must match")
 	}
-	if ns.Contains("exe9") || ns.Contains("not a host[") {
+	if ns.Contains("exe9") || ns.Contains("not a host[") || ns.Contains("exe1]") {
 		t.Error("Contains matched a host that is not a member")
 	}
 	if err := ns.Add("exe["); err == nil {
@@ -456,6 +508,7 @@ func TestExpressionLimits(t *testing.T) {
 		// an expression costs is bounded as well as its size.
 		{"exe[1-100]!exe[1-100],exe1", "together"},
 		{"a[1-60]!a[1-60],b1", "together"},
+		{"exe[1-100],login", "together"},
 		// A pattern is weighed one dimension at a time, before the next is
 		// expanded.
 		{"a[1-2]b[1-2]c[1-2]d[1-2]e[1-2]f[1-2]g[1-2]h[1-2]", "hosts"},
