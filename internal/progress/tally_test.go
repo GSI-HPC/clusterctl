@@ -95,3 +95,48 @@ func TestTallyCountsEveryTargetOnce(t *testing.T) {
 		t.Errorf("roots once everything ended = %+v", roots)
 	}
 }
+
+// A Tally fed events out of the Bus's order, as a sink that joins late or
+// a log read back may feed it, counts what it can and ignores the rest: a
+// second start of a span, a run or an end of a span it never saw start,
+// and a run of a span already running.
+func TestTallyIgnoresEventsItCannotPlace(t *testing.T) {
+	t.Parallel()
+
+	var tally progress.Tally
+	step := progress.Event{Type: progress.TypeStart, Span: 1, Kind: progress.KindStep, Name: "step", Flags: progress.Fold, Fields: progress.Fields{Total: 3}}
+	tally.Add(step)
+	tally.Add(step)
+	// A target that starts running, never queued.
+	tally.Add(progress.Event{Type: progress.TypeStart, Span: 2, Parent: 1, Kind: progress.KindTarget, State: progress.StateRunning})
+	tally.Add(progress.Event{Type: progress.TypeRun, Span: 2})
+	tally.Add(progress.Event{Type: progress.TypeRun, Span: 9})
+	if _, ok := tally.Add(progress.Event{Type: progress.TypeEnd, Span: 9}); ok {
+		t.Error("the end of a span never started counted")
+	}
+	roots := tally.Roots()
+	if len(roots) != 1 || roots[0].Targets != 1 || roots[0].Running != 1 || roots[0].Queued != 0 {
+		t.Errorf("roots = %+v, want one step with one target running", roots)
+	}
+	if _, ok := tally.Count(9); ok {
+		t.Error("a span never started has a count")
+	}
+}
+
+// A batch that waits and says it has more targets than it said at first
+// adds them to what the spans above it count as queued.
+func TestTallyCountsWhatAQueuedBatchGrowsBy(t *testing.T) {
+	t.Parallel()
+
+	var tally progress.Tally
+	tally.Add(progress.Event{Type: progress.TypeStart, Span: 1, Kind: progress.KindStep, Name: "power on", Flags: progress.Fold})
+	tally.Add(progress.Event{Type: progress.TypeStart, Span: 2, Parent: 1, Kind: progress.KindBatch, Name: "2/2", State: progress.StateQueued, Fields: progress.Fields{Total: 2}})
+	tally.Add(progress.Event{Type: progress.TypeUpdate, Span: 2, Fields: progress.Fields{Total: 5}})
+	tally.Add(progress.Event{Type: progress.TypeUpdate, Span: 2, Fields: progress.Fields{Total: 3}})
+	if c, ok := tally.Count(1); !ok || c.Queued != 5 {
+		t.Errorf("the step counts %+v, want 5 queued", c)
+	}
+	if c, ok := tally.Count(2); !ok || c.Total != 5 {
+		t.Errorf("the batch counts %+v, want a total of 5", c)
+	}
+}

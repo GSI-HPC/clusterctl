@@ -652,6 +652,22 @@ func TestTwoRunsAppendingToOneFileCanBeToldApart(t *testing.T) {
 	}
 }
 
+// A log whose writer takes nothing, though it is not behind, says at Close
+// that its last lines were not written.
+func TestALogThatCannotFinishSaysSo(t *testing.T) {
+	t.Parallel()
+	w := stalled{release: make(chan struct{})}
+	defer close(w.release)
+	log := progress.NewLog(w, progress.LogOptions{FlushEvery: time.Millisecond, CloseWait: 20 * time.Millisecond})
+	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{log}})
+	_, s := progress.Start(progress.WithBus(context.Background(), bus), progress.KindCall, "ssh")
+	s.End(nil)
+	bus.Close()
+	if err := log.Close(); err == nil || !strings.Contains(err.Error(), "not written within 20ms") {
+		t.Errorf("Close = %v, want it to say the last lines were not written within 20ms", err)
+	}
+}
+
 // The first line names the program that wrote the log when the log was
 // told it, and leaves the key out otherwise, as the fixture shows.
 func TestTheEventLogNamesTheProgram(t *testing.T) {
