@@ -13,8 +13,8 @@ import (
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
-// divergences are the places where clusterctl decides otherwise than
-// ClusterShell on purpose. doc/nodeset.md lists each of them.
+// divergences are the places where this package decides otherwise than
+// ClusterShell on purpose. The language reference in doc/ lists each of them.
 var divergences = map[string]bool{
 	"padding identity":       true,
 	"adjacent numeric parts": true,
@@ -60,9 +60,9 @@ func TestClusterShellCorpus(t *testing.T) {
 		got := answer(expr)
 		switch {
 		case tag == "" && got != sortWords(want):
-			t.Errorf("%q: clusterctl gives %q, ClusterShell %q", expr, got, want)
+			t.Errorf("%q: nodeset gives %q, ClusterShell %q", expr, got, want)
 		case tag != "" && got == sortWords(want):
-			t.Errorf("%q: clusterctl now agrees with ClusterShell (%q); the %s divergence is gone", expr, got, tag)
+			t.Errorf("%q: nodeset now agrees with ClusterShell (%q); the %s divergence is gone", expr, got, tag)
 		}
 	}
 	if err := scanner.Err(); err != nil {

@@ -31,14 +31,21 @@
 // with "-".
 //
 // Zero padding is not part of a node's identity: "exe1" and "exe01" are the
-// same host, so Parse("exe1,exe01") holds one host and Contains("exe01") is
-// true for a set holding exe1. Each host keeps the spelling it was first
-// given, and a set never shows a host under a name it was not given:
+// same host, so Parse("exe1,exe01") has Len 1 and Contains("exe01") is true
+// for a set holding exe1. Each host keeps the spelling it was first given,
+// and a set never shows a host under a name it was not given:
 // "exe[01-02],exe3" prints as exe[01-02,3], and Canonical("exe1") on a set
 // holding exe0001 answers "exe0001". In a range the padding of the first bound
 // applies to the whole range, and a last bound padded to another width, such
 // as exe[1-010], is an error.
 //
-// These rules, and the others where this package differs from ClusterShell,
-// are listed in doc/nodeset.md in the source repository.
+// A set does not report that it was given one host under two spellings; the
+// second is simply the same member again. A program for which such a pair is
+// an error, such as two machines in an inventory, checks its names itself:
+// before it adds a name, Canonical on the set built so far answers the
+// spelling already held for that host, if there is one.
+//
+// These rules, and each place where this package differs from ClusterShell,
+// are set out in the node set language reference in the doc directory of the
+// repository this package comes from.
 package nodeset

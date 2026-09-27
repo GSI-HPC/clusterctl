@@ -77,8 +77,8 @@ func resolveGroup(ref string, res Resolver, depth int, b *budget) (*NodeSet, err
 	return parseExpression(expr, res, depth+1, b)
 }
 
-// MapResolver resolves groups from an in-memory table. It backs the static
-// group definitions in the site configuration and the tests.
+// MapResolver resolves groups from an in-memory table, such as groups a
+// program reads from its configuration, or those of a test.
 type MapResolver struct {
 	// Groups maps a source name to its groups.
 	Groups map[string]map[string]string
