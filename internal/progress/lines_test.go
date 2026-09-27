@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/progress"
@@ -323,5 +324,94 @@ func TestTeeKeepsUpWithAnEndWhileWriting(t *testing.T) {
 	wg.Wait()
 	if len(p.lines) != 400 {
 		t.Errorf("the parser got %d lines, want 400", len(p.lines))
+	}
+}
+
+// stepper is a clock that moves on by step each time it is read.
+type stepper struct {
+	mu   sync.Mutex
+	now  time.Time
+	step time.Duration
+}
+
+func (c *stepper) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now
+	c.now = now.Add(c.step)
+	return now
+}
+
+func (c *stepper) setStep(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.step = d
+}
+
+// The line held back waits for its token by the Bus's clock: a timer that
+// fires before the token is due by that clock waits again, and one that
+// fires once a write has sent the line sends nothing.
+func TestTheLineHeldBackWaitsForItsTokenByTheBusClock(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		clock := newClock()
+		ctx, call, capture := showing(t, progress.Options{Now: clock.Now})
+		w := progress.Tee(ctx, io.Discard, progress.Stdout, nil)
+		for i := range 21 {
+			fmt.Fprintf(w, "line %d\n", i)
+		}
+		// The timer fires twice, and the Bus's clock has not moved.
+		time.Sleep(250 * time.Millisecond)
+		if got := shown(capture); len(got) != 20 {
+			t.Errorf("%d lines shown before a token was due, want 20", len(got))
+		}
+		// A write once the token is due sends the line held back, and the
+		// timer, when it fires, finds nothing left to send.
+		clock.Add(100 * time.Millisecond)
+		fmt.Fprint(w, "partial")
+		time.Sleep(250 * time.Millisecond)
+		if got := shown(capture); len(got) != 21 || got[20] != "line 20" {
+			t.Errorf("the line held back was not sent once, when its token came: %q", got)
+		}
+		call.End(nil)
+	})
+}
+
+// A token that comes due while the line held back is being put aside,
+// by a clock that moved on in between, is waited for a whole interval
+// rather than none.
+func TestALateTokenIsWaitedForAWholeInterval(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		clock := &stepper{now: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)}
+		ctx, call, capture := showing(t, progress.Options{Now: clock.Now})
+		w := progress.Tee(ctx, io.Discard, progress.Stdout, nil)
+		for i := range 20 {
+			fmt.Fprintf(w, "line %d\n", i)
+		}
+		clock.setStep(150 * time.Millisecond)
+		fmt.Fprint(w, "line 20\n")
+		time.Sleep(50 * time.Millisecond)
+		if got := shown(capture); len(got) != 20 {
+			t.Errorf("%d lines shown at once, want 20", len(got))
+		}
+		time.Sleep(100 * time.Millisecond)
+		if got := shown(capture); len(got) != 21 || got[20] != "line 20" {
+			t.Errorf("the line held back was not sent after an interval: %q", got)
+		}
+		call.End(nil)
+	})
+}
+
+// A line that the parser is handed after the span has ended, by a parser
+// that ends it, is not shown.
+func TestALineOfASpanThatEndedWhileItWasParsedIsNotShown(t *testing.T) {
+	t.Parallel()
+
+	ctx, call, capture := showing(t, progress.Options{})
+	w := progress.Tee(ctx, io.Discard, progress.Stdout, func(progress.Stream, string) { call.End(nil) })
+	fmt.Fprint(w, "done\n")
+	if got := shown(capture); len(got) != 0 {
+		t.Errorf("lines shown after the End: %q", got)
 	}
 }

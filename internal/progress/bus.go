@@ -85,6 +85,9 @@ func NewBus(o Options) *Bus {
 	if b.now == nil {
 		b.now = time.Now
 	}
+	if b.panicLog == nil {
+		b.panicLog = os.Stderr
+	}
 	if b.trace.Trace == (TraceID{}) {
 		b.trace = TraceContext{}
 		// crypto/rand never fails; it ends the process when it cannot.
@@ -514,16 +517,12 @@ func (b *Bus) emit(e Event) {
 func (b *Bus) safely(f func()) (ok bool) {
 	defer func() {
 		if v := recover(); v != nil {
-			log := b.panicLog
-			if log == nil {
-				log = os.Stderr
-			}
 			prefix := ""
 			if b.program != "" {
 				prefix = b.program + ": "
 			}
 			// The log is a courtesy; a write that fails changes nothing.
-			_, _ = fmt.Fprintf(log, "%sa progress display panicked and was stopped: %q\n%s", prefix, fmt.Sprint(v), debug.Stack())
+			_, _ = fmt.Fprintf(b.panicLog, "%sa progress display panicked and was stopped: %q\n%s", prefix, fmt.Sprint(v), debug.Stack())
 			ok = false
 		}
 	}()

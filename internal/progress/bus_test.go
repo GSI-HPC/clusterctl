@@ -725,3 +725,41 @@ func TestThePanicLogNamesTheProgram(t *testing.T) {
 		t.Errorf("the panic log reads %q, want it to start with %q", log.String(), want)
 	}
 }
+
+// A Skip after the Bus is closed changes nothing, as an End does not.
+func TestSkipAfterCloseIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	ctx, bus, capture := watched(t, progress.Options{})
+	_, span := progress.Start(ctx, progress.KindBatch, "batch 2/2", progress.Queued())
+	bus.Close()
+	n := len(capture.Events())
+	span.Skip("not tried")
+	if got := len(capture.Events()); got != n {
+		t.Errorf("a Skip after Close sent %d events", got-n)
+	}
+}
+
+// A span that ends ends only the spans started under it, not the others
+// still open that started after it.
+func TestAnEndLeavesOtherSpansOpen(t *testing.T) {
+	t.Parallel()
+
+	ctx, bus, capture := watched(t, progress.Options{})
+	aCtx, a := progress.Start(ctx, progress.KindStep, "a")
+	_, child := progress.Start(aCtx, progress.KindCall, "a's call")
+	_, b := progress.Start(ctx, progress.KindStep, "b")
+	a.End(nil)
+	var ended []string
+	for _, e := range capture.Events() {
+		if e.Type == progress.TypeEnd {
+			ended = append(ended, e.Name)
+		}
+	}
+	if !equal(ended, []string{"a's call", "a"}) {
+		t.Errorf("ending a ended %q, want a's call and a", ended)
+	}
+	b.End(nil)
+	child.End(nil)
+	bus.Close()
+}

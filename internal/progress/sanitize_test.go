@@ -39,6 +39,7 @@ func TestSanitize(t *testing.T) {
 		{"a byte that is not UTF-8 is one column", "\xff\xffa\rb", 512, `b\xffa`},
 		{"an escape is text to a carriage return", "\x1b[31m\rok", 512, "ok31m"},
 		{"an escape written over text is still shown", "ok\r\x1b[1A", 512, `\x1b[1A`},
+		{"continuation bytes alone are cut at the bound", "\x80\x80\x80\x80\x80\x80", 4, `\x80`},
 		{"a cut keeps whole runes", "ééé", 5, "éé"},
 		{"a cut keeps no half of an escape's rune", "a\u202e", 4, `a\u2`},
 		{"a cut counts the escapes", "\x1b\x1b\x1b", 8, `\x1b\x1b`},
