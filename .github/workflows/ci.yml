@@ -207,6 +207,28 @@ jobs:
           name: fuzz-corpus-progress
           path: internal/progress/testdata/fuzz/
 
+  fuzz-termtext:
+    name: Fuzz the terminal escaper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go
+
+      # Every text from elsewhere is escaped by termtext before a terminal
+      # sees it, so no input may leave a rune the escape policy names in
+      # what it returns, and Truncate must never reach past its columns.
+      - name: Fuzz the escapers
+        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzEscape -fuzztime 30s
+      - name: Fuzz Truncate
+        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzTruncate -fuzztime 30s
+
+      - name: Upload the failing input
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus-termtext
+          path: internal/termtext/testdata/fuzz/
+
   cross-build:
     name: Cross build
     runs-on: ubuntu-latest
