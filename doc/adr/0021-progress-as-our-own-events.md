@@ -65,7 +65,8 @@ cores at 2.8 GHz.
 ## Decision
 
 Progress is reported as events of our own, in `internal/progress`, which
-depends on the standard library, `exitcode`, and `output` for escaping.
+depends on the standard library, `exitcode`, and `termtext` for escaping,
+first-party and with no third-party module but `golang.org/x/text`.
 
 - **Spans in the context.** Work is a tree of spans at six levels: command,
   step, batch, target, call and wait. A span travels in the
@@ -84,10 +85,13 @@ depends on the standard library, `exitcode`, and `output` for escaping.
   standard input, the environment or a header.
 - **Remote bytes are data.** Every text in an event has been through
   `progress.Sanitize`: carriage returns are applied as a terminal shows
-  them, `output.EscapeCell` escapes the rest, and the text is cut on a rune
-  boundary. Lines of output are produced only when a sink asks for them and
-  the command shows lines, and are rate limited, the newest kept. A parser
-  is handed only lines that ended.
+  them, `termtext.EscapeCell` escapes the rest, and the text is cut on a rune
+  boundary. The escaper's policy is a deny-list, which the package comment of
+  `termtext` records: the runes that can move the cursor, change the
+  terminal's state or reorder its lines are escaped, and invisible format
+  characters such as a zero-width space pass. Lines of output are produced
+  only when a sink asks for them and the command shows lines, and are rate
+  limited, the newest kept. A parser is handed only lines that ended.
 - **The terminal is lent, not shared.** `progress.Suspend` returns once every
   display is off the terminal, for the confirmation, a password prompt, sops
   and a credential helper to ask their questions.

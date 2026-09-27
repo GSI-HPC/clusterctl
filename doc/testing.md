@@ -27,7 +27,11 @@ any input. CI runs it for a minute on every change, and
 `progress.Sanitize`, which every remote line and error passes through before a
 display may draw it: whatever the input, what comes out holds nothing a
 terminal would act on and keeps to its bound. CI runs it for a minute too, and
-`go test ./internal/progress/ -fuzz FuzzSanitize` runs it locally.
+`go test ./internal/progress/ -fuzz FuzzSanitize` runs it locally. Two more
+check `termtext`, the escaper under it: `FuzzEscape`, that neither escaper
+leaves a rune its policy names and that escaping twice changes nothing, and
+`FuzzTruncate`, that a cut row is a prefix that fits its columns. CI runs each
+for half a minute.
 
 **A fake BMC** serves the Redfish surface clusterctl uses, over TLS, from
 `httptest`. It is how the reset-type check, the once-only action and the boot

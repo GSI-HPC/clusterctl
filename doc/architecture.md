@@ -82,7 +82,8 @@ subsystems it drives and calls them itself, with what `app` built.
 
 | Package | Owns |
 | --- | --- |
-| `internal/output` | Table, JSON, YAML, node set, name and jq rendering, and escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`). |
+| `internal/output` | Table, JSON, YAML, node set, name and jq rendering, with forwarders to `termtext` for the commands that escape text. |
+| `internal/termtext` | Escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`), and the columns text takes there (`Width`, `Truncate`). It needs nothing but the standard library and `golang.org/x/text`. |
 | `internal/progress/display` | Showing the progress of a command on its standard error, as the live tree or the counter on a terminal or as plain lines, the summary left once it has ended, and the writers that keep the command's own output clear of them. |
 | `internal/version` | The build provenance, which comes from the signed tag or the VCS stamps. |
 
@@ -90,13 +91,14 @@ subsystems it drives and calls them itself, with what `app` built.
 
 `cli` and `mcpserver` depend on `app`, and `cli` on the subsystems it drives
 too; `app` depends on everything else. A subsystem depends on the model, on
-`transport` and on the helpers beside it, `output` for escaping among them. No
+`transport` and on the helpers beside it, `termtext` or `output` for escaping
+among them. No
 subsystem imports `config`: `app` hands each the typed `v1alpha1` values it
 needs. And none imports `cli` or `app`, so a subsystem can be exercised in a
 test without a command tree.
 
 `progress` is a leaf that every layer may report through. It depends on
-nothing of clusterctl's but `exitcode`, and `output` for escaping, so
+nothing of clusterctl's but `exitcode`, and `termtext` for escaping, so
 `fanout`, `transport`, `redfish`, `credentials`, `secrets`, `safety` and `app`
 can each start and end the spans of their work, and lend the terminal to a
 question, without a cycle
@@ -105,8 +107,9 @@ depends on `progress` and on `nodeset`, which folds the targets of the tree,
 and only `cli` uses it.
 
 Text that came from a node, a BMC, Slurm, a group source or an agent is
-escaped with `output.EscapeText`, or `output.EscapeCell` where it has to stay
-on one line, before it reaches a terminal. There is no other escaper: a
+escaped with `termtext.EscapeText`, or `termtext.EscapeCell` where it has to
+stay on one line, before it reaches a terminal; `output` forwards both, and a
+table measures its cells with `termtext.Width`. There is no other escaper: a
 package that quotes such text in an error, as the group resolver does, uses
 the same helper, and `cli` escapes every error it prints once more on the way
 out, which changes nothing in text that is already escaped. Every line of
