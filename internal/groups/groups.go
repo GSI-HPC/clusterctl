@@ -65,7 +65,8 @@ func notDefined(format string, args ...any) error {
 	return &sentinelError{sentinel: ErrNotDefined, msg: fmt.Sprintf(format, args...)}
 }
 
-// Resolver implements nodeset.Resolver over the configured group sources.
+// Resolver implements nodeset.Resolver over the configured group sources, and
+// nodeset.Lister for the commands that list groups or complete their names.
 type Resolver struct {
 	sources   map[string]v1alpha1.GroupSource
 	def       string
@@ -85,6 +86,11 @@ type Resolver struct {
 	missing map[string]error
 	flights map[string]*flight
 }
+
+var (
+	_ nodeset.Resolver = (*Resolver)(nil)
+	_ nodeset.Lister   = (*Resolver)(nil)
+)
 
 // flight is one lookup under way.
 type flight struct {
@@ -154,7 +160,7 @@ func New(opts Options) *Resolver {
 	}
 }
 
-// DefaultSource implements nodeset.Resolver.
+// DefaultSource implements nodeset.Lister.
 func (r *Resolver) DefaultSource() string { return r.def }
 
 // Sources lists the configured source names in sorted order.
@@ -276,7 +282,7 @@ func (r *Resolver) All(source string) (string, error) {
 	})
 }
 
-// List implements nodeset.Resolver.
+// List implements nodeset.Lister.
 func (r *Resolver) List(source string) ([]string, error) {
 	return r.list(r.ctx, source)
 }

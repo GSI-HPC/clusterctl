@@ -308,6 +308,8 @@ func TestGroupErrors(t *testing.T) {
 	}
 }
 
+var _ nodeset.Lister = (*nodeset.MapResolver)(nil)
+
 func TestMapResolverLists(t *testing.T) {
 	t.Parallel()
 

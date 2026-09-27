@@ -19,14 +19,26 @@ const maxGroupDepth = 16
 // A reference is written @group, or @source:group when several group sources
 // are configured. The expression a resolver returns is parsed in turn, so a
 // group may refer to other groups.
+//
+// The source is passed on as written, and is empty for a bare @group: which
+// source that means, the default one or a search of several, is the
+// resolver's to decide.
 type Resolver interface {
 	// Resolve returns the expression a group names. An unknown group is an
 	// error; an empty group returns an empty expression.
 	Resolve(source, group string) (string, error)
-	// List returns the group names a source offers.
-	List(source string) ([]string, error)
-	// All returns the expression naming every host a source knows.
+	// All returns the expression naming every host a source knows. It
+	// answers the reference @source:*, or @* for an empty source.
 	All(source string) (string, error)
+}
+
+// Lister is implemented by a Resolver that can also say which groups it
+// offers, for a program that lists them or completes a group name. Parsing
+// never needs it.
+type Lister interface {
+	// List returns the group names a source offers. An empty source means
+	// the default one.
+	List(source string) ([]string, error)
 	// DefaultSource names the source used when a reference names none.
 	DefaultSource() string
 }
@@ -96,7 +108,7 @@ func (m *MapResolver) Resolve(source, group string) (string, error) {
 	return expr, nil
 }
 
-// List implements Resolver. An empty source means the default one.
+// List implements Lister. An empty source means the default one.
 func (m *MapResolver) List(source string) ([]string, error) {
 	source = cmp.Or(source, m.Default)
 	groups, ok := m.Groups[source]
@@ -125,5 +137,5 @@ func (m *MapResolver) All(source string) (string, error) {
 	return strings.Join(parts, ","), nil
 }
 
-// DefaultSource implements Resolver.
+// DefaultSource implements Lister.
 func (m *MapResolver) DefaultSource() string { return m.Default }
