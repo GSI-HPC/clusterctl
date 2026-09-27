@@ -113,6 +113,12 @@ partly failed, and cutting a batch down to the pool's limit.
   it.
 - **One exit code.** The failures of a pool become the command's exit code
   through `exitcode.Worst` ([ADR 0020](0020-one-exit-code-rule-for-many-hosts.md)).
+  The pools themselves, `Each`, `Map` and `Batches`, live in
+  `internal/clikit/fanout`, which knows no exit codes: `Map` takes the
+  program's name, its rule for the class of an error and the error its step
+  ends with as options, and `internal/fanout` gives it clusterctl's, the
+  last of them `fanout.Summarize`, which puts the exit code on the pools'
+  own summary, `Failure`.
 
 ## Why
 
