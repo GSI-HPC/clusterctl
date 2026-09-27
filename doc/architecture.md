@@ -160,7 +160,14 @@ the region off, and write the lines a display leaves for good that came
 before, a finished step's or a plain line, before they write, and pass what
 they are given on unchanged; the wrapping is done before the command context
 is built, which copies the streams, and only then, so without a display
-nothing stands between a command and its streams. Such a line is formatted as
+nothing stands between a command and its streams. What goroutines beside the
+command write, the stack of a panic a pool's worker, a sink or the display
+recovered from, goes to `app.Streams.WorkerDiag`, which under a display is the
+terminal's `Lines`: whole lines only, held while a question is asked or the
+command has a line open, and written above the region with the next frame,
+the write that ends the line, the answer or the display's end, so that no
+stack lands inside a password prompt. What waits is bounded, and a line says
+how much was left out. Such a line is formatted as
 its event arrives and written by the next frame or the next write of the
 command, never from the Bus. The displays count the targets of each step the
 way `progress.Tally` does, which is also what `progresstest.Check` holds the

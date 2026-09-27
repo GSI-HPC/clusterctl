@@ -122,9 +122,9 @@ func redfishEach[T any](ctx context.Context, a *app.App, step string, names []st
 		Describe: func(i int) (node, host, role string) {
 			return calls[i].node, calls[i].client.Host, ""
 		},
-		PanicLog: a.Diag,
+		PanicLog: a.WorkerDiag,
 	}, func(ctx context.Context, i int) (struct{}, error) {
-		calls[i].send(ctx, a.Diag, changes, do)
+		calls[i].send(ctx, a.WorkerDiag, changes, do)
 		return struct{}{}, calls[i].err
 	})
 	for k, i := range sendable {
@@ -641,7 +641,7 @@ func (r *bmcRun) redfish(ctx context.Context, a *app.App, names []string, client
 		t := r.targets[calls[i].node]
 		t.span.Run()
 		calls[i].sent = true
-		calls[i].send(t.ctx, a.Diag, changes, do)
+		calls[i].send(t.ctx, a.WorkerDiag, changes, do)
 		r.answered(ctx, app.TransportRedfish, calls[i].node, calls[i].err)
 	})
 	for i := range calls {

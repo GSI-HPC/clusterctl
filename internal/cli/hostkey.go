@@ -87,12 +87,12 @@ func scanTargets(ctx context.Context, a *app.App, ns *nodeset.NodeSet, bmc bool,
 		Step:     "scan the host keys",
 		Limit:    a.Spec.Fanout.Max,
 		Describe: func(s scan) (node, host, role string) { return s.node, s.host, "" },
-		PanicLog: a.Diag,
+		PanicLog: a.WorkerDiag,
 	}, func(ctx context.Context, s scan) ([]hostkeys.Entry, error) {
 		if s.err != nil {
 			return nil, s.err
 		}
-		return scanHost(ctx, a.Diag, s.scanner, s.host)
+		return scanHost(ctx, a.WorkerDiag, s.scanner, s.host)
 	})
 	found := map[string][]hostkeys.Entry{}
 	failed := map[string]error{}

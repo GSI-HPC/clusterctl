@@ -56,6 +56,12 @@ type Streams struct {
 	// the server's log, where Err is the notes a call returns to the agent.
 	// Nil means Err.
 	Diag io.Writer
+	// WorkerDiag receives what the goroutines of the command's own pools
+	// have to say about themselves: the stack of a panic a worker recovered
+	// from. They write at any moment, so while a progress display is shown
+	// it holds their lines while a question is asked, and writes them once
+	// it has been answered, never into it. Nil means Diag.
+	WorkerDiag io.Writer
 
 	// IsTTY says standard input is a terminal, so that a confirmation or a
 	// password can be asked for.
@@ -291,6 +297,9 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	}
 	if a.Diag == nil {
 		a.Diag = a.Err
+	}
+	if a.WorkerDiag == nil {
+		a.WorkerDiag = a.Diag
 	}
 	// --fanout is applied as the flags layer of the configuration, so that
 	// config explain reports it; the built-in default is in defaults.yaml.
@@ -675,7 +684,7 @@ func (a *App) SelectOptional(expr string) (*nodeset.NodeSet, error) {
 
 // Executor returns a fan-out executor bound to the configured limits.
 func (a *App) Executor() *fanout.Executor {
-	return &fanout.Executor{Runner: a.Runner, Max: a.Spec.Fanout.Max, PanicLog: a.Diag}
+	return &fanout.Executor{Runner: a.Runner, Max: a.Spec.Fanout.Max, PanicLog: a.WorkerDiag}
 }
 
 // FanoutFlag is what --fanout gave, zero when it was not given. fanout.max

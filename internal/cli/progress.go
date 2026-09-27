@@ -306,7 +306,11 @@ var displayClock = time.Now
 // command context and cobra's alike, which printExec and the help write to.
 // They are put in place before the command context is built, which copies
 // the streams, and only while a display is shown: without one, nothing
-// stands between the command and its streams, event log or not.
+// stands between the command and its streams, event log or not. What
+// goroutines beside the command write, the stacks of the panics a pool's
+// workers, the Bus's sinks or the display recovered from, goes through the
+// terminal's Lines instead, which holds it while a question is asked, a
+// password among them, and writes it once the question has been answered.
 //
 // The summary is one line on standard error once the display is gone, and
 // before the command's error, for a command that ran for a second or more:
@@ -345,13 +349,21 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 	if diag == nil {
 		diag = r.streams.Err
 	}
+	// What goroutines beside the command write, the panics of a pool's
+	// workers and of the Bus's sinks, which may come while a question is
+	// asked, goes to the diagnostics as it would, and through the Lines of
+	// the terminal under a display.
+	panicLog := r.streams.WorkerDiag
+	if panicLog == nil {
+		panicLog = diag
+	}
 	var sinks []progress.Sink
 	var shown renderer
 	var summary *display.Summary
 	var restore func()
 	if mode != progressNone {
 		term := display.NewTerminal(r.streams.Err, r.streams.Size)
-		term.PanicLog, term.Foreground, term.Program = diag, r.streams.Foreground, "clusterctl"
+		term.PanicLog, term.Foreground, term.Program = panicLog, r.streams.Foreground, "clusterctl"
 		shown = startDisplay(mode, term, r.context().Done())
 		summary = &display.Summary{}
 		sinks = append(sinks, shown, summary)
@@ -364,11 +376,11 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 		}
 		r.streams.Err = term.Writer(r.streams.Err)
 		top.SetErr(term.Writer(errOut))
-		diag = r.streams.Err
 		if r.streams.Diag != nil {
 			r.streams.Diag = term.Writer(r.streams.Diag)
-			diag = r.streams.Diag
 		}
+		panicLog = term.Lines(panicLog)
+		r.streams.WorkerDiag = panicLog
 		r.streams.Display = true
 		restore = func() {
 			r.streams = saved
@@ -384,7 +396,7 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 
 	tc, _ := progress.ParseTraceContext(r.traceparent, r.tracestate)
 	bus := progress.NewBus(progress.Options{
-		Sinks: sinks, Now: displayClock, PanicLog: diag, Program: "clusterctl", Classify: exitcode.Class,
+		Sinks: sinks, Now: displayClock, PanicLog: panicLog, Program: "clusterctl", Classify: exitcode.Class,
 		Trace: tc.Trace, Parent: tc.Parent, TraceFlags: tc.Flags, TraceState: tc.State,
 	})
 	return bus, func() {

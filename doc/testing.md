@@ -114,6 +114,14 @@ batches, two steps side by side, a terminal too small for the tree, the ASCII
 marks, an interrupt, a question and a write in the middle of a frame are
 compared whole, and so are the plain lines of a fan-out, a power-on in
 batches and a reinstall that fails, the summary among them.
+The Terminal's `Lines` is tested around a question, an open line, a frame and
+the display's end, and against its bound; a stress test has four goroutines
+write 200 lines each through it, half of them in two writes, while the command
+writes its own lines, asks questions and the counter draws, and checks on the
+`Screen` that every line arrived whole, on a row of its own, in its writer's
+order, and none inside a question. A command test has one node's worker panic
+while another's asks for a password, and checks that the stack comes after
+the answer.
 
 **The event log** is compared line for line, with the span ids, which each
 Bus draws at random, replaced by their order, and a clock the test moves: the
