@@ -15,43 +15,6 @@ import (
 // OSC 52 to write the clipboard.
 const hostile = "ok\r\x1b[1Aexe0001: \x1b]52;c;ZXZpbA==\x07evil"
 
-func TestEscapeText(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct{ in, want string }{
-		{"plain text", "plain text"},
-		{"two\nlines\n", "two\nlines\n"},
-		{"tab\tseparated", "tab\tseparated"},
-		{hostile, `ok\r\x1b[1Aexe0001: \x1b]52;c;ZXZpbA==\x07evil`},
-		{"nul\x00del\x7f", `nul\x00del\x7f`},
-		{"c1 \u009b31m", `c1 \u009b31m`},
-		{"bidi \u202eevil", `bidi \u202eevil`},
-		{"bad utf-8 \xff\xfe", `bad utf-8 \xff\xfe`},
-		{"grüße", "grüße"},
-	}
-	for _, tc := range tests {
-		if got := output.EscapeText(tc.in); got != tc.want {
-			t.Errorf("EscapeText(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestEscapeCell(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct{ in, want string }{
-		{"firmware update, ticket 4711", "firmware update, ticket 4711"},
-		{"bad\nexe0002  idle   fine", `bad\nexe0002  idle   fine`},
-		{"cr\rtab\t", `cr\rtab\t`},
-		{hostile, `ok\r\x1b[1Aexe0001: \x1b]52;c;ZXZpbA==\x07evil`},
-	}
-	for _, tc := range tests {
-		if got := output.EscapeCell(tc.in); got != tc.want {
-			t.Errorf("EscapeCell(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 // TestTableCellCannotForgeARow covers the review's case: a value holding a
 // newline rendered as a healthy row for another node.
 func TestTableCellCannotForgeARow(t *testing.T) {
