@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
@@ -120,6 +121,39 @@ func TestTheCounterWaitsASecond(t *testing.T) {
 		t.Fatalf("the counter was drawn within its first second: %q", got)
 	}
 	f.draw(time.Millisecond)
+	check(t, f.frames(), "node hw · 0:01")
+}
+
+// A counter given no clock reads the real one, and draws from its own
+// ticker: nothing in its first second, and then a line each time it reads
+// otherwise than the one before.
+func TestTheCounterReadsTheRealClock(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := &screen{}
+		counter := display.NewCounter(display.NewTerminal(s, nil), display.CounterOptions{})
+		counter.Start()
+		time.Sleep(999 * time.Millisecond)
+		synctest.Wait()
+		if got := s.String(); got != "" {
+			t.Fatalf("the counter was drawn within its first second: %q", got)
+		}
+		// Two ticks, at 1.0s and 1.1s, of the same line.
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		counter.Close()
+		if got, want := s.String(), "\n<erase>0:01\n<erase>"; got != want {
+			t.Errorf("screen:\n%q\nwant:\n%q", got, want)
+		}
+	})
+}
+
+// A line that reads as the one drawn before is not written again.
+func TestTheCounterDoesNotDrawTheSameLineTwice(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "node hw", nil)
+	f.draw(time.Second)
+	f.draw(500 * time.Millisecond)
 	check(t, f.frames(), "node hw · 0:01")
 }
 

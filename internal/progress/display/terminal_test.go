@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/progress/display"
@@ -138,6 +139,18 @@ func TestCloseEndsALineOfLinesThatWasNotEnded(t *testing.T) {
 	f.shows(t, "once closed", "one\ntwo\nthr\n")
 }
 
+// A write that ends no line writes nothing: its part of the line waits for
+// the write that ends it, and then goes out with it, whole.
+func TestLinesWriteNothingOfALineNotEnded(t *testing.T) {
+	t.Parallel()
+	f := newTerminalFixture(t)
+	diag := f.term.Lines(f.screen)
+	_, _ = io.WriteString(diag, "a log ")
+	f.shows(t, "with part of a line", "")
+	_, _ = io.WriteString(diag, "line\n")
+	f.shows(t, "once the line has ended", "a log line\n")
+}
+
 // A line that would reach past the bound, 256 KiB, while the lines wait is
 // left out, and a line written with the others, which names the program,
 // says how many were; a line that does not end within the bound is cut.
@@ -206,6 +219,30 @@ func TestThePanicOfADisplayWaitsForTheQuestion(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	counter.Close()
+}
+
+// A display that panics while it draws, on a terminal given no PanicLog,
+// writes its stack on the terminal itself, as a line from beside the
+// command that names the program.
+func TestThePanicOfADisplayGoesToTheTerminalWithoutAPanicLog(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := &progresstest.Screen{}
+		term := display.NewTerminal(s, func() (int, int, error) { panic("the size of the terminal") })
+		term.Program = "sind"
+		counter := display.NewCounter(term, display.CounterOptions{})
+		counter.Start()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		counter.Close()
+		got := s.String()
+		if !strings.HasPrefix(got, "sind: the progress display stopped: the size of the terminal\n") {
+			t.Errorf("the panic is not written on the terminal: %q", got)
+		}
+		if !strings.Contains(got, "goroutine") {
+			t.Errorf("the stack is not written: %q", got)
+		}
+	})
 }
 
 // Lines from goroutines beside the command, written while the command
