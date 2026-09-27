@@ -105,11 +105,12 @@ without a cycle ([ADR 0021](adr/0021-progress-as-our-own-events.md)).
 `progress/display` depends on `progress` and on `nodeset`, which folds the
 targets of the tree, and only `cli` uses it.
 
-`progress` knows no exit codes. An error that says no class of
+`progress` knows no exit codes and no program. An error that says no class of
 its own, and is neither canceled nor a timeout, takes the class the Bus's
 `Options.Classify` gives it: on every Bus clusterctl makes that is
 `exitcode.Class`, the class of the exit code the error asks for, so
-`exitcode` imports `progress` and not the other way round.
+`exitcode` imports `progress` and not the other way round. `Options.Program`
+names clusterctl in the line that says a display panicked.
 
 Text that came from a node, a BMC, Slurm, a group source or an agent is
 escaped with `termtext.EscapeText`, or `termtext.EscapeCell` where it has to
