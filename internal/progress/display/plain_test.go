@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/display"
@@ -51,7 +50,7 @@ func newPlainFixtureWith(t *testing.T, command string, o display.PlainOptions) *
 	f.plain = display.NewPlain(f.term, o)
 	f.summary = &display.Summary{}
 	f.capture = &progresstest.Capture{}
-	f.bus = progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{f.capture, f.plain, f.summary}, Now: f.clock.Now})
+	f.bus = progress.NewBus(progress.Options{Sinks: []progress.Sink{f.capture, f.plain, f.summary}, Now: f.clock.Now})
 	t.Cleanup(func() {
 		f.close()
 		progresstest.Check(t, f.capture.Events())
@@ -101,7 +100,7 @@ func TestPlainLinesOfAFanOut(t *testing.T) {
 		func(_ context.Context, node string) (struct{}, error) {
 			f.draw(3 * time.Second)
 			if node == "exe3" || node == "exe5" {
-				return struct{}{}, exitcode.Errorf(exitcode.Transport, "%s.mgmt: dial tcp: i/o timeout", node)
+				return struct{}{}, unreachable("%s.mgmt: dial tcp: i/o timeout", node)
 			}
 			return struct{}{}, nil
 		})
@@ -198,7 +197,7 @@ func TestPlainLinesOfAFailure(t *testing.T) {
 		func(_ context.Context, node string) (struct{}, error) {
 			if node == "exe2" {
 				f.draw(time.Second)
-				return struct{}{}, exitcode.Errorf(exitcode.Transport, "exe2.mgmt: dial tcp: connection refused")
+				return struct{}{}, unreachable("exe2.mgmt: dial tcp: connection refused")
 			}
 			return struct{}{}, nil
 		})
@@ -206,7 +205,7 @@ func TestPlainLinesOfAFailure(t *testing.T) {
 	fanout.Map(disarm, []string{"exe1", "exe3"}, fanout.Options[string]{Step: "clearing the boot overrides", Limit: 8},
 		func(context.Context, string) (struct{}, error) { return struct{}{}, nil })
 	disarming.End(nil)
-	checkScreen(t, f.end(exitcode.Errorf(exitcode.Transport, "setting the machines to boot from the network once failed: exe2")), `
+	checkScreen(t, f.end(unreachable("setting the machines to boot from the network once failed: exe2")), `
 [0:01] provision reinstall › configuring the network boot: start
 [0:03] provision reinstall › configuring the network boot: done in 2.0s
 [0:03] provision reinstall › setting the machines to boot from the network once: start, 3 hosts
