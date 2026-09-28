@@ -43,16 +43,17 @@ git push origin v1.4.0
 ```
 
 The tag must be **signed with an SSH key listed in the
-`RELEASE_ALLOWED_SIGNERS` repository variable**. Before it builds anything, the
-release workflow refuses a tag that:
+`RELEASE_ALLOWED_SIGNERS` repository variable, or with an OpenPGP key held in
+`RELEASE_ALLOWED_PGP_KEYS`**. Before it builds anything, the release workflow
+refuses a tag that:
 
 - is lightweight, or annotated but unsigned;
-- carries a signature `git verify-tag` does not accept against that list,
-  which includes every OpenPGP signature;
+- carries a signature `git verify-tag` does not accept against those keys;
 - was signed under another name than the one it was pushed as, such as a
   signed `v1.0.0` pushed again as `v9.9.9`;
 - names another commit than the push;
-- or when the variable is empty or not set.
+- or when both variables are empty or not set, or `RELEASE_ALLOWED_PGP_KEYS`
+  holds a private key or no public key.
 
 `.github/scripts/verify-release-tag.sh` makes these checks, and CI tests it
 against tags it makes on the spot. The release job then checks that the tag
@@ -61,12 +62,15 @@ tag it is releasing.
 
 ### Setting up verification
 
-The list is a repository variable, not a file in the tree, because the
+The keys are repository variables, not files in the tree, because the
 workflow runs on the tagged commit: a file there would let the commit being
-released name its own signers. Only an administrator can change a variable.
-Under *Settings → Secrets and variables → Actions → Variables*, set
-`RELEASE_ALLOWED_SIGNERS` to one line per signer, in the format of git's
-`gpg.ssh.allowedSignersFile`:
+released name its own signers. Only an administrator can change a variable. A
+variable is no secret, though: a workflow can print it, and GitHub does not
+mask it in the log, so both hold public keys only. Set them under *Settings →
+Secrets and variables → Actions → Variables*; either may be left unset.
+
+`RELEASE_ALLOWED_SIGNERS` lists the SSH keys, one line per signer, in the
+format of git's `gpg.ssh.allowedSignersFile`:
 
 ```
 name@example.org namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...
@@ -79,9 +83,21 @@ git config gpg.format ssh
 git config user.signingKey ~/.ssh/id_ed25519.pub
 ```
 
+`RELEASE_ALLOWED_PGP_KEYS` holds the OpenPGP public keys, ASCII armored, one
+block after the other, as `gpg --armor --export <fingerprint>` prints them.
+Any key in it may sign, however gpg would otherwise trust it. The workflow
+knows only what the variable holds: a key that has expired no longer verifies,
+but a revoked key verifies until the variable holds its revocation, so export
+the key again after revoking it, or remove it. Sign with the key:
+
+```
+git config gpg.format openpgp
+git config user.signingKey <fingerprint>
+```
+
 A writer who may change workflows could still edit the check out of
 `release.yml` in the commit they tag. Two settings close that, and belong with
-the variable:
+the variables:
 
 - a tag ruleset on `v*` that lets only the maintainers who sign releases
   create, update or delete such a tag;

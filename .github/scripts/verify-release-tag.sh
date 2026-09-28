@@ -9,31 +9,37 @@
 # statement by a person holding a key rather than a label anyone with write
 # access can move. Run in a checkout of the pushed tag:
 #
-#   GITHUB_REF_NAME  the tag that was pushed, v1.4.0
-#   GITHUB_SHA       the commit the push event is about
-#   ALLOWED_SIGNERS  the keys that may sign a release, in the format of git's
-#                    gpg.ssh.allowedSignersFile. It comes from the
-#                    RELEASE_ALLOWED_SIGNERS repository variable and never
-#                    from the checkout, which the tagged commit controls.
-#   GITHUB_OUTPUT    optional; receives object= and commit=, the tag object
-#                    and the commit that were verified.
+#   GITHUB_REF_NAME   the tag that was pushed, v1.4.0
+#   GITHUB_SHA        the commit the push event is about
+#   ALLOWED_SIGNERS   the SSH keys that may sign a release, in the format of
+#                     git's gpg.ssh.allowedSignersFile, from the
+#                     RELEASE_ALLOWED_SIGNERS repository variable
+#   ALLOWED_PGP_KEYS  the OpenPGP keys that may sign a release, their public
+#                     keys ASCII armored, from the RELEASE_ALLOWED_PGP_KEYS
+#                     repository variable
+#   GITHUB_OUTPUT     optional; receives object= and commit=, the tag object
+#                     and the commit that were verified.
 #
-# Every check fails closed: a missing signer list, a signature git cannot
-# verify, and a signature by anyone else all stop the release.
+# The keys come from repository variables and never from the checkout, which
+# the tagged commit controls. Either list may be empty, not both.
+#
+# Every check fails closed: no listed key, a signature git cannot verify, and
+# a signature by anyone else all stop the release.
 
 set -euo pipefail
 
 tag="${GITHUB_REF_NAME:?the tag to verify}"
 sha="${GITHUB_SHA:?the commit of the push event}"
 signers="${ALLOWED_SIGNERS:-}"
+pgp_keys="${ALLOWED_PGP_KEYS:-}"
 
 fail() {
   echo "::error::$*"
   exit 1
 }
 
-if [ -z "${signers//[[:space:]]/}" ]; then
-  fail "the RELEASE_ALLOWED_SIGNERS repository variable is empty or not set; releases are verified against it, see doc/release.md"
+if [ -z "${signers//[[:space:]]/}" ] && [ -z "${pgp_keys//[[:space:]]/}" ]; then
+  fail "the RELEASE_ALLOWED_SIGNERS and RELEASE_ALLOWED_PGP_KEYS repository variables are empty or not set; releases are verified against them, see doc/release.md"
 fi
 
 object="$(git rev-parse --verify --quiet "refs/tags/$tag")" ||
@@ -45,17 +51,36 @@ if [ "$(git cat-file -t "$object")" != "tag" ]; then
   exit 1
 fi
 
-# The signature, checked by git against the listed keys alone. An empty
-# GnuPG home means an OpenPGP signature has no key to verify against either,
-# so only a listed SSH key passes.
+# The signature, checked by git against the listed keys alone: the SSH keys
+# in an allowed signers file, and the OpenPGP keys in a GnuPG home that holds
+# nothing else, so that a good signature is one of theirs whatever trust gpg
+# gives it. A signature in a format with no listed key does not verify.
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+cleanup() {
+  # gpg starts an agent for the home it is given; it goes with the home.
+  gpgconf --homedir "$work/gnupg" --kill all > /dev/null 2>&1 || true
+  rm -rf "$work"
+}
+trap cleanup EXIT
 printf '%s\n' "$signers" > "$work/allowed_signers"
 mkdir -m 0700 "$work/gnupg"
 
+if [ -n "${pgp_keys//[[:space:]]/}" ]; then
+  # A repository variable is no secret: anyone who can run a workflow can
+  # print it.
+  if grep -qF -- '-----BEGIN PGP PRIVATE KEY BLOCK-----' <<< "$pgp_keys"; then
+    fail "RELEASE_ALLOWED_PGP_KEYS holds a private key; remove it, and revoke the key"
+  fi
+  GNUPGHOME="$work/gnupg" gpg --batch --quiet --import <<< "$pgp_keys" ||
+    fail "RELEASE_ALLOWED_PGP_KEYS holds something gpg cannot import; it takes public keys, ASCII armored"
+  keys="$(GNUPGHOME="$work/gnupg" gpg --batch --with-colons --list-keys)"
+  grep -q '^pub:' <<< "$keys" ||
+    fail "RELEASE_ALLOWED_PGP_KEYS holds no OpenPGP public key"
+fi
+
 if ! GNUPGHOME="$work/gnupg" git -c gpg.ssh.allowedSignersFile="$work/allowed_signers" \
-  verify-tag "$object"; then
-  fail "$tag is not signed by anyone in RELEASE_ALLOWED_SIGNERS"
+  -c gpg.minTrustLevel=undefined verify-tag "$object"; then
+  fail "$tag is not signed by a key in RELEASE_ALLOWED_SIGNERS or RELEASE_ALLOWED_PGP_KEYS"
 fi
 
 # A signature covers the name inside the tag object, not the ref it was pushed
