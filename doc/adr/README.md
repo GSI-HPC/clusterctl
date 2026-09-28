@@ -17,7 +17,7 @@ A decision is superseded by a later record, never edited.
 | [0004](0004-drive-openssh.md) | Drive OpenSSH rather than speak SSH | accepted |
 | [0005](0005-own-redfish-client.md) | Write the Redfish client rather than take gofish | accepted |
 | [0006](0006-clean-break.md) | No compatibility layer for the shell toolkit | accepted |
-| [0007](0007-version-from-signed-tags.md) | The version lives only in a signed tag | accepted |
+| [0007](0007-version-from-signed-tags.md) | The version lives only in a signed tag | superseded in part by [0023](0023-ssh-or-openpgp-release-tags.md) |
 | [0008](0008-lgpl.md) | LGPL-3.0-or-later | accepted |
 | [0009](0009-hugo-for-the-manual.md) | Hugo and Hextra for the manual | accepted |
 | [0010](0010-public-nodeset-package.md) | Publish `nodeset`, keep the rest internal | accepted |
@@ -33,3 +33,4 @@ A decision is superseded by a later record, never edited.
 | [0020](0020-one-exit-code-rule-for-many-hosts.md) | One exit code rule for a command on many hosts | accepted |
 | [0021](0021-progress-as-our-own-events.md) | Report progress as our own span-shaped events | accepted |
 | [0022](0022-bounded-pools-and-power-batches.md) | Bounded pools, and power actions in batches | accepted |
+| [0023](0023-ssh-or-openpgp-release-tags.md) | A release tag is signed with an SSH or an OpenPGP key | accepted |

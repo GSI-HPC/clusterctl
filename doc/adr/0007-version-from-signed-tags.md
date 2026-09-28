@@ -3,7 +3,7 @@
 
 # 0007 — The version lives only in a signed tag
 
-Status: accepted
+Status: superseded in part by [0023](0023-ssh-or-openpgp-release-tags.md)
 
 ## Context
 

@@ -44,8 +44,8 @@ git push origin v1.4.0
 
 The tag must be **signed with an SSH key listed in the
 `RELEASE_ALLOWED_SIGNERS` repository variable, or with an OpenPGP key held in
-`RELEASE_ALLOWED_PGP_KEYS`**. Before it builds anything, the release workflow
-refuses a tag that:
+`RELEASE_ALLOWED_PGP_KEYS`** ([ADR 0023](adr/0023-ssh-or-openpgp-release-tags.md)).
+Before it builds anything, the release workflow refuses a tag that:
 
 - is lightweight, or annotated but unsigned;
 - carries a signature `git verify-tag` does not accept against those keys;
