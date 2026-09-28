@@ -24,13 +24,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # The signer list is a repository variable, which only an administrator
-      # can change, and never a file in the checkout: the tagged commit would
-      # otherwise name its own signers. Without it no release is cut.
+      # The signers' keys are repository variables, which only an
+      # administrator can change, and never a file in the checkout: the tagged
+      # commit would otherwise name its own signers. Without them no release
+      # is cut.
       - name: Refuse a tag not signed by a listed signer
         id: verify
         env:
           ALLOWED_SIGNERS: ${{ vars.RELEASE_ALLOWED_SIGNERS }}
+          ALLOWED_PGP_KEYS: ${{ vars.RELEASE_ALLOWED_PGP_KEYS }}
         run: .github/scripts/verify-release-tag.sh
 
   test:
