@@ -423,7 +423,11 @@ comes back.
 			if err != nil {
 				return err
 			}
-			return redfishRequest(a.Context(), a, nodes, "GET", args[0], nil)
+			clients, err := redfishClients(a.Context(), a, nodes.Expand())
+			if err != nil {
+				return err
+			}
+			return redfishRequest(a.Context(), a, nodes, clients, "GET", args[0], nil)
 		}))
 
 	var loseJobs bool
@@ -432,7 +436,9 @@ Send a POST with a JSON body to the Redfish interface.
 
 This can power off a machine, so it goes through the confirmation gate like
 any other destructive command, and it is never retried. A path that names a
-reset asks Slurm first, as bmc power does, and --lose-jobs overrides that.`,
+reset asks Slurm first, as bmc power does, and --lose-jobs overrides that.
+--dry-run resolves the BMC account too, so it is refused where the real run
+would be.`,
 		cobra.MinimumNArgs(2),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			var body any
@@ -456,10 +462,14 @@ reset asks Slurm first, as bmc power does, and --lose-jobs overrides that.`,
 					return err
 				}
 			}
-			if err := a.Gate.Confirm(gated); err != nil {
+			var clients []*redfish.Client
+			if err := confirmResolved(a, gated, func() (err error) {
+				clients, err = redfishClients(a.Context(), a, nodes.Expand())
+				return err
+			}); err != nil {
 				return err
 			}
-			return redfishRequest(a.Context(), a, nodes, "POST", args[0], body)
+			return redfishRequest(a.Context(), a, nodes, clients, "POST", args[0], body)
 		}))
 	addLoseJobsFlag(post, &loseJobs)
 
@@ -517,11 +527,7 @@ func resetsHost(path string) bool {
 	return strings.Contains(strings.ToLower(path), "reset")
 }
 
-func redfishRequest(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, method, path string, body any) error {
-	clients, err := redfishClients(ctx, a, nodes.Expand())
-	if err != nil {
-		return err
-	}
+func redfishRequest(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, clients []*redfish.Client, method, path string, body any) error {
 	changes := method != "GET"
 	calls := redfishEach(ctx, a, method+" "+path, nodes.Expand(), clients, changes, func(ctx context.Context, _ string, c *redfish.Client) (map[string]any, error) {
 		return c.Do(ctx, method, path, body)
