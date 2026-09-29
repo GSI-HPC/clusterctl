@@ -1503,11 +1503,13 @@ type provisionState struct {
 	BMC                string `json:"bmc,omitempty"`
 	Power              string `json:"power,omitempty"`
 	// SSH says whether the node answers over ssh; SSHError says why not.
-	// A node that is reinstalling does not, so neither fails the command.
+	// A node that is reinstalling does not, so neither fails the command;
+	// an interrupt that stopped the command asking is no answer, and does.
 	SSH      bool   `json:"ssh"`
 	SSHError string `json:"sshError,omitempty"`
 	Uptime   string `json:"uptime,omitempty"`
-	// Error says why the boot path or the power state is not known.
+	// Error says why the boot path or the power state is not known, or,
+	// once the command was interrupted, whether the node answers.
 	Error string `json:"error,omitempty"`
 
 	err error
@@ -1541,7 +1543,9 @@ answer. A boot path or a power state that cannot be read is shown as
 unknown, with the reason in the ERROR column and in the error field of the
 node in the JSON output, and fails the command: with exit code 3 when a host
 could not be reached, 2 for a configuration problem such as a missing
-credential, and 1 when a host refused.`,
+credential, and 1 when a host refused. A node the command stopped asking
+over ssh because it was interrupted has the interrupt as its error, and the
+command exits 130.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, err := pxeRole(a)
@@ -1645,6 +1649,12 @@ credential, and 1 when a host refused.`,
 				switch {
 				case !ok:
 					s.SSHError = "not tried"
+				case res.Failed() && exitcode.Worst(res.Err) == exitcode.Interrupted:
+					// A probe the interrupt ended, or never started, is no
+					// answer from the node, so it fails the command, which
+					// then exits 130 rather than 0.
+					s.SSHError = "interrupted"
+					s.fail(fmt.Errorf("reading the uptime: %w", res.Err))
 				case res.Failed():
 					s.SSHError = output.EscapeCell(sshReason(res))
 				default:
