@@ -456,6 +456,46 @@ func TestFabricCountersUplinkReadsTheCabledSwitchPort(t *testing.T) {
 	}
 }
 
+// fabric counters looked its NODE up as typed, so exe1 missed exe0001's
+// DHCP declaration and read the port of the inventory's address, which may
+// be stale, and EXE0001 was refused. The name is resolved the way -n is.
+func TestFabricCountersFindsTheNodeOfAnySpelling(t *testing.T) {
+	for _, spelling := range []string{"exe0001", "exe1", "EXE0001", "exe0001.hpc.example.org"} {
+		t.Run(spelling, func(t *testing.T) {
+			rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+				if tg.Role == "dhcp" {
+					return &transport.Result{Target: tg,
+						Stdout: "host exe0001 {\n  hardware ethernet aa:bb:cc:11:22:33;\n  fixed-address 10.0.2.1;\n}\n"}, nil
+				}
+				return &transport.Result{Target: tg, Stdout: "Errors for 0xaabbcc0300112233\n"}, nil
+			}}
+			h, err := run(t, harnessOptions{recorder: rec}, "fabric", "counters", spelling)
+			if err != nil {
+				t.Fatalf("fabric counters %s failed: %v", spelling, err)
+			}
+			calls := rec.Calls()
+			if got, want := strings.Join(calls[len(calls)-1].Request.Argv, " "), "ibqueryerrors -G 0xaabbcc0300112233 --data"; got != want {
+				t.Errorf("the counters were read with %q, want %q", got, want)
+			}
+			if !strings.Contains(h.out.String(), "0xaabbcc0300112233") {
+				t.Errorf("the counters are not shown:\n%s", h.out)
+			}
+		})
+	}
+}
+
+// NODE is one node, and a name that is not a host name is refused before
+// anything is asked.
+func TestFabricCountersRefusesWhatIsNotOneNode(t *testing.T) {
+	for _, arg := range []string{"exe[0001-0002]", "exe0001;id", " "} {
+		t.Run(arg, func(t *testing.T) {
+			h, err := run(t, harnessOptions{}, "fabric", "counters", "--", arg)
+			wantCode(t, err, exitcode.Usage)
+			wantNoCalls(t, h)
+		})
+	}
+}
+
 func TestFabricCountersUplinkRefusesToGuess(t *testing.T) {
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		out := ""

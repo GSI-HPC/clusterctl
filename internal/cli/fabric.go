@@ -551,7 +551,8 @@ func newFabricCountersCommand(r *root) *cobra.Command {
 	var uplink bool
 	cmd := leaf("counters NODE", "Show the fabric error counters of a node", `
 Read the error counters of a node's port, or of the switch port it is
-connected to.
+connected to. The name is resolved the way -n is, so exe1, EXE0001 and the
+node's host name all find exe0001.
 
 With --uplink the switch port is found by asking the subnet manager for the
 LID of the node's port and looking for the one switch port linked to it, and
@@ -562,7 +563,11 @@ only that port is read. The switch and port are named on standard error.`,
 			if err != nil {
 				return err
 			}
-			guids, err := newGUIDLookup(a).guids(a.Context(), args[0])
+			node, err := oneNode(a, args[0])
+			if err != nil {
+				return err
+			}
+			guids, err := newGUIDLookup(a).guids(a.Context(), node)
 			if err != nil {
 				return err
 			}
@@ -580,9 +585,9 @@ only that port is read. The switch and port are named on standard error.`,
 				}
 				sw, err := findUplink(links.Stdout, lid)
 				if err != nil {
-					return fmt.Errorf("%s: %w", args[0], err)
+					return fmt.Errorf("%s: %w", node, err)
 				}
-				a.Printf("%s is linked to port %d of switch %s (LID %d)\n", args[0], sw.Port, sw.GUID, sw.LID)
+				a.Printf("%s is linked to port %d of switch %s (LID %d)\n", node, sw.Port, sw.GUID, sw.LID)
 				argv = []string{"perfquery", strconv.Itoa(sw.LID), strconv.Itoa(sw.Port)}
 			}
 			result, err := a.RunOnRole(a.Context(), role, transport.Request{
