@@ -830,7 +830,9 @@ for dev in $devs; do
   if out=$(mlxconfig --yes --dev "$dev" set %s 2>&1); then
     printf '%%s|ok|\n' "$dev"
   else
-    printf '%%s|failed|%%s\n' "$dev" "$(printf '%%s\n' "$out" | tail -n 1)"
+    why=$(printf '%%s\n' "$out" | tail -n 1)
+    printf '%%s|failed|%%s\n' "$dev" "$why"
+    printf '%%s: %%s\n' "$dev" "$why" >&2
     rc=1
   fi
 done
@@ -841,7 +843,10 @@ exit $rc
 func newHCAConfigSetCommand(r *root) *cobra.Command {
 	return leaf("set KEY VALUE [NODESET]", "Set an adapter firmware setting", `
 Set a firmware setting on every adapter of each node, and report each
-adapter. A node where any adapter was not changed fails the command.
+adapter, with what mlxconfig said of one it failed on in -o wide. A node
+where any adapter was not changed fails the command, and so does one that
+cannot be reached or has no adapter; why each node failed is said on standard
+error.
 
 Setting a firmware value changes hardware behaviour across a reboot, so it
 goes through the confirmation gate.
@@ -870,14 +875,13 @@ goes through the confirmation gate.
 			}
 			t := output.NewTable(output.Cols("NODE", "DEVICE", "STATUS", "ERROR").Wide("ERROR")...)
 			for _, res := range results {
+				// ssh sets an error for every exit that is not zero, so
+				// one adapter that refused leaves one; a node whose
+				// script got to its adapters has their rows whatever it
+				// exited with.
 				lines := res.Lines()
-				if res.Err != nil || len(lines) == 0 {
-					status := "failed"
-					detail := strings.TrimSpace(lastNonEmpty(res.Stderr))
-					if res.Err != nil {
-						status, detail = "unreachable", res.Err.Error()
-					}
-					t.Add(res.Target.Name, "", status, detail)
+				if len(lines) == 0 {
+					t.Add(res.Target.Name, "", fanout.Status(res), failureDetail(res))
 					continue
 				}
 				for _, line := range lines {
@@ -891,6 +895,7 @@ goes through the confirmation gate.
 			if err := a.Print(output.Result{Table: t, Object: results}); err != nil {
 				return err
 			}
+			sayAdapterFailures(a, results)
 			return failureError(results)
 		}))
 }
