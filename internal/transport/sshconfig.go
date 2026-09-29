@@ -450,6 +450,34 @@ func (h jumpHop) String() string {
 	return host
 }
 
+// Hop is one jump host of a chain; the account and the port are empty where
+// ssh decides them.
+type Hop struct {
+	User, Host, Port string
+}
+
+// String renders the hop as a ProxyJump list writes it, [user@]host[:port].
+func (h Hop) String() string { return jumpHop{user: h.User, host: h.Host, port: h.Port}.String() }
+
+// Jumps resolves a proxyJump value into the hops the generated configuration
+// writes for it: a role becomes its host, with the role's account unless the
+// value names one, and every hop keeps the port written with it.
+func (c *Client) Jumps(proxyJump string) ([]Hop, error) {
+	chain, _, err := c.resolveJumps(proxyJump)
+	if err != nil {
+		return nil, err
+	}
+	var hops []Hop
+	for element := range strings.SplitSeq(chain, ",") {
+		hop, err := parseHop(element)
+		if err != nil {
+			return nil, err
+		}
+		hops = append(hops, Hop{User: hop.user, Host: hop.host, Port: hop.port})
+	}
+	return hops, nil
+}
+
 // resolveJumps turns a proxyJump value into the list ssh is given, and names
 // the roles it goes through.
 //
