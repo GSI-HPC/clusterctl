@@ -291,6 +291,39 @@ spec:
 	}
 }
 
+// A mapping key of digits alone, a network called 100 or a host role
+// called 01, is a key and not a list index: a problem with its value is
+// reported at the key, spec.networks.100, rather than at the mapping that
+// holds it.
+func TestValidationReportsANumericKeyWhereItWasWritten(t *testing.T) {
+	src := `apiVersion: clusterctl/v1alpha1
+kind: Site
+metadata:
+  name: example
+spec:
+  networks:
+    ipmi: 10.0.0.0/8
+    "100": [10.100.0.0/16]
+  hosts:
+    "01":
+      host: login.example.org
+      forwardAgnet: true
+`
+	file := filepath.Join(t.TempDir(), "site.yaml")
+	if err := os.WriteFile(file, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.Load([]string{file})
+	if err == nil {
+		t.Fatal("a list for a network and a misspelled field should be rejected")
+	}
+	for _, want := range []string{"site.yaml:8:5: spec.networks.100:", "site.yaml:12:7: spec.hosts.01.forwardAgnet:"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
 func TestValidationRejectsWrongTypesAndVersions(t *testing.T) {
 	tests := []struct {
 		name string
