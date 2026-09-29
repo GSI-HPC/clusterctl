@@ -20,6 +20,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
+	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
 
@@ -403,6 +404,33 @@ func TestHostkeyListShowsTheMarkers(t *testing.T) {
 	}
 	if strings.Contains(rows["AAAAtrusted"], "@") {
 		t.Errorf("the plain key is marked: %q", rows["AAAAtrusted"])
+	}
+}
+
+// TestMatchesWantsEveryOfferedKeyInTheFile: a host matches the file when each
+// key it offers is there under the same type; the file may hold more.
+func TestMatchesWantsEveryOfferedKeyInTheFile(t *testing.T) {
+	ed := hostkeys.Entry{Type: "ssh-ed25519", Key: "AAAAed"}
+	rsa := hostkeys.Entry{Type: "ssh-rsa", Key: "AAAArsa"}
+	tests := []struct {
+		name         string
+		known, found []hostkeys.Entry
+		want         bool
+	}{
+		{"the one key offered", []hostkeys.Entry{ed}, []hostkeys.Entry{ed}, true},
+		{"the file holds more", []hostkeys.Entry{rsa, ed}, []hostkeys.Entry{ed}, true},
+		{"every key offered, in another order", []hostkeys.Entry{ed, rsa}, []hostkeys.Entry{rsa, ed}, true},
+		{"one key offered is missing", []hostkeys.Entry{ed}, []hostkeys.Entry{ed, rsa}, false},
+		{"another key", []hostkeys.Entry{ed}, []hostkeys.Entry{{Type: "ssh-ed25519", Key: "AAAAnew"}}, false},
+		{"the key under another type", []hostkeys.Entry{ed}, []hostkeys.Entry{{Type: "ssh-rsa", Key: "AAAAed"}}, false},
+		{"an empty file", nil, []hostkeys.Entry{ed}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matches(tt.known, tt.found); got != tt.want {
+				t.Errorf("matches(%v, %v) = %t, want %t", tt.known, tt.found, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 )
 
@@ -36,6 +38,34 @@ func TestLoginRejectsASecondName(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "uptime") {
 		t.Errorf("the command is missing:\n%s", h.out)
+	}
+}
+
+// TestDefaultRolePrefersLoginThenMgmt: login without a name goes to the login
+// role, else to mgmt, else to the first role in name order, and names none
+// when the site has no role.
+func TestDefaultRolePrefersLoginThenMgmt(t *testing.T) {
+	tests := []struct {
+		name  string
+		roles []string
+		want  string
+	}{
+		{"login and mgmt", []string{"wlm", "mgmt", "login", "db"}, "login"},
+		{"mgmt without login", []string{"wlm", "mgmt", "db"}, "mgmt"},
+		{"neither", []string{"wlm", "install", "db"}, "db"},
+		{"no role", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &app.App{}
+			a.Spec.Hosts = map[string]v1alpha1.HostRole{}
+			for _, role := range tt.roles {
+				a.Spec.Hosts[role] = v1alpha1.HostRole{Host: role + ".example.org"}
+			}
+			if got := defaultRole(a); got != tt.want {
+				t.Errorf("defaultRole of %v = %q, want %q", tt.roles, got, tt.want)
+			}
+		})
 	}
 }
 
