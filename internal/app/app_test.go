@@ -269,6 +269,71 @@ func TestCommandLinePathsResolveAgainstTheWorkingDirectory(t *testing.T) {
 	}
 }
 
+// The sops a variable names, CLUSTERCTL_SOPS_BINARY=tools/sops, and the
+// password file or helper a --set names are the working directory's, as a
+// known hosts file is: they resolved against the site instead. A program
+// named without a slash is still looked up in PATH, and a path written in
+// a document still resolves against the site.
+func TestCommandLineProgramsAndPasswordsResolveAgainstTheWorkingDirectory(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sops := func(a *app.App) string { return a.Sops().Binary }
+	password := func(name string) func(*app.App) string {
+		return func(a *app.App) string {
+			src := a.Spec.Credentials[name].Password
+			switch {
+			case src.File != "":
+				return a.Path(src.File)
+			case src.AgeFile != "":
+				return a.Path(src.AgeFile)
+			}
+			return src.Command[0]
+		}
+	}
+	tests := []struct {
+		name string
+		env  map[string]string
+		set  map[string]string
+		got  func(*app.App) string
+		want string
+	}{
+		{"sops in the environment", map[string]string{"CLUSTERCTL_SOPS_BINARY": "tools/sops"}, nil,
+			sops, filepath.Join(wd, "tools", "sops")},
+		{"sops with --set", nil, map[string]string{"workstation.sopsBinary": "tools/sops"},
+			sops, filepath.Join(wd, "tools", "sops")},
+		{"sops by name", map[string]string{"CLUSTERCTL_SOPS_BINARY": "sops-3.13"}, nil,
+			sops, "sops-3.13"},
+		{"a password file", nil, map[string]string{"credentials.local": "{username: admin, password: {file: pw}}"},
+			password("local"), filepath.Join(wd, "pw")},
+		{"an age file", nil, map[string]string{"credentials.bmc-vault.password.ageFile": "pw.age"},
+			password("bmc-vault"), filepath.Join(wd, "pw.age")},
+		{"a helper", nil, map[string]string{"credentials.local": "{username: admin, password: {command: [bin/pw, bmc]}}"},
+			password("local"), filepath.Join(wd, "bin", "pw")},
+		{"a helper by name", nil, map[string]string{"credentials.local": "{username: admin, password: {command: [pass, bmc]}}"},
+			password("local"), "pass"},
+		{"an age file in a document", nil, nil,
+			password("bmc-vault"), filepath.Join(exampleDir, "secrets", "bmc-admin.age")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a, err := app.New(context.Background(), app.Streams{StateDir: t.TempDir(), CacheDir: t.TempDir()}, app.Options{
+				ConfigFiles: []string{exampleDir},
+				Env:         func(k string) string { return tc.env[k] },
+				Set:         tc.set,
+				Runner:      &transport.Recorder{},
+			})
+			if err != nil {
+				t.Fatalf("building the app: %v", err)
+			}
+			if got := tc.got(a); got != tc.want {
+				t.Errorf("resolved to %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRedfishClientCarriesTheVendorResetTypes(t *testing.T) {
 	t.Parallel()
 	a, _ := bmcApp(t)

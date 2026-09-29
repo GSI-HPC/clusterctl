@@ -134,8 +134,9 @@ func (a *App) Sops() *secrets.Sops {
 func (a *App) sopsLocked() *secrets.Sops {
 	s := &a.secrets
 	if s.sops == nil {
-		// A binary named by a path resolves against the site, as a
-		// credential helper does; a bare name is looked up in PATH.
+		// A binary a document names by a path resolves against the site,
+		// as a credential helper does; one from the environment or --set
+		// is absolute already, and a bare name is looked up in PATH.
 		binary := a.Spec.Workstation.SopsBinary
 		if strings.ContainsRune(binary, '/') {
 			binary = a.Path(binary)
