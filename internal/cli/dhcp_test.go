@@ -340,6 +340,65 @@ func TestDHCPCaptureAlwaysStopsOnItsOwn(t *testing.T) {
 	}
 }
 
+// roleShell took only what follows -- for the command and dropped the words
+// before it, so dhcp shell uptime opened an interactive login on the DHCP
+// server instead of running uptime, and boot shell and cinc shell did the
+// same. login refuses such a word, and so do they now.
+func TestServiceShellRefusesACommandBeforeTheDash(t *testing.T) {
+	for _, args := range [][]string{
+		{"dhcp", "shell", "uptime"},
+		{"boot", "shell", "uptime"},
+		{"cinc", "shell", "uptime"},
+		{"dhcp", "shell", "uptime", "--", "ls"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			h, err := run(t, harnessOptions{tty: true}, append([]string{"--dry-run"}, args...)...)
+			wantCode(t, err, exitcode.Usage)
+			if want := "clusterctl " + args[0] + " shell -- uptime"; err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %v, want it to show %q", err, want)
+			}
+			if out := h.out.String(); out != "" {
+				t.Errorf("a session was opened:\n%s", out)
+			}
+			wantNoCalls(t, h)
+		})
+	}
+}
+
+// A service shell reaches the host of the service's role, and runs what
+// follows -- there, or opens a login shell when nothing does.
+func TestServiceShellReachesTheRoleOfTheService(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		host string
+		cmd  string
+	}{
+		{[]string{"dhcp", "shell"}, "root@dhcp01.example.org", ""},
+		{[]string{"dhcp", "shell", "--", "ls", "-l", "/etc/dhcp"}, "root@dhcp01.example.org", "sh ls -l /etc/dhcp"},
+		{[]string{"boot", "shell", "--", "uptime"}, "installer.hpc.example.org", "sh uptime"},
+		{[]string{"cinc", "shell", "--", "uptime"}, "installer.hpc.example.org", "sh uptime"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			h, err := run(t, harnessOptions{tty: true}, append([]string{"--dry-run"}, tc.args...)...)
+			if err != nil {
+				t.Fatalf("%v", err)
+			}
+			line := strings.TrimSpace(h.out.String())
+			before, after, ok := strings.Cut(line, tc.host)
+			if !ok || !strings.HasPrefix(before, "ssh ") {
+				t.Fatalf("the session does not reach %s:\n%s", tc.host, line)
+			}
+			if (tc.cmd == "" && after != "") || !strings.HasSuffix(after, tc.cmd) {
+				t.Errorf("the session runs %q, want %q", after, tc.cmd)
+			}
+			wantNoCalls(t, h)
+		})
+	}
+
+	_, err := run(t, harnessOptions{tty: true}, "--set", `services.dhcp.role=""`, "--dry-run", "dhcp", "shell")
+	wantCode(t, err, exitcode.Usage)
+}
+
 // The log holds what the nodes sent, so a terminal escape in it is shown
 // rather than obeyed.
 func TestDHCPLogEscapesControlCharacters(t *testing.T) {
