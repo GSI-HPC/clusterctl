@@ -870,10 +870,15 @@ no longer finds a configuration named after the node.`,
 
 	show := leaf("show NODE", "Show the GRUB file name a node loads", `
 Print the address of a node and the GRUB configuration file name it asks for,
-which is the address in hexadecimal.`,
+which is the address in hexadecimal. The node is named as for "boot grub
+set", so exe1, EXE0001 and the node's host name all show exe0001.`,
 		cobra.ExactArgs(1),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
-			address, err := nodeAddress(a.Context(), a, args[0])
+			node, err := oneNode(a, args[0])
+			if err != nil {
+				return err
+			}
+			address, err := nodeAddress(a.Context(), a, node)
 			if err != nil {
 				return err
 			}
@@ -882,9 +887,9 @@ which is the address in hexadecimal.`,
 				return exitcode.Wrap(exitcode.Usage, err)
 			}
 			t := output.NewTable(output.Cols("NODE", "ADDRESS", "GRUB FILE")...)
-			t.Add(args[0], address, "grub.cfg-"+hex)
+			t.Add(node, address, "grub.cfg-"+hex)
 			return a.Print(output.Result{Table: t, Object: map[string]string{
-				"node": args[0], "address": address, "grubFile": "grub.cfg-" + hex,
+				"node": node, "address": address, "grubFile": "grub.cfg-" + hex,
 			}})
 		}))
 

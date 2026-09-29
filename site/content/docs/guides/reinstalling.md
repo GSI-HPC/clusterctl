@@ -288,6 +288,9 @@ $ clusterctl boot grub set exe0007 /srv/tftp/grub/1.0/grub.cfg.install-exec
 $ clusterctl boot grub unset exe0007
 ```
 
+Each of the three takes one node, resolved as `-n` is: `exe7`, `EXE0007` and
+the node's host name all name `exe0007`.
+
 A GRUB link has no one-shot form: the node loads its target at every boot
 until `boot grub unset` removes the link.
 
