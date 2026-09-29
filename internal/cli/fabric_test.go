@@ -706,3 +706,89 @@ exit 0
 		t.Errorf("the adapters are not reported one by one:\n%s", out)
 	}
 }
+
+// hca link and hca firmware printed nothing for a node without an adapter,
+// or without ibstat, so the node was left out of the table and the command
+// exited 0: a firmware audit skipped it without a word. Such a node has a
+// row, is named on standard error with why, and fails the command.
+func TestHCAReportsANodeWithoutAdapters(t *testing.T) {
+	for _, command := range []string{"link", "firmware"} {
+		for _, tc := range []struct {
+			name, ibstat, reason string
+		}{
+			{"no ibstat", "", "ibstat is not installed"},
+			{"no adapter", "exit 0\n", "no adapter found"},
+		} {
+			t.Run(command+"/"+tc.name, func(t *testing.T) {
+				bin := t.TempDir()
+				if tc.ibstat != "" {
+					fakeTool(t, bin, "ibstat", tc.ibstat)
+				}
+				rec, _ := shellRunner(t, bin, "")
+				h, err := run(t, harnessOptions{recorder: rec}, "hca", command, "-n", "exe0001")
+				wantCode(t, err, exitcode.TargetFailed)
+				if !strings.Contains(h.out.String(), "exe0001") {
+					t.Errorf("the node is left out of the table:\n%s", h.out)
+				}
+				if !strings.Contains(h.errOut.String(), "exe0001: exit 1: "+tc.reason) {
+					t.Errorf("standard error does not say why exe0001 failed:\n%s", h.errOut)
+				}
+			})
+		}
+	}
+}
+
+// Each adapter of a node is a row of hca link and hca firmware, and a node
+// that could not be reached is one too, with how it failed.
+func TestHCAListsEveryAdapterAndEveryNode(t *testing.T) {
+	bin := t.TempDir()
+	fakeTool(t, bin, "ibstat", `
+case "$1" in
+-l) printf 'mlx5_0\nmlx5_1\n' ;;
+mlx5_0) printf 'State: Active\nPhysical state: LinkUp\nRate: 200\nFirmware version: 20.31.1014\n' ;;
+mlx5_1) printf 'State: Down\nPhysical state: Polling\nRate: 10\nFirmware version: 20.28.1002\n' ;;
+esac
+`)
+	shell, _ := shellRunner(t, bin, "")
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if tg.Name == "exe0002" {
+			return unreachable(tg), nil
+		}
+		return shell.Reply(tg, req)
+	}}
+	for _, tc := range []struct {
+		command, want string
+	}{
+		{"link", `NODE     DEVICE       STATE   PHYSICAL  RATE
+exe0001  mlx5_0       Active  LinkUp    200
+exe0001  mlx5_1       Down    Polling   10
+exe0002  unreachable
+`},
+		{"firmware", `NODE     DEVICE       FIRMWARE
+exe0001  mlx5_0       20.31.1014
+exe0001  mlx5_1       20.28.1002
+exe0002  unreachable
+`},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			h, err := run(t, harnessOptions{recorder: rec}, "hca", tc.command, "-n", "exe[1-2]")
+			wantCode(t, err, exitcode.Transport)
+			if got := trimLines(h.out.String()); got != tc.want {
+				t.Errorf("output:\n%s\nwant:\n%s", got, tc.want)
+			}
+			if !strings.Contains(h.errOut.String(), "exe0002: unreachable: ") {
+				t.Errorf("standard error does not say why exe0002 failed:\n%s", h.errOut)
+			}
+		})
+	}
+}
+
+// trimLines drops the spaces a table pads the empty cells at the end of a
+// row with.
+func trimLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(lines, "\n")
+}

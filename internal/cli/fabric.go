@@ -613,18 +613,69 @@ commands need the vendor tools on the node, so the node has to be up.`,
 	)
 }
 
+// adapterList is how every script that works on the adapters of a node
+// starts: it lists them into devs. A node with no adapter, or no ibstat to
+// list them with, fails with the reason; one that printed nothing would
+// otherwise be left out of the table of a command that exits 0.
+const adapterList = `set -u
+command -v ibstat >/dev/null 2>&1 || { echo "ibstat is not installed" >&2; exit 1; }
+devs=$(ibstat -l 2>/dev/null) || devs=
+[ -n "$devs" ] || { echo "no adapter found" >&2; exit 1; }
+`
+
+// adapterRows adds what a node answered to the table of an hca command: a
+// row for each line its script printed, cut at | into cells cells after the
+// node's name. A node that printed no line, because it could not be reached
+// or has no adapter, is a row too, with how it ended in the first cell.
+func adapterRows(t *output.Table, res *transport.Result, cells int) {
+	lines := res.Lines()
+	if len(lines) == 0 {
+		row := make([]string, 1+cells)
+		row[0], row[1] = res.Target.Name, fanout.Status(res)
+		t.Add(row...)
+		return
+	}
+	for _, line := range lines {
+		f := strings.SplitN(line, "|", cells)
+		for len(f) < cells {
+			f = append(f, "")
+		}
+		t.Add(append([]string{res.Target.Name}, f...)...)
+	}
+}
+
+// sayAdapterFailures names each node that failed on standard error, with
+// why: the table of an hca command has no room for it, and without it a
+// node without adapters reads the same as one whose ssh failed.
+func sayAdapterFailures(a *app.App, results []*transport.Result) {
+	for _, res := range results {
+		if !res.Failed() {
+			continue
+		}
+		line := fanout.Status(res)
+		if detail := failureDetail(res); detail != "" {
+			line += ": " + detail
+		}
+		a.Printf("%s: %s\n", res.Target.Name, output.EscapeCell(line))
+	}
+}
+
 func newHCALinkCommand(r *root) *cobra.Command {
 	return leaf("link [NODESET]", "Show the adapter link state of a node set", `
-Report the state, rate and physical state of each node's adapter.`,
+Report the state, rate and physical state of each adapter of each node, a row
+per adapter.
+
+A node that cannot be reached, or has no adapter or no ibstat to list them
+with, has a row that says how it failed in place of the device. Why it failed
+is said on standard error, and it fails the command.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
 			}
-			const script = `
-set -u
-for dev in $(ibstat -l 2>/dev/null); do
+			const script = adapterList + `
+for dev in $devs; do
   state=$(ibstat "$dev" 1 2>/dev/null | awk -F': *' '/State:/{print $2}')
   phys=$(ibstat "$dev" 1 2>/dev/null | awk -F': *' '/Physical state:/{print $2}')
   rate=$(ibstat "$dev" 1 2>/dev/null | awk -F': *' '/Rate:/{print $2}')
@@ -637,21 +688,12 @@ done
 			}
 			t := output.NewTable(output.Cols("NODE", "DEVICE", "STATE", "PHYSICAL", "RATE")...)
 			for _, res := range results {
-				if res.Failed() {
-					t.Add(res.Target.Name, "unreachable", "", "", "")
-					continue
-				}
-				for _, line := range res.Lines() {
-					f := strings.SplitN(line, "|", 4)
-					for len(f) < 4 {
-						f = append(f, "")
-					}
-					t.Add(res.Target.Name, f[0], f[1], f[2], f[3])
-				}
+				adapterRows(t, res, 4)
 			}
 			if err := a.Print(output.Result{Table: t, Object: results}); err != nil {
 				return err
 			}
+			sayAdapterFailures(a, results)
 			return failureError(results)
 		}))
 }
@@ -783,13 +825,7 @@ Read a firmware setting from the adapters of each node.
 // one line per adapter, so that a node with two adapters is not reported
 // done when only the first was changed.
 func hcaSetScript(key, value string) string {
-	return fmt.Sprintf(`set -u
-devs=$(ibstat -l 2>/dev/null) || devs=
-if [ -z "$devs" ]; then
-  echo "no adapter found" >&2
-  exit 1
-fi
-rc=0
+	return adapterList + fmt.Sprintf(`rc=0
 for dev in $devs; do
   if out=$(mlxconfig --yes --dev "$dev" set %s 2>&1); then
     printf '%%s|ok|\n' "$dev"
@@ -861,16 +897,21 @@ goes through the confirmation gate.
 
 func newHCAFirmwareCommand(r *root) *cobra.Command {
 	return leaf("firmware [NODESET]", "Show the adapter firmware version of a node set", `
-Report the adapter firmware version each node is running.`,
+Report the firmware version each adapter of each node is running, a row per
+adapter.
+
+A node that cannot be reached, or has no adapter or no ibstat to list them
+with, has a row that says how it failed in place of the device. Why it failed
+is said on standard error, and it fails the command, so that an audit of the
+firmware never passes over a node.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
 			}
-			const script = `
-set -u
-for dev in $(ibstat -l 2>/dev/null); do
+			const script = adapterList + `
+for dev in $devs; do
   fw=$(ibstat "$dev" 2>/dev/null | awk -F': *' '/Firmware version:/{print $2}')
   printf '%s|%s\n' "$dev" "$fw"
 done
@@ -881,21 +922,12 @@ done
 			}
 			t := output.NewTable(output.Cols("NODE", "DEVICE", "FIRMWARE")...)
 			for _, res := range results {
-				if res.Failed() {
-					t.Add(res.Target.Name, "unreachable", "")
-					continue
-				}
-				for _, line := range res.Lines() {
-					f := strings.SplitN(line, "|", 2)
-					for len(f) < 2 {
-						f = append(f, "")
-					}
-					t.Add(res.Target.Name, f[0], f[1])
-				}
+				adapterRows(t, res, 2)
 			}
 			if err := a.Print(output.Result{Table: t}); err != nil {
 				return err
 			}
+			sayAdapterFailures(a, results)
 			return failureError(results)
 		}))
 }
