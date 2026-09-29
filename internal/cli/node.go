@@ -71,16 +71,18 @@ the same nodes.`,
 func newNodeDescribeCommand(r *root) *cobra.Command {
 	return leaf("describe NODE", "Show everything known about one node", `
 Print the inventory entry of a node together with the host name, the service
-processor name and the groups it belongs to.`,
+processor name and the groups it belongs to. The name is resolved the way -n
+is, so exe1, EXE0001, the node's host name and its address all find exe0001.`,
 		cobra.ExactArgs(1),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
-			name := args[0]
+			// exe1 finds exe0001; the names shown are the ones the acting
+			// commands use, built from the inventory's name.
+			name, err := oneNode(a, args[0])
+			if err != nil {
+				return err
+			}
 			node, ok := a.Inventory.Lookup(name)
-			if ok {
-				// exe1 finds exe0001; the names shown are the ones the
-				// acting commands use, built from the inventory's name.
-				name = node.Name
-			} else {
+			if !ok {
 				node = &inventory.Node{Name: name}
 				a.Printf("%s is not in the inventory; showing what the naming rules produce\n", name)
 			}

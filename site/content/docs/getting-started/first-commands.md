@@ -77,6 +77,9 @@ groups.inventory  exe
 groups.rack       R02
 ```
 
+The node is found the way `-n` finds it, so `exe7`, `EXE0007`, its host name
+and its address describe the same `exe0007`.
+
 ## Can it reach a host
 
 ```console
