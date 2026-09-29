@@ -206,10 +206,11 @@ func TestPlanReadsTheNodesAndTheJobsAtOnce(t *testing.T) {
 }
 
 // stateOrJobs reports whether a request reads the state of nodes or their
-// jobs, rather than checking that Slurm reads a set as itself.
+// jobs, rather than checking that Slurm reads a set as itself, which asks
+// sinfo for the names alone.
 func stateOrJobs(req transport.Request) bool {
 	if len(req.Argv) == 0 {
 		return false
 	}
-	return req.Argv[0] == "squeue" || req.Argv[0] == "sinfo" && !slices.Contains(req.Argv, "--all")
+	return req.Argv[0] == "squeue" || req.Argv[0] == "sinfo" && slurm.Arg(req, "--format") != "%N"
 }

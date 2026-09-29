@@ -61,7 +61,8 @@ func newSlurmNodeListCommand(r *root) *cobra.Command {
 
 	cmd := leaf("list [NODESET]", "List the nodes Slurm knows", `
 List the nodes with their state, partition, resources and the reason a drained
-node carries.
+node carries. The nodes of hidden partitions are listed too, since drain and
+resume change them all the same.
 
   clusterctl slurm node list
   clusterctl slurm node list --state defect

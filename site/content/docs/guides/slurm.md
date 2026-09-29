@@ -31,7 +31,8 @@ stopped responding or waits to be powered down. Anything else is passed to
 Slurm as it is written, so `--state mixed,completing` works too.
 
 A node without a reason shows an empty `REASON`, although `sinfo` prints
-`none` for it.
+`none` for it. The nodes of hidden partitions are listed too, as
+`sinfo --all` lists them: `scontrol` drains and resumes them like any other.
 
 ## Taking a node out of production
 
