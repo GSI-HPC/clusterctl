@@ -928,8 +928,9 @@ func (c *Client) AddAccount(ctx context.Context, name, organization, description
 	return err
 }
 
-// SetCoordinators makes users coordinators of an account.
-func (c *Client) SetCoordinators(ctx context.Context, account string, users []string) error {
+// AddCoordinators makes users coordinators of an account, beside those it
+// has already.
+func (c *Client) AddCoordinators(ctx context.Context, account string, users []string) error {
 	err := c.run(ctx, []string{"sacctmgr", "--immediate", "add", "coordinator",
 		"account=" + account, "names=" + strings.Join(users, ",")})
 	return err

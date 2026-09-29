@@ -443,7 +443,8 @@ which sacctmgr prints between fields, so account list could not read it back.`,
 		}))
 
 	coordinator := leaf("coordinator ACCOUNT USER...", "Make users coordinators of an account", `
-Add coordinators to an account.`,
+Add coordinators to an account. The coordinators it has already stay; this
+adds to them and replaces none.`,
 		cobra.MinimumNArgs(2),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			if err := slurm.ValidateName("account", args[0]); err != nil {
@@ -462,10 +463,10 @@ Add coordinators to an account.`,
 				strings.Join(args[1:], ", "), args[0])); err != nil {
 				return err
 			}
-			if err := c.SetCoordinators(a.Context(), args[0], args[1:]); err != nil {
+			if err := c.AddCoordinators(a.Context(), args[0], args[1:]); err != nil {
 				return err
 			}
-			a.Printf("coordinators of %s set\n", args[0])
+			a.Printf("%s added to the coordinators of %s\n", strings.Join(args[1:], ", "), args[0])
 			return nil
 		}))
 

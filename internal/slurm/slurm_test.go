@@ -513,6 +513,25 @@ func TestAddAccountFillsInTheDefaults(t *testing.T) {
 	}
 }
 
+// sacctmgr add coordinator adds to the coordinators an account has, and
+// keeps the others; the method was called SetCoordinators, which reads as
+// replacing them.
+func TestAddCoordinatorsAddsToThoseTheAccountHas(t *testing.T) {
+	t.Parallel()
+
+	c, rec := client(t, "")
+	if err := c.AddCoordinators(context.Background(), "proj", []string{"alice", "bob"}); err != nil {
+		t.Fatalf("AddCoordinators failed: %v", err)
+	}
+	var sent []string
+	for _, call := range rec.Calls() {
+		sent = append(sent, strings.Join(call.Request.Argv, " "))
+	}
+	if want := []string{"sacctmgr --immediate add coordinator account=proj names=alice,bob"}; !slices.Equal(sent, want) {
+		t.Errorf("sent %q, want %q", sent, want)
+	}
+}
+
 func TestAddUserCreatesOrAssociates(t *testing.T) {
 	t.Parallel()
 

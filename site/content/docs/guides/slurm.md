@@ -158,6 +158,10 @@ add` refuses a description or organisation that holds one, as it refuses a
 line break. An account given one by other means makes `account list` fail
 with its line; change the value with `sacctmgr modify account`.
 
+`account coordinator` adds users to the coordinators an account has, and
+says `alice, bob added to the coordinators of newproj`; the coordinators the
+account had stay.
+
 ## Users
 
 ```console
