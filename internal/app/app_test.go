@@ -5,6 +5,7 @@ package app_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -182,6 +183,46 @@ func TestRemoteFileReportsAFailure(t *testing.T) {
 
 	if _, err := a.RemoteFile(context.Background(), "dhcp", "/missing", 0); err == nil {
 		t.Error("a failing read should be reported")
+	}
+}
+
+// RemoteFile fails the way ReadOnRole does, through the same path: a
+// command that exits non-zero without a word says its exit status, a
+// runner's error keeps the code it carries, and one that carries none is a
+// transport failure. RemoteFile had a copy of its own that had drifted: a
+// silent exit lost its status, and a coded error exited 3.
+func TestRemoteFileFailsAsReadOnRoleDoes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		reply func(transport.Target) (*transport.Result, error)
+		code  int
+		says  string
+	}{
+		{"a silent exit", func(tg transport.Target) (*transport.Result, error) {
+			return transport.ExitResult(tg, 3, "", ""), nil
+		}, exitcode.TargetFailed, "exited 3"},
+		{"a coded error", func(transport.Target) (*transport.Result, error) {
+			return nil, exitcode.Errorf(exitcode.Usage, "no account for the host")
+		}, exitcode.Usage, "no account for the host"},
+		{"an error without a code", func(transport.Target) (*transport.Result, error) {
+			return nil, errors.New("connection reset")
+		}, exitcode.Transport, "connection reset"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := newApp(t, &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+				return tc.reply(tg)
+			}})
+			const path = "/etc/dhcp/dhcpd.conf"
+			_, fileErr := a.RemoteFile(context.Background(), "dhcp", path, 0)
+			_, readErr := a.ReadOnRole(context.Background(), "dhcp", transport.Request{Argv: []string{"cat", path}})
+			for what, err := range map[string]error{"RemoteFile": fileErr, "ReadOnRole": readErr} {
+				if exitcode.From(err) != tc.code || err == nil || !strings.Contains(err.Error(), tc.says) {
+					t.Errorf("%s: %v (exit code %d); want exit code %d and %q", what, err, exitcode.From(err), tc.code, tc.says)
+				}
+			}
+		})
 	}
 }
 
