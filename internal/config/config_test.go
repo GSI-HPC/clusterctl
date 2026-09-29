@@ -323,6 +323,50 @@ func TestLeadingZeroStaysAString(t *testing.T) {
 	}
 }
 
+// A document of comments alone in a stream, or an empty one, took every
+// document after it along: a file holding a Site, a comment and a Cluster
+// loaded with no Cluster and no error. The documents after it keep their
+// lines, and are counted with it.
+func TestParseDocumentsKeepsTheDocumentsAfterAnEmptyOne(t *testing.T) {
+	const (
+		site    = "apiVersion: clusterctl/v1alpha1\nkind: Site\n"
+		cluster = "apiVersion: clusterctl/v1alpha1\nkind: Cluster\n"
+	)
+	for _, tc := range []struct {
+		name, src, kinds string
+		line             int // of the last document's kind
+	}{
+		{"a comment between", site + "---\n# retired\n---\n" + cluster, "Site,Cluster", 7},
+		{"nothing between", site + "---\n---\n" + cluster, "Site,Cluster", 6},
+		{"two comments between", site + "---\n# one\n---\n# two\n---\n" + cluster, "Site,Cluster", 9},
+		{"an end marker before", site + "...\n---\n---\n" + cluster, "Site,Cluster", 7},
+		{"a comment first", "---\n# about the site\n---\n" + site, "Site", 5},
+		{"a comment last", site + "---\n# the end\n", "Site", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			docs, err := config.ParseDocuments("t.yaml", []byte(tc.src))
+			if err != nil {
+				t.Fatalf("ParseDocuments: %v", err)
+			}
+			var kinds []string
+			for _, doc := range docs {
+				kinds = append(kinds, doc.Kind)
+			}
+			if got := strings.Join(kinds, ","); got != tc.kinds {
+				t.Fatalf("documents = %s, want %s", got, tc.kinds)
+			}
+			if got := docs[len(docs)-1].Position("kind").Line; got != tc.line {
+				t.Errorf("the last kind is on line %d, want %d", got, tc.line)
+			}
+		})
+	}
+
+	_, err := config.ParseDocuments("t.yaml", []byte(site+"---\n# retired\n---\njust a string\n"))
+	if err == nil || !strings.Contains(err.Error(), "document 3") {
+		t.Errorf("a scalar after an empty document: err = %v, want it named document 3", err)
+	}
+}
+
 func TestParseDocumentsRejectsBadInput(t *testing.T) {
 	tests := []struct {
 		name string
