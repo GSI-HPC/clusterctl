@@ -64,7 +64,8 @@ another, and refuses the global options the server sets itself: `--config`,
 `--context`, `--set`, `--yes`, `--force`; `--fanout`, with which an agent
 could reach more nodes at once than the server's `fanout.max` allows (the
 server's own `--fanout`, when it was started with one, is given to every
-command it runs); `--progress`, since no progress display is drawn for an
+command it runs, and is checked with `--set` by the same code, `root.options`,
+that checks them for every other command); `--progress`, since no progress display is drawn for an
 agent; and `--progress-log`, which would have the server append to a file
 the agent names. `CLUSTERCTL_PROGRESS` and `CLUSTERCTL_PROGRESS_LOG` in the
 server's environment are not read for a call either. A `--timeout` may

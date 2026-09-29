@@ -50,6 +50,9 @@ with a client that asks you before every call of that tool.
 
 Commands on the nodes cannot be run, and --yes, --force, --dry-run and
 --nodes are refused: the server never confirms or forces anything itself.
+--set and --fanout apply to every command the server runs, and a value any
+other command would refuse, such as --fanout 0, stops the server before it
+starts.
 
 Register it with Claude Code:
 
@@ -60,18 +63,12 @@ Register it with Claude Code:
 				return exitcode.Errorf(exitcode.Usage,
 					"mcp serve does not take --yes, --force, --dry-run or --nodes; the server never confirms or forces anything itself")
 			}
-			set, err := r.overrides()
+			opts, err := r.options()
 			if err != nil {
 				return err
 			}
 			server, err := mcpserver.New(r.context(), mcpserver.Options{
-				App: app.Options{
-					ConfigFiles: r.configFiles,
-					Context:     r.contextName,
-					Set:         set,
-					Fanout:      r.fanout,
-					Runner:      r.runner,
-				},
+				App:      opts,
 				StateDir: r.streams.StateDir,
 				CacheDir: r.streams.CacheDir,
 				Command:  CommandTree(r.runner),

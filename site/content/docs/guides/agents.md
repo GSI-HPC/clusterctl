@@ -20,7 +20,10 @@ $ claude mcp add clusterctl -- clusterctl mcp serve --context cluster1
 ```
 
 Start one server per cluster, each with its own `--context`. The server does
-not follow a change of `currentContext` while it runs.
+not follow a change of `currentContext` while it runs. It reads `--config`,
+`--context`, `--set` and `--fanout` as every other command does, so a `--set`
+without `=` or a `--fanout` below 1 stops it before it starts, with exit code
+2.
 
 ## What the agent can do
 

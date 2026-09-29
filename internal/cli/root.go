@@ -70,41 +70,49 @@ func (r *root) App() (*app.App, error) {
 	if r.cached != nil {
 		return r.cached, nil
 	}
-	set, err := r.overrides()
+	opts, err := r.options()
 	if err != nil {
 		return nil, err
 	}
-
-	// Zero is what an absent --fanout reads as, so a given one below one
-	// would otherwise be dropped without a word.
-	if r.fanoutGiven != nil && r.fanoutGiven() && r.fanout < 1 {
-		return nil, exitcode.Errorf(exitcode.Usage, "--fanout is %d; it must be at least 1", r.fanout)
-	}
-
-	nodes, fromFlag, err := r.nodesFromFlagOrEnv()
+	opts.Nodes, opts.NodesFromFlag, err = r.nodesFromFlagOrEnv()
 	if err != nil {
 		return nil, err
 	}
+	opts.Format = r.format
+	opts.DryRun = r.dryRun
+	opts.AssumeYes = r.assumeYes
+	opts.Force = r.force
+	opts.SiteHostsOnly = r.agent
 
-	a, err := app.New(r.context(), r.streams, app.Options{
-		ConfigFiles:   r.configFiles,
-		Context:       r.contextName,
-		Nodes:         nodes,
-		NodesFromFlag: fromFlag,
-		Format:        r.format,
-		Set:           set,
-		DryRun:        r.dryRun,
-		AssumeYes:     r.assumeYes,
-		Force:         r.force,
-		Fanout:        r.fanout,
-		Runner:        r.runner,
-		SiteHostsOnly: r.agent,
-	})
+	a, err := app.New(r.context(), r.streams, opts)
 	if err != nil {
 		return nil, err
 	}
 	r.cached = a
 	return a, nil
+}
+
+// options reads the global flags that decide which configuration a command
+// context resolves: the files, the context, --set and --fanout. mcp serve
+// builds the contexts of its calls from them too, so that it refuses what
+// every other command refuses.
+func (r *root) options() (app.Options, error) {
+	set, err := r.overrides()
+	if err != nil {
+		return app.Options{}, err
+	}
+	// Zero is what an absent --fanout reads as, so a given one below one
+	// would otherwise be dropped without a word.
+	if r.fanoutGiven != nil && r.fanoutGiven() && r.fanout < 1 {
+		return app.Options{}, exitcode.Errorf(exitcode.Usage, "--fanout is %d; it must be at least 1", r.fanout)
+	}
+	return app.Options{
+		ConfigFiles: r.configFiles,
+		Context:     r.contextName,
+		Set:         set,
+		Fanout:      r.fanout,
+		Runner:      r.runner,
+	}, nil
 }
 
 // run builds the function of a command that works in the command context,

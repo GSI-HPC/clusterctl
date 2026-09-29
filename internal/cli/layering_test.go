@@ -429,6 +429,27 @@ func TestSetWithoutAValueIsRefused(t *testing.T) {
 	}
 }
 
+// TestFanoutBelowOneIsRefusedByMCPServe: mcp serve repeated root's reading
+// of the global flags and left out the check of --fanout, so it served with
+// --fanout 0, which every other command refuses, and read it as no --fanout
+// at all.
+func TestFanoutBelowOneIsRefusedByMCPServe(t *testing.T) {
+	for _, value := range []string{"0", "-1"} {
+		for _, args := range [][]string{
+			{"--fanout", value, "config", "view"},
+			{"--fanout", value, "mcp", "serve"},
+		} {
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				_, err := run(t, harnessOptions{}, args...)
+				wantCode(t, err, exitcode.Usage)
+				if err == nil || !strings.Contains(err.Error(), "--fanout is "+value) {
+					t.Errorf("err = %v, want --fanout %s refused", err, value)
+				}
+			})
+		}
+	}
+}
+
 // defaults.yaml gives these values, and the commands use them as they are,
 // so an empty one or a zero is refused rather than read as "the default".
 func TestValuesDefaultsGiveCannotBeEmptied(t *testing.T) {
