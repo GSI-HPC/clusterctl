@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -58,7 +59,8 @@ const (
 // Sops is the sops command clusterctl decrypts with.
 type Sops struct {
 	// Binary is the command, "sops" when empty. A bare name is looked up
-	// in PATH, as the ssh client is.
+	// in PATH, as the ssh client is, and a relative path is the working
+	// directory's.
 	Binary string
 
 	mu      sync.Mutex
@@ -98,6 +100,11 @@ func (s *Sops) find(ctx context.Context) (SopsFound, error) {
 	path, err := exec.LookPath(s.binary())
 	if err != nil {
 		return SopsFound{}, fmt.Errorf("sops %s or later is needed to read a Secret document: %w", MinSopsVersion, err)
+	}
+	// sops runs in a directory of its own, where a relative path would
+	// name another file or none.
+	if path, err = filepath.Abs(path); err != nil {
+		return SopsFound{}, fmt.Errorf("%s is relative and the working directory is not known: %w", s.binary(), err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
