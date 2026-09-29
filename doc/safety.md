@@ -57,7 +57,9 @@ Everything that changes or destroys something goes through
    target, reset once. The protected host entries are resolved the same way,
    so an entry may name a machine by any of these too. A name with a domain
    the rules do not give its short name is left as written, and counts as
-   protected when its short name is.
+   protected when its short name is. A name that could be two machines, one
+   node's name written another way and another node's address, is refused
+   rather than given to either.
 
 3. **Names the inventory does not know are refused.** A name no machine of the
    inventory answers to cannot be told apart from another spelling of a

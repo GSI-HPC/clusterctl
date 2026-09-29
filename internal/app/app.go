@@ -685,11 +685,15 @@ func checkHostNames(ns *nodeset.NodeSet) error {
 // administrator who types any of them should reach the host the site wrote
 // down, see it under the name the site gave it, and be stopped by the gate
 // if it is protected. Names that turn out to be one machine become one
-// target, so that it is not reset twice at once.
+// target, so that it is not reset twice at once, and a name that could be
+// two machines is refused.
 func (a *App) canonicalize(ns *nodeset.NodeSet) (*nodeset.NodeSet, error) {
 	out := nodeset.New()
 	for _, name := range ns.Expand() {
-		machine := a.machine(name)
+		machine, err := a.machine(name)
+		if err != nil {
+			return nil, err
+		}
 		if err := out.Add(machine); err != nil {
 			return nil, exitcode.Errorf(exitcode.Usage, "node %q, which is %q, cannot be selected: %w",
 				name, machine, err)
