@@ -231,9 +231,11 @@ func (rs *rangeSet) list(autostep int) string {
 // arithmeticRun finds the longest run starting at i with a constant step
 // and values that read the same at the width of the first. list calls it only
 // where no run of consecutive values starts, so the step is greater than one.
+// Any two values make a run, the last two of the set too, so that autostep 2
+// folds a pair wherever it stands, as ClusterShell does.
 func (rs *rangeSet) arithmeticRun(i int) (end, step int) {
 	vals, pads := rs.values, rs.pads
-	if i+2 >= len(vals) || !fits(vals[i+1], pads[i+1], pads[i]) {
+	if i+1 >= len(vals) || !fits(vals[i+1], pads[i+1], pads[i]) {
 		return i, 0
 	}
 	step = vals[i+1] - vals[i]

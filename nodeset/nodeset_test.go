@@ -196,6 +196,32 @@ func TestAutostep(t *testing.T) {
 		}
 	}
 
+	// A threshold of two folds a pair wherever it stands, at the end of the
+	// set as in the middle, as ClusterShell 1.10.1 does with autostep 2; a
+	// threshold of three leaves pairs alone.
+	for _, tc := range []struct {
+		expr     string
+		autostep int
+		want     string
+	}{
+		{"exe[1,3,10]", 2, "exe[1-3/2,10]"},
+		{"exe[1,3,10,12]", 2, "exe[1-3/2,10-12/2]"},
+		{"exe[1,3]", 2, "exe[1-3/2]"},
+		{"exe[1,2,4,6]", 2, "exe[1-2,4-6/2]"},
+		{"exe[0,1,3,10]", 2, "exe[0-1,3-10/7]"},
+		{"exe[1,3,4]", 2, "exe[1-3/2,4]"},
+		{"exe[1,3,10,12]", 3, "exe[1,3,10,12]"},
+		{"exe[1,3,10,12,14]", 3, "exe[1,3,10-14/2]"},
+		// ClusterShell prints exe[7-10/3,11,14]: it takes the step of the
+		// progression after a folded one from the gap before it. Both
+		// forms name the same hosts.
+		{"exe[7,10,11,14]", 2, "exe[7-10/3,11-14/3]"},
+	} {
+		if got := nodeset.MustParse(tc.expr, nodeset.WithAutostep(tc.autostep)).String(); got != tc.want {
+			t.Errorf("String() of %q with autostep %d = %q, want %q", tc.expr, tc.autostep, got, tc.want)
+		}
+	}
+
 	// A set built with New folds the same way.
 	built := nodeset.New(nodeset.WithAutostep(3))
 	if err := built.Add("exe[1,3,5]"); err != nil {
