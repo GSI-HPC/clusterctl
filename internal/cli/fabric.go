@@ -784,14 +784,20 @@ var (
 	mlxconfigValue = regexp.MustCompile(`^[A-Za-z0-9_.:+-]+$`)
 )
 
-// checkMlxconfig refuses a key or value mlxconfig would not take, before
-// anything is sent. Both are quoted all the same.
-func checkMlxconfig(key, value string, withValue bool) error {
+// checkMlxconfigKey refuses a key mlxconfig would not take, before anything
+// is sent. It is quoted all the same.
+func checkMlxconfigKey(key string) error {
 	if !mlxconfigKey.MatchString(key) {
 		return exitcode.Errorf(exitcode.Usage,
 			"%q is not an adapter firmware setting; it has letters, digits and underscores, and an optional [N] or [N..M]", key)
 	}
-	if withValue && !mlxconfigValue.MatchString(value) {
+	return nil
+}
+
+// checkMlxconfigValue refuses a value mlxconfig would not take, before
+// anything is sent. It is quoted all the same.
+func checkMlxconfigValue(value string) error {
+	if !mlxconfigValue.MatchString(value) {
 		return exitcode.Errorf(exitcode.Usage,
 			"%q is not an adapter firmware value; it has letters, digits and . : _ + -", value)
 	}
@@ -806,7 +812,7 @@ Read a firmware setting from the adapters of each node.
 		cobra.MinimumNArgs(1),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			key := args[0]
-			if err := checkMlxconfig(key, "", false); err != nil {
+			if err := checkMlxconfigKey(key); err != nil {
 				return err
 			}
 			ns, err := selection(a, args[1:])
@@ -864,7 +870,10 @@ goes through the confirmation gate.
 		cobra.MinimumNArgs(2),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			key, value := args[0], args[1]
-			if err := checkMlxconfig(key, value, true); err != nil {
+			if err := checkMlxconfigKey(key); err != nil {
+				return err
+			}
+			if err := checkMlxconfigValue(value); err != nil {
 				return err
 			}
 			ns, err := selection(a, args[2:])
