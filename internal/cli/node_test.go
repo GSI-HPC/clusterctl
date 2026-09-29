@@ -189,6 +189,34 @@ func TestNodeDescribeUsesTheInventoryName(t *testing.T) {
 	}
 }
 
+// TestNodeDescribeFindsEverySpellingOfANode: node describe EXE0001, or the
+// node's host name, reported it not in the inventory and showed nothing the
+// inventory says, while node groups found exe0001 from either.
+func TestNodeDescribeFindsEverySpellingOfANode(t *testing.T) {
+	for _, name := range []string{"EXE0001", "exe0001.hpc.example.org", "exe0001.mgmt.hpc.example.org", "10.0.2.1"} {
+		t.Run(name, func(t *testing.T) {
+			h, err := run(t, harnessOptions{}, "node", "describe", name, "-o", "json")
+			if err != nil {
+				t.Fatalf("node describe failed: %v", err)
+			}
+			if strings.Contains(h.errOut.String(), "not in the inventory") {
+				t.Errorf("node describe %s says:\n%s", name, h.errOut)
+			}
+			var got struct {
+				Node struct{ Name, Rack, CID string } `json:"node"`
+				Host string                           `json:"host"`
+			}
+			if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+				t.Fatalf("decoding %s: %v", h.out, err)
+			}
+			if got.Node.Name != "exe0001" || got.Node.Rack != "R02" || got.Node.CID != "223456789" ||
+				got.Host != "exe0001.hpc.example.org" {
+				t.Errorf("node describe %s = %+v, want the inventory's exe0001", name, got)
+			}
+		})
+	}
+}
+
 // Report 12.8: node hw called every failed node unreachable and left it out of
 // -o json altogether, so a script saw fewer nodes and no failure.
 func TestNodeHardwareReportsEveryFailedNode(t *testing.T) {
