@@ -467,7 +467,9 @@ its service processor's.`,
 
 func newHostkeyListCommand(r *root) *cobra.Command {
 	return leaf("list", "List the host key file", `
-Print the entries of the host key file.`,
+Print the entries of the host key file. MARKER holds the marker of a line
+that revokes a key or names a certificate authority: a revoked key is not a
+key of its host but one ssh refuses from it.`,
 		cobra.NoArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			path, err := hostkeyFile(a)
@@ -478,9 +480,9 @@ Print the entries of the host key file.`,
 			if err != nil {
 				return err
 			}
-			t := output.NewTable(output.Cols("HOST", "TYPE", "KEY")...)
+			t := output.NewTable(output.Cols("HOST", "MARKER", "TYPE", "KEY")...)
 			for _, e := range file.Entries {
-				t.Add(strings.Join(e.Hosts, ","), e.Type, abbreviate(e.Key))
+				t.Add(strings.Join(e.Hosts, ","), e.Marker, e.Type, abbreviate(e.Key))
 			}
 			t.Caption = fmt.Sprintf("%d entries in %s", len(file.Entries), path)
 			return a.Print(output.Result{Table: t, Object: file.Entries})

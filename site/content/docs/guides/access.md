@@ -76,7 +76,8 @@ ssh itself understands are read the way ssh reads them:
   itself, literally or hashed; a wildcard speaks for other hosts too and stays.
 - `@revoked` and `@cert-authority` lines are never removed or replaced. A host
   offering a revoked key is reported as `REVOKED` by `verify`, and `refresh`
-  refuses to write that key; both exit non-zero.
+  refuses to write that key; both exit non-zero. `list` shows the marker in its
+  `MARKER` column, so a revoked key does not read as a second key of its host.
 
 ## The generated ssh configuration
 
