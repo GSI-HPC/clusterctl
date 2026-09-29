@@ -194,6 +194,11 @@ and RHEL 8 still does, hands the path to the remote shell, while SFTP takes it
 literally, so such a path is refused rather than read one of two ways. Globs
 and a leading `~` mean the same to both and work.
 
+The account `-u` names is checked as it is for `exec`: one that is not spelled
+in the portable user name alphabet, letters, digits, `.`, `_` and `-`, not
+beginning with `-`, is refused with exit code 2 before scp runs, since scp
+would read `-u 'x:y'` as a copy to the host `x`.
+
 ## Reading the result
 
 A failing node does not stop the others, and every node is reported:

@@ -51,11 +51,12 @@ reported, with the advice to send the payload over standard input instead.
 The destination follows `--`, as the source and destination of `scp` do, so
 ssh cannot read a host name that begins with `-` as an option such as
 `-oProxyCommand=`. That alone would still hand ssh a name it was never meant to
-see, so the destination is checked as well: the host has to be a host name
-(letters, digits, hyphens and dots, no label beginning or ending with a
-hyphen) or an IP address, and the account has to be spelled in the portable
-user name alphabet, letters, digits, `.`, `_` and `-`, not beginning with `-`.
-Anything else is refused with exit code 2 before ssh runs. Node names are
+see, so the destination is checked as well, by one rule for ssh and scp: the
+host has to be a host name (letters, digits, hyphens and dots, no label
+beginning or ending with a hyphen) or an IP address, and the account has to be
+spelled in the portable user name alphabet, letters, digits, `.`, `_` and `-`,
+not beginning with `-`. Anything else is refused with exit code 2 before ssh
+or scp runs; scp would read `x:y@exe0001:/tmp/` as the host `x`. Node names are
 checked earlier still, when they are selected; see
 [selecting nodes](selection.md#names-are-host-names).
 
