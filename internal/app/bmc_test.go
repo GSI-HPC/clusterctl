@@ -15,6 +15,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -276,5 +277,62 @@ func TestThePromptAsksNothingOnceInterrupted(t *testing.T) {
 	_, err = a.BMCCredential(ctx, "exe0001")
 	if !errors.Is(err, context.Canceled) || exitcode.From(err) != exitcode.Interrupted {
 		t.Errorf("BMCCredential = %v (exit code %d), want an interrupt", err, exitcode.From(err))
+	}
+}
+
+// A dry run reads the power state over IPMI as the real run does, since a
+// read only asks, and records a change without sending it. The backend ran
+// every request through the dry run's recorder, so --dry-run bmc status
+// --ipmi sent nothing and reported each node as not reported by the
+// backend.
+func TestADryRunReadsThePowerStateOverIPMIAndRecordsAChange(t *testing.T) {
+	t.Parallel()
+	var bmc string
+	host := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, Stdout: bmc + ": on\n"}, nil
+	}}
+	dir := t.TempDir()
+	a, err := app.New(context.Background(), app.Streams{
+		In: strings.NewReader(""), Out: &strings.Builder{}, Err: &strings.Builder{},
+		StateDir: filepath.Join(dir, "state"), CacheDir: filepath.Join(dir, "cache"),
+	}, app.Options{
+		ConfigFiles: []string{exampleDir},
+		Env: func(k string) string {
+			if k == "BMC_PASSWORD" {
+				return "s3cret"
+			}
+			return ""
+		},
+		DryRun: true,
+		Runner: host,
+	})
+	if err != nil {
+		t.Fatalf("building the app: %v", err)
+	}
+	if bmc, err = a.BMCHost("exe0001"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := a.IPMIBackend(context.Background(), "exe0001")
+	if err != nil {
+		t.Fatalf("IPMIBackend: %v", err)
+	}
+
+	statuses, err := b.Power(context.Background(), ipmi.ActionStatus, nodeset.MustParse(bmc))
+	if err != nil || len(statuses) != 1 || statuses[0].State != "on" {
+		t.Errorf("status = %+v, %v; want %s on", statuses, err, bmc)
+	}
+	sent := len(host.Calls())
+	if sent != 1 {
+		t.Errorf("the status reached the host %d times, want once", sent)
+	}
+
+	if _, err := b.Power(context.Background(), ipmi.ActionOff, nodeset.MustParse(bmc)); err != nil {
+		t.Fatalf("off: %v", err)
+	}
+	if len(host.Calls()) != sent {
+		t.Error("the dry run sent a power change to the host")
+	}
+	if got := len(a.DryRunRecorder.Calls()); got != 1 {
+		t.Errorf("the dry run recorded %d requests, want the power change", got)
 	}
 }

@@ -87,8 +87,9 @@ Everything that changes or destroys something goes through
 
 `--dry-run` stops after the preview and sends no change. Read-only lookups
 still run for real: the node set is resolved, group sources such as
-`@slurm:main` are asked over ssh, the DHCP server's configuration is read, and
-the checks a real run makes, such as the Slurm job check, a drain's reason or
+`@slurm:main` are asked over ssh, the DHCP server's configuration is read, the
+service processors are asked for their power state, over IPMI as over
+Redfish, and the checks a real run makes, such as the Slurm job check, a drain's reason or
 the boot paths on the PXE host, are made the same way. The rehearsal therefore selects and addresses the same
 hosts the real run would, refuses what the real run would refuse with the same
 exit code, and exits zero only when the real run would go ahead. Only the
