@@ -30,7 +30,8 @@ type slurmCluster struct {
 	// users are the accounts getent knows.
 	users map[string]bool
 	// associations is what sacctmgr show user answers, one
-	// user|account|default|fairshare line each.
+	// user|account|default|fairshare line each, of which it prints as many
+	// fields as the format names.
 	associations string
 	// update is the result of scontrol update; after it, applied names the
 	// nodes the update changed anyway.
@@ -130,10 +131,27 @@ func (c *slurmCluster) reply(target transport.Target, req transport.Request) (*t
 		result.Stdout = name + ":x:1000:1000:" + name + ":/home/" + name + ":/bin/bash\n"
 	case "sacctmgr":
 		if len(req.Argv) > 3 && req.Argv[3] == "show" {
-			result.Stdout = c.associations
+			result.Stdout = c.showUsers(req)
 		}
 	}
 	return result, nil
+}
+
+// showUsers answers sacctmgr show user with the leading fields of each
+// association that its format names, as sacctmgr prints only those.
+func (c *slurmCluster) showUsers(req transport.Request) string {
+	n := 4
+	for _, arg := range req.Argv {
+		if format, ok := strings.CutPrefix(arg, "format="); ok {
+			n = strings.Count(format, ",") + 1
+		}
+	}
+	var b strings.Builder
+	for line := range strings.Lines(c.associations) {
+		f := strings.Split(strings.TrimSuffix(line, "\n"), "|")
+		b.WriteString(strings.Join(f[:min(n, len(f))], "|") + "\n")
+	}
+	return b.String()
 }
 
 // selected returns the nodes a sinfo call selects, reading --nodes the way

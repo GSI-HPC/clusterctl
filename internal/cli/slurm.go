@@ -30,7 +30,9 @@ queue, the accounting database and fair share.
 The clients are asked for their parsable output with an explicit field list,
 rather than having their aligned display output parsed. The display form
 moves with the terminal width and truncates, which is how a state once ended
-up reported against the wrong node.`,
+up reported against the wrong node. A line with more fields than asked for,
+because a value holds the separator, fails the command rather than being
+read with its columns shifted.`,
 		newSlurmNodeCommand(r),
 		newSlurmJobCommand(r),
 		newSlurmAccountCommand(r),
@@ -367,7 +369,11 @@ before deciding whose work is filling the queue.`,
 
 func newSlurmAccountCommand(r *root) *cobra.Command {
 	list := leaf("list [ACCOUNT]", "List the accounts and their coordinators", `
-List the accounts of the accounting database.`,
+List the accounts of the accounting database.
+
+sacctmgr puts | between fields and has no other separator, so an account
+whose description or organisation holds | fails the list, naming its line;
+change the value with sacctmgr modify account.`,
 		cobra.MaximumNArgs(1),
 		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
 			accounts, err := c.Accounts(a.Context(), first(args))

@@ -27,6 +27,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/termtext"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -100,14 +101,43 @@ func (c *Client) timeout() time.Duration {
 	return 2 * time.Minute
 }
 
+// readRecords executes a client that only reads and splits each line of its
+// parsable output into exactly n fields.
+func (c *Client) readRecords(ctx context.Context, argv []string, n int) ([][]string, error) {
+	lines, err := c.readLines(ctx, argv)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][]string, 0, len(lines))
+	for _, line := range lines {
+		f, err := fields(argv[0], line, n)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
+
 // fields splits a parsable line into exactly n fields, padding a short line
 // so that a missing trailing value does not shift the others.
-func fields(line string, n int) []string {
+//
+// A line with more fields than asked for has a value that holds the
+// separator, such as an account description written with sacctmgr, which
+// has no separator of its own choosing. Which field the surplus belongs to
+// cannot be told, and every field after it would be read one place on, so
+// the line is refused.
+func fields(program, line string, n int) ([]string, error) {
 	out := strings.Split(line, separator)
+	if len(out) > n {
+		return nil, exitcode.Errorf(exitcode.TargetFailed,
+			"%s printed %d fields where %d were asked for, because a value holds the separator %s: %s",
+			program, len(out), n, separator, termtext.EscapeCell(line))
+	}
 	for len(out) < n {
 		out = append(out, "")
 	}
-	return out[:n]
+	return out, nil
 }
 
 // framed is a sinfo or squeue format whose fields are separated by a token
@@ -522,14 +552,13 @@ func (c *Client) Partitions(ctx context.Context, name string) ([]Partition, erro
 	if name != "" {
 		argv = append(argv, "--partition", name)
 	}
-	lines, err := c.readLines(ctx, argv)
+	records, err := c.readRecords(ctx, argv, 10)
 	if err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
-	out := make([]Partition, 0, len(lines))
-	for _, line := range lines {
-		f := fields(line, 10)
+	out := make([]Partition, 0, len(records))
+	for _, f := range records {
 		// The marker is sinfo's and no part of the name: the name is what
 		// --partition and every other Slurm command take.
 		name, isDefault := strings.CutSuffix(f[0], "*")
@@ -684,13 +713,12 @@ func (c *Client) History(ctx context.Context, f AccountingFilter) ([]Accounting,
 		argv = append(argv, "--allusers")
 	}
 
-	lines, err := c.readLines(ctx, argv)
+	records, err := c.readRecords(ctx, argv, 11)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Accounting, 0, len(lines))
-	for _, line := range lines {
-		f := fields(line, 11)
+	out := make([]Accounting, 0, len(records))
+	for _, f := range records {
 		out = append(out, Accounting{
 			JobID: f[0], User: f[1], Account: f[2], State: f[3], ExitCode: f[4],
 			Nodes: f[5], Elapsed: f[6], Start: f[7], End: f[8], Submit: f[9], Partition: f[10],
@@ -722,13 +750,12 @@ func (c *Client) Accounts(ctx context.Context, name string) ([]Association, erro
 	if name != "" {
 		argv = append(argv, "where", "name="+name)
 	}
-	lines, err := c.readLines(ctx, argv)
+	records, err := c.readRecords(ctx, argv, 4)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Association, 0, len(lines))
-	for _, line := range lines {
-		f := fields(line, 4)
+	out := make([]Association, 0, len(records))
+	for _, f := range records {
 		out = append(out, Association{
 			Account: f[0], Description: f[1], Organization: f[2], Coordinators: f[3],
 		})
@@ -743,13 +770,12 @@ func (c *Client) AccountLimits(ctx context.Context, account string) ([]Associati
 	if account != "" {
 		argv = append(argv, "where", "name="+account)
 	}
-	lines, err := c.readLines(ctx, argv)
+	records, err := c.readRecords(ctx, argv, 8)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Association, 0, len(lines))
-	for _, line := range lines {
-		f := fields(line, 8)
+	out := make([]Association, 0, len(records))
+	for _, f := range records {
 		out = append(out, Association{
 			Account: f[0], User: f[1], MaxSubmit: f[2], MaxJobs: f[3],
 			MaxNodes: f[4], MaxCPUs: f[5], MaxWall: f[6], FairShare: f[7],
@@ -765,13 +791,12 @@ func (c *Client) Users(ctx context.Context, user string) ([]Association, error) 
 	if user != "" {
 		argv = append(argv, "where", "name="+user)
 	}
-	lines, err := c.readLines(ctx, argv)
+	records, err := c.readRecords(ctx, argv, 4)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Association, 0, len(lines))
-	for _, line := range lines {
-		f := fields(line, 4)
+	out := make([]Association, 0, len(records))
+	for _, f := range records {
 		out = append(out, Association{
 			User: f[0], Account: f[1], DefaultAccount: f[2], FairShare: f[3],
 		})
@@ -786,13 +811,12 @@ func (c *Client) Shares(ctx context.Context, account string) ([]Association, err
 	if account != "" {
 		argv = append(argv, "where", "name="+account)
 	}
-	lines, err := c.readLines(ctx, argv)
+	records, err := c.readRecords(ctx, argv, 3)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Association, 0, len(lines))
-	for _, line := range lines {
-		f := fields(line, 3)
+	out := make([]Association, 0, len(records))
+	for _, f := range records {
 		out = append(out, Association{Account: f[0], User: f[1], FairShare: f[2]})
 	}
 	return out, nil
@@ -961,15 +985,14 @@ func (c *Client) PlanUserAdd(ctx context.Context, user, account, defaultAccount 
 		return UserAddition{}, err
 	}
 	account = cmp.Or(account, c.Spec.DefaultAccount, "default")
-	lines, err := c.readLines(ctx, []string{"sacctmgr", "--noheader", "--parsable2", "show", "user", "withassoc",
-		"format=User,Account,DefaultAccount", "where", "name=" + user, "cluster=" + cluster})
+	records, err := c.readRecords(ctx, []string{"sacctmgr", "--noheader", "--parsable2", "show", "user", "withassoc",
+		"format=User,Account,DefaultAccount", "where", "name=" + user, "cluster=" + cluster}, 3)
 	if err != nil {
 		return UserAddition{}, err
 	}
 	u := UserAddition{User: user, Cluster: cluster, Account: account}
 	associated := map[string]bool{}
-	for _, line := range lines {
-		f := fields(line, 3)
+	for _, f := range records {
 		if f[0] != user {
 			continue
 		}
