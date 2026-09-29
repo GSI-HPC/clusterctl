@@ -46,7 +46,9 @@ func fakeTool(t *testing.T, dir, name, body string) {
 // nodes, in a real sh, in a scratch directory, with the fake tools of bin
 // first on PATH and what the request sends on its standard input. That is
 // as close to the host as a test gets: what is asserted is what the script
-// does, not how it is spelt. Every other host answers with nothing.
+// does, not how it is spelt. Its exit status is reported as ssh's would be,
+// with the error a non-zero status sets. Every other host answers with
+// nothing.
 func shellRunner(t *testing.T, bin, role string) (*transport.Recorder, string) {
 	t.Helper()
 	work := t.TempDir()
@@ -72,7 +74,7 @@ func shellRunner(t *testing.T, bin, role string) (*transport.Recorder, string) {
 			}
 			code = exitErr.ExitCode()
 		}
-		return &transport.Result{Target: tg, Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: code}, nil
+		return transport.ExitResult(tg, code, stdout.String(), stderr.String()), nil
 	}}
 	return rec, work
 }
@@ -704,6 +706,45 @@ exit 0
 	out := h.out.String()
 	if !strings.Contains(out, "mlx5_0") || !strings.Contains(out, "mlx5_1") || !strings.Contains(out, "failed") {
 		t.Errorf("the adapters are not reported one by one:\n%s", out)
+	}
+}
+
+// hca config set took any error of a node's result for a node it could not
+// reach, and ssh sets one for every non-zero exit: one adapter that refused
+// the setting showed the node as unreachable, and the rows of its adapters
+// and mlxconfig's message were lost. A node whose script ran shows each
+// adapter, and one it could not reach, or without an adapter, how it failed.
+func TestHCAConfigSetShowsWhyAnAdapterFailed(t *testing.T) {
+	bin := t.TempDir()
+	fakeTool(t, bin, "ibstat", `[ "$1" = -l ] && printf 'mlx5_0\nmlx5_1\n'`+"\n")
+	fakeTool(t, bin, "mlxconfig", `
+[ "$3" = mlx5_1 ] && { printf 'Applying...\n-E- Failed to set configuration\n'; exit 1; }
+exit 0
+`)
+	shell, _ := shellRunner(t, bin, "")
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if tg.Name == "exe0002" {
+			return unreachable(tg), nil
+		}
+		return shell.Reply(tg, req)
+	}}
+	h, err := run(t, harnessOptions{recorder: rec}, "hca", "config", "set", "KEEP_LINK_UP_ON_BOOT_P1", "1", "-n", "exe[1-2]", "-y", "-o", "wide")
+	wantCode(t, err, exitcode.Transport)
+	want := `NODE     DEVICE  STATUS       ERROR
+exe0001  mlx5_0  ok
+exe0001  mlx5_1  failed       -E- Failed to set configuration
+exe0002          unreachable  ssh: connect to host: Connection refused
+`
+	if got := trimLines(h.out.String()); got != want {
+		t.Errorf("output:\n%s\nwant:\n%s", got, want)
+	}
+	for _, line := range []string{
+		"exe0001: exit 1: mlx5_1: -E- Failed to set configuration",
+		"exe0002: unreachable: ",
+	} {
+		if !strings.Contains(h.errOut.String(), line) {
+			t.Errorf("standard error does not say %q:\n%s", line, h.errOut)
+		}
 	}
 }
 
