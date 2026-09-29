@@ -459,6 +459,29 @@ func TestScanThroughACommandKeepsTheReason(t *testing.T) {
 	}
 }
 
+// TestScanThroughACommandEndsAtItsTimeout: with a ProxyJump, ssh starts
+// another ssh for the first jump, which keeps the standard error open until
+// its own ConnectTimeout. Closing the connection waited for it, so a jump
+// that did not answer cost ssh's timeout rather than the scan's.
+func TestScanThroughACommandEndsAtItsTimeout(t *testing.T) {
+	t.Parallel()
+
+	const timeout = 300 * time.Millisecond
+	s := &hostkeys.Scanner{
+		Timeout: timeout,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return hostkeys.DialCommand(ctx, []string{"sh", "-c", "sleep 5 & exec sleep 10"})
+		},
+	}
+	start := time.Now()
+	if _, err := s.Scan(context.Background(), "behind-a-jump"); err == nil {
+		t.Fatal("a jump that never answered should be reported")
+	}
+	if elapsed := time.Since(start); elapsed > timeout+time.Second {
+		t.Errorf("the scan took %s, want about its timeout of %s", elapsed, timeout)
+	}
+}
+
 // TestCommandConnReportsWhatItSaidOnWrite: the client speaks first in an SSH
 // handshake, so a command that has already exited fails the write, not the
 // read, and the reason has to be there too.
