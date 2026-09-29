@@ -44,6 +44,10 @@ type dnsServer struct {
 	// silent are names, in lower case with their final dot, that are
 	// never answered.
 	silent map[string]bool
+	// failing are names, in lower case with their final dot, that are
+	// answered with the response code given and no records, as a server
+	// answers when it cannot say.
+	failing map[string]dnsmessage.RCode
 	// asked counts the queries that arrived, and onQuery, when it is set,
 	// is told the count as each arrives.
 	asked   atomic.Int32
@@ -102,6 +106,13 @@ func (s *dnsServer) answer(conn net.PacketConn, from net.Addr, query dnsmessage.
 	resp := dnsmessage.Message{
 		Header:    dnsmessage.Header{ID: query.ID, Response: true, RecursionAvailable: true},
 		Questions: query.Questions,
+	}
+	if rcode, ok := s.failing[strings.ToLower(q.Name.String())]; ok {
+		resp.RCode = rcode
+		if packed, err := resp.Pack(); err == nil {
+			_, _ = conn.WriteTo(packed, from)
+		}
+		return
 	}
 	// Follow the aliases the way a recursive server does, and put every
 	// record on the way into the answer.
@@ -225,6 +236,55 @@ func TestDNSAliasesAskTheServerAndNotTheHostsFile(t *testing.T) {
 	}
 	if got := strings.Join(answer.Addresses[0].Hosts, " "); got != "sub0001.hpc.example.org submit-a.hpc.example.org" {
 		t.Errorf("hosts of %s = %q, want every name of the reverse entry", answer.Addresses[0].Address, got)
+	}
+}
+
+// A reverse lookup that failed, because the server answered SERVFAIL or
+// did not answer in time, was shown as "hosts": [] in -o json and exited 0,
+// which is what an address without a reverse entry looks like: a pool whose
+// server could not say which machines are in it read as an empty pool. An
+// address without a reverse entry is still not a failure.
+func TestDNSAliasesFailWhenAReverseLookupFails(t *testing.T) {
+	const failing = "2.3.0.10.in-addr.arpa."
+	for _, tc := range []struct {
+		name   string
+		server *dnsServer
+		code   int
+		error  string
+	}{
+		{"SERVFAIL", &dnsServer{failing: map[string]dnsmessage.RCode{failing: dnsmessage.RCodeServerFailure}},
+			exitcode.TargetFailed, "answered ServerFailure"},
+		{"no answer", &dnsServer{silent: map[string]bool{failing: true}},
+			exitcode.TargetFailed, "did not answer within 200ms"},
+		{"no reverse entry", &dnsServer{}, exitcode.OK, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.server.zone = map[string][]dnsmessage.Resource{
+				"submit.hpc.example.org.": {
+					aRR("submit.hpc.example.org.", "10.0.3.1"),
+					aRR("submit.hpc.example.org.", "10.0.3.2"),
+				},
+				"1.3.0.10.in-addr.arpa.": {ptrRR("1.3.0.10.in-addr.arpa.", "sub0001.hpc.example.org.")},
+			}
+			server := tc.server.serve(t)
+			h, err := run(t, harnessOptions{}, "dns", "aliases", "-o", "json",
+				"--set", "services.dns.server="+server, "--set", "services.dns.timeout=200ms",
+				"--set", `services.dns.aliases=["submit"]`)
+			wantCode(t, err, tc.code)
+			var got map[string]aliasAnswer
+			if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+				t.Fatalf("output is not JSON: %v\n%s", err, h.out)
+			}
+			addresses := got["submit.hpc.example.org"].Addresses
+			if len(addresses) != 2 || strings.Join(addresses[0].Hosts, " ") != "sub0001.hpc.example.org" ||
+				addresses[0].Error != "" {
+				t.Fatalf("addresses = %+v, want 10.0.3.1 with its host first", addresses)
+			}
+			if second := addresses[1]; len(second.Hosts) != 0 || second.Hosts == nil ||
+				!strings.Contains(second.Error, tc.error) || (tc.error == "") != (second.Error == "") {
+				t.Errorf("10.0.3.2 = %+v, want no host and the error %q", second, tc.error)
+			}
+		})
 	}
 }
 

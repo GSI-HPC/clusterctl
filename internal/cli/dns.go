@@ -495,6 +495,9 @@ type aliasAnswer struct {
 type aliasAddress struct {
 	Address string   `json:"address" yaml:"address"`
 	Hosts   []string `json:"hosts" yaml:"hosts"`
+	// Error says why the names could not be read: an empty list alone
+	// reads as an address without a reverse entry.
+	Error string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
 func newDNSAliasesCommand(r *root) *cobra.Command {
@@ -504,7 +507,12 @@ host behind each of them: the chain of names the alias passes through, each
 address at its end, and every name the reverse entry of that address lists.
 
 An alias that resolves to several machines is what a login pool looks like;
-this is how to see which machines are currently in it.`,
+this is how to see which machines are currently in it.
+
+An address without a reverse entry is listed without hosts. One whose reverse
+entry could not be read, because the server failed or did not answer, is
+listed with the reason, in an error field with -o json, and fails the
+command, as an alias that does not resolve does.`,
 		cobra.NoArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			aliases := a.Spec.Services.DNS.Aliases
@@ -520,7 +528,7 @@ this is how to see which machines are currently in it.`,
 
 			t := output.NewTable(output.Cols("ALIAS", "CNAME", "ADDRESS", "HOSTS")...)
 			object := map[string]aliasAnswer{}
-			failed := 0
+			failed, unread, addressCount := 0, 0, 0
 			for _, alias := range aliases {
 				name := alias
 				if !strings.Contains(name, ".") && domain != "" {
@@ -541,23 +549,41 @@ this is how to see which machines are currently in it.`,
 					// machines behind the alias, which is the answer that
 					// matters here.
 					hosts, err := res.lookupAddr(a.Context(), address)
+					entry := aliasAddress{Address: address, Hosts: hosts}
 					shown := strings.Join(hosts, ", ")
 					if err != nil && !errors.Is(err, errNoSuchHost) {
-						shown = "no answer: " + err.Error()
+						if ctxErr := a.Context().Err(); ctxErr != nil {
+							return ctxErr
+						}
+						entry.Error = err.Error()
+						shown = "no answer: " + entry.Error
+						unread++
 					}
-					if hosts == nil {
-						hosts = []string{}
+					if entry.Hosts == nil {
+						entry.Hosts = []string{}
 					}
 					t.Add(name, strings.Join(chain, " -> "), address, shown)
-					answer.Addresses = append(answer.Addresses, aliasAddress{Address: address, Hosts: hosts})
+					answer.Addresses = append(answer.Addresses, entry)
+					addressCount++
 				}
 				object[name] = answer
 			}
 			if err := a.Print(output.Result{Table: t, Object: object}); err != nil {
 				return err
 			}
+			// A reverse entry that could not be read fails the command as
+			// an alias that did not resolve does: without it, which
+			// machines are behind the alias is not known.
+			var problems []string
 			if failed > 0 {
-				return exitcode.Errorf(exitcode.TargetFailed, "%d aliases did not resolve", failed)
+				problems = append(problems, fmt.Sprintf("%d aliases did not resolve", failed))
+			}
+			if unread > 0 {
+				problems = append(problems, fmt.Sprintf("the reverse entry of %d of %d addresses could not be read",
+					unread, addressCount))
+			}
+			if len(problems) > 0 {
+				return exitcode.Errorf(exitcode.TargetFailed, "%s", strings.Join(problems, "; "))
 			}
 			return nil
 		}))

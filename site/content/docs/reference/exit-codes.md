@@ -54,7 +54,7 @@ so they exit `1` for it even when a host could not be asked as well:
 | `hostkey verify` | a host offers a revoked or changed key, or is not in the file | hosts did not answer, and nothing else was found |
 | `hostkey refresh` | a host offers a revoked key, which is not written | hosts did not answer, and none offered a revoked key |
 | `bmc ping` | a service processor does not answer | fping could not resolve a name as well |
-| `dns lookup`, `dns aliases` | a name does not resolve | never |
+| `dns lookup`, `dns aliases` | a name does not resolve, or the reverse entry of an address behind an alias cannot be read | never |
 
 A changed or revoked key matters more than a host that is down, and a script
 that reads `3` as "check the network" must not miss it.
