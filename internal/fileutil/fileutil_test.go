@@ -280,6 +280,74 @@ func TestWriteAtomicWritesThroughALink(t *testing.T) {
 	}
 }
 
+// linkedTarget lays out dir/c/target, the link dir/c/d/link to ../target,
+// the linked directory dir/alias to c/d and the link dir/entry to
+// alias/link, and returns the entry and the target. The kernel reads
+// ../target against dir/c/d, where the link is, while dir/alias/../target
+// spelled out is dir/target.
+func linkedTarget(t *testing.T) (entry, target string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "c", "d"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target = filepath.Join(dir, "c", "target")
+	if err := os.WriteFile(target, []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for link, to := range map[string]string{
+		filepath.Join(dir, "c", "d", "link"): filepath.Join("..", "target"),
+		filepath.Join(dir, "alias"):          filepath.Join("c", "d"),
+		filepath.Join(dir, "entry"):          filepath.Join("alias", "link"),
+	} {
+		if err := os.Symlink(to, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(dir, "entry"), target
+}
+
+// A relative link reached through a linked directory points where the
+// system says, beside the directory the link is really in. The write went
+// beside the name of the linked directory instead: it created a stray
+// file there and left the file the links lead to as it was.
+func TestAWriteFollowsARelativeLinkBehindALinkedDirectory(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		write func(path string) error
+	}{
+		{"WriteAtomic", func(path string) error { return fileutil.WriteAtomic(path, []byte("two\n"), 0o644) }},
+		{"Update", func(path string) error {
+			return fileutil.Update(context.Background(), path, 0o644, func(current []byte) ([]byte, error) {
+				return append(current, "two\n"...), nil
+			})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			entry, target := linkedTarget(t)
+			if err := tc.write(entry); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			want := "two\n"
+			if tc.name == "Update" {
+				want = "one\ntwo\n"
+			}
+			if data, _ := os.ReadFile(target); string(data) != want {
+				t.Errorf("the target holds %q, want %q", data, want)
+			}
+			stray := filepath.Join(filepath.Dir(entry), "target")
+			if _, err := os.Lstat(stray); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("a stray %s was written: %v", stray, err)
+			}
+			if info, err := os.Lstat(entry); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+				t.Errorf("the entry is no longer a link: %v", err)
+			}
+		})
+	}
+}
+
 // TestWriteAtomicRefusesAnotherUsersLink keeps someone who can write a shared
 // directory from redirecting root's next write to a file of their choice.
 func TestWriteAtomicRefusesAnotherUsersLink(t *testing.T) {
@@ -587,6 +655,36 @@ func TestAppendPrivateRefusesAnotherUsersLink(t *testing.T) {
 		t.Fatalf("a link of this user's: %v", err)
 	}
 	_ = f.Close()
+}
+
+// A link another user made is refused behind a linked directory as well.
+// The walk read a relative link on the way beside the linked directory's
+// name, found nothing there and stopped, and the open then went on through
+// the link the system found, which nobody had checked.
+func TestAppendPrivateRefusesAnotherUsersLinkBehindALinkedDirectory(t *testing.T) {
+	t.Parallel()
+	uid, gid := otherIDs(t)
+
+	entry, target := linkedTarget(t)
+	mine := filepath.Join(filepath.Dir(entry), "config")
+	if err := os.WriteFile(mine, []byte("kept\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(mine, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Lchown(target, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := fileutil.AppendPrivate(entry); !errors.Is(err, fileutil.ErrUntrusted) {
+		if f != nil {
+			_ = f.Close()
+		}
+		t.Errorf("a link another user made behind a linked directory: err = %v, want ErrUntrusted", err)
+	}
 }
 
 func TestCacheKeepsAnAnswerForItsKeyAndTTL(t *testing.T) {
