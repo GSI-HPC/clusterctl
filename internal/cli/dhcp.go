@@ -173,13 +173,16 @@ Run a bounded packet capture of the DHCP exchange on the server, which is what
 to do when a node asks for an address and nothing answers.
 
 The capture stops on its own after the given time, so it cannot be left
-running by accident; --seconds must be at least 1.`,
+running by accident; --seconds must be between 1 and 3600, an hour.`,
 		cobra.NoArgs,
 		func(cmd *cobra.Command, _ []string) error {
 			// A timeout of zero or less is no timeout at all, and tcpdump
-			// would run as root until something stopped it.
-			if seconds < 1 {
-				return exitcode.Errorf(exitcode.Usage, "--seconds must be at least 1, not %d", seconds)
+			// would run as root until something stopped it. A count of
+			// seconds too large for a Duration wraps around below zero, so
+			// the bound above matters as much as the one below.
+			if seconds < 1 || seconds > maxCaptureSeconds {
+				return exitcode.Errorf(exitcode.Usage, "--seconds must be between 1 and %d, not %d",
+					maxCaptureSeconds, seconds)
 			}
 			a, err := r.App()
 			if err != nil {
@@ -208,9 +211,14 @@ running by accident; --seconds must be at least 1.`,
 			return session(a.Context(), a, cmd, target, req)
 		})
 	cmd.Flags().StringVarP(&iface, "interface", "i", "", "interface to capture on (default: from the configuration)")
-	cmd.Flags().IntVar(&seconds, "seconds", 60, "how long to capture")
+	cmd.Flags().IntVar(&seconds, "seconds", 60, fmt.Sprintf("how long to capture, at most %d", maxCaptureSeconds))
 	return cmd
 }
+
+// maxCaptureSeconds bounds --seconds of dhcp capture. The capture is watched
+// while a node is made to ask for an address, and an hour is room for a
+// reinstall; more is a capture left behind.
+const maxCaptureSeconds = 3600
 
 // roleShell opens a shell on the host of a configured service role.
 func roleShell(r *root, cmd *cobra.Command, args []string, role func(*app.App) string) error {

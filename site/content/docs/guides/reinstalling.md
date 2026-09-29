@@ -322,6 +322,10 @@ $ clusterctl boot grub log               # did TFTP serve its GRUB file
 $ clusterctl fabric state -n exe0007     # did its fabric link come up
 ```
 
+`dhcp capture` runs `tcpdump` on the DHCP server for a minute, or for
+`--seconds`, at most an hour, and stops on its own, so a capture is never left
+running there as root.
+
 `fabric state` works before the node has booted: the port is identified by the
 adapter identifier derived from the hardware address of the DHCP declaration
 named after the node, the one it boots with; a declaration of another of its
