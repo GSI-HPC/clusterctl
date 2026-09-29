@@ -137,7 +137,9 @@ not hold back the answers over ssh. A node that does not answer over ssh yet
 is not an error. A boot path or power state that cannot
 be read is, and fails the command with exit code `3` when the host could not
 be reached; the JSON output lists every node, with an `error` field for the
-ones that failed.
+ones that failed. A Ctrl-C while the nodes are asked is not an answer
+either: the nodes it cut off have the interrupt as their error, and the
+command exits `130`.
 
 `dhcp log` shows the lines of `dhcpd` in `services.dhcp.logPath`,
 `/var/log/syslog` unless configured. A log that cannot be read, as on a host

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -820,5 +821,71 @@ func TestProvisionStatusNamesTheNodesFirst(t *testing.T) {
 	defer h.bmcs.mu.Unlock()
 	if len(h.bmcs.seen) != 0 {
 		t.Errorf("the processors were asked before the command stopped: %q", h.bmcs.seen)
+	}
+}
+
+// An interrupt while the nodes were asked for their uptime left each node
+// the probes had not heard from shown as one that does not answer over
+// ssh, which does not fail the command, so provision status exited 0.
+// Whether those nodes answer is not known: each has the interrupt as its
+// error, and the command exits 130. Every processor has answered before
+// the interrupt comes, so that nothing else fails.
+func TestProvisionStatusExits130WhenInterruptedWhileAskingTheNodes(t *testing.T) {
+	h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	allAnswered := make(chan struct{})
+	var answered atomic.Int32
+	fake := provisionClient
+	provisionClient = func(a *app.App, ctx context.Context, node string) (*redfish.Client, error) {
+		client, err := fake(a, ctx, node)
+		if err != nil {
+			return nil, err
+		}
+		inner := client.Transport
+		client.Transport = roundTrip(func(req *http.Request) (*http.Response, error) {
+			defer func() {
+				if answered.Add(1) == 3 {
+					close(allAnswered)
+				}
+			}()
+			return inner.RoundTrip(req)
+		})
+		return client, nil
+	}
+	t.Cleanup(func() { provisionClient = fake })
+	reply := h.rec.Reply
+	h.rec.Reply = func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if len(req.Argv) == 0 || req.Argv[0] != "uptime" {
+			return reply(tg, req)
+		}
+		select {
+		case <-allAnswered:
+		case <-time.After(5 * time.Second):
+			t.Error("the processors did not answer")
+		}
+		cancel()
+		// What the ssh transport reports for a command the interrupt ended.
+		return &transport.Result{Target: tg, ExitCode: -1,
+			Err: exitcode.Wrap(exitcode.Interrupted, fmt.Errorf("%s: %w", tg, context.Canceled))}, nil
+	}
+
+	out, code := exitCodeOf(t, harnessOptions{ctx: ctx, recorder: h.rec, config: []string{h.layer}},
+		"--set", "services.pxesrv.root="+h.root, "--set", "ssh.knownHostsFile="+h.knownHosts,
+		"--fanout", "1", "-o", "json", "provision", "status", "-n", "exe[0001-0003]")
+	if code != exitcode.Interrupted {
+		t.Errorf("exit code = %d, want %d; stderr:\n%s", code, exitcode.Interrupted, out.errOut)
+	}
+	var states []provisionState
+	if err := json.Unmarshal(out.out.Bytes(), &states); err != nil {
+		t.Fatalf("output is not a list of nodes: %v\n%s", err, out.out)
+	}
+	if len(states) != 3 {
+		t.Fatalf("got %d nodes, want 3: %s", len(states), out.out)
+	}
+	for _, s := range states {
+		if s.Power != "On" || s.SSH || s.SSHError != "interrupted" || !strings.Contains(s.Error, "context canceled") {
+			t.Errorf("%s = %+v, want the power state, and the interrupt as why ssh is not known", s.Node, s)
+		}
 	}
 }
