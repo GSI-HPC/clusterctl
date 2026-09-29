@@ -17,11 +17,15 @@ import (
 type Tree struct {
 	data    map[string]any
 	origins map[string]Origin
+	// keys holds the keys each path of origins was merged at. A key may
+	// have a dot of its own, such as the group gpu.a100, and its dotted
+	// path would read as a100 inside a section gpu.
+	keys map[string][]string
 }
 
 // NewTree returns an empty tree.
 func NewTree() *Tree {
-	return &Tree{data: map[string]any{}, origins: map[string]Origin{}}
+	return &Tree{data: map[string]any{}, origins: map[string]Origin{}, keys: map[string][]string{}}
 }
 
 // Data returns the merged tree. The caller must not modify it.
@@ -152,13 +156,19 @@ func (t *Tree) mergeValue(layer string, from originFunc, srcPath string, dst []s
 	o.Layer = layer
 	// A replaced subtree keeps no stale origins from earlier layers, and a
 	// value that replaced a whole section earlier no longer speaks for it.
-	prefix := path + "."
-	for p := range t.origins {
-		if strings.HasPrefix(p, prefix) || strings.HasPrefix(path, p+".") {
+	for p, keys := range t.keys {
+		if isPrefix(dst, keys) || isPrefix(keys, dst) {
 			delete(t.origins, p)
+			delete(t.keys, p)
 		}
 	}
 	t.origins[path] = o
+	t.keys[path] = slices.Clone(dst)
+}
+
+// isPrefix reports whether the keys of a path begin with those of prefix.
+func isPrefix(prefix, keys []string) bool {
+	return len(prefix) <= len(keys) && slices.Equal(prefix, keys[:len(prefix)])
 }
 
 // SetPath applies one override, the way an overrides table, an environment

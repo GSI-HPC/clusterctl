@@ -6,11 +6,13 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/config"
+	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 )
 
 // exampleDir is the configuration shipped with the documentation. Loading it
@@ -191,6 +193,64 @@ func TestResolveRecordsFilePositions(t *testing.T) {
 	}
 	if o.Line == 0 || o.Column == 0 {
 		t.Errorf("origin %v has no position", o)
+	}
+}
+
+// A key with a dot in it, such as the static group gpu.a100, keeps the
+// origin of the group gpu beside it, and the other way round. The origins
+// were told apart by their dotted paths alone, so merging gpu.a100 dropped
+// the origin of gpu as that of a section it replaced: config explain then
+// said nothing was set at gpu, and view --show-sources left it out. A
+// --set of gpu dropped gpu.a100's the same way.
+func TestADottedKeyKeepsTheOriginsOfTheKeysBesideIt(t *testing.T) {
+	dir := configtest.CopyDir(t, exampleDir)
+	cluster := filepath.Join(dir, "cluster.yaml")
+	data, err := os.ReadFile(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched := strings.Replace(string(data), "          infra: wlm01,dbm01\n",
+		"          infra: wlm01,dbm01\n          gpu: exe[0001-0002]\n          gpu.a100: exe0001\n", 1)
+	if patched == string(data) {
+		t.Fatal("the example cluster has no static infra group to add to")
+	}
+	if err := os.WriteFile(cluster, []byte(patched), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := config.ExpandEntries([]string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := config.Load(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const static = "groups.sources.static.static."
+	for _, tc := range []struct {
+		name string
+		set  map[string]string
+		want map[string]string // path to layer
+	}{
+		{"merged from the cluster", nil,
+			map[string]string{static + "gpu": v1alpha1.LayerCluster, static + "gpu.a100": v1alpha1.LayerCluster}},
+		{"gpu set with --set", map[string]string{static + "gpu": "exe0003"},
+			map[string]string{static + "gpu": v1alpha1.LayerFlags, static + "gpu.a100": v1alpha1.LayerCluster}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := b.Resolve(config.ResolveOptions{Env: func(string) string { return "" }, Set: tc.set})
+			if err != nil {
+				t.Fatalf("Resolve failed: %v", err)
+			}
+			for path, layer := range tc.want {
+				if o, ok := r.Tree.Origin(path); !ok || o.Layer != layer {
+					t.Errorf("origin of %s = %v, %v; want the %s layer", path, o, ok, layer)
+				}
+				if !slices.Contains(r.Tree.Paths(), path) {
+					t.Errorf("%s is not among the recorded paths", path)
+				}
+			}
+		})
 	}
 }
 
