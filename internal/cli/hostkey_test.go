@@ -373,6 +373,39 @@ func TestHostkeyRemoveOfABMCKeepsTheNodesOwnKey(t *testing.T) {
 	}
 }
 
+// TestHostkeyListShowsTheMarkers: the table left out @revoked and
+// @cert-authority, so a revoked key read as a second trusted key of its host.
+func TestHostkeyListShowsTheMarkers(t *testing.T) {
+	known := filepath.Join(t.TempDir(), "known_hosts")
+	file := "exe0001.hpc.example.org ssh-ed25519 AAAAtrusted\n" +
+		"@revoked exe0001.hpc.example.org ssh-ed25519 AAAArevoked\n" +
+		"@cert-authority *.hpc.example.org ssh-ed25519 AAAAca\n"
+	if err := os.WriteFile(known, []byte(file), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h, err := run(t, harnessOptions{}, "--set", "ssh.knownHostsFile="+known, "hostkey", "list")
+	if err != nil {
+		t.Fatalf("hostkey list failed: %v\n%s", err, h.out)
+	}
+	rows := map[string]string{}
+	for line := range strings.SplitSeq(h.out.String(), "\n") {
+		for _, key := range []string{"AAAAtrusted", "AAAArevoked", "AAAAca"} {
+			if strings.Contains(line, key) {
+				rows[key] = line
+			}
+		}
+	}
+	for key, want := range map[string]string{"AAAArevoked": "@revoked", "AAAAca": "@cert-authority"} {
+		if !strings.Contains(rows[key], want) {
+			t.Errorf("the row of %s is %q, want it marked %s:\n%s", key, rows[key], want, h.out)
+		}
+	}
+	if strings.Contains(rows["AAAAtrusted"], "@") {
+		t.Errorf("the plain key is marked: %q", rows["AAAAtrusted"])
+	}
+}
+
 // A scan is a step with a target for each node: one whose host answered,
 // one whose host did not, one whose service processor has no name, which
 // is refused before anything is dialled, and those an interrupt left out,

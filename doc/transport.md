@@ -353,7 +353,8 @@ with the entry below them, and a refresh carries them over to the new key.
 Hashed names and wildcard patterns are matched as ssh matches them, and only a
 line that names a host itself is removed for it. `@revoked` and
 `@cert-authority` lines are parsed as markers and never dropped; `verify`
-reports a revoked key and `refresh` will not write one back.
+reports a revoked key, `refresh` will not write one back, and `list` shows the
+marker beside the key.
 
 `hostkey verify` reports a changed key and exits non-zero. Whether that is a
 reinstalled machine or something worth investigating is not for a program to
