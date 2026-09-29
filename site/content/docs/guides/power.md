@@ -270,4 +270,5 @@ exe0004.mgmt.hpc.example.org  no answer
 One sweep from the gateway, not one connection per processor. A processor that
 does not answer exits `1`; a sweep that could not run, because `fping` is
 missing or the gateway cannot be reached, exits `3` rather than reporting every
-processor as down.
+processor as down. The sweep only reads, so `--dry-run` sweeps too and exits
+as the real run does.

@@ -41,6 +41,24 @@ func TestBMCPingReadsTheSweepCarefully(t *testing.T) {
 	}
 }
 
+// A dry run sent no sweep, read every processor as silent and exited 1,
+// although a lookup that only reads runs for real in a dry run.
+func TestBMCPingSweepsInADryRun(t *testing.T) {
+	rec := &transport.Recorder{Responses: []*transport.Result{{
+		Stdout: "exe0001.mgmt.hpc.example.org\nexe0002.mgmt.hpc.example.org\n",
+	}}}
+	h, err := run(t, harnessOptions{recorder: rec}, "--dry-run", "bmc", "ping", "-n", "exe[0001-0002]")
+	if err != nil {
+		t.Fatalf("the dry run of a sweep that every processor answered failed: %v\n%s", err, h.out)
+	}
+	if commands := rec.Commands(); len(commands) != 1 || !strings.Contains(commands[0], "fping") {
+		t.Errorf("the dry run sent %q, want the one sweep", commands)
+	}
+	if !strings.Contains(h.out.String(), "2 of 2 answered") {
+		t.Errorf("the dry run does not report the sweep:\n%s", h.out)
+	}
+}
+
 // The sweep is one step that knows how many processors it asks, with the
 // one call that asks them all; fping says which answered only once it is
 // done, so there is no target for each.
