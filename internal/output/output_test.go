@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -151,8 +152,67 @@ func TestNodesetAndName(t *testing.T) {
 	if got, want := render(t, "nodeset", explicit), "sub[1-3]\n"; got != want {
 		t.Errorf("-o nodeset = %q, want %q", got, want)
 	}
-	if got := render(t, "nodeset", output.Result{}); got != "" {
-		t.Errorf("an empty result printed %q", got)
+	if got := render(t, "nodeset", output.Result{Nodes: nodeset.New()}); got != "" {
+		t.Errorf("a result listing no node printed %q", got)
+	}
+}
+
+// TestNodesetAndNameReadOnlyAColumnOfNames: the fallback read the first
+// column whatever its heading, so a table of attribute values, files or job
+// ids printed them as host names, and a result with no table printed
+// nothing and succeeded.
+func TestNodesetAndNameReadOnlyAColumnOfNames(t *testing.T) {
+	t.Parallel()
+
+	table := func(heading string) *output.Table {
+		tb := output.NewTable(output.Cols(heading, "STATE")...)
+		tb.Add("exe0001", "up")
+		tb.Add("exe0002", "up")
+		return tb
+	}
+	for _, heading := range []string{"NODE", "HOST", "BMC"} {
+		r := output.Result{Table: table(heading)}
+		if got, want := render(t, "nodeset", r), "exe[0001-0002]\n"; got != want {
+			t.Errorf("%s: -o nodeset = %q, want %q", heading, got, want)
+		}
+		if got, want := render(t, "name", r), "exe0001\nexe0002\n"; got != want {
+			t.Errorf("%s: -o name = %q, want %q", heading, got, want)
+		}
+	}
+
+	for name, r := range map[string]output.Result{
+		"a VALUE column": {Table: table("VALUE")},
+		"a JOB column":   {Table: table("JOB")},
+		"no column":      {Table: output.NewTable()},
+		"an object":      {Object: map[string]string{"exe0001": "up"}},
+		"nothing":        {},
+	} {
+		for _, spec := range []string{"nodeset", "name"} {
+			f, err := output.ParseFormat(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var buf bytes.Buffer
+			err = f.Write(&buf, r)
+			if got := exitcode.From(err); got != exitcode.Usage {
+				t.Errorf("%s -o %s: exit code %d (%v), want %d", name, spec, got, err, exitcode.Usage)
+			}
+			if buf.Len() != 0 {
+				t.Errorf("%s -o %s printed %q", name, spec, buf.String())
+			}
+			if check := f.Check(r); exitcode.From(check) != exitcode.Usage {
+				t.Errorf("%s: Check(-o %s) = %v, want the refusal", name, spec, check)
+			}
+		}
+		for _, spec := range []string{"table", "json", "jq=."} {
+			f, err := output.ParseFormat(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.Check(r); err != nil {
+				t.Errorf("%s: Check(-o %s) = %v, want nil", name, spec, err)
+			}
+		}
 	}
 }
 

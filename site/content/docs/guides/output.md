@@ -35,6 +35,17 @@ A `jq` program is checked when the command line is read. A mistake in it exits
 2 before anything has run, rather than after a command has changed something
 and has only its result left to print.
 
+### nodeset and name
+
+`nodeset` and `name` print the nodes or hosts a command lists: the set that
+`node select`, `node fqdn` or `slurm node nodeset` resolves, or else the first
+column of the table, when its heading is `NODE`, `HOST` or `BMC`. A command
+whose output lists no nodes, such as `slurm job list`, `node attrs` or
+`config view`, refuses both with exit code 2, rather than printing job ids or
+attribute values as if they were host names. One that changes something and
+lists no nodes, `config init`, `boot sync` or `bmc redfish post`, refuses
+before it changes anything.
+
 ### jq
 
 A `jq` program runs inside clusterctl and stops when the command is
