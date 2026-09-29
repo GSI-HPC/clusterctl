@@ -81,8 +81,13 @@ func resolveTarget(a *app.App, name string) (transport.Target, error) {
 		return transport.Target{Name: name, Host: name}, nil
 	}
 	// A bare name that is neither a role nor qualified is treated as a node,
-	// so that "login exe0001" reaches a compute node.
-	return a.Node(name)
+	// so that "login exe0001" reaches a compute node. It is resolved as -n
+	// resolves it, so that exe1 is the exe0001 every other command reaches.
+	node, err := oneNode(a, name)
+	if err != nil {
+		return transport.Target{}, err
+	}
+	return a.Node(node)
 }
 
 // defaultRole is the role login connects to when none is named.
@@ -106,8 +111,10 @@ func newLoginCommand(r *root) *cobra.Command {
 Log in to an infrastructure role, a host or a node.
 
 With no argument the login role is used. A name that matches a configured
-role connects to that role with its own account and options; any other name
-is taken as a host or a node and resolved through the naming rules.
+role connects to that role with its own account and options. A name with a
+dot is taken as a host name. Any other name is a node, resolved the way -n
+resolves it, so exe1 and EXE0001 reach the exe0001 of the inventory, at the
+host name the naming rules give it.
 
 Everything after -- is run on the remote host instead of opening a shell. The
 argument vector is quoted once and reassembled by the remote shell exactly as
