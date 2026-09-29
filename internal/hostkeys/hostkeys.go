@@ -515,6 +515,11 @@ func DialCommand(ctx context.Context, argv []string) (net.Conn, error) {
 	c.cmd.Stdin = inR
 	c.cmd.Stdout = outW
 	c.cmd.Stderr = &c.stderr
+	// With a ProxyJump, ssh starts another ssh for the first jump, which
+	// holds the standard error open until its own ConnectTimeout. Wait gives
+	// up on it soon after the command has gone, or closing the connection
+	// would take that long rather than the scan's timeout.
+	c.cmd.WaitDelay = stderrGrace
 	err = c.cmd.Start()
 	_ = inR.Close()
 	_ = outW.Close()
@@ -529,6 +534,12 @@ func DialCommand(ctx context.Context, argv []string) (net.Conn, error) {
 	}()
 	return c, nil
 }
+
+// stderrGrace is how long the standard error of a command DialCommand
+// started is still read once the command has exited. What the command
+// itself wrote is in the pipe by then; only a process it started can
+// write more.
+const stderrGrace = 250 * time.Millisecond
 
 // commandConn is a connection over the standard input and output of a
 // command.
