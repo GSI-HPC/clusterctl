@@ -27,6 +27,7 @@ func FuzzParseFold(f *testing.F) {
 		"", ",", "[", "]", "exe[]", "exe[9-1]", "@group", "exe[1-2]x",
 		"exe[1-3]&", "exe[1-3]!,exe2", "exe[1-3]&&exe2", "-exe1",
 		"exe[0001-0010],exe11", "exe1,exe01", "exe7 exe08 exe9", "exe[08-12]!exe09",
+		"exe[1-]", "exe[1-,5]",
 	}
 	for _, s := range seeds {
 		f.Add(s)

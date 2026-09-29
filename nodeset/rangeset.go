@@ -123,16 +123,18 @@ func parseSpans(spec string) ([]span, int, error) {
 			}
 			part = part[:slash]
 		}
-		lo, hi := part, ""
-		if before, after, ok := strings.Cut(part, "-"); ok {
-			lo, hi = before, after
-		}
+		lo, hi, isRange := strings.Cut(part, "-")
 		start, err := parseNumber(lo)
 		if err != nil {
 			return nil, 0, fmt.Errorf("invalid range bound %q in %q", lo, spec)
 		}
 		end := start
-		if hi != "" {
+		if isRange {
+			// exe[1-$N] with N empty arrives as 1-, which is no range of
+			// one value: it would select exe1 where several were meant.
+			if hi == "" {
+				return nil, 0, fmt.Errorf("the range %q has no last bound", part)
+			}
 			if end, err = parseNumber(hi); err != nil {
 				return nil, 0, fmt.Errorf("invalid range bound %q in %q", hi, spec)
 			}

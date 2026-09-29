@@ -342,6 +342,10 @@ func TestParseErrors(t *testing.T) {
 	exprs := []string{
 		"exe[1-", "exe1]", "exe[]", "exe[5-1]", "exe[1-2/0]",
 		"exe[a-b]", "exe[1-b]", "exe[1-2/x]", "exe[3/2]", "exe[1,,2]",
+		// A range without its last bound is what exe[1-$N] leaves behind
+		// when N is empty, and reading it as exe1 would select one host
+		// where the command meant several.
+		"exe[1-]", "exe[1-,5]", "exe[1-/2]",
 		"exe[1-100000000]",
 		// A number is at most eighteen digits long, written bare or in
 		// brackets.

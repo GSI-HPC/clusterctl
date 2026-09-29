@@ -136,9 +136,10 @@ these:
 | `exe[1-3],` and `exe1,,exe2` | error | the empty operand is nothing |
 | `-oProxyCommand=x` | accepted as a name | error |
 
-Both reject `exe[1-010]`, `exe[001-10]`, a dangling `!`, `&` or `^`, and a set
-operator with no left operand. On the other lines of the corpus both name the
-same hosts. Folded output may still be ordered differently: ClusterShell prints
+Both reject `exe[1-010]`, `exe[001-10]`, a range without its last bound such
+as `exe[1-]` or `exe[1-,5]`, a dangling `!`, `&` or `^`, and a set operator
+with no left operand. On the other lines of the corpus both name the same
+hosts. Folded output may still be ordered differently: ClusterShell prints
 `exe[3,01-02]` where the package prints `exe[01-02,3]`.
 
 ## Groups
