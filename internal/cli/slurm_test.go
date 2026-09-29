@@ -635,6 +635,8 @@ func TestSlurmAccountingRefusesNamesSacctmgrExpands(t *testing.T) {
 		{"user", "add", "alice", "proj[1-2]"},
 		{"user", "default", "alice", "a,b"},
 		{"account", "add", "proj", "example", "line\nbreak"},
+		{"account", "add", "proj", "example", "Physics | Detectors"},
+		{"account", "add", "proj", "GSI|FAIR"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cluster := newSlurmCluster()

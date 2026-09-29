@@ -152,9 +152,10 @@ $ clusterctl slurm account shares proj
 $ clusterctl slurm account shares proj 100
 ```
 
-`sacctmgr` puts `|` between fields and has no other separator, so an account
-whose description or organisation holds one makes `account list` fail with
-its line; change the value with `sacctmgr modify account`.
+`sacctmgr` puts `|` between fields and has no other separator, so `account
+add` refuses a description or organisation that holds one, as it refuses a
+line break. An account given one by other means makes `account list` fail
+with its line; change the value with `sacctmgr modify account`.
 
 ## Users
 

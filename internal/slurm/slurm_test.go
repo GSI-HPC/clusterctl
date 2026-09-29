@@ -212,6 +212,29 @@ func TestValidateReason(t *testing.T) {
 	}
 }
 
+// A description or organisation is printed back by account list, split on
+// the | sacctmgr puts between fields, so a | in one would make the account
+// unreadable.
+func TestValidateText(t *testing.T) {
+	t.Parallel()
+
+	for _, ok := range []string{"", "Physics", "Physik – Detektoren", "a, b; c"} {
+		if err := slurm.ValidateText("description", ok); err != nil {
+			t.Errorf("ValidateText(%q) = %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"Physics | Detectors", "|", "a\nb", "a\x1b[2Kb", "a\u009bb"} {
+		err := slurm.ValidateText("description", bad)
+		if err == nil {
+			t.Errorf("ValidateText(%q) accepted it", bad)
+			continue
+		}
+		if got, want := exitcode.From(err), exitcode.Usage; got != want {
+			t.Errorf("ValidateText(%q): exit code = %d, want %d", bad, got, want)
+		}
+	}
+}
+
 func TestBaseStateStripsFlags(t *testing.T) {
 	t.Parallel()
 
