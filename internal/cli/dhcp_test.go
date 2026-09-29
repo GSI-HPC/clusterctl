@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -246,9 +247,51 @@ func TestDHCPLogQuotesTheLogPath(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("got %d calls, want 1", len(calls))
 	}
-	script := strings.Join(calls[0].Request.Argv, " ")
-	if !strings.Contains(script, "'/var/log/dhcp;touch /tmp/pwned'") {
-		t.Errorf("the log path is not quoted: %s", script)
+	if command := calls[0].Command; !strings.Contains(command, "'/var/log/dhcp;touch /tmp/pwned'") {
+		t.Errorf("the log path is not quoted: %s", command)
+	}
+	if script := calls[0].Request.Argv[2]; strings.Contains(script, "pwned") {
+		t.Errorf("the log path is spliced into the script: %s", script)
+	}
+}
+
+// dhcp log ran grep | tail, which exits with tail's status, so a log that
+// could not be read, such as the default /var/log/syslog on a host that logs
+// to the journal alone, printed nothing and exited 0, as a log without a
+// DHCP line does. The command runs in a real shell against a log in a
+// temporary directory.
+func TestDHCPLogSaysWhenTheLogCannotBeRead(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "syslog")
+	mustWrite(t, log, `Sep 25 10:00:01 dhcp01 dhcpd[11]: DHCPDISCOVER from aa:bb:cc:00:00:01 via ib0
+Sep 25 10:00:02 dhcp01 cron[7]: (root) CMD (true)
+Sep 25 10:00:03 dhcp01 dhcpd[11]: DHCPOFFER on 10.0.2.1 to aa:bb:cc:00:00:01 via ib0
+Sep 25 10:00:04 dhcp01 dhcpd[11]: DHCPACK on 10.0.2.1 to aa:bb:cc:00:00:01 via ib0
+`)
+	p := newPXEHost(t, pxeOptions{})
+	logAt := func(path string, args ...string) (*harness, error) {
+		return p.run(t, harnessOptions{}, append([]string{"--set", "services.dhcp.logPath=" + path, "dhcp", "log"}, args...)...)
+	}
+
+	h, err := logAt(log, "--lines", "2")
+	if err != nil {
+		t.Fatalf("dhcp log: %v\n%s", err, h.errOut)
+	}
+	if got, want := h.out.String(), "Sep 25 10:00:03 dhcp01 dhcpd[11]: DHCPOFFER on 10.0.2.1 to aa:bb:cc:00:00:01 via ib0\n"+
+		"Sep 25 10:00:04 dhcp01 dhcpd[11]: DHCPACK on 10.0.2.1 to aa:bb:cc:00:00:01 via ib0\n"; got != want {
+		t.Errorf("dhcp log --lines 2 printed\n%s\nwant\n%s", got, want)
+	}
+	if calls := p.rec.Calls(); len(calls) != 1 || calls[0].Target.Name != "dhcp" {
+		t.Errorf("the log was read from %v, want the dhcp role", calls)
+	}
+
+	missing := filepath.Join(t.TempDir(), "nosuch")
+	h, err = logAt(missing)
+	wantCode(t, err, exitcode.TargetFailed)
+	if err == nil || !strings.Contains(err.Error(), missing+" cannot be read") {
+		t.Errorf("a log that is not there: %v, want it named", err)
+	}
+	if h.out.Len() != 0 {
+		t.Errorf("a log that is not there printed:\n%s", h.out)
 	}
 }
 
