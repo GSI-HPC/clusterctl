@@ -386,6 +386,88 @@ func TestHistoryUsesATimeWindow(t *testing.T) {
 	}
 }
 
+// sent returns the command lines a recorder was asked to run, without the
+// timeout the transport puts around them.
+func sent(rec *transport.Recorder) []string {
+	var out []string
+	for _, call := range rec.Calls() {
+		out = append(out, strings.Join(call.Request.Argv, " "))
+	}
+	return out
+}
+
+func TestAccountLimitsReadsTheLimitsOfEveryAssociation(t *testing.T) {
+	t.Parallel()
+
+	const format = "sacctmgr --noheader --parsable2 --associations list account " +
+		"format=Account,User,MaxSubmit,MaxJobs,MaxNodes,MaxCPUs,MaxWall,Fairshare"
+	tests := []struct {
+		name    string
+		account string
+		command string
+	}{
+		{"every account", "", format},
+		{"one account", "proj", format + " where name=proj"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// The account's own association has no user, and a limit that
+			// is not set is empty.
+			c, rec := client(t, "proj||100|10|4|256|1-00:00:00|10\nproj|alice|50||2|128|12:00:00|1\n")
+			got, err := c.AccountLimits(context.Background(), tc.account)
+			if err != nil {
+				t.Fatalf("AccountLimits failed: %v", err)
+			}
+			want := []slurm.Association{
+				{Account: "proj", MaxSubmit: "100", MaxJobs: "10", MaxNodes: "4", MaxCPUs: "256", MaxWall: "1-00:00:00", FairShare: "10"},
+				{Account: "proj", User: "alice", MaxSubmit: "50", MaxNodes: "2", MaxCPUs: "128", MaxWall: "12:00:00", FairShare: "1"},
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("AccountLimits = %+v\nwant            %+v", got, want)
+			}
+			if got := sent(rec); !slices.Equal(got, []string{tc.command}) {
+				t.Errorf("sent %q, want %q", got, tc.command)
+			}
+		})
+	}
+}
+
+func TestSharesReadsTheFairShareOfEveryAssociation(t *testing.T) {
+	t.Parallel()
+
+	const format = "sacctmgr --noheader --parsable2 list account withassoc format=Account,User,Fairshare"
+	tests := []struct {
+		name    string
+		account string
+		command string
+	}{
+		{"every account", "", format},
+		{"one account", "proj", format + " where name=proj"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, rec := client(t, "proj||10\nproj|alice|1\nproj|bob|parent\n")
+			got, err := c.Shares(context.Background(), tc.account)
+			if err != nil {
+				t.Fatalf("Shares failed: %v", err)
+			}
+			want := []slurm.Association{
+				{Account: "proj", FairShare: "10"},
+				{Account: "proj", User: "alice", FairShare: "1"},
+				{Account: "proj", User: "bob", FairShare: "parent"},
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("Shares = %+v\nwant   %+v", got, want)
+			}
+			if got := sent(rec); !slices.Equal(got, []string{tc.command}) {
+				t.Errorf("sent %q, want %q", got, tc.command)
+			}
+		})
+	}
+}
+
 func TestAccountsAndUsers(t *testing.T) {
 	t.Parallel()
 
@@ -523,12 +605,8 @@ func TestAddCoordinatorsAddsToThoseTheAccountHas(t *testing.T) {
 	if err := c.AddCoordinators(context.Background(), "proj", []string{"alice", "bob"}); err != nil {
 		t.Fatalf("AddCoordinators failed: %v", err)
 	}
-	var sent []string
-	for _, call := range rec.Calls() {
-		sent = append(sent, strings.Join(call.Request.Argv, " "))
-	}
-	if want := []string{"sacctmgr --immediate add coordinator account=proj names=alice,bob"}; !slices.Equal(sent, want) {
-		t.Errorf("sent %q, want %q", sent, want)
+	if got, want := sent(rec), []string{"sacctmgr --immediate add coordinator account=proj names=alice,bob"}; !slices.Equal(got, want) {
+		t.Errorf("sent %q, want %q", got, want)
 	}
 }
 
