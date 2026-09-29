@@ -339,6 +339,8 @@ func TestSlurmDrainRefusesAReasonThatNamesNodes(t *testing.T) {
 		{"a node as the reason", []string{"exe0007", "-n", "exe0001"}, "names nodes"},
 		{"a node set as the reason", []string{"exe[1-2]", "-n", "exe0001"}, "names nodes"},
 		{"a group as the reason", []string{"@rack:R02", "-n", "exe0001"}, "names nodes"},
+		{"a node list as the reason", []string{"exe0007,exe0008", "-n", "exe0001"}, "names nodes"},
+		{"nodes and a group quoted as the reason", []string{"exe0007 exe0008 @rack:R02", "-n", "exe0001"}, "names nodes"},
 		{"nodes after the reason and -n", []string{"ticket", "4711", "DIMM", "-n", "exe0007"}, "both as an argument"},
 	}
 	for _, tc := range tests {
@@ -354,6 +356,30 @@ func TestSlurmDrainRefusesAReasonThatNamesNodes(t *testing.T) {
 			}
 			if changes := cluster.changes(); len(changes) != 0 {
 				t.Errorf("sent %v", changes)
+			}
+		})
+	}
+}
+
+// A reason that named a known node anywhere in it was refused as a
+// forgotten one, so the reason an administrator writes most, what is wrong
+// with which node, could not be given. Only a reason that is nothing but
+// nodes reads as the node argument in the reason's place.
+func TestSlurmDrainKeepsAReasonThatMentionsANode(t *testing.T) {
+	for _, reason := range []string{
+		"ECC errors on exe0007, ticket 42",
+		"exe0007: failing DIMM",
+		"swap the DIMM of exe0007 with exe0008",
+		"@rack:R02 is being recabled",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			cluster := newSlurmCluster()
+			h, err := run(t, harnessOptions{recorder: cluster.recorder()}, "slurm", "node", "drain", reason, "-n", "exe0007", "-y")
+			if err != nil {
+				t.Fatalf("drain failed: %v\n%s", err, h.errOut)
+			}
+			if changes := cluster.changes(); len(changes) != 1 || !strings.HasSuffix(changes[0], "reason="+reason) {
+				t.Errorf("sent %v, want the drain with the reason", changes)
 			}
 		})
 	}

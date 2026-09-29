@@ -53,8 +53,11 @@ it is tracked.
 The reason is checked before anything is shown, and a bad one exits `2`: it
 may not be blank, longer than 200 characters, hold a line break or another
 control character, or hold `|`, which Slurm's parsable output puts between
-fields. A reason that reads as nodes, such as `exe0007` or `@rack:R02`, is
-refused, because that is what a forgotten reason looks like. Name the nodes
+fields. A reason that is nothing but nodes, such as `exe0007`,
+`exe0007,exe0008` or `@rack:R02`, is refused, because that is what a
+forgotten reason looks like: every word of it a group or a node the inventory
+knows. A reason that mentions a node among other words, such as `'ECC errors
+on exe0007, ticket 42'`, says what is wrong and is kept. Name the nodes
 either after the reason or with `-n`, not both.
 
 ```console

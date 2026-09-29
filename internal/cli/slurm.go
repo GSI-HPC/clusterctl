@@ -108,9 +108,11 @@ running are left alone.
 
 The reason is mandatory and comes first, because a drained node with no reason
 is a node nobody dares resume. Say what is wrong and where it is tracked, on
-one line of at most 200 characters and without |. A reason that names nodes
-is refused, since that is what a forgotten reason looks like, and so are nodes
-named both after the reason and with -n.
+one line of at most 200 characters and without |. A reason that is nothing
+but nodes, such as exe0007 or @rack:R02, is refused, since that is what a
+forgotten reason looks like; one that mentions a node among other words,
+such as 'ECC errors on exe0007, ticket 42', is kept. Nodes named both after
+the reason and with -n are refused too.
 
 The nodes are checked against Slurm before anything is shown: slurmctld reads
 ALL as every node and a NodeSet name of slurm.conf as its members, so a name
@@ -187,18 +189,31 @@ func slurmNodes(ctx context.Context, a *app.App, args []string) (*slurm.Client, 
 	return c, ns, nil
 }
 
-// reasonNamesNodes reports whether a drain reason reads as nodes: a group
-// reference, or a node set holding a node the inventory knows. That is what
-// the first node argument looks like when the reason was forgotten.
+// reasonNamesNodes reports whether a drain reason is nothing but nodes:
+// every word of it a group reference or a node set of nodes the inventory
+// knows. That is what the first node argument looks like when the reason
+// was forgotten. A reason that mentions a node among other words, such as
+// "ECC errors on exe0007, ticket 42", says what is wrong and is kept.
 func reasonNamesNodes(a *app.App, reason string) bool {
-	if strings.HasPrefix(reason, "@") {
+	var names []string
+	for word := range strings.FieldsSeq(reason) {
+		// A group is not resolved here: that would run the group sources
+		// for a reason, and a word that refers to one reads as nodes.
+		if !strings.HasPrefix(word, "@") {
+			names = append(names, word)
+		}
+	}
+	if len(names) == 0 {
 		return true
 	}
-	ns, err := nodeset.Parse(reason)
-	if err != nil || a.Inventory == nil {
+	if a.Inventory == nil {
 		return false
 	}
-	return !ns.Intersection(a.Inventory.NodeSet()).IsEmpty()
+	ns, err := nodeset.Parse(strings.Join(names, " "))
+	if err != nil {
+		return false
+	}
+	return ns.Difference(a.Inventory.NodeSet()).IsEmpty()
 }
 
 func newSlurmNodesetCommand(r *root) *cobra.Command {
