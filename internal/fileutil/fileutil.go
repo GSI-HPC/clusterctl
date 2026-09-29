@@ -155,16 +155,27 @@ func resolve(path string) (string, error) {
 		if err := trustedOwner(path, info); err != nil {
 			return "", err
 		}
-		link, err := os.Readlink(path)
-		if err != nil {
+		if path, err = linkTarget(path); err != nil {
 			return "", err
 		}
-		if !filepath.IsAbs(link) {
-			link = filepath.Join(filepath.Dir(path), link)
-		}
-		path = link
 	}
 	return "", fmt.Errorf("%s: too many levels of symbolic links", path)
+}
+
+// linkTarget returns the path the symbolic link path points at. A relative
+// one is read against the directory the link is really in, as the system
+// reads it: behind a linked directory, ../x is beside the directory the
+// link leads to, not beside its name.
+func linkTarget(path string) (string, error) {
+	link, err := os.Readlink(path)
+	if err != nil || filepath.IsAbs(link) {
+		return link, err
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, link), nil
 }
 
 // WriteNew writes data to a file that does not exist yet, and never to one
@@ -282,14 +293,10 @@ func trustedLinks(path string) (end string, linked bool, err error) {
 		if err := trustedOwner(end, info); err != nil {
 			return "", false, err
 		}
-		link, err := os.Readlink(end)
-		if err != nil {
+		if end, err = linkTarget(end); err != nil {
 			return "", false, err
 		}
-		if !filepath.IsAbs(link) {
-			link = filepath.Join(filepath.Dir(end), link)
-		}
-		end, linked = link, true
+		linked = true
 	}
 	return "", false, fmt.Errorf("%s: too many levels of symbolic links", path)
 }
