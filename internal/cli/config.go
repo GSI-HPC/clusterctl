@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -459,10 +460,10 @@ file:
 
   # yaml-language-server: $schema=./site.schema.json
 
-Without an argument every kind is printed as one object keyed by kind.`,
+Without an argument every kind is printed as one JSON object keyed by kind,
+so that "clusterctl config schema | jq .Site" is the schema of a Site.`,
 		cobra.MaximumNArgs(1),
 		func(cmd *cobra.Command, args []string) error {
-			out := cmd.OutOrStdout()
 			if len(args) == 1 {
 				data, err := config.SchemaJSON(args[0])
 				if err != nil {
@@ -470,16 +471,19 @@ Without an argument every kind is printed as one object keyed by kind.`,
 				}
 				return say(cmd, "%s\n", data)
 			}
+			all := map[string]json.RawMessage{}
 			for _, kind := range config.SchemaKinds() {
 				data, err := config.SchemaJSON(kind)
 				if err != nil {
 					return err
 				}
-				if _, err := fmt.Fprintf(out, "// %s\n%s\n", kind, data); err != nil {
-					return err
-				}
+				all[kind] = data
 			}
-			return nil
+			data, err := json.MarshalIndent(all, "", "  ")
+			if err != nil {
+				return err
+			}
+			return say(cmd, "%s\n", data)
 		})
 	cmd.ValidArgsFunction = fixed(v1alpha1.Kinds()...)
 	return cmd

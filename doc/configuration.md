@@ -31,8 +31,9 @@ a context twice is an error.
 | `Workstation` | The machine clusterctl runs on | local environment variables |
 | `Secret` | Values encrypted with sops | the `.age` files next to the configuration |
 
-`clusterctl config schema KIND` prints the JSON Schema of a kind. Point an
-editor at it and the fields, their types and their documentation are checked as
+`clusterctl config schema KIND` prints the JSON Schema of a kind; without a
+kind it prints one JSON object that holds the schema of every kind under its
+name. Point an editor at it and the fields, their types and their documentation are checked as
 the file is typed:
 
 ```yaml

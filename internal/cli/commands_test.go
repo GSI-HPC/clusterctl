@@ -65,6 +65,29 @@ func TestConfigSchemaIsUsableByAnEditor(t *testing.T) {
 	}
 }
 
+// TestConfigSchemaOfEveryKindIsOneJSONObject: without an argument the help
+// promised one object keyed by kind, but each schema was printed after a
+// "// Kind" line, which no JSON reader takes, so config schema | jq .Site
+// failed.
+func TestConfigSchemaOfEveryKindIsOneJSONObject(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "config", "schema")
+	if err != nil {
+		t.Fatalf("config schema failed: %v", err)
+	}
+	var got map[string]map[string]any
+	if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+		t.Fatalf("the output is not one JSON object: %v\n%s", err, h.out)
+	}
+	for _, kind := range config.SchemaKinds() {
+		if _, ok := got[kind]["$schema"]; !ok {
+			t.Errorf("the object has no schema of %s", kind)
+		}
+	}
+	if len(got) != len(config.SchemaKinds()) {
+		t.Errorf("the object has %d kinds, want %d", len(got), len(config.SchemaKinds()))
+	}
+}
+
 func TestConfigViewPrintsTheMergedConfiguration(t *testing.T) {
 	h, err := run(t, harnessOptions{}, "config", "view", "-o", "yaml")
 	if err != nil {
