@@ -596,7 +596,8 @@ one is configured.`,
 func newBMCPingCommand(r *root) *cobra.Command {
 	return leaf("ping [NODESET]", "Check which service processors answer", `
 Sweep the service processors of a node set from the host that can reach the
-management network, and report which of them answer.`,
+management network, and report which of them answer. The sweep only reads,
+so --dry-run sweeps too.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			_, bmcs, err := bmcSet(a, args)
@@ -617,10 +618,12 @@ management network, and report which of them answer.`,
 			// that answered. The list follows --, so no name is read as an
 			// option. It prints them once the sweep is over, so the step
 			// knows how many processors it asks, but not which answered
-			// until it ends.
+			// until it ends. The sweep only reads, so it goes through
+			// ReadRunner: a dry run sweeps too, rather than reading
+			// every processor as silent.
 			ctx, step := progress.Start(a.Context(), progress.KindStep, "ping", progress.Total(bmcs.Len()))
 			argv := append([]string{"fping", "-a", "-q", "-r", "1", "--"}, bmcs.Expand()...)
-			result, err := a.Runner.Run(ctx, target, a.Collect(transport.Request{Argv: argv, Timeout: 2 * time.Minute}))
+			result, err := a.ReadRunner.Run(ctx, target, a.Collect(transport.Request{Argv: argv, Timeout: 2 * time.Minute}))
 			if err != nil {
 				err = bmcError(a.Context(), exitcode.Wrap(exitcode.Transport, err), false)
 				step.End(err)
