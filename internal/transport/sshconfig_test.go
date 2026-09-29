@@ -407,6 +407,54 @@ func TestProxyJumpResolvesEveryHop(t *testing.T) {
 	}
 }
 
+// TestAnIPv6JumpHostIsBracketed: ssh splits a ProxyJump hop at its first
+// colon unless the address is in brackets, and an IPv6 address was written
+// bare unless a port followed it, so ssh refused the file for every host.
+func TestAnIPv6JumpHostIsBracketed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	roles := map[string]v1alpha1.HostRole{
+		"v6": {Host: "2001:db8::1"},
+		"a":  {Host: "a.example.org", ProxyJump: "v6"},
+		"b":  {Host: "b.example.org", ProxyJump: "2001:db8::2"},
+		"c":  {Host: "c.example.org", ProxyJump: "[2001:db8::3]"},
+		"d":  {Host: "d.example.org", ProxyJump: "admin@[2001:db8::4]:2222"},
+	}
+	path, err := transport.New(transport.Options{
+		Roles: roles, StateDir: dir, KnownHostsFile: filepath.Join(dir, "k"), DefaultUser: "alice",
+	}).ConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"a.example.org": "alice@[2001:db8::1]",
+		"b.example.org": "[2001:db8::2]",
+		"c.example.org": "[2001:db8::3]",
+		"d.example.org": "admin@[2001:db8::4]:2222",
+	}
+	for _, jump := range want {
+		if !strings.Contains(string(data), "  ProxyJump "+jump+"\n") {
+			t.Errorf("the configuration does not jump through %s", jump)
+		}
+	}
+	if t.Failed() {
+		t.Logf("the configuration:\n%s", data)
+	}
+	if _, err := exec.LookPath("ssh"); err != nil {
+		return
+	}
+	for host, jump := range want {
+		if got := resolved(t, path, host)["proxyjump"]; got != jump {
+			t.Errorf("%s jumps through %q, want %q", host, got, jump)
+		}
+	}
+	resolved(t, path, "exe0001.example.org")
+}
+
 // TestNamesFollowOneRule covers #90's finding that writing ssh_config and
 // connecting checked names by different rules: alice@EXAMPLE.ORG and svc$
 // passed config validate as the context user and then failed every
