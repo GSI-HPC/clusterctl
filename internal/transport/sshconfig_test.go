@@ -488,6 +488,9 @@ func TestNamesFollowOneRule(t *testing.T) {
 		// A role's name never reaches ssh, only its host does.
 		"install_gw": true, "admin@install_gw:2222": true,
 		"gw_1.example.org": false, "gw*.example.org": false, "admin@": false,
+		// Two colons make parseHop take the whole hop as an address,
+		// which the host check then refuses (#96).
+		"gw.example.org:22:": false, "gw.example.org::22": false, "install_gw:22:": false,
 	} {
 		opts := transport.Options{KnownHostsFile: "/k", Roles: map[string]v1alpha1.HostRole{
 			"a":          {Host: "a.example.org", ProxyJump: hop},
