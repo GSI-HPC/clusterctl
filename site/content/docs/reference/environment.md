@@ -9,7 +9,7 @@ weight: 2
 | --- | --- |
 | `CLUSTERCTL_CONFIG` | Replaces the configuration search path. A `PATH`-style list of files and directories, most general first. |
 | `CLUSTERCTL_CONTEXT` | Selects the context, as `--context` does. |
-| `CLUSTERCTL_NODES` | The node set commands act on when neither `-n` nor a node set argument is given. An empty `-n` is an error, never a fall-back to it. |
+| `CLUSTERCTL_NODES` | The node set commands act on when neither `-n` nor a node set argument is given. An empty `-n` or node set argument is an error, never a fall-back to it. |
 | `CLUSTERCTL_PROGRESS` | How progress is shown when `--progress` is not given: `auto`, `tty`, `counter`, `plain` or `none`. Empty is `auto`, the live tree on a terminal. `plain` suits a CI job's log. Unlike the flag it fails no command: a display where none can be drawn shows nothing, and a value it does not take shows nothing, with a line on standard error. See [Progress](../../guides/progress/). |
 | `CLUSTERCTL_PROGRESS_LOG` | The file each command appends its progress events to, as JSON lines, when `--progress-log` is not given; created readable by you alone. Empty writes none. Unlike the flag it fails no command: a file that cannot be used is not written, with a line on standard error. See [the event log](../../guides/progress/#the-event-log). |
 | `CLUSTERCTL_FANOUT` | `fanout.max`, how many hosts ssh works on at once. Unlike `--fanout`, it leaves the service processors and the names asked at once to their own settings, `bmc.redfish.maxConcurrent`, `bmc.ipmi.maxConcurrent` and `services.dns.maxConcurrent`. |

@@ -226,6 +226,8 @@ $ clusterctl node select "@compute!$(clusterctl slurm node nodeset drain)" --cou
 When no node is in that state, the inner command prints nothing and `-n` is
 given an empty set. That is refused with exit code 2, even with
 `CLUSTERCTL_NODES` set: an explicit `-n` is never replaced by the session set.
+Neither is a node set argument given empty, such as the one of
+`clusterctl exec "$(clusterctl slurm node nodeset drain)" -- uptime`.
 
 clusterctl hands Slurm and FreeIPMI a set with at most one bracketed range per
 name, `rack1node[001-100],rack2node[001-100]` rather than

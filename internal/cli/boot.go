@@ -480,7 +480,11 @@ the command.`,
 			}
 			root := a.Spec.Services.PXESrv.Root
 
-			ns, err := a.SelectOptional(strings.Join(args, ","))
+			expr, err := nodeSetArgument(args)
+			if err != nil {
+				return err
+			}
+			ns, err := a.SelectOptional(expr)
 			if err != nil {
 				return err
 			}
@@ -944,14 +948,10 @@ func grubLink(ctx context.Context, a *app.App, expr string) (role, node, link st
 		return "", "", "", exitcode.Errorf(exitcode.Usage, "no host role runs the TFTP service; set services.tftp.role")
 	}
 	grubPath := a.Spec.Services.TFTP.GrubPath
-	ns, err := a.Select(expr)
+	node, err = oneNode(a, expr)
 	if err != nil {
 		return "", "", "", err
 	}
-	if ns.Len() != 1 {
-		return "", "", "", exitcode.Errorf(exitcode.Usage, "%s is %d nodes; name one", expr, ns.Len())
-	}
-	node = ns.Expand()[0]
 	addresses, err := nodeAddresses(ctx, a, []string{node})
 	if err != nil {
 		return "", "", "", err

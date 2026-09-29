@@ -45,6 +45,45 @@ func TestAnEmptyNodesFlagDoesNotFallBackToTheEnvironment(t *testing.T) {
 	}
 }
 
+// An empty node set argument is refused as an empty -n is. It was read as
+// no argument and replaced by the session set, so that with
+// CLUSTERCTL_NODES=@rack:R02, exec "" -- uptime ran on ten hosts, and with
+// CLUSTERCTL_NODES=exe0001, boot grub unset "" -y removed the GRUB link of
+// exe0001.
+func TestAnEmptyNodeSetArgumentDoesNotFallBackToTheEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		args []string
+	}{
+		{"@rack:R02", []string{"exec", "", "--", "uptime"}},
+		{"@rack:R02", []string{"exec", "--dry-run", " ", "--", "uptime"}},
+		{"@rack:R02", []string{"exec", "", "", "--", "uptime"}},
+		{"@rack:R02", []string{"hostkey", "remove", "", "--dry-run"}},
+		{"@rack:R02", []string{"bmc", "power", "off", "", "--dry-run"}},
+		{"@rack:R02", []string{"boot", "set", "", "-y"}},
+		{"@rack:R02", []string{"boot", "status", ""}},
+		{"exe0001", []string{"boot", "grub", "unset", "", "-y"}},
+		{"exe0001", []string{"boot", "grub", "set", "", "/srv/tftp/grub/1.0/grub.cfg.install-exec", "-y"}},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			t.Setenv(config.EnvNodes, tc.env)
+			t.Setenv("BMC_PASSWORD", "s3cret")
+			h, err := run(t, harnessOptions{tty: true}, tc.args...)
+			if err == nil {
+				t.Fatalf("an empty argument should be refused; it printed:\n%s%s", h.out, h.errOut)
+			}
+			wantCode(t, err, exitcode.Usage)
+			if !strings.Contains(err.Error(), "empty") && !strings.Contains(err.Error(), "no node was named") {
+				t.Errorf("error = %v, want it to say the argument is empty", err)
+			}
+			if strings.Contains(h.errOut.String(), "Would") {
+				t.Errorf("a preview was printed for an empty argument:\n%s", h.errOut)
+			}
+			wantNoCalls(t, h)
+		})
+	}
+}
+
 // Without -n the session set still applies.
 func TestTheEnvironmentAppliesWithoutNodesFlag(t *testing.T) {
 	t.Setenv(config.EnvNodes, "@rack:R02")
