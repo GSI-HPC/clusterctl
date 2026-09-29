@@ -317,6 +317,29 @@ func TestDHCPLogAndCaptureRejectUnboundedArguments(t *testing.T) {
 	}
 }
 
+// --seconds had no upper bound, and time.Duration(seconds)*time.Second
+// overflowed: --seconds 10000000000 came out below zero, which is no time
+// limit at all, so tcpdump ran as root until something stopped it, the
+// very case the lower bound is there to prevent.
+func TestDHCPCaptureAlwaysStopsOnItsOwn(t *testing.T) {
+	h, err := run(t, harnessOptions{}, "--dry-run", "dhcp", "capture", "--seconds", "3600")
+	if err != nil {
+		t.Fatalf("dhcp capture --seconds 3600: %v", err)
+	}
+	if out := h.out.String(); !strings.Contains(out, "timeout -k 5s 3600s tcpdump") {
+		t.Errorf("the capture of an hour does not run under a timeout:\n%s", out)
+	}
+
+	for _, seconds := range []string{"3601", "10000000000", "9223372036854775807"} {
+		h, err := run(t, harnessOptions{}, "--dry-run", "dhcp", "capture", "--seconds", seconds)
+		wantCode(t, err, exitcode.Usage)
+		if out := h.out.String(); out != "" {
+			t.Errorf("--seconds %s printed a command line:\n%s", seconds, out)
+		}
+		wantNoCalls(t, h)
+	}
+}
+
 // The log holds what the nodes sent, so a terminal escape in it is shown
 // rather than obeyed.
 func TestDHCPLogEscapesControlCharacters(t *testing.T) {
