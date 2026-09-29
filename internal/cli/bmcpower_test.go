@@ -168,32 +168,50 @@ func TestBMCPowerOnReportsEveryBatch(t *testing.T) {
 // A power-on interrupted during a batch sends no more batches, and says of
 // their nodes that they were not sent, as for an interrupt during a pause:
 // the batch it cut short failed, but the interrupt is what left the rest
-// out. The command exits 130.
+// out. The command exits 130. Ctrl-C in the first batch of ten nodes at
+// --batch 3 once read "7 not tried: an earlier batch failed".
 func TestBMCPowerOnInterruptedDuringABatch(t *testing.T) {
 	t.Setenv("BMC_PASSWORD", "s3cret")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	answer := ipmiAnswer(func(bmc string) string {
-		if strings.HasPrefix(bmc, "exe0004.") {
-			cancel()
-			return "connection timeout"
-		}
-		return "ok"
-	})
-	h, err := run(t, harnessOptions{ctx: ctx, recorder: &transport.Recorder{Reply: answer}},
-		append(noSlurm, "-o", "json", "bmc", "power", "on", "--ipmi", "--batch", "3", "--stagger", "1ms", "-y", "-n", "exe[1-9]")...)
-	wantCode(t, err, exitcode.Interrupted)
-	rows := jsonRows(t, h)
-	if len(rows) != 9 {
-		t.Fatalf("got %d rows, want 9:\n%s", len(rows), h.out)
-	}
-	for _, row := range rows[6:] {
-		if row["state"] != "not sent" {
-			t.Errorf("%v: state %v, want not sent", row["node"], row["state"])
-		}
-	}
-	if got := len(ipmiCalls(h)); got != 2 {
-		t.Errorf("got %d batches sent, want 2", got)
+	for _, tc := range []struct {
+		name      string
+		interrupt string
+		nodes     string
+		sent      int
+		notSent   string
+	}{
+		{"the first batch", "exe0002.", "exe[1-10]", 1, "7 not sent: exe[0004-0010]"},
+		{"a later batch", "exe0004.", "exe[1-9]", 2, "3 not sent: exe[0007-0009]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			answer := ipmiAnswer(func(bmc string) string {
+				if strings.HasPrefix(bmc, tc.interrupt) {
+					cancel()
+					return "connection timeout"
+				}
+				return "ok"
+			})
+			h, err := run(t, harnessOptions{ctx: ctx, recorder: &transport.Recorder{Reply: answer}},
+				append(noSlurm, "-o", "json", "bmc", "power", "on", "--ipmi", "--batch", "3", "--stagger", "1ms", "-y", "-n", tc.nodes)...)
+			wantCode(t, err, exitcode.Interrupted)
+			if err != nil && (strings.Contains(err.Error(), "not tried") || !strings.Contains(err.Error(), tc.notSent)) {
+				t.Errorf("error = %v, want it to say %q and nothing not tried", err, tc.notSent)
+			}
+			rows := jsonRows(t, h)
+			want, _ := nodeset.Parse(tc.nodes)
+			if len(rows) != want.Len() {
+				t.Fatalf("got %d rows, want %d:\n%s", len(rows), want.Len(), h.out)
+			}
+			for _, row := range rows[3*tc.sent:] {
+				if row["state"] != "not sent" {
+					t.Errorf("%v: state %v, want not sent", row["node"], row["state"])
+				}
+			}
+			if got := len(ipmiCalls(h)); got != tc.sent {
+				t.Errorf("got %d batches sent, want %d", got, tc.sent)
+			}
+		})
 	}
 }
 
