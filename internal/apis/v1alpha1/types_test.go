@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-yaml"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 )
 
@@ -70,6 +72,46 @@ func TestDurationRejectsBadValues(t *testing.T) {
 		var d v1alpha1.Duration
 		if err := json.Unmarshal([]byte(raw), &d); err == nil {
 			t.Errorf("unmarshalling %s should fail", raw)
+		}
+	}
+}
+
+// A duration reads from YAML and writes to it as it does with JSON: as a
+// string such as "90s", never as a bare number, which reads as nanoseconds,
+// and never negative.
+func TestDurationReadsAndWritesYAML(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Timeout v1alpha1.Duration `yaml:"timeout"`
+	}
+	var got config
+	if err := yaml.Unmarshal([]byte("timeout: 90s\n"), &got); err != nil {
+		t.Fatalf("unmarshalling a duration: %v", err)
+	}
+	if want := 90 * time.Second; got.Timeout.Get() != want {
+		t.Errorf("duration = %v, want %v", got.Timeout.Get(), want)
+	}
+	out, err := yaml.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshalling a duration: %v", err)
+	}
+	if want := "timeout: 1m30s\n"; string(out) != want {
+		t.Errorf("marshalled = %q, want %q", out, want)
+	}
+
+	// A scalar is read as text and refused by what it says; a list or a
+	// mapping is refused by the decoder, at its line and column.
+	for raw, scalar := range map[string]bool{
+		"30": true, "forever": true, "-5s": true, "true": true, "[1s]": false, "{seconds: 30}": false,
+	} {
+		var c config
+		err := yaml.Unmarshal([]byte("timeout: "+raw+"\n"), &c)
+		switch {
+		case err == nil:
+			t.Errorf("unmarshalling %s gave %v, want an error", raw, c.Timeout)
+		case scalar && !strings.Contains(err.Error(), "invalid duration"):
+			t.Errorf("unmarshalling %s: %v; want it to say what a duration is", raw, err)
 		}
 	}
 }
