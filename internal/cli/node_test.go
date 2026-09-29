@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -58,6 +59,45 @@ func TestNodeListWithMixedWidths(t *testing.T) {
 		}
 		if out := h.out.String(); !strings.Contains(out, want) || !strings.Contains(out, "exe11") {
 			t.Errorf("node list %s:\n%s\nwant exe11 and %q", args, out, want)
+		}
+	}
+}
+
+// TestNodeListKeepsToTheSelectionInEveryFormat: node list -n exe[1-2] printed
+// the whole inventory in the table and in -o json, and so did every format
+// but nodeset for a set in CLUSTERCTL_NODES; -o nodeset honoured both.
+func TestNodeListKeepsToTheSelectionInEveryFormat(t *testing.T) {
+	formats := map[string]string{
+		"table": "exe0002", "wide": "exe0002", "json": `"exe0002"`, "yaml": "exe0002",
+		"name": "exe0002\n", "nodeset": "exe[0001-0002]\n",
+	}
+	selections := map[string]struct {
+		env  string
+		args []string
+	}{
+		"-n":               {args: []string{"-n", "exe[1-2]"}},
+		"an argument":      {args: []string{"exe[1-2]"}},
+		"CLUSTERCTL_NODES": {env: "exe[1-2]"},
+	}
+	for how, sel := range selections {
+		for format, want := range formats {
+			t.Run(how+" -o "+format, func(t *testing.T) {
+				t.Setenv(config.EnvNodes, sel.env)
+				args := append([]string{"node", "list", "-o", format}, sel.args...)
+				h, err := run(t, harnessOptions{}, args...)
+				if err != nil {
+					t.Fatalf("node list failed: %v", err)
+				}
+				out := h.out.String()
+				if !strings.Contains(out, want) {
+					t.Errorf("output does not contain %q:\n%s", want, out)
+				}
+				for _, other := range []string{"exe0003", "wlm01"} {
+					if strings.Contains(out, other) {
+						t.Errorf("output names %s, which is not selected:\n%s", other, out)
+					}
+				}
+			})
 		}
 	}
 }

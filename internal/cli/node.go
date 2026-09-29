@@ -40,22 +40,22 @@ names the naming rules produce.`,
 
 func newNodeListCommand(r *root) *cobra.Command {
 	return leaf("list [NODESET]", "List the nodes the inventory knows", `
-List the nodes of the inventory, optionally limited to a node set.`,
+List the nodes of the inventory, or those of a node set: the argument, -n or
+else CLUSTERCTL_NODES, as for any other command. Every output format lists
+the same nodes.`,
 		cobra.MaximumNArgs(1),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			nodes := a.Inventory.All()
-			if len(args) > 0 || a.Format.Kind == output.FormatNodeset {
-				ns, err := a.SelectOptional(strings.Join(args, ","))
-				if err != nil {
-					return err
+			ns, err := a.SelectOptional(strings.Join(args, ","))
+			if err != nil {
+				return err
+			}
+			if ns != nil {
+				selected, unknown := a.Inventory.Select(ns)
+				if len(unknown) > 0 {
+					a.Printf("not in the inventory: %s\n", strings.Join(unknown, ", "))
 				}
-				if ns != nil {
-					selected, unknown := a.Inventory.Select(ns)
-					if len(unknown) > 0 {
-						a.Printf("not in the inventory: %s\n", strings.Join(unknown, ", "))
-					}
-					nodes = selected
-				}
+				nodes = selected
 			}
 
 			t := output.NewTable(output.Cols("NODE", "CLASS", "RACK", "ADDRESS", "VENDOR", "CID").
