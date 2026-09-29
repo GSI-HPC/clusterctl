@@ -622,6 +622,24 @@ func TestSlurmAccountingChangesNameTheCluster(t *testing.T) {
 	}
 }
 
+// account coordinator adds users to the coordinators of an account and
+// keeps those it has, while it said "coordinators of proj set", which
+// reads as if they had been replaced.
+func TestSlurmAccountCoordinatorSaysTheUsersWereAdded(t *testing.T) {
+	cluster := newSlurmCluster()
+	h, err := run(t, harnessOptions{recorder: cluster.recorder()}, "slurm", "account", "coordinator", "proj", "alice", "bob", "-y")
+	if err != nil {
+		t.Fatalf("account coordinator failed: %v", err)
+	}
+	want := "sacctmgr --immediate add coordinator account=proj names=alice,bob"
+	if changes := cluster.changes(); len(changes) != 1 || changes[0] != want {
+		t.Errorf("sent %v, want %q", changes, want)
+	}
+	if got := h.errOut.String(); !strings.Contains(got, "alice, bob added to the coordinators of proj\n") || strings.Contains(got, " set") {
+		t.Errorf("account coordinator says:\n%s", got)
+	}
+}
+
 // 12.9: sacctmgr expands lists and ranges in names, and getent resolves a
 // number as a UID.
 func TestSlurmAccountingRefusesNamesSacctmgrExpands(t *testing.T) {
