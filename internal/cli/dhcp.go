@@ -220,8 +220,22 @@ running by accident; --seconds must be between 1 and 3600, an hour.`,
 // reinstall; more is a capture left behind.
 const maxCaptureSeconds = 3600
 
-// roleShell opens a shell on the host of a configured service role.
+// roleShell opens a shell on the host of a configured service role, or runs
+// the command that follows -- there.
 func roleShell(r *root, cmd *cobra.Command, args []string, role func(*app.App) string) error {
+	// Cobra hands over the words on both sides of --; the command is only
+	// what follows it.
+	words, argv := args, []string(nil)
+	if at := cmd.ArgsLenAtDash(); at >= 0 {
+		words, argv = args[:at], args[at:]
+	}
+	// A word before -- used to be dropped, so "dhcp shell uptime" opened a
+	// login shell instead of running uptime.
+	if len(words) > 0 {
+		return exitcode.Errorf(exitcode.Usage,
+			"%s takes no argument before --, got %q; put the command after --, as in \"%s -- %s\"",
+			cmd.CommandPath(), strings.Join(words, " "), cmd.CommandPath(), strings.Join(words, " "))
+	}
 	a, err := r.App()
 	if err != nil {
 		return err
@@ -233,10 +247,6 @@ func roleShell(r *root, cmd *cobra.Command, args []string, role func(*app.App) s
 	target, err := a.Role(name)
 	if err != nil {
 		return err
-	}
-	var argv []string
-	if at := cmd.ArgsLenAtDash(); at >= 0 {
-		argv = args[at:]
 	}
 	return session(a.Context(), a, cmd, target, transport.Request{Argv: argv})
 }
