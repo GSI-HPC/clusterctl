@@ -852,12 +852,16 @@ func ValidateUserName(value string) error {
 }
 
 // ValidateText checks a free text value, such as an account description,
-// which may not hold control characters.
+// which may not hold control characters, nor the separator: sacctmgr prints
+// the value back between fields split on it, and has no other.
 func ValidateText(kind, value string) error {
 	for _, r := range value {
 		if unicode.IsControl(r) {
 			return exitcode.Errorf(exitcode.Usage, "the %s contains the control character %s",
 				kind, strings.Trim(strconv.QuoteRune(r), "'"))
+		}
+		if r == '|' {
+			return exitcode.Errorf(exitcode.Usage, "the %s contains |, which Slurm's parsable output uses between fields", kind)
 		}
 	}
 	return nil

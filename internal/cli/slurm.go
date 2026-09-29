@@ -410,7 +410,9 @@ clients run on. The organisation and the description default to what the
 cluster configuration says and to the account name.
 
 An account name is letters, digits and . _ @ - only: sacctmgr reads a comma as
-a list and brackets as a range, so proj[1-100] would create a hundred accounts.`,
+a list and brackets as a range, so proj[1-100] would create a hundred accounts.
+The organisation and the description may not hold a control character or |,
+which sacctmgr prints between fields, so account list could not read it back.`,
 		cobra.RangeArgs(1, 3),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			org, desc := "", ""
