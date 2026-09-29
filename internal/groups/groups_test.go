@@ -208,6 +208,49 @@ func TestListAndAll(t *testing.T) {
 	}
 }
 
+// @source:* of a source without an all command names what its groups name
+// together, each evaluated on its own, as @a,@b does. The groups'
+// expressions were joined into one, so the operator in one applied to
+// every group before it.
+func TestAllEvaluatesEachGroupOnItsOwn(t *testing.T) {
+	t.Parallel()
+	opts := testOptions(t, &transport.Recorder{}, "")
+	opts.Spec = v1alpha1.GroupsSpec{
+		DefaultSource: "static",
+		Sources: map[string]v1alpha1.GroupSource{
+			"inventory": {Attribute: "class"},
+			"static": {Static: map[string]string{
+				"a": "exe[1-2]", "b": "exe[3-4]!exe2", "c": "@inventory:exe&exe[4-9]", "d": "sub1",
+			}},
+		},
+	}
+	r := groups.New(opts)
+
+	for expr, want := range map[string]string{
+		"@*":          "exe[1-4],sub1",
+		"@static:*":   "exe[1-4],sub1",
+		"@a,@b,@c,@d": "exe[1-4],sub1",
+		"@*!exe3":     "exe[1-2,4],sub1",
+	} {
+		ns, err := nodeset.ParseWith(expr, r)
+		if err != nil {
+			t.Errorf("ParseWith(%q) failed: %v", expr, err)
+			continue
+		}
+		if got := ns.String(); got != want {
+			t.Errorf("ParseWith(%q) = %q, want %q", expr, got, want)
+		}
+	}
+
+	// A group that has to be evaluated on its own is referred to by its
+	// name, so a name that does not read back as one reference is refused
+	// rather than evaluated with its neighbours.
+	opts.Spec.Sources["odd"] = v1alpha1.GroupSource{Static: map[string]string{"a": "exe1", "b c": "exe[1-3]!exe2"}}
+	if ns, err := nodeset.ParseWith("@odd:*", groups.New(opts)); err == nil {
+		t.Errorf("ParseWith(\"@odd:*\") = %q, want the group \"b c\" refused", ns)
+	}
+}
+
 func TestGroupsOf(t *testing.T) {
 	t.Parallel()
 	r := testResolver(t, &transport.Recorder{}, "")

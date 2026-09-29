@@ -29,6 +29,10 @@ type Resolver interface {
 	Resolve(source, group string) (string, error)
 	// All returns the expression naming every host a source knows. It
 	// answers the reference @source:*, or @* for an empty source.
+	//
+	// The expression is evaluated as one, left to right, so a resolver
+	// that joins the expressions of several groups into it has to keep the
+	// operators of each group to that group, as MapResolver does.
 	All(source string) (string, error)
 }
 
@@ -123,18 +127,44 @@ func (m *MapResolver) List(source string) ([]string, error) {
 	return out, nil
 }
 
-// All implements Resolver by unioning every group of the source.
+// All implements Resolver by unioning every group of the source, each
+// evaluated on its own. A group whose expression holds an operator other
+// than the union is referred to as @source:group rather than written out:
+// its operator would otherwise apply to every group before it.
 func (m *MapResolver) All(source string) (string, error) {
 	names, err := m.List(source)
 	if err != nil {
 		return "", err
 	}
-	groups := m.Groups[cmp.Or(source, m.Default)]
+	source = cmp.Or(source, m.Default)
+	groups := m.Groups[source]
 	parts := make([]string, 0, len(names))
 	for _, name := range names {
-		parts = append(parts, groups[name])
+		part, err := unionOperand(source, name, groups[name])
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, ","), nil
+}
+
+// unionOperand writes a group's expression as one operand of a union: as
+// it is when it holds no operator but the union, and otherwise as a
+// reference to the group, which the parser evaluates on its own. A name the
+// parser would not read back as that one reference is refused, since a
+// reference split at a comma or a space would name other hosts.
+func unionOperand(source, group, expr string) (string, error) {
+	if !strings.ContainsAny(expr, "!&^") {
+		return expr, nil
+	}
+	const splits = " \t\r\n,!&^[]"
+	if group == "" || group == "*" || strings.ContainsAny(group, splits) ||
+		strings.ContainsAny(source, splits+":") {
+		return "", fmt.Errorf("group %q of source %q holds a set operator and cannot be referred to by its name, "+
+			"so @%s:* cannot evaluate it on its own", group, source, source)
+	}
+	return "@" + source + ":" + group, nil
 }
 
 // DefaultSource implements Lister.

@@ -314,6 +314,48 @@ func TestGroups(t *testing.T) {
 	}
 }
 
+// @* names what the groups of the source name together, each evaluated on
+// its own, as @a,@b does. The groups' expressions were joined into one, so
+// the operator in one applied to every group before it: @* gave exe[1,3-4]
+// where @a,@b gave exe[1-4].
+func TestAllEvaluatesEachGroupOnItsOwn(t *testing.T) {
+	t.Parallel()
+
+	res := &nodeset.MapResolver{
+		Groups: map[string]map[string]string{
+			"local": {"a": "exe[1-2]", "b": "exe[3-4]!exe2", "c": "exe[5-6]&exe[6-7]", "d": "sub1"},
+			"other": {"x": "exe[8-9]", "y": "exe[7-9]^exe[8-9]"},
+		},
+		Default: "local",
+	}
+	for expr, want := range map[string]string{
+		"@*":          "exe[1-4,6],sub1",
+		"@local:*":    "exe[1-4,6],sub1",
+		"@a,@b,@c":    "exe[1-4,6]",
+		"@other:*":    "exe[7-9]",
+		"@*!exe3":     "exe[1-2,4,6],sub1",
+		"exe0,@*":     "exe[0-4,6],sub1",
+		"@other:*,@*": "exe[1-4,6-9],sub1",
+	} {
+		ns, err := nodeset.ParseWith(expr, res)
+		if err != nil {
+			t.Errorf("ParseWith(%q) failed: %v", expr, err)
+			continue
+		}
+		if got := ns.String(); got != want {
+			t.Errorf("ParseWith(%q) = %q, want %q", expr, got, want)
+		}
+	}
+
+	// A group that has to be evaluated on its own is referred to by its
+	// name, so a name that does not read back as one reference is refused
+	// rather than evaluated with its neighbours.
+	odd := nodeset.NewMapResolver("local", map[string]string{"a": "exe1", "b c": "exe[1-3]!exe2"})
+	if ns, err := nodeset.ParseWith("@*", odd); err == nil {
+		t.Errorf("ParseWith(\"@*\") = %q, want the group \"b c\" refused", ns)
+	}
+}
+
 func TestGroupErrors(t *testing.T) {
 	t.Parallel()
 

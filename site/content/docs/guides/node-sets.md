@@ -194,6 +194,14 @@ substituted as whole arguments. A group name is never interpreted by a shell.
 The commands run on the host role the source names, which is required, and are
 bounded by `fanout.commandTimeout` like every remote command.
 
+`@source:*`, or `@*` for the default source, is every node of a source: what
+its `all` command prints, or else what its groups name together, as
+`@a,@b,...` would. Each group is evaluated on its own, so the `!` in
+`b: "exe[3-4]!exe2"` takes `exe2` out of `b` alone, not out of the groups
+before it. A group whose value holds `!`, `&` or `^` goes in by its name, so
+when that name holds a space, a comma, one of those operators or a bracket,
+`@source:*` is an error.
+
 A cached answer is kept per site, cluster and context, per host and per exact
 command, so two clusters that both have a partition `main` never answer for
 each other. The `list` answer is cached too, except when a bare `@group` search
