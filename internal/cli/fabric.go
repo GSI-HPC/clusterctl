@@ -804,9 +804,68 @@ func checkMlxconfigValue(value string) error {
 	return nil
 }
 
+// mlxconfigSetting is the awk program that picks a setting out of what
+// mlxconfig -e query printed for the adapter dev: the one named key, or
+// for a key with a range of indices, such as MODULE_SPLIT_M0[1..3], each
+// index in it. A name is compared whole, since many begin with another's,
+// as NUM_PF_MSIX_VALID does with NUM_PF_MSIX. It prints a line for each,
+// the adapter, the name and its default, current and next boot values, and
+// fails when there is none.
+const mlxconfigSetting = `
+BEGIN {
+  base = key
+  if (key ~ /\[[0-9]+\.\.[0-9]+\]$/) {
+    sub(/\[.*/, "", base)
+    lo = key; sub(/^[^[]*\[/, "", lo); sub(/\..*/, "", lo)
+    hi = key; sub(/.*\.\./, "", hi); sub(/\]$/, "", hi)
+  }
+}
+{
+  i = ($1 == "*") ? 2 : 1
+  name = $i; at = ""
+  if (lo != "" && index(name, base "[") == 1) {
+    at = substr(name, length(base) + 2); sub(/\]$/, "", at)
+  }
+}
+name == key || (at ~ /^[0-9]+$/ && at + 0 >= lo + 0 && at + 0 <= hi + 0) {
+  printf "%s|%s|%s|%s|%s\n", dev, name, $(i + 1), $(i + 2), $(i + 3)
+  found = 1
+}
+END { exit !found }`
+
+// hcaGetScript reads one firmware setting from every adapter of a node and
+// prints a line for each. An adapter mlxconfig could not be asked about, or
+// that has no such setting, has a line without a value and is named on
+// standard error, and fails the node.
+func hcaGetScript(key string) string {
+	return adapterList + fmt.Sprintf(`rc=0
+for dev in $devs; do
+  if ! out=$(mlxconfig --dev "$dev" -e query 2>&1); then
+    printf '%%s|\n' "$dev"
+    printf '%%s: %%s\n' "$dev" "$(printf '%%s\n' "$out" | tail -n 1)" >&2
+    rc=1
+  elif ! printf '%%s\n' "$out" | awk -v dev="$dev" -v key=%[1]s %[2]s; then
+    printf '%%s|\n' "$dev"
+    printf '%%s: %%s is not among its settings\n' "$dev" %[1]s >&2
+    rc=1
+  fi
+done
+exit $rc
+`, shellQuote(key), shellQuote(mlxconfigSetting))
+}
+
 func newHCAConfigGetCommand(r *root) *cobra.Command {
 	return leaf("get KEY [NODESET]", "Read an adapter firmware setting", `
-Read a firmware setting from the adapters of each node.
+Read a firmware setting from the adapters of each node: its default, current
+and next boot values, a row per adapter. KEY is compared whole, so
+NUM_PF_MSIX does not read NUM_PF_MSIX_VALID; a KEY with a range of indices,
+such as MODULE_SPLIT_M0[1..3], reads a row for each index.
+
+An adapter without the setting, or that mlxconfig cannot be asked about, has a
+row without a value. A node that cannot be reached, or has no adapter or no
+ibstat to list them with, has a row that says how it failed in place of the
+device. Why each node failed is said on standard error, and it fails the
+command.
 
   clusterctl hca config get KEEP_LINK_UP_ON_BOOT_P1 -n exe[1-4]`,
 		cobra.MinimumNArgs(1),
@@ -819,19 +878,18 @@ Read a firmware setting from the adapters of each node.
 			if err != nil {
 				return err
 			}
-			results, err := runOnNodes(a.Context(), a, ns, transport.Request{
-				Argv: []string{"sh", "-c", "mlxconfig -e query 2>/dev/null | grep -F -- " + shellQuote(key)},
-			})
+			results, err := runOnNodes(a.Context(), a, ns, transport.Request{Script: hcaGetScript(key)})
 			if err != nil {
 				return err
 			}
-			t := output.NewTable(output.Cols("NODE", key)...)
+			t := output.NewTable(output.Cols("NODE", "DEVICE", "SETTING", "DEFAULT", "CURRENT", "NEXT BOOT")...)
 			for _, res := range results {
-				t.Add(res.Target.Name, strings.Join(strings.Fields(res.Output()), " "))
+				adapterRows(t, res, 5)
 			}
 			if err := a.Print(output.Result{Table: t}); err != nil {
 				return err
 			}
+			sayAdapterFailures(a, results)
 			return failureError(results)
 		}))
 }
