@@ -130,6 +130,12 @@ Exactly one per credential:
 | `command` | The first line a helper prints; a helper named by a relative path resolves against the `Site` document, a bare name is looked up in `PATH`. What it writes on standard error goes to clusterctl's standard error, or to the server's log under `clusterctl mcp` |
 | `prompt` | The terminal |
 
+An empty password is refused, as a problem with the configuration that exits
+2 and names the source: a variable that is not set, a file whose first line is
+empty, a helper that prints nothing, an age file or a `Secret` key that holds
+nothing, and a prompt answered with nothing. A service processor would
+otherwise be sent an empty password.
+
 A password is read once per command, however many nodes need it, and so is
 a failure: a helper that fails, a variable that is not set or a prompt
 answered with nothing is not tried again for the next node. Nothing is read

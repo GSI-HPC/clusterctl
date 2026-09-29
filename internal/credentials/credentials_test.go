@@ -139,6 +139,51 @@ func TestFromFileAndCommand(t *testing.T) {
 	}
 }
 
+// An empty password is refused, with the source it came from and the exit
+// code of a configuration problem. An empty file, one whose first line is
+// blank, a helper that prints nothing and an age file that holds only a
+// newline gave an empty password without an error, and Redfish sent an
+// empty Basic authorization to every service processor.
+func TestAnEmptyPasswordIsRefused(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for name, content := range map[string]string{"empty": "", "blank": "\nhunter2\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := &credentials.Resolver{
+		Path: inDir(dir),
+		Credentials: map[string]v1alpha1.Credential{
+			"empty-file":     {Username: "u", Password: v1alpha1.PasswordSource{File: "empty"}},
+			"blank-line":     {Username: "u", Password: v1alpha1.PasswordSource{File: "blank"}},
+			"silent-helper":  {Username: "u", Password: v1alpha1.PasswordSource{Command: []string{"true"}}},
+			"blank-helper":   {Username: "u", Password: v1alpha1.PasswordSource{Command: []string{"echo"}}},
+			"empty-age-file": {Username: "u", Password: v1alpha1.PasswordSource{AgeFile: "bmc.age"}},
+		},
+		AgeFile: func(context.Context, string) ([]byte, error) { return []byte("\n"), nil },
+		Env:     func(string) string { return "" },
+	}
+	for name, source := range map[string]string{
+		"empty-file":     filepath.Join(dir, "empty"),
+		"blank-line":     filepath.Join(dir, "blank"),
+		"silent-helper":  "true",
+		"blank-helper":   "echo",
+		"empty-age-file": "bmc.age",
+	} {
+		cred, err := r.Get(context.Background(), name)
+		switch {
+		case err == nil:
+			t.Errorf("%s: got the password %q, want an error", name, cred.Password())
+		case exitcode.From(err) != exitcode.Usage:
+			t.Errorf("%s: exit code %d, want %d: %v", name, exitcode.From(err), exitcode.Usage, err)
+		case !strings.Contains(err.Error(), source) || !strings.Contains(err.Error(), name):
+			t.Errorf("%s: %v; want it to name the credential and %s", name, err, source)
+		}
+	}
+}
+
 func TestExactlyOneSourceIsRequired(t *testing.T) {
 	t.Parallel()
 

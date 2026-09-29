@@ -221,11 +221,12 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		return value, nil
 
 	case src.File != "":
-		data, err := os.ReadFile(r.path(src.File))
+		path := r.path(src.File)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return "", fmt.Errorf("credential %q: %w", name, err)
 		}
-		return firstLine(string(data)), nil
+		return nonEmpty(name, firstLine(string(data)), "the first line of "+path)
 
 	case src.AgeFile != "":
 		data, err := r.AgeFile(ctx, src.AgeFile)
@@ -233,7 +234,7 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 			return "", fmt.Errorf("credential %q: %w", name, err)
 		}
 		// The file holds one line, and its newline is not part of it.
-		return strings.TrimRight(string(data), "\r\n"), nil
+		return nonEmpty(name, strings.TrimRight(string(data), "\r\n"), "the age file "+src.AgeFile)
 
 	case src.SecretRef != nil:
 		if r.Secret == nil {
@@ -280,7 +281,7 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		if err != nil {
 			return "", fmt.Errorf("credential %q: the helper failed: %w", name, err)
 		}
-		return firstLine(string(out)), nil
+		return nonEmpty(name, firstLine(string(out)), "the helper "+helper)
 
 	default:
 		if r.Prompt == nil {
@@ -299,6 +300,16 @@ func (r *Resolver) read(ctx context.Context, name string, src v1alpha1.PasswordS
 		}
 		return value, nil
 	}
+}
+
+// nonEmpty returns a password that was read, and refuses an empty one,
+// naming what gave it: Redfish would send it to every service processor as
+// an empty Basic authorization rather than fail.
+func nonEmpty(name, password, what string) (string, error) {
+	if password == "" {
+		return "", exitcode.Errorf(exitcode.Usage, "credential %q: %s gave no password", name, what)
+	}
+	return password, nil
 }
 
 func (r *Resolver) path(p string) string {
