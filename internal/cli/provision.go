@@ -1653,7 +1653,7 @@ command exits 130.`,
 					s.SSHError = "interrupted"
 					s.fail(fmt.Errorf("reading the uptime: %w", res.Err))
 				case res.Failed():
-					s.SSHError = output.EscapeCell(sshReason(res))
+					s.SSHError = output.EscapeCell(cmp.Or(failureDetail(res), fanout.Status(res)))
 				default:
 					s.SSH, s.Uptime = true, output.EscapeCell(res.Output())
 				}
@@ -1691,19 +1691,4 @@ command exits 130.`,
 			}
 			return nil
 		}))
-}
-
-// sshReason is the reason a node gave for failing, or the transport's.
-func sshReason(res *transport.Result) string {
-	for _, text := range []string{res.Stderr, res.Stdout} {
-		for line := range strings.SplitSeq(text, "\n") {
-			if line = strings.TrimSpace(line); line != "" {
-				return line
-			}
-		}
-	}
-	if res.Err != nil {
-		return res.Err.Error()
-	}
-	return fmt.Sprintf("exit status %d", res.ExitCode)
 }
