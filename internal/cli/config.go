@@ -86,6 +86,11 @@ to files it did not write, and overwrites nothing.
 			for _, f := range files {
 				t.Add(filepath.Join(dir, f.Name), f.Kind, f.DocName)
 			}
+			// A table of files lists no nodes, so -o nodeset and -o name
+			// are refused before anything is written, not after.
+			if err := format.Check(output.Result{Table: t}); err != nil {
+				return err
+			}
 			if r.dryRun {
 				t.Caption = fmt.Sprintf("%d files would be written; nothing was", len(files))
 				return format.WriteContext(cmd.Context(), cmd.OutOrStdout(), output.Result{Table: t})

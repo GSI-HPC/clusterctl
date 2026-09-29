@@ -83,7 +83,7 @@ subsystems it drives and calls them itself, with what `app` built.
 
 | Package | Owns |
 | --- | --- |
-| `internal/output` | Table, JSON, YAML, node set, name and jq rendering, with forwarders to `termtext` for the commands that escape text. |
+| `internal/output` | Table, JSON, YAML, node set, name and jq rendering, with forwarders to `termtext` for the commands that escape text. The node set and name formats print a result's `Nodes`, or the first column of its table when that column is headed `NODE`, `HOST` or `BMC`, and refuse any other result with exit code 2; `Format.Check` lets a command that changes something refuse before it acts. |
 | `internal/termtext` | Escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`), and the columns text takes there (`Width`, `Truncate`). It needs nothing but the standard library and `golang.org/x/text`. |
 | `internal/progress/display` | Showing the progress of a command on its standard error, as the live tree or the counter on a terminal or as plain lines, the summary left once it has ended, and the writers that keep the command's own output clear of them. |
 | `internal/version` | The build provenance, which comes from the signed tag or the VCS stamps. |

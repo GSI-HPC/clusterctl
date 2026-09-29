@@ -236,7 +236,8 @@ are about to do and ask before doing it.`),
 	flags.StringArrayVarP(&r.nodes, "nodes", "n", nil,
 		"node set to act on, for example 'exe[1-10],@rack:R02' (default: "+config.EnvNodes+")")
 	flags.StringVarP(&r.format, "output", "o", "table",
-		"output format: "+strings.Join(output.Formats(), ", "))
+		"output format: "+strings.Join(output.Formats(), ", ")+
+			"; nodeset and name print the nodes a command lists, and a command that lists none refuses them")
 	flags.StringArrayVar(&r.setValues, "set", nil, "override one configuration value as PATH=VALUE, repeatable")
 	flags.BoolVar(&r.dryRun, "dry-run", false, "report what would be done and change nothing")
 	flags.BoolVarP(&r.assumeYes, "yes", "y", false, "answer the confirmation prompts with yes")

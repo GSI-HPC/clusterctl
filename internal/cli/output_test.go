@@ -7,6 +7,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -92,5 +96,88 @@ func TestJQStopsWithTheCommand(t *testing.T) {
 			t.Fatalf("%q kept running after its context ended", args)
 		}
 		cancel()
+	}
+}
+
+// TestNodeFormatsRefuseAnOutputThatListsNoNodes: -o nodeset and -o name read
+// the first column of any table as host names, so node attrs vendor printed
+// vendor[1-2] and slurm job list the ids of the jobs, with exit 0, and a
+// command that printed no table printed nothing and succeeded.
+func TestNodeFormatsRefuseAnOutputThatListsNoNodes(t *testing.T) {
+	jobs := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, Stdout: slurm.Render(req,
+			slurm.Row{"i": "4711", "u": "alice", "T": "RUNNING", "N": "exe0001"})}, nil
+	}}
+	tests := []struct {
+		rec  *transport.Recorder
+		args []string
+	}{
+		{nil, []string{"node", "attrs", "vendor"}},
+		{jobs, []string{"slurm", "job", "list"}},
+		{nil, []string{"config", "view"}},
+	}
+	for _, tt := range tests {
+		for _, format := range []string{"nodeset", "name"} {
+			t.Run(strings.Join(tt.args, " ")+" -o "+format, func(t *testing.T) {
+				h, err := run(t, harnessOptions{recorder: tt.rec}, append(tt.args, "-o", format)...)
+				wantCode(t, err, exitcode.Usage)
+				if err == nil || !strings.Contains(err.Error(), "lists none") {
+					t.Errorf("err = %v, want it to say the command lists no nodes", err)
+				}
+				if h.out.Len() != 0 {
+					t.Errorf("printed %q, want nothing", h.out)
+				}
+			})
+		}
+	}
+
+	h, err := run(t, harnessOptions{}, "exec", "-n", "exe[1-2]", "-o", "name", "--", "true")
+	if err != nil {
+		t.Fatalf("exec -o name failed: %v", err)
+	}
+	if got, want := h.out.String(), "exe0001\nexe0002\n"; got != want {
+		t.Errorf("exec -o name = %q, want %q", got, want)
+	}
+}
+
+// TestNodeFormatsAreRefusedBeforeAChange: config init -o name wrote the files
+// and printed their paths as host names, and boot sync and bmc redfish post
+// acted before printing nothing. A command that changes something and lists
+// no nodes refuses -o nodeset and -o name before it acts, as it refuses a jq
+// program that does not compile.
+func TestNodeFormatsAreRefusedBeforeAChange(t *testing.T) {
+	for _, format := range []string{"nodeset", "name"} {
+		for _, dryRun := range []bool{true, false} {
+			t.Run(fmt.Sprintf("config init -o %s, dry run %t", format, dryRun), func(t *testing.T) {
+				dir := filepath.Join(t.TempDir(), "new")
+				args := []string{"config", "init", dir, "-o", format}
+				if dryRun {
+					args = append(args, "--dry-run")
+				}
+				h, err := run(t, harnessOptions{}, args...)
+				wantCode(t, err, exitcode.Usage)
+				if h.out.Len() != 0 {
+					t.Errorf("printed %q, want nothing", h.out)
+				}
+				if _, err := os.Stat(dir); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("%s was created (%v)", dir, err)
+				}
+			})
+		}
+		for _, args := range [][]string{
+			{"boot", "sync", "-y"},
+			{"bmc", "redfish", "post", "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+				`{"ResetType":"ForceRestart"}`, "-n", "exe1", "-y"},
+		} {
+			t.Run(strings.Join(args[:2], " ")+" -o "+format, func(t *testing.T) {
+				h, err := run(t, harnessOptions{recorder: sinfoAnswers("exe0001 idle\n", 0)},
+					append(args, "-o", format)...)
+				wantCode(t, err, exitcode.Usage)
+				if err == nil || !strings.Contains(err.Error(), "lists none") {
+					t.Errorf("err = %v, want it to say the command lists no nodes", err)
+				}
+				wantNoCalls(t, h)
+			})
+		}
 	}
 }

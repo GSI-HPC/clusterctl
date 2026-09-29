@@ -14,8 +14,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
+	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -101,8 +103,29 @@ type Result struct {
 	// table is converted to a list of objects.
 	Object any
 	// Nodes is rendered by the nodeset and name formats. When it is nil
-	// those formats fall back to the first column of the table.
+	// those formats fall back to the first column of the table, if that
+	// column holds node or host names (nodeColumns), and refuse the result
+	// otherwise.
 	Nodes *nodeset.NodeSet
+}
+
+// nodeColumns are the headings of the columns that hold node or host names.
+// Only a first column under one of them stands for the nodes a result lists:
+// another, such as a job id, a file or an attribute value, would print as
+// host names that name nothing.
+var nodeColumns = []string{"NODE", "HOST", "BMC"}
+
+// Check reports whether a result shaped like r can be printed in the
+// format. Only -o nodeset and -o name refuse one, a result that lists no
+// nodes. A command that changes something checks the shape of its result
+// first, so that it is refused before the change rather than after it.
+func (f Format) Check(r Result) error {
+	switch f.Kind {
+	case FormatNodeset, FormatName:
+		_, err := r.nodes()
+		return err
+	}
+	return nil
 }
 
 // Write renders a result.
@@ -175,22 +198,23 @@ func writeNames(w io.Writer, r Result) error {
 	return nil
 }
 
-// nodes returns the node set a result names, falling back to the first column
-// of its table.
+// nodes returns the node set a result lists: its Nodes, else the first
+// column of its table when that column holds node or host names.
 func (r Result) nodes() (*nodeset.NodeSet, error) {
 	if r.Nodes != nil {
 		return r.Nodes, nil
 	}
-	ns := nodeset.New()
-	if r.Table == nil {
-		return ns, nil
+	if r.Table == nil || len(r.Table.Columns) == 0 || !slices.Contains(nodeColumns, r.Table.Columns[0].Name) {
+		return nil, exitcode.Errorf(exitcode.Usage,
+			"-o nodeset and -o name print the nodes or hosts a command lists, and this command lists none; use -o table or -o json")
 	}
+	ns := nodeset.New()
 	for _, row := range r.Table.Rows {
 		if len(row) == 0 || row[0] == "" {
 			continue
 		}
 		if err := ns.Add(row[0]); err != nil {
-			return nil, fmt.Errorf("the first column does not hold host names: %w", err)
+			return nil, fmt.Errorf("the %s column does not hold host names: %w", r.Table.Columns[0].Name, err)
 		}
 	}
 	return ns, nil

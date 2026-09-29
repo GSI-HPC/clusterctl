@@ -445,6 +445,12 @@ would be.`,
 			if err := json.Unmarshal([]byte(args[1]), &body); err != nil {
 				return exitcode.Errorf(exitcode.Usage, "the body is not JSON: %v", err)
 			}
+			// The answer is a tree for each node, which lists no nodes, so
+			// -o nodeset and -o name are refused before the POST, not
+			// after it.
+			if err := a.Format.Check(output.Result{Object: map[string]any{}}); err != nil {
+				return err
+			}
 			nodes, _, err := bmcSet(a, args[2:])
 			if err != nil {
 				return err

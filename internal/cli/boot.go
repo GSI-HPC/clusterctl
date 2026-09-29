@@ -832,6 +832,11 @@ configurations it offers match what is in version control. The pull is
 previewed and confirmed like any other change.`,
 		cobra.NoArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
+			// The lines the pull prints list no nodes, so -o nodeset and
+			// -o name are refused before the pull, not after it.
+			if err := a.Format.Check(output.Result{Object: []string{}}); err != nil {
+				return err
+			}
 			role, err := pxeRole(a)
 			if err != nil {
 				return err
