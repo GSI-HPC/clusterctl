@@ -17,7 +17,8 @@ Everything that changes or destroys something goes through
    over from an earlier command, and an empty selection is a usage error. An
    explicit `-n` is final: given empty, as `-n "$(...)"` is when the command
    inside selects nothing, it is refused and `CLUSTERCTL_NODES` is not read in
-   its place. A node set given both with `-n` and as an argument, or with `-n`
+   its place. So is a node set argument, as `exec "$(...)" -- uptime` gives
+   one. A node set given both with `-n` and as an argument, or with `-n`
    twice, is refused rather than one of them being dropped.
 
 2. **Protected hosts are refused.** `safety.protectedHosts` is a list of node

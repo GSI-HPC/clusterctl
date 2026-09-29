@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
+	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/output"
@@ -90,11 +91,24 @@ func printLines(a *app.App, cmd *cobra.Command, text string) error {
 // from -n, or else from CLUSTERCTL_NODES. An argument together with -n is a
 // usage error, as is an empty selection.
 func selection(a *app.App, args []string) (*nodeset.NodeSet, error) {
-	expr := ""
-	if len(args) > 0 {
-		expr = strings.Join(args, ",")
+	expr, err := nodeSetArgument(args)
+	if err != nil {
+		return nil, err
 	}
 	return a.Select(expr)
+}
+
+// nodeSetArgument joins the words of a node set argument into one
+// expression. An argument that was given empty is refused: App.Select reads
+// an empty expression as none given and falls back to CLUSTERCTL_NODES, so
+// exec "$(...)" -- with nothing inside would reach the whole session set, as
+// an empty -n would.
+func nodeSetArgument(args []string) (string, error) {
+	if len(args) > 0 && strings.TrimSpace(strings.Join(args, "")) == "" {
+		return "", exitcode.Errorf(exitcode.Usage,
+			"the node set argument is empty; %s is not used in its place", config.EnvNodes)
+	}
+	return strings.Join(args, ","), nil
 }
 
 // oneNode resolves the one node a command's NODE argument names, the way a
