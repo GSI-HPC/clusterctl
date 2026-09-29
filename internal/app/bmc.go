@@ -267,7 +267,9 @@ func (a *App) noteFirstContact(pins *redfish.PinStore, host string) {
 // tools locally, so a site that names no role gets a usage error. The
 // processors ipmitool is run for at once are bmc.ipmi.maxConcurrent, or
 // fewer where --fanout is lower; ipmipower, which fans out by itself, is
-// handed --fanout when it was given.
+// handed --fanout when it was given. A status is read through ReadRunner, so
+// that a dry run sees the power state the real run would, and a change goes
+// through Runner, which a dry run records.
 func (a *App) IPMIBackend(ctx context.Context, node string) (*ipmi.Backend, error) {
 	cred, err := a.BMCCredential(ctx, node)
 	if err != nil {
@@ -285,6 +287,7 @@ func (a *App) IPMIBackend(ctx context.Context, node string) (*ipmi.Backend, erro
 	}
 	return &ipmi.Backend{
 		Runner:   a.Runner,
+		Reader:   a.ReadRunner,
 		Target:   target,
 		Spec:     spec,
 		Username: cred.Username,

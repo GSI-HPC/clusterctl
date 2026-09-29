@@ -57,6 +57,10 @@ const (
 type Backend struct {
 	// Runner executes the command, usually over ssh.
 	Runner transport.Runner
+	// Reader executes a status read in place of Runner; nil is Runner. A
+	// dry run records what Runner is given, and a read has to reach the
+	// host all the same, to see what the real run would.
+	Reader transport.Runner
 	// Target is the host the tool runs on.
 	Target transport.Target
 	// Spec is the IPMI configuration of the site.
@@ -127,6 +131,11 @@ func (b *Backend) Power(ctx context.Context, action string, bmcs *nodeset.NodeSe
 				"which the IPMI tools cannot read", b.Username)
 	}
 
+	if action == ActionStatus && b.Reader != nil {
+		reader := *b
+		reader.Runner = b.Reader
+		b = &reader
+	}
 	switch b.backend() {
 	case BackendIpmitool:
 		return b.runIpmitool(ctx, action, bmcs)
