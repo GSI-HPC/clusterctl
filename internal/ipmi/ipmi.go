@@ -421,10 +421,15 @@ func answered(bmc, text string, answer func(string) (string, bool)) Status {
 // the backend or the connection to its host failed, the processor was not
 // reached, which is a transport failure; an action may or may not have been
 // carried out.
+//
+// The transport sets the error of every command that exited with a status,
+// so the status is read before the error. Only an error the transport gave
+// an exit code of its own, ssh's failure to reach the host or an interrupt,
+// says more than the status does.
 func (b *Backend) unreported(result *transport.Result) error {
 	const what = "not reported by the IPMI backend"
 	switch {
-	case result.Err != nil:
+	case exitcode.Has(result.Err):
 		return fmt.Errorf("%s, which failed: %w", what, result.Err)
 	case result.ExitCode == 124 || result.ExitCode == 137:
 		return exitcode.Errorf(exitcode.Transport,
@@ -435,6 +440,8 @@ func (b *Backend) unreported(result *transport.Result) error {
 			detail = ": " + line
 		}
 		return exitcode.Errorf(exitcode.Transport, "%s, which exited %d%s", what, result.ExitCode, detail)
+	case result.Err != nil:
+		return fmt.Errorf("%s, which failed: %w", what, result.Err)
 	default:
 		return errors.New(what)
 	}
