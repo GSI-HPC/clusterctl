@@ -212,6 +212,12 @@ anywhere. A path given in the environment, `CLUSTERCTL_KNOWN_HOSTS`, or with
 it was typed in reads it. A leading `~` is expanded. Absolute paths are left
 alone.
 
+A program named by a path, `workstation.sopsBinary` or the helper of a
+password's `command`, follows the same rule, and so does a password's `file`
+or `ageFile`: `CLUSTERCTL_SOPS_BINARY=tools/sops` is the sops in the working
+directory. A program named without a slash is looked up in `PATH`, wherever
+it was given.
+
 ## Environment variables
 
 The variables are listed in the manual's

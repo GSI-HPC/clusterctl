@@ -276,8 +276,12 @@ next to the documents.
 
 ## Paths
 
-A path resolves against the directory of the `Site` document. A leading `~` is
-expanded. Absolute paths are left alone.
+A path resolves against the directory of the `Site` document, or against the
+working directory when it was given in the environment or with `--set`. A
+leading `~` is expanded. Absolute paths are left alone. A program named by a
+path, `workstation.sopsBinary` or a password helper, resolves the same way:
+`CLUSTERCTL_SOPS_BINARY=tools/sops` is the sops in the working directory. A
+program named without a slash is looked up in `PATH`.
 
 ## Types
 

@@ -440,6 +440,31 @@ func (a *App) absoluteCommandLinePaths() error {
 			return err
 		}
 	}
+	// A program named without a slash is looked up in PATH, wherever it
+	// was given.
+	if strings.ContainsRune(a.Spec.Workstation.SopsBinary, '/') {
+		if err := abs("workstation.sopsBinary", &a.Spec.Workstation.SopsBinary); err != nil {
+			return err
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(a.Spec.Credentials)) {
+		cred := a.Spec.Credentials[name]
+		src := &cred.Password
+		at := "credentials." + name + ".password."
+		if err := abs(at+"file", &src.File); err != nil {
+			return err
+		}
+		if err := abs(at+"ageFile", &src.AgeFile); err != nil {
+			return err
+		}
+		if len(src.Command) > 0 && strings.ContainsRune(src.Command[0], '/') {
+			src.Command = slices.Clone(src.Command)
+			if err := abs(at+"command", &src.Command[0]); err != nil {
+				return err
+			}
+		}
+		a.Spec.Credentials[name] = cred
+	}
 	return nil
 }
 
