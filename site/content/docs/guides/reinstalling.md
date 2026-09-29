@@ -228,9 +228,11 @@ whole: leave out `--run-list` and a run list written earlier is gone, and the
 client falls back to the run list of the archive.
 
 `cinc run` reads that file without sourcing it and hands the two values to the
-client as arguments; any other assignment in the file is ignored. A node whose file holds anything but plain assignments,
-such as an unquoted `$(...)` left by hand or by an older tool, is refused and
-the client is not started there; run `cinc config` again to rewrite it.
+client as arguments; the value of any other assignment in the file is not
+used. A node whose file holds anything but plain assignments, such as an
+unquoted `$(...)` left by hand or by an older tool, is refused and the client
+is not started there, whichever variable it is assigned to, since whatever
+still sources the file would run it; run `cinc config` again to rewrite it.
 The client may run for 30 minutes on each node, or for `fanout.commandTimeout`
 when that is longer, since converging a freshly installed node takes longer
 than most commands.

@@ -584,10 +584,11 @@ func checkCincRunList(s string) error {
 }
 
 // parseCincSolo reads a configuration file without a shell. Every line is a
-// comment or an assignment, and the two values clusterctl uses must be
-// literal words: quoted, escaped or plain, but never anything a shell would
-// expand or run. A file that sourcing would make do more than assign is
-// refused rather than guessed at.
+// comment or an assignment of a literal word: quoted, escaped or plain, but
+// never anything a shell would expand or run. That holds for every
+// variable, not only the two clusterctl uses, since whatever still sources
+// the file runs any of them. A file that sourcing would make do more than
+// assign is refused rather than guessed at.
 func parseCincSolo(text string) (cincSolo, error) {
 	var c cincSolo
 	for n, line := range strings.Split(text, "\n") {
@@ -599,20 +600,16 @@ func parseCincSolo(text string) (cincSolo, error) {
 		if !ok || !isShellName(name) {
 			return cincSolo{}, fmt.Errorf("line %d is not an assignment: %q", n+1, line)
 		}
-		var target *string
-		switch name {
-		case cincURLKey:
-			target = &c.URL
-		case cincRunListKey:
-			target = &c.RunList
-		default:
-			continue
-		}
 		word, err := shellLiteral(value)
 		if err != nil {
 			return cincSolo{}, fmt.Errorf("line %d, %s: %w", n+1, name, err)
 		}
-		*target = word
+		switch name {
+		case cincURLKey:
+			c.URL = word
+		case cincRunListKey:
+			c.RunList = word
+		}
 	}
 	return c, nil
 }
@@ -866,8 +863,8 @@ run list it is configured with. Without a run list, in the file or given
 here, the client uses the run list of the archive.
 
 The configuration file is read, never sourced: a node whose file holds
-anything but plain assignments, or names no http or https archive, is refused
-and the client is not started there.
+anything but plain assignments, to whichever variable, or names no http or
+https archive, is refused and the client is not started there.
 
 The client may run for 30 minutes on each node, or for fanout.commandTimeout
 when that is longer, since converging a freshly installed node takes longer
