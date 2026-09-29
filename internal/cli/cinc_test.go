@@ -269,6 +269,11 @@ func TestCincRunPassesTheFileAsArguments(t *testing.T) {
 				"--override-runlist", "recipe[x]"},
 		},
 		{
+			name:    "with other variables, literal",
+			content: "CHEF_LOG_LEVEL=info\nexport CHEF_ENV='prod $(not run)'\nCHEF_RECIPE_URL=http://installer/cinc/latest.tgz\n",
+			want:    []string{"cinc-solo", "--minimal-ohai", "--recipe-url", "http://installer/cinc/latest.tgz"},
+		},
+		{
 			name:    "with a command substitution, quoted",
 			content: "# written by hand\nexport CHEF_RECIPE_URL='http://installer/cinc/$(touch${IFS}PWNED).tgz'\n",
 			want:    []string{"cinc-solo", "--minimal-ohai", "--recipe-url", "http://installer/cinc/$(touch${IFS}PWNED).tgz"},
@@ -341,6 +346,11 @@ func TestCincRunRefusesAFileThatIsNotPlainAssignments(t *testing.T) {
 		"no archive":                       "CHEF_RUN_LIST=role[exe]\n",
 		"an archive that is not a URL":     "CHEF_RECIPE_URL='file:///srv/latest.tgz'\n",
 		"no file":                          "",
+		// Sourcing runs what any assignment holds, not only what the two
+		// clusterctl reads hold.
+		"another variable that runs a command": "CHEF_RECIPE_URL=http://installer/cinc/latest.tgz\nOTHER=$(reboot)\n",
+		"another variable, exported":           "export OTHER=`reboot`\nCHEF_RECIPE_URL=http://installer/cinc/latest.tgz\n",
+		"a command after another variable":     "CHEF_RECIPE_URL=http://installer/cinc/latest.tgz\nOTHER=1 reboot\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := cincNode(content)
