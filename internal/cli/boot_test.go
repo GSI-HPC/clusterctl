@@ -240,6 +240,89 @@ func TestBootStatusShowsThePersistentLink(t *testing.T) {
 	}
 }
 
+// Without a node set, boot status listed the links in the order of a map,
+// which changes from one run to the next, with the NODE column always
+// empty and a persistent link on a row of its own under its file name. It
+// lists one row per address now, in the order of the addresses, with the
+// one-shot and the persistent link side by side and the inventory node
+// whose boot address it is, from the inventory or from DHCP.
+func TestBootStatusListsEveryLinkInOrderWithItsNode(t *testing.T) {
+	p := newPXEHost(t, pxeOptions{dhcp: "host exe0002 {\n  fixed-address 10.0.2.2;\n}\n"})
+	for _, name := range []string{"10.0.2.10", "10.0.2.1.static", "10.0.2.2", "10.0.2.1", "default"} {
+		p.link(t, name, p.exePath())
+	}
+
+	path := p.exePath()
+	want := []addressLinks{
+		{[]string{"exe0001"}, "10.0.2.1", path, path},
+		{[]string{"exe0002"}, "10.0.2.2", path, "none"},
+		{nil, "10.0.2.10", path, "none"},
+		{nil, "default", path, "none"},
+	}
+	// A map's order changes from one run to the next, so one run in order
+	// proves little.
+	for range 3 {
+		h, err := p.run(t, harnessOptions{}, "--set", staticSuffix, "-o", "json", "boot", "status")
+		if err != nil {
+			t.Fatalf("boot status: %v\n%s", err, h.errOut)
+		}
+		var got []addressLinks
+		if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+			t.Fatalf("not JSON: %v\n%s", err, h.out)
+		}
+		if !slices.EqualFunc(got, want, func(a, b addressLinks) bool {
+			return slices.Equal(a.Nodes, b.Nodes) && a.Address == b.Address &&
+				a.BootPath == b.BootPath && a.Persistent == b.Persistent
+		}) {
+			t.Fatalf("boot status -o json =\n%+v\nwant\n%+v", got, want)
+		}
+	}
+
+	h, err := p.run(t, harnessOptions{}, "--set", staticSuffix, "boot", "status")
+	if err != nil {
+		t.Fatalf("boot status: %v", err)
+	}
+	var addresses []string
+	for line := range strings.SplitSeq(h.out.String(), "\n") {
+		fields := strings.Fields(line)
+		switch {
+		case len(fields) == 4 && strings.HasPrefix(fields[0], "exe"):
+			addresses = append(addresses, fields[0]+" "+fields[1])
+		case len(fields) == 3 && fields[1] == path:
+			addresses = append(addresses, fields[0])
+		}
+	}
+	if got, want := strings.Join(addresses, ", "), "exe0001 10.0.2.1, exe0002 10.0.2.2, 10.0.2.10, default"; got != want {
+		t.Errorf("the table lists %s, want %s:\n%s", got, want, h.out)
+	}
+}
+
+// The node of an address that DHCP gives cannot be named while DHCP cannot
+// be read: the links are listed with the nodes that are known, and the
+// command fails with the reason.
+func TestBootStatusFailsWhenDHCPCannotNameTheNodes(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if len(req.Argv) > 0 && req.Argv[0] == "find" {
+			return &transport.Result{Target: tg, Stdout: "10.0.2.2\t/srv/pxesrv/boot/exe/ipxe.net2\n" +
+				"10.0.2.1\t/srv/pxesrv/boot/exe/ipxe.net2\n"}, nil
+		}
+		return transport.ExitResult(tg, 255, "", "ssh: connect to host dhcp01.example.org port 22: Connection refused\n"), nil
+	}}
+	h, err := run(t, harnessOptions{recorder: rec}, "-o", "json", "boot", "status")
+	wantCode(t, err, exitcode.Transport)
+	if err == nil || !strings.Contains(err.Error(), "Connection refused") {
+		t.Errorf("error = %v, want the reason DHCP could not be read", err)
+	}
+	var got []addressLinks
+	if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, h.out)
+	}
+	if len(got) != 2 || got[0].Address != "10.0.2.1" || !slices.Equal(got[0].Nodes, []string{"exe0001"}) ||
+		got[1].Address != "10.0.2.2" || got[1].Nodes != nil {
+		t.Errorf("boot status -o json = %+v, want both links, exe0001 named from the inventory", got)
+	}
+}
+
 func TestBootSetRefusesOverAPersistentLink(t *testing.T) {
 	p := newPXEHost(t, pxeOptions{})
 	p.link(t, "10.0.2.1.static", p.exePath())

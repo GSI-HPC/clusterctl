@@ -279,6 +279,24 @@ exe0007  10.0.2.7  none       none
 $ clusterctl boot unset -n exe0007
 ```
 
+Without a node set, `boot status` lists every link on the PXE service, one
+row per address in the order of the addresses, with the node whose boot
+address it is, from the inventory or from DHCP:
+
+```console
+$ clusterctl boot status
+NODE     ADDRESS    BOOT PATH                                   PERSISTENT
+exe0007  10.0.2.7   /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2  none
+exe0012  10.0.2.12  none                                        /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2
+         10.0.9.1   /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2  none
+
+3 boot paths configured on install
+```
+
+A link that is no inventory node's, like `10.0.9.1` above, is listed without a
+node. When DHCP cannot be read to name the nodes, the links are listed with
+the nodes that are known and the command fails.
+
 ## GRUB over TFTP
 
 Where nodes load a GRUB configuration named after their address in

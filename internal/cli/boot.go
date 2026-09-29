@@ -8,7 +8,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
+	"net/netip"
 	"path"
 	"slices"
 	"strconv"
@@ -471,7 +473,18 @@ List the boot path configured on the PXE service for each node: the one-shot
 link and, when services.pxesrv.staticSuffix is set, the persistent one.
 
 A node whose address cannot be resolved is listed with the reason and fails
-the command.`,
+the command.
+
+Without a node set, every link under services.pxesrv.root is listed, one row
+per address in the order of the addresses, with the inventory nodes whose
+boot address it is: their address in the inventory, else the one DHCP hands
+them. A link that is no such node's is listed without a node, and a name
+that is not an address comes last. When DHCP cannot be read to name the
+nodes, the links are listed with the nodes that are known, and the command
+fails.
+
+  clusterctl boot status -n exe[1-4]
+  clusterctl boot status`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			role, err := pxeRole(a)
@@ -495,18 +508,11 @@ the command.`,
 				return err
 			}
 
+			suffix := a.Spec.Services.PXESrv.StaticSuffix
 			if ns == nil {
-				t := output.NewTable(output.Cols("NODE", "ADDRESS", "BOOT PATH")...)
-				object := map[string]string{}
-				for name, target := range links {
-					t.Add("", output.EscapeCell(name), output.EscapeCell(target))
-					object[name] = target
-				}
-				t.Caption = fmt.Sprintf("%d boot paths configured on %s", len(links), role)
-				return a.Print(output.Result{Table: t, Object: object})
+				return printBootLinks(a, role, links, suffix)
 			}
 
-			suffix := a.Spec.Services.PXESrv.StaticSuffix
 			cols := []string{"NODE", "ADDRESS", "BOOT PATH"}
 			if suffix != "" {
 				cols = append(cols, "PERSISTENT")
@@ -553,6 +559,116 @@ the command.`,
 			}
 			return nil
 		}))
+}
+
+// addressLinks are the boot links named after one address, and the nodes
+// whose boot address it is.
+type addressLinks struct {
+	Nodes      []string `json:"nodes,omitempty" yaml:"nodes,omitempty"`
+	Address    string   `json:"address" yaml:"address"`
+	BootPath   string   `json:"bootPath" yaml:"bootPath"`
+	Persistent string   `json:"persistentBootPath,omitempty" yaml:"persistentBootPath,omitempty"`
+}
+
+// printBootLinks lists every link under the PXE root, one row per address
+// with its one-shot and its persistent link, in the order of the addresses
+// and after them any name that is not one, which boot set never writes.
+// Each row names the nodes whose boot address it is; when DHCP could not be
+// read for that, the table is printed with the nodes that are known, and
+// the command fails.
+func printBootLinks(a *app.App, role string, links map[string]string, suffix string) error {
+	rows := map[string]*addressLinks{}
+	for name, target := range links {
+		address, persistent := name, false
+		if suffix != "" {
+			address, persistent = strings.CutSuffix(name, suffix)
+		}
+		r := rows[address]
+		if r == nil {
+			r = &addressLinks{Address: address}
+			rows[address] = r
+		}
+		if persistent {
+			r.Persistent = target
+		} else {
+			r.BootPath = target
+		}
+	}
+	var owners map[string][]string
+	var ownersErr error
+	if len(rows) > 0 {
+		owners, ownersErr = bootAddressOwners(a.Context(), a)
+	}
+
+	cols := []string{"NODE", "ADDRESS", "BOOT PATH"}
+	if suffix != "" {
+		cols = append(cols, "PERSISTENT")
+	}
+	t := output.NewTable(output.Cols(cols...)...)
+	object := make([]addressLinks, 0, len(rows))
+	for _, address := range slices.SortedFunc(maps.Keys(rows), compareAddresses) {
+		r := rows[address]
+		r.Nodes = owners[address]
+		r.BootPath = cmp.Or(r.BootPath, "none")
+		row := []string{fold(r.Nodes), output.EscapeCell(r.Address), output.EscapeCell(r.BootPath)}
+		if suffix != "" {
+			r.Persistent = cmp.Or(r.Persistent, "none")
+			row = append(row, output.EscapeCell(r.Persistent))
+		}
+		t.Add(row...)
+		object = append(object, *r)
+	}
+	t.Caption = fmt.Sprintf("%d boot paths configured on %s", len(links), role)
+	if err := a.Print(output.Result{Table: t, Object: object}); err != nil {
+		return err
+	}
+	if ownersErr != nil {
+		return fmt.Errorf("the nodes whose boot address DHCP gives are not named: %w", ownersErr)
+	}
+	return nil
+}
+
+// bootAddressOwners names the nodes of the inventory by the address boot
+// set names their link after: the inventory's, else the one DHCP hands the
+// node. DHCP is read only for a node without an address in the inventory,
+// and only when a role runs the DHCP server. A node whose DHCP address is
+// not decided names no address, since boot set would refuse it.
+func bootAddressOwners(ctx context.Context, a *app.App) (map[string][]string, error) {
+	owners := map[string][]string{}
+	var dhcpErr error
+	for _, n := range a.Inventory.All() {
+		address := n.Address
+		if address == "" && a.Spec.Services.DHCP.Role != "" {
+			cfg, err := a.DHCPConfig(ctx)
+			if err != nil {
+				dhcpErr = err
+				continue
+			}
+			address, _ = cfg.BootAddress(n.Name)
+		}
+		if ip := net.ParseIP(address); ip != nil {
+			owners[ip.String()] = append(owners[ip.String()], n.Name)
+		}
+	}
+	return owners, dhcpErr
+}
+
+// compareAddresses orders addresses by their value, before any name that is
+// not an address.
+func compareAddresses(x, y string) int {
+	ax, errX := netip.ParseAddr(x)
+	ay, errY := netip.ParseAddr(y)
+	switch {
+	case errX == nil && errY == nil:
+		if c := ax.Compare(ay); c != 0 {
+			return c
+		}
+	case errX == nil:
+		return -1
+	case errY == nil:
+		return 1
+	}
+	return strings.Compare(x, y)
 }
 
 func newBootSetCommand(r *root) *cobra.Command {
