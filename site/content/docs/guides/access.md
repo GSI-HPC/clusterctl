@@ -44,8 +44,9 @@ the server presents its key, so no credentials are involved. The strongest key
 the host has is taken: Ed25519, then ECDSA, then RSA, and for an sshd older
 than OpenSSH 7.2 the same RSA key over `ssh-rsa`. A host that serves a role
 with a `proxyJump` is reached through its jump host with `ssh -W`, over the
-generated configuration, so the jump host's own key is checked against the
-file first; that connection runs in batch mode and never prompts. Hosts are
+generated configuration and as the account and port it gives the jump host, so
+the jump host's own key is checked against the file first; that connection
+runs in batch mode and never prompts. Hosts are
 scanned in parallel up to `fanout.max`, and `--timeout` bounds each host once,
 from the connection to the key. With `--bmc`, `scan`, `verify`, `refresh` and `remove` act on
 the nodes' service processors instead, reached the way the `bmc` commands

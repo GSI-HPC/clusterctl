@@ -118,6 +118,44 @@ func TestHostkeyScanGoesThroughTheJumpHost(t *testing.T) {
 	}
 }
 
+// TestHostkeyScanReachesTheJumpHostAsTheConfigurationDoes: the scan logged in
+// to the jump host as the local user, where the generated configuration
+// uses the context's account, and passed an element such as root@mgmt or
+// mgmt:2222 to ssh as it was written, a host no name resolves.
+func TestHostkeyScanReachesTheJumpHostAsTheConfigurationDoes(t *testing.T) {
+	tests := []struct {
+		proxyJump string
+		want      []string
+	}{
+		{"mgmt", []string{"-l alice_adm -W dhcp01.example.org:22 -- mgmt-gw.example.org"}},
+		{"root@mgmt", []string{"-l root -W dhcp01.example.org:22 -- mgmt-gw.example.org"}},
+		{"mgmt:2222", []string{"-l alice_adm -p 2222 -W dhcp01.example.org:22 -- mgmt-gw.example.org"}},
+		{"pool,root@mgmt", []string{
+			"-J alice_adm@pool.example.org",
+			"-l root -W dhcp01.example.org:22 -- mgmt-gw.example.org",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.proxyJump, func(t *testing.T) {
+			binary, argsFile := fakeSSH(t)
+			h, err := run(t, harnessOptions{},
+				"--set", "ssh.binary="+binary, "--set", "hosts.dhcp.proxyJump="+tt.proxyJump,
+				"hostkey", "scan", "-n", "dhcp01", "--timeout", "5s")
+			wantCode(t, err, exitcode.Transport)
+			data, readErr := os.ReadFile(argsFile)
+			if readErr != nil {
+				t.Fatalf("ssh was not run to reach the jump host: %v; output:\n%s", readErr, h.out)
+			}
+			joined := strings.Join(strings.Fields(string(data)), " ")
+			for _, want := range tt.want {
+				if !strings.Contains(joined, want) {
+					t.Errorf("ssh arguments %q do not contain %q", joined, want)
+				}
+			}
+		})
+	}
+}
+
 // TestHostkeyScanRunsHostsInParallel: the hosts used to be scanned one at a
 // time, so every silent node added a timeout. Each dial here waits until all
 // four have started, which only happens when they run at once.

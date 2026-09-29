@@ -327,9 +327,12 @@ Keys are collected by starting an SSH handshake and abandoning it the moment
 the server presents its key, so no credentials are involved. All algorithms
 are offered in one handshake, best first, with `ssh-rsa` last for servers that
 sign with nothing else; it is the same RSA key. A host serving a role with a
-`proxyJump` is reached through `ssh -F <generated config> -o BatchMode=yes -W
-host:22 <jump>`, so the jump is made, and its key checked, exactly as for any
-other connection. Hosts are scanned in parallel up to `fanout.max`, and an
+`proxyJump` is reached through `ssh -F <generated config> -o BatchMode=yes
+[-J <hops before the last>] [-l <user>] [-p <port>] -W host:22 <last hop>`,
+the way ssh itself follows a ProxyJump. The hops are resolved as the generated
+configuration resolves them, a role to its host and its account or the
+context's, so the jump is made, as the same account, and its key checked,
+exactly as for any other connection. Hosts are scanned in parallel up to `fanout.max`, and an
 unreachable host costs one `--timeout`. The file is always
 rewritten completely, under a lock, and sorted, so two administrators
 refreshing at once cannot lose an entry and a diff stays readable.

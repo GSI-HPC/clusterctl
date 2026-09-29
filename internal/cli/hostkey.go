@@ -22,6 +22,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
@@ -70,8 +71,13 @@ func scanTargets(ctx context.Context, a *app.App, ns *nodeset.NodeSet, bmc bool,
 			scans[i] = scan{node: node, err: err}
 			continue
 		}
+		hops, err := jumpHops(a, host)
+		if err != nil {
+			scans[i] = scan{node: node, err: err}
+			continue
+		}
 		scanner := &hostkeys.Scanner{Timeout: timeout, Dial: scanDial}
-		if hops := jumpHops(a, host); len(hops) > 0 {
+		if len(hops) > 0 {
 			scanner.Dial = dialThrough(a, hops)
 		}
 		scans[i] = scan{node: node, host: host, scanner: scanner}
@@ -140,46 +146,55 @@ func scanHost(ctx context.Context, log io.Writer, scanner *hostkeys.Scanner, hos
 
 // jumpHops returns the jump hosts a host is reached through: those of the
 // role serving it, the first role in name order deciding as it does in the
-// generated ssh configuration. A role names another role or a host, and a
-// chain is separated by commas.
-func jumpHops(a *app.App, host string) []string {
+// generated ssh configuration, resolved as that configuration resolves them.
+func jumpHops(a *app.App, host string) ([]transport.Hop, error) {
 	for _, name := range a.RoleNames() {
 		role := a.Spec.Hosts[name]
 		if !strings.EqualFold(role.Host, host) {
 			continue
 		}
 		if role.ProxyJump == "" {
-			return nil
+			return nil, nil
 		}
-		var hops []string
-		for hop := range strings.SplitSeq(role.ProxyJump, ",") {
-			hop = strings.TrimSpace(hop)
-			if jump, ok := a.Spec.Hosts[hop]; ok && jump.Host != "" {
-				hop = jump.Host
-			}
-			hops = append(hops, hop)
+		hops, err := a.SSH.Jumps(role.ProxyJump)
+		if err != nil {
+			return nil, exitcode.Wrap(exitcode.Usage, fmt.Errorf("role %s: %w", name, err))
 		}
-		return hops
+		return hops, nil
 	}
-	return nil
+	return nil, nil
 }
 
 // dialThrough reaches a host the way ssh would, through its jump hosts with
 // "ssh -W". The jumps are made with the generated configuration, so their
 // own host keys are checked against the site's file before anything passes
 // through them. BatchMode keeps a scan of many hosts from prompting.
-func dialThrough(a *app.App, hops []string) func(ctx context.Context, network, address string) (net.Conn, error) {
+//
+// The last hop is given as ssh gives it when it follows a ProxyJump itself,
+// its account with -l and its port with -p: a destination cannot carry a
+// port, and without an account ssh would log in as the local user.
+func dialThrough(a *app.App, hops []transport.Hop) func(ctx context.Context, network, address string) (net.Conn, error) {
 	return func(ctx context.Context, _, address string) (net.Conn, error) {
 		config, err := a.SSH.ConfigPath()
 		if err != nil {
 			return nil, err
 		}
 		argv := []string{a.SSH.Binary(), "-F", config, "-o", "BatchMode=yes"}
-		last := len(hops) - 1
-		if last > 0 {
-			argv = append(argv, "-J", strings.Join(hops[:last], ","))
+		last := hops[len(hops)-1]
+		if before := hops[:len(hops)-1]; len(before) > 0 {
+			chain := make([]string, len(before))
+			for i, hop := range before {
+				chain[i] = hop.String()
+			}
+			argv = append(argv, "-J", strings.Join(chain, ","))
 		}
-		argv = append(argv, "-W", address, "--", hops[last])
+		if last.User != "" {
+			argv = append(argv, "-l", last.User)
+		}
+		if last.Port != "" {
+			argv = append(argv, "-p", last.Port)
+		}
+		argv = append(argv, "-W", address, "--", last.Host)
 		return hostkeys.DialCommand(ctx, argv)
 	}
 }
