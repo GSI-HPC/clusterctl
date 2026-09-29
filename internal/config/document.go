@@ -16,7 +16,9 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/parser"
+	"github.com/goccy/go-yaml/token"
 )
 
 // Origin says where a value came from.
@@ -84,13 +86,17 @@ func (d *Document) Position(path string) Origin {
 // ParseDocuments reads a YAML stream into documents, recording where every
 // value was written.
 func ParseDocuments(file string, data []byte) ([]*Document, error) {
-	f, err := parser.ParseBytes(data, 0)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
+	var astDocs []*ast.DocumentNode
+	for _, tokens := range splitStream(lexer.Tokenize(string(data))) {
+		f, err := parser.Parse(tokens, 0)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", file, err)
+		}
+		astDocs = append(astDocs, f.Docs...)
 	}
 
-	docs := make([]*Document, 0, len(f.Docs))
-	for i, astDoc := range f.Docs {
+	docs := make([]*Document, 0, len(astDocs))
+	for i, astDoc := range astDocs {
 		if astDoc.Body == nil {
 			continue
 		}
@@ -112,6 +118,30 @@ func ParseDocuments(file string, data []byte) ([]*Document, error) {
 		docs = append(docs, doc)
 	}
 	return docs, nil
+}
+
+// splitStream cuts a YAML stream before each document marker that follows
+// another with nothing but comments between them, to be parsed on its own.
+// The parser takes such a second marker for the end of the stream and drops
+// every document after it without an error: a file holding a Site, a
+// document of comments and a Cluster would load without the Cluster.
+func splitStream(tokens token.Tokens) []token.Tokens {
+	var parts []token.Tokens
+	start, afterMarker := 0, false
+	for i, tk := range tokens {
+		switch tk.Type {
+		case token.CommentType:
+		case token.DocumentHeaderType:
+			if afterMarker {
+				parts = append(parts, tokens[start:i])
+				start = i
+			}
+			afterMarker = true
+		default:
+			afterMarker = false
+		}
+	}
+	return append(parts, tokens[start:])
 }
 
 // convert turns a YAML node into a plain tree, recording positions as it
