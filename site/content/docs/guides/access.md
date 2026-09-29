@@ -128,7 +128,10 @@ every command then uses it — which is why `clusterctl login -J` is refused.
 `proxyJump` takes a role name, optionally with an account as in `admin@mgmt`,
 or a fully qualified host, and a comma separated list of either. A bare word
 that is not a role is refused as a likely misspelling, and so is a chain that
-comes back to where it started.
+comes back to where it started. An IPv6 jump host may be written with or
+without brackets, and a role used as one may have an IPv6 host: ssh needs the
+brackets, so the generated configuration always writes them, as in
+`alice@[2001:db8::1]`.
 
 A role's account is passed on the command line, not written into its block, so
 a node whose host name is also a role's host still logs in with your own

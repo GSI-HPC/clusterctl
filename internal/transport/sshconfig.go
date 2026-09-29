@@ -433,12 +433,15 @@ func parseHop(s string) (jumpHop, error) {
 	return hop, nil
 }
 
+// String writes the hop the way ProxyJump reads it. ssh splits a hop at the
+// first colon that is not inside brackets, so an IPv6 address is bracketed
+// whether a port follows it or not.
 func (h jumpHop) String() string {
 	host := h.host
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
 	if h.port != "" {
-		if strings.Contains(host, ":") {
-			host = "[" + host + "]"
-		}
 		host += ":" + h.port
 	}
 	if h.user != "" {

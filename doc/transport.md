@@ -188,10 +188,12 @@ problem and every command refuses to run with it:
   double quote or a backslash is refused;
 - each element of a `proxyJump` list is a role, optionally with an account as
   in `admin@mgmt`, or a fully qualified host name or an address, checked as a
-  destination is, optionally with a port. A bare word that is not a role is
-  refused as a likely misspelling. A chain that comes back to where it
-  started, through role names or through their hosts, is refused: ssh would
-  start hops without end;
+  destination is, optionally with a port. An IPv6 address, given or a role's
+  host, is written in brackets whether a port follows or not: ssh splits a
+  hop at its first colon outside them, and refuses the file over a bare one.
+  A bare word that is not a role is refused as a likely misspelling. A chain
+  that comes back to where it started, through role names or through their
+  hosts, is refused: ssh would start hops without end;
 - roles that connect to the same host have one block between them, so they
   must agree on everything that goes into it.
 
