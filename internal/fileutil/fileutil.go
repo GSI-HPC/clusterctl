@@ -7,6 +7,7 @@
 package fileutil
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -333,7 +334,9 @@ func Update(ctx context.Context, path string, perm os.FileMode, change func([]by
 
 // Lock takes an exclusive lock for a path and returns the function that
 // releases it. The lock lives in a sibling file, so that the locked file can
-// still be replaced atomically.
+// still be replaced atomically. A lock held elsewhere is waited for, for
+// lockWait at most, and the error then names the file and, where the system
+// tells, the process that holds the lock.
 //
 // The lock file is readable, which is all taking the lock needs, by whoever
 // can write the file: its group when the file, or while there is none yet
@@ -348,18 +351,34 @@ func Lock(ctx context.Context, path string) (func(), error) {
 	name := filepath.Join(dir, "."+filepath.Base(path)+".lock")
 	lock := flock.New(name, flock.SetPermissions(perm))
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	wait, cancel := context.WithTimeout(ctx, lockWait)
 	defer cancel()
-	ok, err := lock.TryLockContext(ctx, 50*time.Millisecond)
-	if err != nil {
+	ok, err := lock.TryLockContext(wait, 50*time.Millisecond)
+	switch {
+	case ok:
+		shareLock(name, perm, gid)
+		return func() { _ = lock.Unlock() }, nil
+	case ctx.Err() != nil:
+		return nil, fmt.Errorf("waiting for the lock on %s: %w", path, ctx.Err())
+	case wait.Err() != nil:
+		holder := cmp.Or(lockHolder(name), "another process")
+		return nil, &lockTimeout{fmt.Sprintf("%s is locked by %s, which has not let go of it in %s (the lock is %s); try again once it is done",
+			path, holder, lockWait, name)}
+	default:
 		return nil, fmt.Errorf("locking %s: %w", path, err)
 	}
-	if !ok {
-		return nil, fmt.Errorf("another clusterctl is holding the lock on %s", path)
-	}
-	shareLock(name, perm, gid)
-	return func() { _ = lock.Unlock() }, nil
 }
+
+// lockWait is how long Lock waits for whoever holds a lock to let go.
+const lockWait = 30 * time.Second
+
+// lockTimeout is a lock that was not let go of in time. It is the timeout
+// the deadline it replaces was, without the deadline's words, which say
+// nothing of the lock.
+type lockTimeout struct{ msg string }
+
+func (e *lockTimeout) Error() string { return e.msg }
+func (e *lockTimeout) Unwrap() error { return context.DeadlineExceeded }
 
 // lockMode returns the mode and group a lock for path is created with: the
 // group's read and write permission is that of the file, or of its directory

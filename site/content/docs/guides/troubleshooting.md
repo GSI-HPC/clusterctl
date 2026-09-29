@@ -189,6 +189,21 @@ power cycle is slow on purpose: it is sent in batches of
 `safety.powerOnBatch`, with `safety.powerOnStagger` between them, and
 `--batch` and `--stagger` change both for one command.
 
+## A file is locked
+
+The shared known hosts file, the certificate pins and a tunnel's process id
+file are written under a lock, which another clusterctl, yours or another
+administrator's, may hold. A command waits 30 seconds for it, and then says
+which process holds it where the system can tell:
+
+```
+clusterctl: hostkeys/ssh-known-hosts is locked by process 4242 (clusterctl, run by bob), which has not let go of it in 30s (the lock is hostkeys/.ssh-known-hosts.lock); try again once it is done
+```
+
+A lock ends with the process that holds it, so there is nothing to remove.
+A process on another host that shares the file is named only as another
+process.
+
 ## Something changed that should not have
 
 Every destructive command understands `--dry-run` and prints what it would do
