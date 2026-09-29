@@ -265,6 +265,59 @@ func TestEveryRequestedProcessorIsReported(t *testing.T) {
 	}
 }
 
+// A processor the backend never reported was not reached, whatever ended
+// the backend. The transport sets the error of a command that exited with
+// a status, and that error used to win over the status: a backend that
+// timeout(1) stopped left its processors a target failure, without the
+// hint to check their power state.
+func TestUnreportedProcessorsWereNotReached(t *testing.T) {
+	t.Parallel()
+
+	target := transport.Target{Name: "mgmt", Host: "mgmt-gw.example.org"}
+	timedOut := func(code int) *transport.Result {
+		r := transport.ExitResult(target, code, "bmc1: ok\n", "")
+		r.Err = &transport.TimeoutError{Target: target, ExitCode: code, Timeout: time.Minute}
+		return r
+	}
+	for _, tc := range []struct {
+		name   string
+		result *transport.Result
+		code   int
+		says   string
+	}{
+		{"stopped at its timeout", timedOut(124), exitcode.Transport, "check the power state"},
+		{"killed at its timeout", timedOut(137), exitcode.Transport, "check the power state"},
+		{"failed", transport.ExitResult(target, 1, "bmc1: ok\n", "ipmipower: invalid driver type\n"),
+			exitcode.Transport, "exited 1: ipmipower: invalid driver type"},
+		{"not reached", transport.ExitResult(target, 255, "", "ssh: connect to host mgmt-gw.example.org port 22: Connection refused\n"),
+			exitcode.Transport, "Connection refused"},
+		{"interrupted", &transport.Result{Target: target, ExitCode: -1,
+			Err: exitcode.Wrap(exitcode.Interrupted, fmt.Errorf("%s: %w", target, context.Canceled))},
+			exitcode.Interrupted, "canceled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rec := &transport.Recorder{Reply: func(transport.Target, transport.Request) (*transport.Result, error) {
+				return tc.result, nil
+			}}
+			b := &ipmi.Backend{Runner: rec, Target: target, Username: "admin", Password: "hunter2"}
+			statuses, err := b.Power(context.Background(), ipmi.ActionOff, nodeset.MustParse("bmc[2-3]"))
+			if err != nil {
+				t.Fatalf("Power failed: %v", err)
+			}
+			for _, bmc := range []string{"bmc2", "bmc3"} {
+				s := statusOf(t, statuses, bmc)
+				if got := exitcode.From(s.Cause); got != tc.code {
+					t.Errorf("%s: exit code of the cause = %d, want %d (%v)", bmc, got, tc.code, s.Cause)
+				}
+				if !strings.Contains(s.Err, tc.says) {
+					t.Errorf("%s: error = %q, want it to say %q", bmc, s.Err, tc.says)
+				}
+			}
+		})
+	}
+}
+
 // Only a list of failure words was recognised, so anything else a tool said
 // became the state of the node and the command exited 0.
 func TestOnlyKnownAnswersCountAsSuccess(t *testing.T) {
