@@ -9,6 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -314,6 +317,47 @@ func TestDNSServerTakesAnIPv6Address(t *testing.T) {
 		if got, err := dnsServerAddress(server); err == nil {
 			t.Errorf("dnsServerAddress(%q) = %q, want an error", server, got)
 		}
+	}
+}
+
+// The system name servers are the nameserver lines of resolv.conf, each
+// with port 53, an IPv6 address in brackets. Comments, other keywords and a
+// nameserver line without an address name none.
+func TestResolvConfServersReadsTheNameserverLines(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{"one server", "nameserver 10.0.0.53\n", []string{"10.0.0.53:53"}},
+		{"every line in order", `# written by NetworkManager
+; nameserver 192.0.2.1
+search hpc.example.org example.org
+nameserver 10.0.0.53
+  nameserver   10.0.0.54   # the second
+	nameserver fd00::53
+nameserver fe80::1%eth0
+nameserver
+options ndots:2 timeout:1
+`, []string{"10.0.0.53:53", "10.0.0.54:53", "[fd00::53]:53", "[fe80::1%eth0]:53"}},
+		{"none", "# nothing\nsearch example.org\n", nil},
+		{"an empty file", "", nil},
+		{"no final newline", "nameserver 10.0.0.53", []string{"10.0.0.53:53"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "resolv.conf")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := resolvConfServers(path)
+			if err != nil || !slices.Equal(got, tc.want) {
+				t.Errorf("resolvConfServers = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+
+	if got, err := resolvConfServers(filepath.Join(t.TempDir(), "resolv.conf")); err == nil {
+		t.Errorf("a file that is not there gave %q and no error", got)
 	}
 }
 
