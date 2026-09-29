@@ -45,6 +45,14 @@ $ clusterctl node select '@rack:R02&'
 clusterctl: in "@rack:R02&": the & operator has no right operand
 ```
 
+A range needs both of its bounds for the same reason: `-n "exe[1-$N]"` with
+`N` empty becomes `exe[1-]`, which is an error rather than `exe1`:
+
+```console
+$ clusterctl node select 'exe[1-]'
+clusterctl: in "exe[1-]": the range "1-" has no last bound
+```
+
 ## Folding and expanding
 
 ```console
