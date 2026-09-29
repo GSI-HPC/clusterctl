@@ -439,6 +439,26 @@ func TestScanThroughACommandReportsWhatItSaid(t *testing.T) {
 	}
 }
 
+// TestScanThroughACommandKeepsTheReason: OpenSSH says why a forward
+// failed on the line before its last, which only says that it failed, so
+// keeping the last line alone dropped the reason.
+func TestScanThroughACommandKeepsTheReason(t *testing.T) {
+	t.Parallel()
+
+	s := &hostkeys.Scanner{
+		Timeout: 5 * time.Second,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return hostkeys.DialCommand(ctx, []string{"sh", "-c",
+				"echo 'channel 0: open failed: connect failed: No route to host' >&2; " +
+					"echo 'stdio forwarding failed' >&2; exit 255"})
+		},
+	}
+	_, err := s.Scan(context.Background(), "behind-a-jump")
+	if err == nil || !strings.Contains(err.Error(), "No route to host; stdio forwarding failed") {
+		t.Errorf("error = %v, want both lines the command said", err)
+	}
+}
+
 // TestCommandConnReportsWhatItSaidOnWrite: the client speaks first in an SSH
 // handshake, so a command that has already exited fails the write, not the
 // read, and the reason has to be there too.
