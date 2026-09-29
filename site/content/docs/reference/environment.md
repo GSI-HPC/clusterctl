@@ -75,7 +75,7 @@ queries themselves, to `services.dns.server` or else to the name servers in
 `/etc/resolv.conf`; `/etc/hosts` is not consulted.
 
 **On the nodes:** whatever a command was asked to run, plus `ibstat`,
-`mlxconfig` and `mst` for the adapter commands and the configuration management
-client for `cinc run`.
+`mlxconfig`, `mlxcables` and `mst` for the adapter commands and the
+configuration management client for `cinc run`.
 
 `clusterctl doctor --remote` checks all of it.
