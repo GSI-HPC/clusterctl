@@ -119,6 +119,14 @@ to included.
 which is what ClusterShell's `--autostep` does; without it, `exe[1,3,5,7]`
 prints as it is.
 
+With autostep `n`, a run of at least `n` values with one step is folded,
+wherever it stands: with `n` at 2, `exe[1,3,10,12]` prints as
+`exe[1-3/2,10-12/2]`, as in ClusterShell. The runs are taken from the lowest
+value up. ClusterShell takes the step of the run after a folded one from the
+gap before it, so it folds a little less there: `exe[7,10,11,14]` prints as
+`exe[7-10/3,11-14/3]` here and `exe[7-10/3,11,14]` there. Both name the same
+hosts.
+
 ## Where this differs from ClusterShell
 
 ClusterShell 1.10.1 was run over the corpus in
