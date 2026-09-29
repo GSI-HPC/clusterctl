@@ -187,7 +187,10 @@ sshuttle then keeps. An option that would set one of those itself,
 A tunnel is found by its process id file, and a process counts as the tunnel
 only while it runs with that very file: a file left behind by a crash, even
 one whose number now belongs to another of your processes, is not reported as
-a running tunnel, and `tunnel stop` signals nothing and removes the file.
+a running tunnel, and `tunnel stop` signals nothing and removes the file. The
+process id is reported only for a running tunnel, in `-o json` as in the
+table, so that a script never learns the number of a process that is not the
+tunnel.
 `tunnel stop` takes only the name of a configured profile.
 
 An exclude that expands to nothing is refused rather than dropped:

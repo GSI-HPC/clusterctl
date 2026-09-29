@@ -79,7 +79,8 @@ Report every profile and whether it is running.
 
 A process id file left behind by a crash is not reported as a running tunnel:
 the process it names has to be alive and running with that file, as sshuttle
-started by tunnel start does.`,
+started by tunnel start does. The process id is reported only for a running
+tunnel, since a stale file may name any other process by now.`,
 		cobra.NoArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
 			status := manager(a).Status()

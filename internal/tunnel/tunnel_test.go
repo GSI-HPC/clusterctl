@@ -146,6 +146,23 @@ func TestStatusIgnoresAStalePIDFile(t *testing.T) {
 	}
 }
 
+// A process id file that names a process other than the tunnel was
+// reported with that process id beside "running": false, which invites a
+// script to kill the process it names.
+func TestStatusReportsNoProcessThatIsNotTheTunnel(t *testing.T) {
+	t.Parallel()
+	m := manager(t)
+
+	for _, pid := range []int{2147483646, os.Getpid()} {
+		writePIDFile(t, m.PIDFile("ipmi"), pid)
+		for _, s := range m.Status() {
+			if s.Name == "ipmi" && (s.Running || s.PID != 0) {
+				t.Errorf("a process id file naming process %d: status %+v, want neither running nor a process id", pid, s)
+			}
+		}
+	}
+}
+
 func running(m *tunnel.Manager, name string) bool {
 	for _, s := range m.Status() {
 		if s.Name == name {
