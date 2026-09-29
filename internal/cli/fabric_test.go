@@ -20,6 +20,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
+	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -44,11 +45,11 @@ func fakeTool(t *testing.T, dir, name, body string) {
 
 // shellRunner runs each script sent to the hosts of one role, "" for the
 // nodes, in a real sh, in a scratch directory, with the fake tools of bin
-// first on PATH and what the request sends on its standard input. That is
-// as close to the host as a test gets: what is asserted is what the script
-// does, not how it is spelt. Its exit status is reported as ssh's would be,
-// with the error a non-zero status sets. Every other host answers with
-// nothing.
+// first on PATH and what the request sends on its standard input, or its
+// argument vector quoted as the transport sends it. That is as close to the
+// host as a test gets: what is asserted is what the script does, not how it
+// is spelt. Its exit status is reported as ssh's would be, with the error a
+// non-zero status sets. Every other host answers with nothing.
 func shellRunner(t *testing.T, bin, role string) (*transport.Recorder, string) {
 	t.Helper()
 	work := t.TempDir()
@@ -58,7 +59,7 @@ func shellRunner(t *testing.T, bin, role string) (*transport.Recorder, string) {
 		}
 		script := req.Script
 		if script == "" {
-			script = strings.Join(req.Argv, " ")
+			script = shellquote.Join(req.Argv)
 		}
 		cmd := exec.Command("sh", "-c", script)
 		cmd.Dir = work
@@ -700,7 +701,9 @@ func TestHCAConfigNeverTakesANodeForTheValue(t *testing.T) {
 	if len(calls) != 1 || calls[0].Target.Name != "exe0001" {
 		t.Fatalf("the read went to %v, want exe0001 only", calls)
 	}
-	if strings.Contains(calls[0].Command, "set") {
+	// mlxconfig writes with its set command; the script's own set -u is
+	// no write.
+	if strings.Contains(calls[0].Command, " set ") {
 		t.Errorf("a read sent a write: %s", calls[0].Command)
 	}
 }
@@ -843,6 +846,79 @@ exe0002  unreachable
 			}
 			if !strings.Contains(h.errOut.String(), "exe0002: unreachable: ") {
 				t.Errorf("standard error does not say why exe0002 failed:\n%s", h.errOut)
+			}
+		})
+	}
+}
+
+// mlxconfigQuery is what mlxconfig -e query prints for the adapters of a
+// node, abridged, and for the one --dev names when it is given. mlx5_1 has
+// no MODULE_SPLIT_M0.
+const mlxconfigQuery = `
+query() {
+  cat <<EOF
+
+Device #$2:
+----------
+
+Device type:    ConnectX6
+Description:    ConnectX-6 VPI adapter card; HDR IB (200Gb/s) and 200GbE; dual-port QSFP56
+Device:         $1
+
+Configurations:                                      Default         Current         Next Boot
+         NUM_PF_MSIX_VALID                           True(1)         True(1)         True(1)
+*        NUM_PF_MSIX                                 63              $3              $4
+EOF
+  [ "$1" = mlx5_1 ] && return
+  cat <<EOF
+         MODULE_SPLIT_M0[0]                          1               1               1
+         MODULE_SPLIT_M0[1]                          2               2               2
+         MODULE_SPLIT_M0[2]                          3               3               3
+         MODULE_SPLIT_M0[3]                          4               4               4
+EOF
+}
+case "$*" in
+"--dev mlx5_0 -e query") query mlx5_0 1 63 127 ;;
+"--dev mlx5_1 -e query") query mlx5_1 1 31 31 ;;
+"-e query") query mlx5_0 1 63 127; query mlx5_1 2 31 31 ;;
+*) echo "-E- usage: $*" >&2; exit 1 ;;
+esac
+`
+
+// hca config get matched the key with grep -F, so NUM_PF_MSIX brought
+// NUM_PF_MSIX_VALID along, and the lines of every adapter of a node were
+// joined into one cell without the names of the devices. Each adapter is a
+// row with its device, and a setting is only the one of that exact name, or
+// one of the indices a range names; an adapter without it is named on
+// standard error and fails the command.
+func TestHCAConfigGetReadsTheSettingOfEachAdapter(t *testing.T) {
+	for _, tc := range []struct {
+		key         string
+		code        int
+		out, errOut string
+	}{
+		{"NUM_PF_MSIX", exitcode.OK, `NODE     DEVICE  SETTING      DEFAULT  CURRENT  NEXT BOOT
+exe0001  mlx5_0  NUM_PF_MSIX  63       63       127
+exe0001  mlx5_1  NUM_PF_MSIX  63       31       31
+`, ""},
+		{"MODULE_SPLIT_M0[1..2]", exitcode.TargetFailed, `NODE     DEVICE  SETTING             DEFAULT  CURRENT  NEXT BOOT
+exe0001  mlx5_0  MODULE_SPLIT_M0[1]  2        2        2
+exe0001  mlx5_0  MODULE_SPLIT_M0[2]  3        3        3
+exe0001  mlx5_1
+`, "exe0001: exit 1: mlx5_1: MODULE_SPLIT_M0[1..2] is not among its settings\n"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			bin := t.TempDir()
+			fakeTool(t, bin, "ibstat", `[ "$1" = -l ] && printf 'mlx5_0\nmlx5_1\n'`+"\n")
+			fakeTool(t, bin, "mlxconfig", mlxconfigQuery)
+			rec, _ := shellRunner(t, bin, "")
+			h, err := run(t, harnessOptions{recorder: rec}, "hca", "config", "get", tc.key, "-n", "exe0001")
+			wantCode(t, err, tc.code)
+			if got := trimLines(h.out.String()); got != tc.out {
+				t.Errorf("output:\n%s\nwant:\n%s", got, tc.out)
+			}
+			if !strings.Contains(h.errOut.String(), tc.errOut) {
+				t.Errorf("standard error:\n%s\nwant it to say:\n%s", h.errOut, tc.errOut)
 			}
 		})
 	}
