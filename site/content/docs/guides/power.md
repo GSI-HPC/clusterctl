@@ -197,10 +197,12 @@ forgot the certificate of exe0001.mgmt.hpc.example.org, sha256:1a2b…
 ```
 
 The node's name works, and so does the service processor's as the error gives
-it. Forgetting goes through the same confirmation as any other change, and
-`--dry-run` shows the fingerprints without dropping them. Do it after
-replacing a certificate on purpose. If it changed and nobody replaced it, find
-out why first: the next connection trusts whatever it is shown.
+it. Name them as arguments or with `-n`, not both: both at once is refused
+rather than one of them dropped. Forgetting goes through the same confirmation
+as any other change, and `--dry-run` shows the fingerprints without dropping
+them. Do it after replacing a certificate on purpose. If it changed and nobody
+replaced it, find out why first: the next connection trusts whatever it is
+shown.
 
 When several commands reach a new service processor at the same time, only the
 certificate recorded first is accepted; one that presents a different
