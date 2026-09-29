@@ -78,6 +78,14 @@ semicolon stays a group name.
 Groups may refer to groups, and a cycle is reported rather than looping;
 [nodeset.md](nodeset.md#groups) says how deep.
 
+`@source:*` of a source without an `all` command is the union of its groups,
+each evaluated on its own as `@a,@b` evaluates them. The resolver hands the
+parser one expression, which is read left to right, so a group whose value
+holds `!`, `&` or `^` goes into it as the reference `@source:group` rather
+than as its value, where the operator would apply to every group before it.
+A name that would not read back as that one reference, one holding a space,
+a comma, an operator or a bracket, is refused.
+
 ## Names are host names
 
 The node set language accepts more than a host name may contain, because a

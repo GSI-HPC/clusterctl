@@ -265,7 +265,7 @@ func (r *Resolver) All(source string) (string, error) {
 			return out, nil
 		}
 		// Without a command of its own, the union of every group is what
-		// the source knows.
+		// the source knows, each group evaluated on its own.
 		names, err := r.list(q.ctx, source)
 		if err != nil {
 			return "", err
@@ -276,10 +276,34 @@ func (r *Resolver) All(source string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			parts = append(parts, one)
+			part, err := unionOperand(source, group, one)
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, part)
 		}
 		return strings.Join(parts, ","), nil
 	})
+}
+
+// unionOperand writes a group's expression as one operand of the union All
+// returns, which is evaluated as one expression, left to right: as it is
+// when it holds no operator but the union, and otherwise as a reference to
+// the group, which the parser evaluates on its own, so that the operator
+// does not apply to every group before it. A name the parser would not read
+// back as that one reference is refused, since a reference split at a comma
+// or a space would name other hosts.
+func unionOperand(source, group, expr string) (string, error) {
+	if !strings.ContainsAny(expr, "!&^") {
+		return expr, nil
+	}
+	const splits = " \t\r\n,!&^[]"
+	if group == "" || group == "*" || strings.ContainsAny(group, splits) ||
+		strings.ContainsAny(source, splits+":") {
+		return "", fmt.Errorf("source %q: the group %q holds a set operator and cannot be referred to by its name, "+
+			"so @%s:* cannot evaluate it on its own", source, group, source)
+	}
+	return "@" + source + ":" + group, nil
 }
 
 // List implements nodeset.Lister.

@@ -158,6 +158,13 @@ handed over as it was written, empty for a bare `@group`, so the resolver
 decides what that means: its default source, or a search of several. `@*` and
 `@source:*` ask it for every host of a source.
 
+The resolver answers `@*` with one expression, which is evaluated left to
+right like any other, so one that joins the values of several groups keeps
+each group's operators to that group. `MapResolver` gives the union of the
+source's groups, each evaluated on its own, as ClusterShell does: a group
+whose value holds `!`, `&` or `^` goes in as the reference `@source:group`,
+and a name that would not read back as one is refused.
+
 The expression a resolver returns is parsed in turn, with the same resolver,
 so a group may refer to other groups. Nesting is cut off after sixteen levels,
 which also reports a cycle rather than looping. The hosts of every group an
