@@ -227,11 +227,18 @@ type Status struct {
 }
 
 // Status reports every profile and whether it is running.
+//
+// The process id is reported only for a running tunnel. A stale file can
+// name any other process by now, and a script handed its number beside
+// "not running" might well kill it.
 func (m *Manager) Status() []Status {
 	out := make([]Status, 0, len(m.Profiles))
 	for _, name := range m.Names() {
 		profile := m.Profiles[name]
 		pid, running := m.running(name)
+		if !running {
+			pid = 0
+		}
 		out = append(out, Status{
 			Name:        name,
 			Running:     running,
