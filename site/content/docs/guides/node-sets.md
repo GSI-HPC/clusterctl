@@ -259,4 +259,6 @@ $ clusterctl node fqdn -n '@rack:R02'
 ```
 
 Worth doing before anything destructive. `--dry-run` also prints the set it
-resolved before it stops.
+resolved before it stops. `node list` takes its set as every other command
+does, from the argument, `-n` or `CLUSTERCTL_NODES`, and lists the same nodes
+in every output format; with none of them it lists the whole inventory.
