@@ -14,8 +14,9 @@ $ clusterctl login install -- ls /srv/pxesrv/boot
 ```
 
 A name that matches a configured role connects with that role's account and
-options. Anything else is treated as a host or a node and resolved through the
-naming rules.
+options. A name with a dot is a host name. Anything else is a node, resolved
+the way `-n` resolves it, so `exe7` and `EXE0007` reach the inventory's
+`exe0007`, at the host name the naming rules give it.
 
 `login` takes one name. A command goes after `--`; a second word before it is
 refused rather than dropped, so `clusterctl login mgmt uptime` is an error and

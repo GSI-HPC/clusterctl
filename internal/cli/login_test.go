@@ -38,3 +38,20 @@ func TestLoginRejectsASecondName(t *testing.T) {
 		t.Errorf("the command is missing:\n%s", h.out)
 	}
 }
+
+// TestLoginReachesTheNodeANameSelects: login exe1 connected to
+// exe1.hpc.example.org, while exec -n exe1 reaches exe0001, because a bare
+// name that was not a role went to the naming rules as it was written.
+func TestLoginReachesTheNodeANameSelects(t *testing.T) {
+	for _, name := range []string{"exe1", "EXE0001", "exe0001"} {
+		t.Run(name, func(t *testing.T) {
+			h, err := run(t, harnessOptions{}, "--dry-run", "login", name)
+			if err != nil {
+				t.Fatalf("login %s failed: %v", name, err)
+			}
+			if want := "-- alice_adm@exe0001.hpc.example.org"; !strings.Contains(h.out.String(), want) {
+				t.Errorf("login %s would run:\n%s\nwant it to reach %q", name, h.out, want)
+			}
+		})
+	}
+}
