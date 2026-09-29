@@ -854,20 +854,32 @@ func pduHost(a *app.App, row, rack string) (string, error) {
 func newPDUShellCommand(r *root) *cobra.Command {
 	return leaf("shell ROW RACK [-- COMMAND...]", "Open a session on a rack power distribution unit", `
 Connect to the power distribution unit of a rack, or run one command on it.
+The command follows --; any other word after the rack is refused.
 
   clusterctl pdu shell 1 R02
   clusterctl pdu shell 1 R02 -- show outlets`,
 		cobra.MinimumNArgs(2),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
-			host, err := pduHost(a, args[0], args[1])
+			words, argv := args, []string(nil)
+			if at := cmd.ArgsLenAtDash(); at >= 0 {
+				words, argv = args[:at], args[at:]
+			}
+			// A word after the rack used to be dropped, so a command given
+			// without -- opened a session on the PDU instead of running.
+			switch {
+			case len(words) < 2:
+				return exitcode.Errorf(exitcode.Usage,
+					"pdu shell takes a row and a rack before --, got %q", strings.Join(words, " "))
+			case len(words) > 2:
+				return exitcode.Errorf(exitcode.Usage,
+					"pdu shell takes a row and a rack, got %q; put a command after --, as in "+
+						"\"clusterctl pdu shell %s %s -- %s\"", strings.Join(words, " "), words[0], words[1], strings.Join(words[2:], " "))
+			}
+			host, err := pduHost(a, words[0], words[1])
 			if err != nil {
 				return err
 			}
 			user := a.Spec.BMC.PDU.User
-			var argv []string
-			if at := cmd.ArgsLenAtDash(); at >= 0 {
-				argv = args[at:]
-			}
 			target := transport.Target{Name: host, Host: host, User: user}
 			// A PDU's command line is its own, not sh.
 			return session(a.Context(), a, cmd, target, transport.Request{Argv: argv, NoShell: true})

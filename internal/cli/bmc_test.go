@@ -322,6 +322,38 @@ func TestInventoryNameWithCapitalsIsRefused(t *testing.T) {
 	}
 }
 
+// pdu shell took the row and the rack and dropped every word after them that
+// did not follow --, so "pdu shell 1 R02 olOff 5" opened a session on the
+// PDU instead of switching the outlet off, and a word between the rack and
+// -- was lost too. A -- before the rack ran the rack as the command.
+func TestPDUShellRefusesWordsAfterTheRack(t *testing.T) {
+	for _, args := range [][]string{
+		{"pdu", "shell", "1", "R02", "olOff", "5"},
+		{"pdu", "shell", "1", "R02", "olOff", "--", "5"},
+		{"pdu", "shell", "1", "--", "R02", "olOff", "5"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			h, err := run(t, harnessOptions{}, append([]string{"--dry-run"}, args...)...)
+			if err == nil {
+				t.Fatalf("words after the rack should be refused; would run:\n%s", h.out)
+			}
+			wantCode(t, err, exitcode.Usage)
+			if !strings.Contains(err.Error(), "--") {
+				t.Errorf("error = %v, want it to point at --", err)
+			}
+			wantNoCalls(t, h)
+		})
+	}
+
+	h, err := run(t, harnessOptions{}, "--dry-run", "pdu", "shell", "1", "R02", "--", "olOff", "5")
+	if err != nil {
+		t.Fatalf("pdu shell with a command failed: %v", err)
+	}
+	if out := h.out.String(); !strings.Contains(out, "pdu1-R02.mgmt.example.org olOff 5") {
+		t.Errorf("the host or the command is missing:\n%s", out)
+	}
+}
+
 // bmc web took its argument as it was typed, so a name that is not a host
 // name ended up in the URL that is opened in the browser, where exe0003/x?
 // made the node itself the host.

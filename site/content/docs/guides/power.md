@@ -256,7 +256,9 @@ $ clusterctl pdu shell 1 R02 -- show outlets
 ```
 
 `pdu shell` logs in with ssh as `bmc.pdu.user`, and ssh asks for the PDU's
-password or uses your key, as it would for any other host.
+password or uses your key, as it would for any other host. A command follows
+`--`; a word after the rack without it is refused rather than dropped, which
+would open a session instead of running the command.
 
 ## Which processors answer
 
