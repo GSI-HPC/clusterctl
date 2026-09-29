@@ -527,6 +527,55 @@ func TestFabricGUIDPrefersDHCP(t *testing.T) {
 	}
 }
 
+// The port was derived from every declaration DHCP has for the node, its
+// BMC's among them, so fabric guid listed a port for the BMC's hardware
+// address, and fabric state reported that port without an answer and failed
+// while the node's link was up. Only the declaration named after the node,
+// the one it boots with, names its port.
+func TestFabricLeavesTheBMCDeclarationOut(t *testing.T) {
+	const dhcpd = `host exe0001 {
+  hardware ethernet aa:bb:cc:11:22:33;
+  fixed-address 10.0.2.1;
+}
+host exe0001-bmc {
+  hardware ethernet aa:bb:cc:44:55:66;
+  fixed-address 10.0.3.1;
+}
+`
+	bin := t.TempDir()
+	fakeTool(t, bin, "ibportstate", `[ "$2" = 0xaabbcc0300112233 ] || exit 1
+cat <<'EOF'
+`+ibportstateOutput("Active", "LinkUp")+`EOF
+`)
+	fabric, _ := shellRunner(t, bin, "fabric")
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if tg.Role == "dhcp" {
+			return &transport.Result{Target: tg, Stdout: dhcpd}, nil
+		}
+		return fabric.Reply(tg, req)
+	}}
+
+	h, err := run(t, harnessOptions{recorder: rec}, "fabric", "guid", "-n", "exe0001", "-o", "json")
+	if err != nil {
+		t.Fatalf("fabric guid failed: %v", err)
+	}
+	var guids map[string][]string
+	if err := json.Unmarshal(h.out.Bytes(), &guids); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, h.out)
+	}
+	if got := strings.Join(guids["exe0001"], ","); got != "0xaabbcc0300112233" {
+		t.Errorf("the ports of exe0001 are %s, want only 0xaabbcc0300112233", got)
+	}
+
+	h, err = run(t, harnessOptions{recorder: rec}, "fabric", "state", "-n", "exe0001")
+	if err != nil {
+		t.Errorf("fabric state failed although the node's link is up: %v\n%s", err, h.out)
+	}
+	if strings.Contains(h.out.String(), "0xaabbcc0300445566") {
+		t.Errorf("fabric state asked about the BMC's port:\n%s", h.out)
+	}
+}
+
 // TestHCAConfigSetRefusesWhatIsNotASetting is the report's 1.6: the key and
 // value were written bare into the script, so a value of "1; reboot" ran
 // reboot on every selected node.
