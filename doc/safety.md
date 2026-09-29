@@ -196,9 +196,11 @@ persistent one. A GRUB link over TFTP has no one-shot form, so its preview says
 that it stays until `boot grub unset`.
 
 **A boot link is checked before it is written.** The address a link is named
-after has to be an IP address that no other node has, and every boot path has
-to exist on the PXE host, all before the question, which lists each boot path
-with the nodes and addresses it is written for. The check only reads, so a
+after has to be an IP address that no other node has: none in the inventory,
+and, for an address from DHCP, no declaration that is not the node's own or
+one of its interfaces. Every boot path has to exist on the PXE host. All of it
+is checked before the question, which lists each boot path with the nodes and
+addresses it is written for. The check only reads, so a
 dry run makes it too and is refused where the real run would be: a missing
 boot path, or a persistent link in the way of a one-shot one. Every node is
 tried and reported, so a link that cannot be written neither stops the rest

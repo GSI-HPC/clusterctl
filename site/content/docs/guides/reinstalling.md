@@ -33,7 +33,10 @@ is `name`. A declaration for another interface (`interface`), such as
 whose comment names the node (`comment`), which is only shown. When several
 declarations named after the node carry an address, or one hands out several,
 `boot set` and `provision reinstall` refuse the node rather than pick one; set
-its address in the inventory to settle it.
+its address in the inventory to settle it. They also refuse a node whose
+address DHCP hands to another declaration as well, one that is not the
+node's own interface: the boot link named after the address would arm that
+machine too.
 
 ## Reinstalling
 

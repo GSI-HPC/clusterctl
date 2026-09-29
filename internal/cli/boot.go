@@ -54,34 +54,43 @@ asked for.`,
 // is written as root, so anything that does not parse as an IP address is
 // refused rather than joined into a path.
 func nodeAddress(ctx context.Context, a *app.App, node string) (string, error) {
+	address, _, err := resolveNodeAddress(ctx, a, node)
+	return address, err
+}
+
+// resolveNodeAddress is nodeAddress, which also returns the DHCP
+// configuration when the address came from it.
+func resolveNodeAddress(ctx context.Context, a *app.App, node string) (string, *dhcp.Config, error) {
 	address, source := "", "the inventory"
+	var cfg *dhcp.Config
 	if entry, ok := a.Inventory.Lookup(node); ok && entry.Address != "" {
 		address = entry.Address
 	} else {
-		cfg, err := a.DHCPConfig(ctx)
+		var err error
+		cfg, err = a.DHCPConfig(ctx)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		address, err = cfg.BootAddress(node)
 		switch {
 		case errors.Is(err, dhcp.ErrNoAddress):
 		case err != nil:
-			return "", exitcode.Wrap(exitcode.Usage, err)
+			return "", nil, exitcode.Wrap(exitcode.Usage, err)
 		default:
 			source = "DHCP"
 		}
 	}
 	if address == "" {
-		return "", exitcode.Errorf(exitcode.Usage,
+		return "", nil, exitcode.Errorf(exitcode.Usage,
 			"no address is known for %s; set it in the inventory or in DHCP", node)
 	}
 	ip := net.ParseIP(address)
 	if ip == nil {
-		return "", exitcode.Errorf(exitcode.Usage,
+		return "", nil, exitcode.Errorf(exitcode.Usage,
 			"%s has the address %q in %s, which is not an IP address; the boot link is named after it",
 			node, output.EscapeCell(address), source)
 	}
-	return ip.String(), nil
+	return ip.String(), cfg, nil
 }
 
 // nodeAddresses resolves the boot address of each node, in order, and
@@ -97,14 +106,21 @@ func nodeAddresses(ctx context.Context, a *app.App, nodes []string) ([]string, e
 	addresses := make([]string, len(nodes))
 	seen := map[string]string{}
 	for i, node := range nodes {
-		address, err := nodeAddress(ctx, a, node)
+		address, cfg, err := resolveNodeAddress(ctx, a, node)
 		if err != nil {
 			return nil, err
 		}
 		if other, ok := seen[address]; ok {
 			return nil, sharedAddress(address, other, node)
 		}
-		for _, other := range owners[address] {
+		others := owners[address]
+		if cfg != nil {
+			// The inventory's addresses are unique, but DHCP may hand this
+			// one to a machine the inventory knows no address of, or none
+			// at all.
+			others = append(slices.Clone(others), dhcpHolders(cfg, node, address)...)
+		}
+		for _, other := range others {
 			if other != node {
 				return nil, sharedAddress(address, other, node)
 			}
@@ -113,6 +129,28 @@ func nodeAddresses(ctx context.Context, a *app.App, nodes []string) ([]string, e
 		addresses[i] = address
 	}
 	return addresses, nil
+}
+
+// dhcpHolders names the declarations that hand out an address and are not
+// the node's own, nor one of its other interfaces.
+func dhcpHolders(cfg *dhcp.Config, node, address string) []string {
+	own := map[string]bool{}
+	for _, m := range cfg.Lookup(node) {
+		own[m.Name] = true
+	}
+	var out []string
+	for _, h := range cfg.Hosts {
+		if own[h.Name] {
+			continue
+		}
+		for fixed := range strings.SplitSeq(h.Address, ",") {
+			if ip := net.ParseIP(strings.TrimSpace(fixed)); ip != nil && ip.String() == address {
+				out = append(out, h.Name)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func sharedAddress(address, first, second string) error {
@@ -524,9 +562,10 @@ a reinstall a one-liner. A node matched by two rules is an error rather than a
 silent first match. A rule marked static writes a persistent link, as
 --persistent does; both need services.pxesrv.staticSuffix.
 
-Before it asks, the command resolves every address, checks that each boot
-path exists on the PXE host, and refuses a one-shot path for a node that has
-a persistent one. The question lists each boot path with its nodes.
+Before it asks, the command resolves every address, refuses one that another
+node has too in the inventory or in DHCP, checks that each boot path exists
+on the PXE host, and refuses a one-shot path for a node that has a persistent
+one. The question lists each boot path with its nodes.
 
 Every node is tried, and each one's result is listed; a node that failed or
 was not reported fails the command.
