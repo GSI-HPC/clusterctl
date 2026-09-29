@@ -23,7 +23,9 @@ The authoritative field list is the JSON Schema:
 $ clusterctl config schema Site
 ```
 
-or `https://gsi-hpc.github.io/clusterctl/schema/v1alpha1/site.json`.
+or `https://gsi-hpc.github.io/clusterctl/schema/v1alpha1/site.json`. Without a
+kind, `config schema` prints one JSON object with the schema of every kind
+under its name, so `clusterctl config schema | jq .Site` is the same schema.
 
 ## Merge layers
 
