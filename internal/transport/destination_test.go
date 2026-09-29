@@ -37,6 +37,22 @@ func TestArgsEndOptionsBeforeTheDestination(t *testing.T) {
 	}
 }
 
+// notDestinations are targets whose host or account ssh and scp would read
+// as something else: an option, another host, a port or a second argument.
+var notDestinations = []transport.Target{
+	{Name: "n", Host: "-oProxyCommand=touch${IFS}/tmp/pwned1;#"},
+	{Name: "n", Host: "-v"},
+	{Name: "n", Host: "exe0001 -v"},
+	{Name: "n", Host: "x@exe0001"},
+	{Name: "n", Host: "exe0001:22"},
+	{Name: "n", Host: ""},
+	{Name: "n", Host: "exe0001", User: "-oProxyCommand=x"},
+	{Name: "n", Host: "exe0001", User: "a@b"},
+	{Name: "n", Host: "exe0001", User: "a b"},
+	{Name: "n", Host: "exe0001", User: "a\nb"},
+	{Name: "n", Host: "exe0001", User: "x:y"},
+}
+
 func TestArgsRefuseADestinationThatIsNotAHost(t *testing.T) {
 	t.Parallel()
 	// No default user, so that the destination is the bare host name, which
@@ -44,18 +60,7 @@ func TestArgsRefuseADestinationThatIsNotAHost(t *testing.T) {
 	dir := t.TempDir()
 	c := transport.New(transport.Options{StateDir: dir, KnownHostsFile: filepath.Join(dir, "known_hosts")})
 
-	for _, target := range []transport.Target{
-		{Name: "n", Host: "-oProxyCommand=touch${IFS}/tmp/pwned1;#"},
-		{Name: "n", Host: "-v"},
-		{Name: "n", Host: "exe0001 -v"},
-		{Name: "n", Host: "x@exe0001"},
-		{Name: "n", Host: "exe0001:22"},
-		{Name: "n", Host: ""},
-		{Name: "n", Host: "exe0001", User: "-oProxyCommand=x"},
-		{Name: "n", Host: "exe0001", User: "a@b"},
-		{Name: "n", Host: "exe0001", User: "a b"},
-		{Name: "n", Host: "exe0001", User: "a\nb"},
-	} {
+	for _, target := range notDestinations {
 		args, err := c.Args(target, transport.Request{Argv: []string{"uptime"}})
 		if err == nil {
 			t.Errorf("Args(%+v) = %q, want it refused", target, args)
@@ -63,6 +68,30 @@ func TestArgsRefuseADestinationThatIsNotAHost(t *testing.T) {
 		}
 		if got, want := exitcode.From(err), exitcode.Usage; got != want {
 			t.Errorf("Args(%+v): exit code = %d, want %d", target, got, want)
+		}
+	}
+}
+
+// TestCopyArgsRefuseWhatArgsRefuse: scp was handed the account unchecked,
+// so copy -u 'x:y' built x:y@exe0001:/tmp/, which scp reads as the host x,
+// where a command with the same -u was refused.
+func TestCopyArgsRefuseWhatArgsRefuse(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	c := transport.New(transport.Options{StateDir: dir, KnownHostsFile: filepath.Join(dir, "known_hosts")})
+
+	for _, target := range notDestinations {
+		for _, upload := range []bool{true, false} {
+			args, err := c.CopyArgs(target, transport.CopyRequest{
+				Sources: []string{"/etc/hosts"}, Destination: "/tmp/", Upload: upload,
+			})
+			if err == nil {
+				t.Errorf("CopyArgs(%+v, upload %v) = %q, want it refused", target, upload, args)
+				continue
+			}
+			if got, want := exitcode.From(err), exitcode.Usage; got != want {
+				t.Errorf("CopyArgs(%+v, upload %v): exit code = %d, want %d", target, upload, got, want)
+			}
 		}
 	}
 }

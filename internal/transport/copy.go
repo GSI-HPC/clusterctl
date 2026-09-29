@@ -55,9 +55,9 @@ func (c *Client) CopyArgs(target Target, req CopyRequest) ([]string, error) {
 		args = append(args, "-o", "BatchMode=yes")
 	}
 
-	host := target.Host
-	if user := c.userFor(target); user != "" {
-		host = user + "@" + host
+	host, err := c.destination(target)
+	if err != nil {
+		return nil, err
 	}
 	// A path holding a colon would be read as a host, and one starting with
 	// a dash as an option, so both are made unambiguous.
