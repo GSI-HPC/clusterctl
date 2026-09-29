@@ -242,7 +242,9 @@ func noReason(reason string) bool {
 func (c *Client) Nodes(ctx context.Context, ns *nodeset.NodeSet, states []string) ([]Node, error) {
 	// The reason goes last; it is the one field people write.
 	format := newFramed("%N", "%T", "%R", "%c", "%m", "%f", "%G", "%u", "%H", "%E")
-	argv := []string{"sinfo", "--noheader", "--Node", "--format", format.format()}
+	// --all includes the nodes of hidden partitions, as CheckNodes does:
+	// scontrol changes them all the same, and a read-back must see them.
+	argv := []string{"sinfo", "--all", "--noheader", "--Node", "--format", format.format()}
 	if ns != nil && !ns.IsEmpty() {
 		argv = append(argv, "--nodes", ns.Hostlist())
 	}

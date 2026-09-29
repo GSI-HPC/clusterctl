@@ -123,6 +123,50 @@ func TestNodesRefusesOutputOfTheWrongShape(t *testing.T) {
 	}
 }
 
+// sinfo leaves out a node whose partitions are all hidden unless it is
+// asked with --all, as CheckNodes and the job check ask it, while scontrol
+// changes such a node all the same. Nodes asked without it, so such a node
+// was missing from node list, from the warnings of a plan and from the
+// read-back after a failed update, which said it had not been drained.
+func TestNodesIncludesTheNodesOfHiddenPartitions(t *testing.T) {
+	t.Parallel()
+
+	var updated bool
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if req.Argv[0] == "scontrol" {
+			updated = true
+			return &transport.Result{Target: tg, ExitCode: 1, Stderr: "slurm_update error: Invalid node state specified\n"}, nil
+		}
+		rows := []slurm.Row{{"N": "exe0001", "T": "idle", "R": "main", "E": "none"}}
+		if slices.Contains(req.Argv, "--all") {
+			reason := "none"
+			if updated {
+				reason = "ticket 42"
+			}
+			rows = append(rows, slurm.Row{"N": "exe0099", "T": "drained", "R": "maint", "E": reason})
+		}
+		return &transport.Result{Target: tg, Stdout: slurm.Render(req, rows...)}, nil
+	}}
+	c := &slurm.Client{Runner: rec, Target: transport.Target{Name: "login"}}
+
+	nodes, err := c.Nodes(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("Nodes failed: %v", err)
+	}
+	var names []string
+	for _, n := range nodes {
+		names = append(names, n.Name+" in "+n.Partition)
+	}
+	if want := []string{"exe0001 in main", "exe0099 in maint"}; !slices.Equal(names, want) {
+		t.Errorf("Nodes = %q, want %q", names, want)
+	}
+
+	err = c.Drain(context.Background(), nodeset.MustParse("exe[0001,0099]"), "ticket 42")
+	if err == nil || !strings.Contains(err.Error(), "afterwards exe0099 is drained with this reason, exe0001 is not") {
+		t.Errorf("error = %v, want the hidden node read back", err)
+	}
+}
+
 func TestNodesKeepsOnlyTheStateAskedFor(t *testing.T) {
 	t.Parallel()
 
