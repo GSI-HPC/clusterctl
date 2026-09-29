@@ -139,6 +139,11 @@ be read is, and fails the command with exit code `3` when the host could not
 be reached; the JSON output lists every node, with an `error` field for the
 ones that failed.
 
+`dhcp log` shows the lines of `dhcpd` in `services.dhcp.logPath`,
+`/var/log/syslog` unless configured. A log that cannot be read, as on a host
+that logs to the journal alone, fails it with exit code `1` rather than
+showing nothing.
+
 ## Doing it by hand
 
 ```console

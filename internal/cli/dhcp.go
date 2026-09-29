@@ -6,6 +6,7 @@ package cli
 import (
 	"cmp"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/dhcp"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
-	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -33,7 +33,7 @@ asked again for the next node. A fetched copy is reused by the commands that
 follow for services.dhcp.cacheTtl, two minutes unless it says otherwise.`,
 		newDHCPHostsCommand(r),
 		newDHCPConfigCommand(r),
-		newDHCPLeasesCommand(r),
+		newDHCPLogCommand(r),
 		newDHCPShellCommand(r),
 		newDHCPCaptureCommand(r),
 	)
@@ -115,11 +115,13 @@ Print every host declaration the DHCP server carries.`,
 		}))
 }
 
-func newDHCPLeasesCommand(r *root) *cobra.Command {
+func newDHCPLogCommand(r *root) *cobra.Command {
 	var lines int
 	cmd := leaf("log", "Show the DHCP responses from the server log", `
-Read the DHCP exchanges out of the server's log, which is what to look at when
-a node is not coming up. At most 10000 lines are shown.`,
+Read the DHCP exchanges out of the server's log, services.dhcp.logPath, which
+is what to look at when a node is not coming up. At most 10000 lines are
+shown. A log that cannot be read, such as /var/log/syslog on a host that logs
+to the journal alone, fails the command rather than showing nothing.`,
 		cobra.NoArgs,
 		func(cmd *cobra.Command, _ []string) error {
 			if lines < 1 || lines > maxLogLines {
@@ -133,10 +135,13 @@ a node is not coming up. At most 10000 lines are shown.`,
 			if spec.Role == "" {
 				return exitcode.Errorf(exitcode.Usage, "no host role runs the DHCP server; set services.dhcp.role")
 			}
-			path := spec.LogPath
+			// A pipeline exits with its last command, so a log that cannot
+			// be read is looked for first, rather than shown as empty.
 			result, err := a.RunOnRole(a.Context(), spec.Role, transport.Request{
 				Argv: []string{"sh", "-c",
-					fmt.Sprintf("grep -a -e dhcpd -- %s | tail -n %d", shellquote.Quote(path), lines)},
+					`[ -r "$1" ] || { echo "$1 cannot be read" >&2; exit 1; }; ` +
+						`grep -a -e dhcpd -- "$1" | tail -n "$2"`,
+					"sh", spec.LogPath, strconv.Itoa(lines)},
 			})
 			if err != nil {
 				return err
