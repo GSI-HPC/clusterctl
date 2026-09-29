@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -454,6 +455,39 @@ func TestBootGrubSetSaysItPersistsAndCanBeUnset(t *testing.T) {
 	h, err = run(t, harnessOptions{}, "boot", "grub", "unset", "exe0001")
 	if err == nil || len(h.recorder.Calls()) != 0 {
 		t.Errorf("boot grub unset without a terminal should be refused and send nothing, got %v", err)
+	}
+}
+
+// boot grub show looked its argument up as it was written, while boot grub
+// set resolves it the way -n is: EXE0001 and the host name had no address,
+// exe1 was shown as exe1 rather than as exe0001, and exe[1-2] was taken for
+// one node without an address instead of being refused as two.
+func TestBootGrubShowResolvesTheNodeAsSetDoes(t *testing.T) {
+	for _, arg := range []string{"exe0001", "exe1", "EXE0001", "exe0001.hpc.example.org"} {
+		t.Run(arg, func(t *testing.T) {
+			h, err := run(t, harnessOptions{}, "-o", "json", "boot", "grub", "show", arg)
+			if err != nil {
+				t.Fatalf("boot grub show %s: %v", arg, err)
+			}
+			var got map[string]string
+			if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+				t.Fatalf("not JSON: %v\n%s", err, h.out)
+			}
+			want := map[string]string{"node": "exe0001", "address": "10.0.2.1", "grubFile": "grub.cfg-0A000201"}
+			if !maps.Equal(got, want) {
+				t.Errorf("boot grub show %s = %v, want %v", arg, got, want)
+			}
+			wantNoCalls(t, h)
+		})
+	}
+
+	for arg, want := range map[string]string{"exe[1-2]": "2 nodes", "": "no node"} {
+		h, err := run(t, harnessOptions{}, "boot", "grub", "show", arg)
+		wantCode(t, err, exitcode.Usage)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("boot grub show %q: %v, want it to say %q", arg, err, want)
+		}
+		wantNoCalls(t, h)
 	}
 }
 
