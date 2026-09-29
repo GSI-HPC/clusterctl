@@ -109,7 +109,9 @@ exe0001
 So a command runs once on a machine however many ways it was named, and a
 protected host is refused however it was written. A name with a domain the
 naming rules do not give it is left as it is, and a change to a name the
-inventory does not know needs `--force`.
+inventory does not know needs `--force`. A name that could be two machines is
+refused: with `bmcAddress: exe4` on `exe0003`, `exe4` is both that address and
+`exe0004` written without its padding, so write `exe0003` or `exe0004`.
 
 ## Groups
 

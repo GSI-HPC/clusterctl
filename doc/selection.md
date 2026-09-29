@@ -113,10 +113,15 @@ list is reduced to its short name when it is the host name or service processor
 name the rules give that short name. Anything else is kept, lowercased.
 Because the result is a set, one machine named several ways is one member. An
 alias two inventory nodes share names neither, and an inventory name is never
-taken over by another node's alias. The one node that `login`, `node
-describe` and `node groups` take as an argument is resolved the same way
-(`oneNode`), so that `login exe1` reaches the `exe0001` that `exec -n exe1`
-does, and `node describe` finds a node by its host name.
+taken over by another node's alias. Nor is any other spelling of it: a name
+that is one node's written with other padding or as its host name, and another
+node's alias as well, could be either machine, and is refused as ambiguous with
+a usage error. With `bmcAddress: exe4` on `exe0003`, `exe4` would otherwise
+reach `exe0003` while `EXE04` reached `exe0004`; `exe0004` itself stays
+`exe0004`. The one node that `login`, `node describe` and `node groups` take as
+an argument is resolved the same way (`oneNode`), so that `login exe1` reaches
+the `exe0001` that `exec -n exe1` does, and `node describe` finds a node by its
+host name.
 
 ## One machine, one spelling
 
