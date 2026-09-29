@@ -31,6 +31,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
+	"github.com/GSI-HPC/clusterctl/internal/termtext"
 )
 
 // DefaultAlgorithms are the host key algorithms collected for a host, best
@@ -560,13 +561,15 @@ func (c *commandConn) Write(p []byte) (int, error) {
 }
 
 // explain adds what the command said on its way out to an error of the
-// connection, such as a jump host that could not be reached.
+// connection, such as a jump host that could not be reached. Every line is
+// kept: ssh gives the reason on one line and ends with another that only
+// says the forward failed.
 func (c *commandConn) explain(err error) error {
 	select {
 	case <-c.done:
 	case <-time.After(time.Second):
 	}
-	if msg := lastLine(c.stderr.String()); msg != "" {
+	if msg := said(c.stderr.String()); msg != "" {
 		return fmt.Errorf("%s: %s: %w", c.argv[0], msg, err)
 	}
 	return err
@@ -617,7 +620,14 @@ func (l *lockedBuffer) String() string {
 	return l.b.String()
 }
 
-func lastLine(s string) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	return strings.TrimSpace(lines[len(lines)-1])
+// said joins the lines of a command's standard error that say something
+// into one, escaped, since a jump host wrote part of it.
+func said(s string) string {
+	var lines []string
+	for line := range strings.SplitSeq(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return termtext.EscapeCell(strings.Join(lines, "; "))
 }
