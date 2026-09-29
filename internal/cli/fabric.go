@@ -42,11 +42,11 @@ machine did.`,
 // addresses DHCP or the inventory knows.
 //
 // DHCP comes first, because it is what the node boots with and what the
-// documentation promises; the inventory answers only for a node DHCP does
-// not know, or when no host role runs the DHCP server. The DHCP
-// configuration is read once per command, and a failure to read it fails the
-// lookup rather than quietly falling back to an inventory address that may be
-// stale.
+// documentation promises; the inventory answers only for a node that has no
+// declaration named after it, or when no host role runs the DHCP server. The
+// DHCP configuration is read once per command, and a failure to read it fails
+// the lookup rather than quietly falling back to an inventory address that
+// may be stale.
 type guidLookup struct {
 	a    *app.App
 	dhcp *dhcp.Config
@@ -75,7 +75,13 @@ func (l *guidLookup) guids(ctx context.Context, node string) ([]string, error) {
 	var macs []string
 	if l.dhcp != nil {
 		for _, host := range l.dhcp.Lookup(node) {
-			macs = append(macs, host.MACs...)
+			// Only the declaration named after the node is the adapter it
+			// boots with, as for its boot address. Another interface's,
+			// such as its BMC's, is another card, and the port derived
+			// from it is one the fabric has never heard of.
+			if host.By == dhcp.ByName {
+				macs = append(macs, host.MACs...)
+			}
 		}
 	}
 	if len(macs) == 0 {
@@ -112,9 +118,12 @@ func newFabricGUIDCommand(r *root) *cobra.Command {
 	return leaf("guid [NODESET]", "Show the fabric identifiers of a node set", `
 Print the adapter identifier of each node, derived from its hardware address.
 
-The hardware address comes from DHCP, and from the inventory for a node DHCP
-does not know. A node whose identifier cannot be derived is named on standard
-error and makes the command fail; it is left out of the table and of -o json.`,
+The hardware address comes from the DHCP declaration named after the node,
+the one its boot address comes from, and from the inventory for a node that
+has none. The declaration of another of its interfaces, such as its BMC, names
+no port of the fabric and is left out. A node whose identifier cannot be
+derived is named on standard error and makes the command fail; it is left out
+of the table and of -o json.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
