@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -821,6 +822,45 @@ func TestProvisionStatusNamesTheNodesFirst(t *testing.T) {
 	defer h.bmcs.mu.Unlock()
 	if len(h.bmcs.seen) != 0 {
 		t.Errorf("the processors were asked before the command stopped: %q", h.bmcs.seen)
+	}
+}
+
+// provision status said why ssh failed in words of its own: the first line
+// of standard error, which is the banner when the host prints one, where
+// every other command gives the last line, ssh's own. It says it as exec
+// and node info do now, and names the exit status of a node that said
+// nothing.
+func TestProvisionStatusSaysWhySshFailedAsExecDoes(t *testing.T) {
+	h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
+	reply := h.rec.Reply
+	h.rec.Reply = func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if len(req.Argv) == 0 || req.Argv[0] != "uptime" {
+			return reply(tg, req)
+		}
+		switch tg.Name {
+		case "exe0002":
+			return transport.ExitResult(tg, 255, "",
+				"Authorized uses only. All activity may be monitored.\nexe0002: Permission denied (publickey).\n"), nil
+		case "exe0003":
+			return transport.ExitResult(tg, 1, "", ""), nil
+		}
+		return reply(tg, req)
+	}
+	out, err := h.run(t, harnessOptions{}, "-o", "json", "provision", "status", "-n", "exe[0001-0003]")
+	if err != nil {
+		t.Fatalf("provision status failed: %v\n%s", err, out.errOut)
+	}
+	var states []provisionState
+	if err := json.Unmarshal(out.out.Bytes(), &states); err != nil {
+		t.Fatalf("output is not a list of nodes: %v\n%s", err, out.out)
+	}
+	got := map[string]string{}
+	for _, s := range states {
+		got[s.Node] = s.SSHError
+	}
+	want := map[string]string{"exe0001": "", "exe0002": "exe0002: Permission denied (publickey).", "exe0003": "exit 1"}
+	if !maps.Equal(got, want) {
+		t.Errorf("ssh errors = %q, want %q", got, want)
 	}
 }
 
