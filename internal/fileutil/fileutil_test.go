@@ -6,14 +6,17 @@ package fileutil_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
@@ -180,6 +183,53 @@ func TestLockIsSharedWithTheGroup(t *testing.T) {
 	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
 		t.Errorf("private lock mode = %v, want %v", got, want)
 	}
+}
+
+// A lock held elsewhere said "locking ...: context deadline exceeded" after
+// 30 seconds, and the message meant for it could never be shown. It now
+// says which file is locked and, where the system tells, which process
+// holds it: this one, here, through another descriptor. It stays a
+// timeout, and the command's own end while it waits stays the command's.
+func TestLockSaysWhoHoldsIt(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "ssh-known-hosts")
+	unlock, err := fileutil.Lock(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Lock failed: %v", err)
+	}
+	defer unlock()
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		_, err := fileutil.Lock(context.Background(), path)
+		if err == nil {
+			t.Fatal("a lock held elsewhere was taken")
+		}
+		if waited := time.Since(start); waited != 30*time.Second {
+			t.Errorf("waited %v, want 30s", waited)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, path) || strings.Contains(msg, "context deadline exceeded") {
+			t.Errorf("error %q does not name the file, or names the deadline", msg)
+		}
+		if runtime.GOOS == "linux" && !strings.Contains(msg, fmt.Sprintf("process %d (", os.Getpid())) {
+			t.Errorf("error %q does not name this process as the holder", msg)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("error %q is no longer a timeout", msg)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			cancel()
+		}()
+		if _, err := fileutil.Lock(ctx, path); !errors.Is(err, context.Canceled) {
+			t.Errorf("interrupted while it waited: err = %v, want context.Canceled", err)
+		}
+	})
 }
 
 // TestWriteAtomicKeepsModeAndGroup keeps a shared file writable by the
