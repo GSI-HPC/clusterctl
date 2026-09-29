@@ -210,8 +210,10 @@ nor goes unnoticed.
 **Draining a node needs a reason.** The reason is the first argument, not an
 option, because a drained node with no reason is one nobody dares resume. It is checked before the preview: no control characters, which could
 rewrite what the confirmation shows, no `|`, which Slurm's parsable output
-uses between fields, at most 200 characters, and nothing that reads as nodes,
-which is what a forgotten reason looks like. The preview quotes it.
+uses between fields, at most 200 characters, and more than nodes: a reason
+whose every word is a group or a node the inventory knows is what a forgotten
+reason looks like. One that mentions a node among other words says what is
+wrong with it and is kept. The preview quotes it.
 
 **Slurm has to read a node set as itself.** `scontrol update` expands `ALL`
 to every node and a `NodeSet` name to its members, which the gate would count
