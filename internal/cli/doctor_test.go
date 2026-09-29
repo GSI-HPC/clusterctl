@@ -326,6 +326,9 @@ func TestDoctorRemoteFailsARoleWhoseToolsSessionDidNotRun(t *testing.T) {
 		{"an account that runs nothing", func(tg transport.Target) *transport.Result {
 			return transport.ExitResult(tg, 1, "", "This account is currently not available.\n")
 		}, "role login | failed | login (login.hpc.example.org): command exited 1"},
+		{"a script that exits 127 without a word", func(tg transport.Target) *transport.Result {
+			return transport.ExitResult(tg, 127, "", "")
+		}, "role login | failed | login (login.hpc.example.org): command exited 127"},
 		{"an interrupt", func(tg transport.Target) *transport.Result {
 			return &transport.Result{Target: tg, ExitCode: 255, Err: exitcode.Wrap(exitcode.Interrupted, context.Canceled)}
 		}, "role login | failed | context canceled"},
