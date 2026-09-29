@@ -6,7 +6,10 @@ weight: 5
 The Slurm clients run on a host the configuration names. clusterctl asks them
 for their parsable output with an explicit field list and splits on the
 separator — never for the aligned display form, which moves with the terminal
-width and truncates.
+width and truncates. A line with more fields than were asked for has a value
+that holds the separator, and which field the rest belongs to cannot be told,
+so the command fails with exit code `1` and names the line rather than show
+every column after it shifted.
 
 ## Nodes
 
@@ -148,6 +151,10 @@ $ clusterctl slurm account limits proj
 $ clusterctl slurm account shares proj
 $ clusterctl slurm account shares proj 100
 ```
+
+`sacctmgr` puts `|` between fields and has no other separator, so an account
+whose description or organisation holds one makes `account list` fail with
+its line; change the value with `sacctmgr modify account`.
 
 ## Users
 

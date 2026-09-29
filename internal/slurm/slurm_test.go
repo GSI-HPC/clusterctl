@@ -341,6 +341,96 @@ func TestAccountsAndUsers(t *testing.T) {
 	}
 }
 
+// sacctmgr has no separator of its own choosing, and a | in a description
+// shifted every column after it: the organisation became the second half
+// of the description and the coordinators the organisation, while the real
+// coordinators were dropped. Which field the surplus belongs to cannot be
+// told, so the list is refused.
+func TestAccountsRefuseADescriptionThatHoldsTheSeparator(t *testing.T) {
+	t.Parallel()
+
+	c, _ := client(t, "proj|Project|example|alice,bob\nphys|Physics | Detectors|gsi|carol,dave\n")
+	accounts, err := c.Accounts(context.Background(), "")
+	if err == nil {
+		t.Fatalf("Accounts read the shifted line as %+v", accounts)
+	}
+	if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
+		t.Errorf("exit code = %d, want %d", got, want)
+	}
+	if !strings.Contains(err.Error(), "5 fields where 4 were asked for") {
+		t.Errorf("error = %v, want it to say the line has a field too many", err)
+	}
+}
+
+// A value that holds the separator adds a field to its line, and every
+// field after it moved one place on while the last was dropped. A line
+// with fewer fields than asked for is still read, the missing trailing
+// values empty.
+func TestParsableLinesWithMoreFieldsThanAskedForAreRefused(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		line string
+		read func(*slurm.Client) error
+	}{
+		{"partitions", "main|up|all|4|1-00:00:00|1:00:00|256000|128|0/512/0/512|exe[1-4]|x", func(c *slurm.Client) error {
+			_, err := c.Partitions(context.Background(), "")
+			return err
+		}},
+		{"history", "4711|alice|proj|FAILED|1:0|exe1|00:05:00|s|e|sub|main|x", func(c *slurm.Client) error {
+			_, err := c.History(context.Background(), slurm.AccountingFilter{})
+			return err
+		}},
+		{"accounts", "proj|Project|example|alice|x", func(c *slurm.Client) error {
+			_, err := c.Accounts(context.Background(), "")
+			return err
+		}},
+		{"account limits", "proj|alice|10|5|4|128|1-00:00:00|1|x", func(c *slurm.Client) error {
+			_, err := c.AccountLimits(context.Background(), "proj")
+			return err
+		}},
+		{"users", "alice|proj|proj|1|x", func(c *slurm.Client) error {
+			_, err := c.Users(context.Background(), "alice")
+			return err
+		}},
+		{"shares", "proj|alice|1|x", func(c *slurm.Client) error {
+			_, err := c.Shares(context.Background(), "proj")
+			return err
+		}},
+		{"a user to add", "alice|proj|proj|x", func(c *slurm.Client) error {
+			_, err := c.PlanUserAdd(context.Background(), "alice", "proj", "")
+			return err
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, _ := client(t, tc.line+"\n")
+			err := tc.read(c)
+			if err == nil {
+				t.Fatalf("%q was read", tc.line)
+			}
+			if got, want := exitcode.From(err), exitcode.TargetFailed; got != want {
+				t.Errorf("exit code = %d, want %d (%v)", got, want, err)
+			}
+			if !strings.Contains(err.Error(), "were asked for") {
+				t.Errorf("error = %v, want it to say the line has a field too many", err)
+			}
+
+			// The line without its surplus field, and without its last one,
+			// is read.
+			line := tc.line[:strings.LastIndex(tc.line, "|")]
+			for _, line := range []string{line, line[:strings.LastIndex(line, "|")]} {
+				c, _ := client(t, line+"\n")
+				if err := tc.read(c); err != nil {
+					t.Errorf("%q: %v", line, err)
+				}
+			}
+		})
+	}
+}
+
 func TestAddAccountFillsInTheDefaults(t *testing.T) {
 	t.Parallel()
 
