@@ -640,6 +640,30 @@ func TestHCAConfigSetRefusesWhatIsNotASetting(t *testing.T) {
 	}
 }
 
+// The key and the value are checked each by its own rule before anything
+// is sent, and the error names the one refused, so that the two taken the
+// other way round would be refused for the wrong one. hca config get checks
+// its key the same way.
+func TestHCAConfigSaysWhichArgumentIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		says string
+	}{
+		{[]string{"get", "$(reboot)"}, `"$(reboot)" is not an adapter firmware setting`},
+		{[]string{"set", "LINK TYPE", "2"}, `"LINK TYPE" is not an adapter firmware setting`},
+		{[]string{"set", "LINK_TYPE_P1", "ETH;IB"}, `"ETH;IB" is not an adapter firmware value`},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			h, err := run(t, harnessOptions{}, append(append([]string{"hca", "config"}, tc.args...), "-n", "exe0001", "-y")...)
+			wantCode(t, err, exitcode.Usage)
+			if err == nil || !strings.Contains(err.Error(), tc.says) {
+				t.Errorf("error = %v, want it to say %s", err, tc.says)
+			}
+			wantNoCalls(t, h)
+		})
+	}
+}
+
 func TestHCAConfigSetQuotesTheSetting(t *testing.T) {
 	h, err := run(t, harnessOptions{}, "hca", "config", "set", "MODULE_SPLIT_M0[1..3]", "1", "-n", "exe0001", "-y")
 	if err != nil {
