@@ -824,6 +824,72 @@ exe0002  unreachable
 	}
 }
 
+// mlxcablesOutput is what mlxcables -q prints for two cables, abridged.
+const mlxcablesOutput = `Querying Cables ....
+
+Cable #1:
+---------
+Cable name    : mt4123_pciconf0_cable_0
+>> No FW data to show
+-------- Cable EEPROM --------
+Identifier    : QSFP56 (11h)
+Vendor        : Mellanox
+Part number   : MCP1650-H002E26
+Length        : 2 m
+
+Cable #2:
+---------
+Cable name    : mt4123_pciconf1_cable_0
+>> No FW data to show
+-------- Cable EEPROM --------
+Identifier    : QSFP56 (11h)
+Vendor        : Mellanox
+Part number   : MFS1S00-H010E
+Length        : 10 m
+`
+
+// hca cable kept only the last cable mlxcables printed, so a node with two
+// adapters reported one. Each cable is a row, named as mlxcables names it,
+// and a node where none is found is named with why and fails the command.
+func TestHCACableReportsEveryCable(t *testing.T) {
+	for _, tc := range []struct {
+		name, mlxcables string
+		code            int
+		out, errOut     string
+	}{
+		{"two cables", "cat <<'EOF'\n" + mlxcablesOutput + "EOF\n", exitcode.OK,
+			`NODE     CABLE                    PART NUMBER      LENGTH
+exe0001  mt4123_pciconf0_cable_0  MCP1650-H002E26  2 m
+exe0001  mt4123_pciconf1_cable_0  MFS1S00-H010E    10 m
+`, ""},
+		{"no cable", "echo 'Querying Cables ....'\n", exitcode.TargetFailed,
+			`NODE     CABLE   PART NUMBER  LENGTH
+exe0001  exit 1
+`, "exe0001: exit 1: no cable found\n"},
+		{"no mlxcables", "", exitcode.TargetFailed,
+			`NODE     CABLE   PART NUMBER  LENGTH
+exe0001  exit 1
+`, "exe0001: exit 1: mlxcables is not installed\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := t.TempDir()
+			fakeTool(t, bin, "mst", "exit 0\n")
+			if tc.mlxcables != "" {
+				fakeTool(t, bin, "mlxcables", `[ "$1" = -q ] || exit 1`+"\n"+tc.mlxcables)
+			}
+			rec, _ := shellRunner(t, bin, "")
+			h, err := run(t, harnessOptions{recorder: rec}, "hca", "cable", "-n", "exe0001")
+			wantCode(t, err, tc.code)
+			if got := trimLines(h.out.String()); got != tc.out {
+				t.Errorf("output:\n%s\nwant:\n%s", got, tc.out)
+			}
+			if !strings.Contains(h.errOut.String(), tc.errOut) {
+				t.Errorf("standard error:\n%s\nwant it to say:\n%s", h.errOut, tc.errOut)
+			}
+		})
+	}
+}
+
 // trimLines drops the spaces a table pads the empty cells at the end of a
 // row with.
 func trimLines(s string) string {

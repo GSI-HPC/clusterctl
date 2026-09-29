@@ -637,6 +637,9 @@ func adapterRows(t *output.Table, res *transport.Result, cells int) {
 	}
 	for _, line := range lines {
 		f := strings.SplitN(line, "|", cells)
+		for i := range f {
+			f[i] = strings.TrimSpace(f[i])
+		}
 		for len(f) < cells {
 			f = append(f, "")
 		}
@@ -699,41 +702,47 @@ done
 }
 
 func newHCACableCommand(r *root) *cobra.Command {
-	return leaf("cable [NODESET]", "Show the cable in each node's adapter", `
-Report the cable part number and length each node's adapter sees.`,
+	return leaf("cable [NODESET]", "Show the cables in each node's adapters", `
+Report the part number and length of each cable the adapters of each node
+see, a row per cable, named as mlxcables names it.
+
+A node that cannot be reached, or has no cable or no mlxcables to read them
+with, has a row that says how it failed in place of the cable. Why it failed
+is said on standard error, and it fails the command.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			ns, err := selection(a, args)
 			if err != nil {
 				return err
 			}
-			const script = `
-set -u
+			// mlxcables prints a block for each cable, which starts with
+			// its number. A block's line is printed once the next block
+			// begins, so that a later cable never takes an earlier one's
+			// place.
+			const script = `set -u
+command -v mlxcables >/dev/null 2>&1 || { echo "mlxcables is not installed" >&2; exit 1; }
 mst cable add >/dev/null 2>&1 || true
-mlxcables -q 2>/dev/null | awk -F': *' '
-  /^Part number/ {part=$2}
-  /^Length/      {len=$2}
-  END           {printf "%s|%s\n", part, len}'
+cables=$(mlxcables -q 2>/dev/null | awk -F': *' '
+  /^Cable #[0-9]/ { if (n++) print name "|" part "|" len; name = part = len = "" }
+  /^Cable name/   { name = $2 }
+  /^Part number/  { part = $2 }
+  /^Length/       { len = $2 }
+  END             { if (n) print name "|" part "|" len }')
+[ -n "$cables" ] || { echo "no cable found" >&2; exit 1; }
+printf '%s\n' "$cables"
 `
 			results, err := runOnNodes(a.Context(), a, ns, transport.Request{Script: script})
 			if err != nil {
 				return err
 			}
-			t := output.NewTable(output.Cols("NODE", "PART NUMBER", "LENGTH")...)
+			t := output.NewTable(output.Cols("NODE", "CABLE", "PART NUMBER", "LENGTH")...)
 			for _, res := range results {
-				if res.Failed() {
-					t.Add(res.Target.Name, "unreachable", "")
-					continue
-				}
-				f := strings.SplitN(res.Output(), "|", 2)
-				for len(f) < 2 {
-					f = append(f, "")
-				}
-				t.Add(res.Target.Name, strings.TrimSpace(f[0]), strings.TrimSpace(f[1]))
+				adapterRows(t, res, 3)
 			}
 			if err := a.Print(output.Result{Table: t}); err != nil {
 				return err
 			}
+			sayAdapterFailures(a, results)
 			return failureError(results)
 		}))
 }
