@@ -683,15 +683,24 @@ func newBMCForgetCommand(r *root) *cobra.Command {
 Remove the recorded certificate fingerprint of a service processor, so that
 the next connection records whatever it now presents.
 
-Name the nodes, or the service processor as the certificate error names it.
-The fingerprints about to be dropped are shown and confirmed like any other
-change, and a protected host is refused without --force.
+Name the nodes, or the service processor as the certificate error names it,
+as arguments or with -n, not both. The fingerprints about to be dropped are
+shown and confirmed like any other change, and a protected host is refused
+without --force.
 
 Run this after a certificate was replaced on purpose. If it changed without
 anyone replacing it, find out why first: the next connection trusts whatever
 it is shown and sends the BMC account to it.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
+			// A service processor's name is not a selection, so it would
+			// pass by the check a selection makes and drop the nodes of -n
+			// without a word.
+			if len(args) > 0 && cmd.Flags().Changed("nodes") {
+				return exitcode.Errorf(exitcode.Usage,
+					"the certificates to forget were named both as arguments (%s) and with -n; name them once",
+					strings.Join(args, " "))
+			}
 			store := a.PinStore()
 			pins, err := store.Load()
 			if err != nil {

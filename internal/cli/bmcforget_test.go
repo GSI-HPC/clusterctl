@@ -95,3 +95,26 @@ func TestBMCForgetGoesThroughTheGate(t *testing.T) {
 		t.Errorf("claims to have forgotten a pin that was not there:\n%s%s", h.out, h.errOut)
 	}
 }
+
+// With -n and a service processor named as the certificate error names it,
+// bmc forget forgot that processor alone and exited 0, dropping the nodes of
+// -n without a word; with the node's own name the same line was a usage
+// error. Both are refused now, and nothing is forgotten.
+func TestBMCForgetRefusesAnArgumentBesideTheNodesOfN(t *testing.T) {
+	isolateHome(t)
+	path, set := pinFile(t, "exe0001.mgmt.hpc.example.org", "exe0008.mgmt.hpc.example.org")
+	before := readFile(t, path)
+	for _, arg := range []string{"exe0008", "exe0008.mgmt.hpc.example.org"} {
+		h, err := run(t, harnessOptions{}, append(set, "bmc", "forget", "-y", "-n", "exe0001", arg)...)
+		wantCode(t, err, exitcode.Usage)
+		if err != nil && !strings.Contains(err.Error(), "-n") {
+			t.Errorf("%s: error = %v, want it to name -n", arg, err)
+		}
+		if strings.Contains(h.errOut.String(), "forgot") {
+			t.Errorf("%s: forgot a certificate:\n%s", arg, h.errOut)
+		}
+	}
+	if got := readFile(t, path); got != before {
+		t.Errorf("a refused forget changed the pin store:\n%s", got)
+	}
+}
