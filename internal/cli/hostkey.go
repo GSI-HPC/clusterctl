@@ -407,7 +407,11 @@ func newHostkeyRemoveCommand(r *root) *cobra.Command {
 	var bmc bool
 	cmd := leaf("remove [NODESET]", "Remove hosts from the host key file", `
 Drop every entry for the named hosts. Use this before reinstalling a node, so
-that the key it comes back with can be collected cleanly.`,
+that the key it comes back with can be collected cleanly.
+
+An entry written under a node's short name, from before the naming rules were
+in place, is dropped too, except with --bmc: that is the node's own key, not
+its service processor's.`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			path, err := hostkeyFile(a)
@@ -441,8 +445,11 @@ that the key it comes back with can be collected cleanly.`,
 					}
 					n := f.Remove(name)
 					// A short name may have been written before the naming
-					// rules were in place.
-					n += f.Remove(node)
+					// rules were in place. It is the node's own name, so
+					// its key is the node's, whatever --bmc says.
+					if !bmc {
+						n += f.Remove(node)
+					}
 					removed += n
 					t.Add(name, fmt.Sprint(n))
 				}

@@ -51,7 +51,9 @@ scanned in parallel up to `fanout.max`, and `--timeout` bounds each host once,
 from the connection to the key. With `--bmc`, `scan`, `verify`, `refresh` and `remove` act on
 the nodes' service processors instead, reached the way the `bmc` commands
 reach them: at the `bmcAddress` the inventory records, else by the name the
-naming rules give them, and the key is recorded under that host. The file is always
+naming rules give them, and the key is recorded under that host. `remove` also
+drops an entry written under a node's short name, from before the naming rules
+were in place, but not with `--bmc`: that entry holds the node's own key. The file is always
 rewritten completely, under a lock, and sorted, so two administrators
 refreshing at once cannot lose an entry and the diff is readable.
 
