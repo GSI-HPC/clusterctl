@@ -668,6 +668,44 @@ func TestSopsVersion(t *testing.T) {
 	}
 }
 
+// A sops named by a relative path, as workstation.sopsBinary with a
+// relative --config is, is the one in the working directory. sops runs in
+// a directory of its own, where the path was looked up again and named
+// nothing.
+func TestSopsNamedByARelativePathIsTheWorkingDirectorys(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fake, _ := fakeSops(t, "3.13.3", `cat >/dev/null; echo '{"data":{"bmc-password":"hunter2"}}'`)
+	script, err := os.ReadFile(fake.Binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bin", "sops"), script, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	s := &secrets.Sops{Binary: filepath.Join("bin", "sops")}
+	found, err := s.Find(context.Background())
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if want := filepath.Join(dir, "bin", "sops"); found.Path != want {
+		t.Errorf("Find = %q, want %q", found.Path, want)
+	}
+	id := newIdentity(t)
+	file := sopstest.Encrypt(t, secretDoc, id.Recipient().String())
+	got, err := decrypt(t, s, file, secrets.SopsKeys{Identities: identities(t, id.String()+"\n")})
+	if err != nil {
+		t.Fatalf("DecryptSops: %v", err)
+	}
+	if got["data"]["bmc-password"] != "hunter2" {
+		t.Errorf("DecryptSops = %v", got)
+	}
+}
+
 func TestSopsIsNotNeededToInspect(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	const file = secretDoc + `sops:

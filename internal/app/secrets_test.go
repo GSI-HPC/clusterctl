@@ -102,6 +102,43 @@ func TestSecretValueDecryptsWithTheWorkstationIdentities(t *testing.T) {
 	}
 }
 
+// workstation.sopsBinary: bin/sops in a document read with a relative
+// --config names the sops beside that document, whose directory is
+// relative too. The path was handed on as it was, and sops, which runs in a
+// directory of its own, was not found there.
+func TestARelativeSopsBesideARelativeConfigurationIsFound(t *testing.T) {
+	dir := configtest.CopyDir(t, exampleDir, "workstation.yaml")
+	ws := "apiVersion: clusterctl/v1alpha1\nkind: Workstation\nspec:\n  sopsBinary: bin/sops\n"
+	if err := os.WriteFile(filepath.Join(dir, "workstation.yaml"), []byte(ws), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bin", "sops"), []byte("#!/bin/sh\necho 'sops 3.13.3'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(filepath.Dir(dir))
+
+	a, err := app.New(context.Background(), app.Streams{
+		StateDir: filepath.Join(dir, "state"), CacheDir: filepath.Join(dir, "cache"),
+	}, app.Options{
+		ConfigFiles: []string{filepath.Base(dir)},
+		Env:         func(string) string { return "" },
+		Runner:      &transport.Recorder{},
+	})
+	if err != nil {
+		t.Fatalf("building the app: %v", err)
+	}
+	found, err := a.Sops().Find(a.Context())
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if want := filepath.Join(dir, "bin", "sops"); found.Path != want {
+		t.Errorf("Find = %q, want %q", found.Path, want)
+	}
+}
+
 func TestSecretValueFallsBackToTheKeysOfSops(t *testing.T) {
 	// No workstation.identities: sops finds the key itself, here through
 	// SOPS_AGE_KEY_FILE. The variable is read by sops from the process
