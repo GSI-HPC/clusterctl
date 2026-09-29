@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -334,5 +335,44 @@ func TestADryRunReadsThePowerStateOverIPMIAndRecordsAChange(t *testing.T) {
 	}
 	if got := len(a.DryRunRecorder.Calls()); got != 1 {
 		t.Errorf("the dry run recorded %d requests, want the power change", got)
+	}
+}
+
+// A password file or helper written as ~bob/pw is not the home directory
+// followed by bob/pw. The credential resolver expanded a leading ~ itself,
+// so ~bob/pw read /home/alicebob/pw for alice, and a helper ~bob/bin/pw
+// ran from there. Only ~ and ~/ are expanded, as for every other path, and
+// ~bob/pw is a name in the site's directory.
+func TestACredentialPathExpandsOnlyTheUsersOwnHome(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "alice")
+	t.Setenv("HOME", home)
+	for path, content := range map[string]string{
+		filepath.Join(home, "pw"):                    "own\n",
+		filepath.Join(base, "alicebob", "pw"):        "planted\n",
+		filepath.Join(base, "alicebob", "bin", "pw"): "#!/bin/sh\necho planted\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := newApp(t, &transport.Recorder{})
+	a.Spec.Credentials = map[string]v1alpha1.Credential{
+		"own":    {Username: "admin", Password: v1alpha1.PasswordSource{File: "~/pw"}},
+		"file":   {Username: "admin", Password: v1alpha1.PasswordSource{File: "~bob/pw"}},
+		"helper": {Username: "admin", Password: v1alpha1.PasswordSource{Command: []string{"~bob/bin/pw"}}},
+	}
+
+	if cred, err := a.Credentials().Get(context.Background(), "own"); err != nil || cred.Password() != "own" {
+		t.Errorf("~/pw: %v, %v; want the file in the home directory", cred, err)
+	}
+	for _, name := range []string{"file", "helper"} {
+		cred, err := a.Credentials().Get(context.Background(), name)
+		if err == nil {
+			t.Errorf("%s: read %q, want nothing found in the site's directory", name, cred.Password())
+		}
 	}
 }
