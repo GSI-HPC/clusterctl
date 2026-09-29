@@ -348,6 +348,31 @@ func TestHostkeyRemoveTakesTheInventoryBMCAddress(t *testing.T) {
 	}
 }
 
+// TestHostkeyRemoveOfABMCKeepsTheNodesOwnKey: remove --bmc also removed the
+// entry under the node's short name, which is the node's own key written
+// before the naming rules were in place, not its service processor's.
+func TestHostkeyRemoveOfABMCKeepsTheNodesOwnKey(t *testing.T) {
+	known := filepath.Join(t.TempDir(), "known_hosts")
+	file := "exe0003 ssh-ed25519 AAAAnode\n" +
+		"exe0003.mgmt.hpc.example.org ssh-ed25519 AAAAbmc\n"
+	if err := os.WriteFile(known, []byte(file), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h, err := run(t, harnessOptions{},
+		"--set", "ssh.knownHostsFile="+known, "hostkey", "remove", "--bmc", "-y", "-n", "exe0003")
+	if err != nil {
+		t.Fatalf("hostkey remove --bmc failed: %v\n%s", err, h.out)
+	}
+	data, err := os.ReadFile(known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); strings.Contains(got, "AAAAbmc") || !strings.Contains(got, "exe0003 ssh-ed25519 AAAAnode") {
+		t.Errorf("the file is now:\n%s\nwant only the service processor's entry removed", got)
+	}
+}
+
 // A scan is a step with a target for each node: one whose host answered,
 // one whose host did not, one whose service processor has no name, which
 // is refused before anything is dialled, and those an interrupt left out,
