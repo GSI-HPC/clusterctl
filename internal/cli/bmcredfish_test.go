@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -168,5 +169,41 @@ func TestTheRedfishFanOutLetsGoOfItsConnections(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Without BMC_PASSWORD a dry run of bmc redfish post previewed the POST and
+// exited 0, while the real run stopped at the missing account and exited 2.
+func TestBMCRedfishPostDryRunStopsWhereTheRealRunWould(t *testing.T) {
+	isolateHome(t)
+	t.Setenv("BMC_PASSWORD", "")
+	if err := os.Unsetenv("BMC_PASSWORD"); err != nil {
+		t.Fatal(err)
+	}
+	post := []string{"bmc", "redfish", "post", "/redfish/v1/Systems/1/LogServices/Log/Actions/LogService.ClearLog", `{}`, "-n", "exe0001"}
+	for _, args := range [][]string{
+		append([]string{"-y"}, post...),
+		append([]string{"--dry-run"}, post...),
+	} {
+		h, err := run(t, harnessOptions{}, args...)
+		wantCode(t, err, exitcode.Usage)
+		if strings.Contains(h.errOut.String(), "Would POST") {
+			t.Errorf("%v: previewed a POST the real run refuses:\n%s", args, h.errOut)
+		}
+		wantNoCalls(t, h)
+	}
+
+	// With the account the dry run previews, and sends nothing.
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	fakeRedfish(t, func(req *http.Request) (*http.Response, error) {
+		t.Errorf("the dry run sent %s %s", req.Method, req.URL.Path)
+		return answer(req, http.StatusOK, `{}`), nil
+	})
+	h, err := run(t, harnessOptions{}, append([]string{"--dry-run"}, post...)...)
+	if err != nil {
+		t.Fatalf("the dry run with an account failed: %v", err)
+	}
+	if !strings.Contains(h.errOut.String(), "Would POST") {
+		t.Errorf("the dry run says nothing:\n%s", h.errOut)
 	}
 }

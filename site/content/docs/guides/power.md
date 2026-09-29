@@ -221,7 +221,9 @@ $ clusterctl bmc redfish post /redfish/v1/Systems/1/Actions/ComputerSystem.Reset
 ```
 
 `post` can power off a machine, so it goes through the same confirmation as any
-other destructive command.
+other destructive command. `--dry-run` resolves the BMC account as the real run
+does, so a missing credential stops it with `2` rather than previewing a POST
+that would never be sent.
 
 ## Firmware that differs
 
