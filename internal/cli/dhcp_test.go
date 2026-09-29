@@ -292,3 +292,59 @@ func TestDHCPLogEscapesControlCharacters(t *testing.T) {
 		t.Errorf("newlines and tabs should be kept:\n%q", out)
 	}
 }
+
+// Two nodes the inventory gives no address to, whose DHCP declarations hand
+// out one address, were not refused: the owners of an address were looked
+// up in the inventory only, so boot set -n exe0005 linked 10.0.9.1 and so
+// armed exe0006 as well. A second interface of the node itself holding its
+// address is still the node.
+func TestBootRefusesAnAddressDHCPHandsToAnotherNode(t *testing.T) {
+	shared := `
+host exe0005 {
+  hardware ethernet aa:bb:cc:00:00:05;
+  fixed-address 10.0.9.1;
+}
+host exe0006 {
+  hardware ethernet aa:bb:cc:00:00:06;
+  fixed-address 10.0.9.1;
+}
+`
+	for _, args := range [][]string{
+		{"boot", "set", "-n", "exe0005"},
+		{"boot", "set", "-n", "exe0005", "--dry-run"},
+		{"boot", "unset", "-n", "exe0006"},
+		{"boot", "grub", "unset", "exe0005"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			rec := serveDHCP(map[string]string{dhcpdPath: shared})
+			_, err := run(t, harnessOptions{recorder: rec}, append(args, "-y")...)
+			wantCode(t, err, exitcode.Usage)
+			if err == nil || !strings.Contains(err.Error(), "exe0005") || !strings.Contains(err.Error(), "exe0006") ||
+				!strings.Contains(err.Error(), "10.0.9.1") {
+				t.Errorf("error = %v, want it to name both nodes and the address", err)
+			}
+			for _, c := range rec.Calls() {
+				if len(c.Request.Argv) == 0 || c.Request.Argv[0] != "cat" {
+					t.Errorf("sent %q although the address is shared", c.Command)
+				}
+			}
+		})
+	}
+
+	rec := serveDHCP(map[string]string{dhcpdPath: `
+host exe0005 {
+  hardware ethernet aa:bb:cc:00:00:05;
+  fixed-address 10.0.9.1;
+}
+host exe0005-eth1 {
+  hardware ethernet aa:bb:cc:00:01:05;
+  fixed-address 10.0.9.1;
+}
+`})
+	if _, err := run(t, harnessOptions{recorder: rec}, "boot", "set", "-y", "-n", "exe0005"); err != nil {
+		t.Fatalf("boot set refused an address the node's own interfaces share: %v", err)
+	}
+	if script := linkScripts(rec); !strings.Contains(script, " /srv/pxesrv/10.0.9.1\n") {
+		t.Errorf("boot set did not link the node's address:\n%s", script)
+	}
+}
