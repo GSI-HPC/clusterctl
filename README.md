@@ -119,7 +119,7 @@ The repository carries a `mise.toml`, so the toolchain comes from
 [mise](https://mise.jdx.dev) if you use it:
 
 ```console
-$ mise install  # Go and golangci-lint, at the versions CI uses
+$ mise install  # Go, golangci-lint, sops and sind, at the versions CI uses
 ```
 
 ```console
@@ -127,6 +127,16 @@ $ make test     # unit and command tests
 $ make lint     # vet and formatting
 $ make cover    # coverage
 $ make build    # bin/clusterctl
+```
+
+The end-to-end tests run the binary against a Slurm cluster in Docker, which
+[sind](https://github.com/GSI-HPC/sind) creates; they need Linux with Docker,
+and `mise install` installs sind:
+
+```console
+$ make e2e-up   # create the cluster
+$ make e2e      # run the tests against it
+$ make e2e-down # delete it
 ```
 
 The documentation site needs Hugo **extended**; see [`site/README.md`](site/README.md).
