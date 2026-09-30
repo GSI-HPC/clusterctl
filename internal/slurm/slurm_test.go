@@ -453,6 +453,37 @@ func TestHasPosixUserAsksGetent(t *testing.T) {
 	}
 }
 
+// TestPartitionsTellTheDefaultFromTheName checks that the "*" sinfo appends
+// to the default partition is read as a flag and not kept in the name, which
+// --partition and every other Slurm command would not know. sinfo prints a
+// partition once for each state its nodes are in, each time with the "*".
+func TestPartitionsTellTheDefaultFromTheName(t *testing.T) {
+	t.Parallel()
+
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, Stdout: "" +
+			"main*|up|all|8|1-00:00:00|01:00:00|515000|128|0/1024/0/1024|exe[0001-0008]\n" +
+			"main*|up|all|2|1-00:00:00|01:00:00|515000|128|0/0/256/256|exe[0009-0010]\n" +
+			"debug|up|all|2|02:00:00|n/a|515000|128|0/256/0/256|exe[0011-0012]\n"}, nil
+	}}
+	c := &slurm.Client{Runner: rec, Target: transport.Target{Name: "login"}}
+	partitions, err := c.Partitions(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type named struct {
+		name      string
+		isDefault bool
+	}
+	var got []named
+	for _, p := range partitions {
+		got = append(got, named{p.Name, p.Default})
+	}
+	if want := []named{{"main", true}, {"debug", false}}; !slices.Equal(got, want) {
+		t.Errorf("partitions = %+v, want %+v", got, want)
+	}
+}
+
 func TestErrorsFromTheClientAreReported(t *testing.T) {
 	t.Parallel()
 

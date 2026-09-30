@@ -117,12 +117,16 @@ $ clusterctl slurm job history --user alice --since 7d
 
 ```console
 $ clusterctl slurm partition
-PARTITION  AVAIL  NODES  MAX TIME
-main       up      1020  7-00:00:00
-debug      up         4  02:00:00
+PARTITION  DEFAULT  AVAIL  NODES  MAX TIME
+main       yes      up      1020  7-00:00:00
+debug               up         4  02:00:00
 
 $ clusterctl slurm partition main -o wide
 ```
+
+The name is the one Slurm takes, without the `*` sinfo appends to the default
+partition; which partition is the default is its own column, and `default` in
+JSON and YAML.
 
 ## Accounts
 

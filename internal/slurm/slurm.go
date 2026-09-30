@@ -501,7 +501,10 @@ func isAre(ns *nodeset.NodeSet) string {
 
 // Partition is one Slurm partition.
 type Partition struct {
-	Name        string `json:"name" yaml:"name"`
+	Name string `json:"name" yaml:"name"`
+	// Default is set on the partition a job is submitted to when it names
+	// none, which sinfo marks by appending "*" to the name.
+	Default     bool   `json:"default,omitempty" yaml:"default,omitempty"`
 	Available   string `json:"available,omitempty" yaml:"available,omitempty"`
 	Groups      string `json:"groups,omitempty" yaml:"groups,omitempty"`
 	Nodes       string `json:"nodes,omitempty" yaml:"nodes,omitempty"`
@@ -527,12 +530,15 @@ func (c *Client) Partitions(ctx context.Context, name string) ([]Partition, erro
 	out := make([]Partition, 0, len(lines))
 	for _, line := range lines {
 		f := fields(line, 10)
-		if seen[f[0]] {
+		// The marker is sinfo's and no part of the name: the name is what
+		// --partition and every other Slurm command take.
+		name, isDefault := strings.CutSuffix(f[0], "*")
+		if seen[name] {
 			continue
 		}
-		seen[f[0]] = true
+		seen[name] = true
 		out = append(out, Partition{
-			Name: f[0], Available: f[1], Groups: f[2], NodeCount: f[3],
+			Name: name, Default: isDefault, Available: f[1], Groups: f[2], NodeCount: f[3],
 			MaxTime: f[4], DefaultTime: f[5], Memory: f[6], CPUs: f[7],
 			CPUState: f[8], Nodes: f[9],
 		})

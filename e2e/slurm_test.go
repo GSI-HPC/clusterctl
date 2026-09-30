@@ -68,6 +68,7 @@ func TestSlurmPartition(t *testing.T) {
 	r.wantCode(t, 0)
 	partitions := decode[[]struct {
 		Name      string `json:"name"`
+		Default   bool   `json:"default"`
 		Available string `json:"available"`
 		Nodes     string `json:"nodes"`
 		NodeCount string `json:"nodeCount"`
@@ -75,9 +76,10 @@ func TestSlurmPartition(t *testing.T) {
 	if len(partitions) != 1 {
 		t.Fatalf("got %d partitions, want the one sind makes: %s", len(partitions), r)
 	}
+	// sinfo prints the default partition as "all*"; the name is "all".
 	p := partitions[0]
-	if p.Name != "all" || p.Available != "up" || p.Nodes != "worker-[0-2]" || p.NodeCount != "3" {
-		t.Errorf("got %+v, want all, up, with the 3 nodes worker-[0-2]", p)
+	if p.Name != "all" || !p.Default || p.Available != "up" || p.Nodes != "worker-[0-2]" || p.NodeCount != "3" {
+		t.Errorf("got %+v, want all, the default, up, with the 3 nodes worker-[0-2]", p)
 	}
 }
 
