@@ -120,6 +120,78 @@ jobs:
           sops --disable-version-check --version | grep -Fx "sops ${SOPS_MIN_VERSION}"
           go test ./...
 
+  # The binary against a Slurm cluster in Docker, which sind creates: real
+  # ssh, a real sshd on every node, a real slurmctld and slurmd, on each Slurm
+  # release line sind publishes a node image for. doc/testing.md says what
+  # the suite covers.
+  e2e:
+    name: End to end (Slurm ${{ matrix.slurm }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        slurm: ['25.11', '26.05']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go
+
+      - name: Build
+        run: make build
+
+      # The sind mise.toml pins, and the cluster of e2e/testdata with the
+      # node image of this Slurm release line.
+      - name: Prepare the cluster
+        id: prepare
+        env:
+          SLURM: ${{ matrix.slurm }}
+        run: |
+          set -euo pipefail
+          sind=$(sed -n 's/^"github:GSI-HPC\/sind" = { version = "\([0-9.]*\)".*$/\1/p' mise.toml)
+          if [ -z "$sind" ]; then
+            echo "::error::mise.toml names no sind version"
+            exit 1
+          fi
+          echo "sind=v$sind" >> "$GITHUB_OUTPUT"
+          config="$RUNNER_TEMP/sind-cluster.yaml"
+          yq '.defaults.image = "ghcr.io/gsi-hpc/sind-node:" + strenv(SLURM)' e2e/testdata/sind-cluster.yaml > "$config"
+          echo "config=$config" >> "$GITHUB_OUTPUT"
+
+      - uses: GSI-HPC/sind-action@v2
+        with:
+          version: ${{ steps.prepare.outputs.sind }}
+          realm: e2e
+          clusters: |
+            - ${{ steps.prepare.outputs.config }}
+
+      # The host key commands dial the nodes themselves, not through sind's
+      # relay, so the names of the nodes have to resolve on the runner.
+      - name: Resolve the node names
+        run: make e2e-hosts | sudo tee -a /etc/hosts
+
+      - name: Test
+        run: make e2e
+
+      - name: Collect the logs of the nodes
+        if: failure()
+        run: |
+          dir="$RUNNER_TEMP/sind-logs"
+          mkdir -p "$dir"
+          for unit in controller:slurmctld submitter:sshd worker-0:slurmd worker-1:slurmd worker-2:slurmd; do
+            node=${unit%%:*}
+            sind --realm e2e logs "$node.alpha" "${unit#*:}" > "$dir/$node-${unit#*:}.log" 2>&1 || true
+            sind --realm e2e logs "$node.alpha" sshd > "$dir/$node-sshd.log" 2>&1 || true
+          done
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: sind-logs-slurm-${{ matrix.slurm }}
+          path: ${{ runner.temp }}/sind-logs/
+          retention-days: 14
+
+      - uses: GSI-HPC/sind-action/cleanup@v2
+        if: always()
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
