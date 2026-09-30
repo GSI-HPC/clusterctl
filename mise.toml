@@ -21,3 +21,8 @@ golangci-lint = "2"
 # installs from here too. clusterctl runs sops to read a Secret, so the tests
 # need it.
 sops = "3.13.3"
+
+# The sind the end-to-end tests create their Slurm cluster with, which CI
+# installs from here too. It ships Linux binaries only, and runs on Linux
+# only, since its nodes are Docker containers with systemd inside.
+"github:GSI-HPC/sind" = { version = "0.10.0", os = ["linux"] }

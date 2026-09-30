@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The context of the end-to-end tests: the sind cluster "alpha" in the realm
+# "e2e", reached as root, the only account sind authorises.
+apiVersion: clusterctl/v1alpha1
+kind: Config
+currentContext: alpha
+contexts:
+  - name: alpha
+    cluster: alpha
+    user: root

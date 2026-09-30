@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The nodes of the sind cluster, and one it does not have: worker-9 is known
+# here and nowhere else, so it stands for a node that does not answer, and
+# for a name Slurm does not know.
+apiVersion: clusterctl/v1alpha1
+kind: NodeInventory
+metadata:
+  name: sind
+spec:
+  nodes:
+    - nodes: controller
+      attributes: {class: wlm}
+    - nodes: submitter
+      attributes: {class: login}
+    - nodes: worker-[0-2]
+      attributes: {class: worker}
+    - nodes: worker-9
+      attributes: {class: absent}

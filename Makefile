@@ -30,11 +30,32 @@ cover:
 	$(GO) test -coverprofile=$(COVER) -covermode=atomic ./...
 	$(GO) tool cover -func=$(COVER) | tail -n 1
 
-## lint: vet the tree and check formatting
+## lint: vet the tree, the end-to-end tests included, and check formatting
 .PHONY: lint
 lint:
 	$(GO) vet ./...
+	$(GO) vet -tags e2e ./e2e/
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+
+## e2e-up: create the sind cluster the end-to-end tests run against
+.PHONY: e2e-up
+e2e-up:
+	sind create cluster --config e2e/testdata/sind-cluster.yaml
+
+## e2e-hosts: print the /etc/hosts lines that resolve the cluster's nodes here
+.PHONY: e2e-hosts
+e2e-hosts:
+	@sind --realm e2e get dns | awk 'NR > 1 { print $$2, $$1 }'
+
+## e2e: run the end-to-end tests against that cluster
+.PHONY: e2e
+e2e: build
+	CLUSTERCTL_E2E_BINARY="$(CURDIR)/$(BIN)" $(GO) test -tags e2e -count=1 -timeout 15m ./e2e/
+
+## e2e-down: delete the cluster
+.PHONY: e2e-down
+e2e-down:
+	sind --realm e2e delete cluster alpha
 
 ## tidy: prune and verify the module requirements
 .PHONY: tidy

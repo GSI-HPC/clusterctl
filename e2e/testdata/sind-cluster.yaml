@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The sind cluster the end-to-end tests run against: "make e2e-up" creates it,
+# and CI hands it to sind-action with the node image of each Slurm release
+# line it tests. testdata/site/ is the clusterctl configuration of the same
+# cluster, so the names here and there change together.
+kind: Cluster
+name: alpha
+realm: e2e
+
+# A volume rather than the default bind mount of the directory sind is
+# started in, so that the cluster does not depend on where it was created.
+storage:
+  dataStorage:
+    type: volume
+
+nodes:
+  - controller
+  - submitter
+  - worker: 3
