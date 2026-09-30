@@ -46,7 +46,11 @@ the same nodes.`,
 		cobra.MaximumNArgs(1),
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
 			nodes := a.Inventory.All()
-			ns, err := a.SelectOptional(strings.Join(args, ","))
+			expr, err := nodeSetArgument(args)
+			if err != nil {
+				return err
+			}
+			ns, err := a.SelectOptional(expr)
 			if err != nil {
 				return err
 			}

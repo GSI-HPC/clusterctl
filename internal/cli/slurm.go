@@ -69,7 +69,11 @@ resume change them all the same.
   clusterctl slurm node list --state idle -o wide`,
 		cobra.ArbitraryArgs,
 		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
-			ns, err := a.SelectOptional(strings.Join(args, ","))
+			expr, err := nodeSetArgument(args)
+			if err != nil {
+				return err
+			}
+			ns, err := a.SelectOptional(expr)
 			if err != nil {
 				return err
 			}
@@ -270,7 +274,11 @@ nodes they run on.
   clusterctl slurm job list -n exe0007`,
 		cobra.ArbitraryArgs,
 		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
-			ns, err := a.SelectOptional(strings.Join(args, ","))
+			expr, err := nodeSetArgument(args)
+			if err != nil {
+				return err
+			}
+			ns, err := a.SelectOptional(expr)
 			if err != nil {
 				return err
 			}
