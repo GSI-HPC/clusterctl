@@ -595,6 +595,40 @@ func TestSlurmPartitionAndAccounts(t *testing.T) {
 	}
 }
 
+// TestSlurmPartitionNamesTheDefaultApart checks that the name printed is the
+// one Slurm takes, without the "*" sinfo marks the default partition with,
+// and that which partition is the default is still said: as a field of its
+// own in JSON, and as a column in the table.
+func TestSlurmPartitionNamesTheDefaultApart(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, Stdout: "" +
+			"main*|up|all|10|1-00:00:00|01:00:00|515000|128|0/128/0/128|exe[0001-0010]\n" +
+			"debug|up|all|2|02:00:00|n/a|515000|128|0/16/0/16|exe[0011-0012]\n"}, nil
+	}}
+	h, err := run(t, harnessOptions{recorder: rec}, "slurm", "partition", "-o", "json")
+	if err != nil {
+		t.Fatalf("slurm partition failed: %v", err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+		t.Fatalf("the output is not JSON: %v\n%s", err, h.out)
+	}
+	if len(got) != 2 || got[0]["name"] != "main" || got[0]["default"] != true ||
+		got[1]["name"] != "debug" || got[1]["default"] != nil {
+		t.Errorf("got %v, want main as the default and debug, both named as Slurm names them", got)
+	}
+
+	h, err = run(t, harnessOptions{recorder: rec}, "slurm", "partition")
+	if err != nil {
+		t.Fatalf("slurm partition failed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(h.out.String()), "\n")
+	if len(lines) != 3 || strings.Contains(h.out.String(), "*") ||
+		!strings.Contains(lines[0], "DEFAULT") || !strings.Contains(lines[1], "yes") || strings.Contains(lines[2], "yes") {
+		t.Errorf("the table does not mark main alone as the default in a column of its own:\n%s", h.out)
+	}
+}
+
 func TestSlurmJobSummaryCountsPerUser(t *testing.T) {
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, Stdout: slurm.Render(req,

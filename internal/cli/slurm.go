@@ -617,12 +617,18 @@ they offer.`,
 				return err
 			}
 			t := output.NewTable(output.Cols(
-				"PARTITION", "AVAIL", "NODES", "MAX TIME", "DEFAULT TIME", "MEMORY", "CPUS",
+				"PARTITION", "DEFAULT", "AVAIL", "NODES", "MAX TIME", "DEFAULT TIME", "MEMORY", "CPUS",
 				"CPU A/I/O/T", "GROUPS", "NODELIST").
 				Wide("DEFAULT TIME", "MEMORY", "CPUS", "CPU A/I/O/T", "GROUPS", "NODELIST").
 				Right("NODES", "MEMORY", "CPUS")...)
 			for _, p := range partitions {
-				t.Add(p.Name, p.Available, p.NodeCount, p.MaxTime, p.DefaultTime,
+				// A column of its own rather than sinfo's "*", so that the
+				// name shown is one the commands take.
+				isDefault := ""
+				if p.Default {
+					isDefault = "yes"
+				}
+				t.Add(p.Name, isDefault, p.Available, p.NodeCount, p.MaxTime, p.DefaultTime,
 					p.Memory, p.CPUs, p.CPUState, p.Groups, p.Nodes)
 			}
 			return a.Print(output.Result{Table: t, Object: partitions})
