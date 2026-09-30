@@ -62,6 +62,9 @@ func TestAnEmptyNodeSetArgumentDoesNotFallBackToTheEnvironment(t *testing.T) {
 		{"@rack:R02", []string{"bmc", "power", "off", "", "--dry-run"}},
 		{"@rack:R02", []string{"boot", "set", "", "-y"}},
 		{"@rack:R02", []string{"boot", "status", ""}},
+		{"@rack:R02", []string{"node", "list", ""}},
+		{"@rack:R02", []string{"slurm", "node", "list", ""}},
+		{"@rack:R02", []string{"slurm", "job", "list", " "}},
 		{"exe0001", []string{"boot", "grub", "unset", "", "-y"}},
 		{"exe0001", []string{"boot", "grub", "set", "", "/srv/tftp/grub/1.0/grub.cfg.install-exec", "-y"}},
 	} {
