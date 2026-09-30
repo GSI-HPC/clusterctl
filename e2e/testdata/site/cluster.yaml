@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+# SPDX-License-Identifier: LGPL-3.0-or-later
+apiVersion: clusterctl/v1alpha1
+kind: Cluster
+metadata:
+  name: alpha
+spec:
+  site: sind
+  slurm:
+    role: login
+  groups:
+    defaultSource: inventory
+    sources:
+      inventory:
+        attribute: class
+      slurm:
+        # Resolved by asking slurmctld from the login role, as a site's
+        # Slurm group source does.
+        exec:
+          role: login
+          map: [sinfo, -h, -o, "%N", -p, $GROUP]
+          all: [sinfo, -h, -o, "%N"]
+          list: [sinfo, -h, -o, "%R"]
+          reverse: [sinfo, -h, -N, -o, "%R", -n, $NODE]

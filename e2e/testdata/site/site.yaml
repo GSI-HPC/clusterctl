@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# The site the end-to-end tests run against: a sind cluster. sind names a
+# node <node>.<cluster>.<realm>.sind, so the cluster "alpha" in the realm
+# "e2e" is the domain alpha.e2e.sind. The ssh configuration sind exports,
+# which reaches the nodes through its relay container, is included by the
+# workstation document the tests write, since where it lies is a fact of the
+# machine the tests run on.
+apiVersion: clusterctl/v1alpha1
+kind: Site
+metadata:
+  name: sind
+spec:
+  domains:
+    hpc: alpha.e2e.sind
+  naming:
+    rules:
+      - fqdn: "{name}.{domains.hpc}"
+  hosts:
+    login:
+      host: submitter.alpha.e2e.sind
+      description: The submitter, where the Slurm clients run
+    wlm:
+      host: controller.alpha.e2e.sind
+      description: The controller, where slurmctld runs
+  ssh:
+    # A copy of the host keys sind collected, which the tests may change.
+    knownHostsFile: ssh-known-hosts
+    connectTimeout: 5s
+  safety:
+    protectedHosts:
+      - controller
+    slurmAware: true
+  fanout:
+    max: 8

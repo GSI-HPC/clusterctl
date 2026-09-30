@@ -3,6 +3,11 @@
 
 version: "2"
 
+run:
+  # The end-to-end tests build only with their tag, and are linted with the
+  # rest.
+  build-tags: [e2e]
+
 linters:
   enable:
     # Errors that are checked nowhere are the ones that surprise an
