@@ -3,7 +3,8 @@
 
 # Testing
 
-`make test` runs everything. `make cover` reports coverage, `make race` runs
+`make test` runs everything but the end-to-end tests, which need a cluster in
+Docker and `make e2e` runs. `make cover` reports coverage, `make race` runs
 under the race detector, and `make lint` vets and checks formatting.
 
 ## What is tested where
@@ -144,20 +145,65 @@ survive the trip, that a declined confirmation sends nothing, that a dry run
 sends nothing, that a protected host is refused, and that exit codes are what
 the contract says.
 
+**End to end, against sind.** `e2e/` runs the binary against a Slurm
+cluster in Docker that [sind](https://github.com/GSI-HPC/sind) creates: a
+controller, a submitter and three workers, each a container with systemd,
+sshd, munge and the Slurm daemons of its role. Nothing of clusterctl is
+replaced. The configuration in `e2e/testdata/site/` names the cluster's
+domain, and the workstation document the suite writes includes the ssh
+configuration sind exports, whose `ProxyCommand` reaches a node through
+sind's relay container; so a node name goes through the naming rules, the
+generated configuration, the include and a real handshake checked against the
+site's host key file, a copy of the keys sind collected
+([ADR 0024](adr/0024-end-to-end-tests-on-sind.md)). What clusterctl did is
+checked past it, with `docker exec` in the node's container:
+
+- each node answers with its own name, and arguments and a payload on
+  standard input arrive unchanged at a real login shell;
+- a failed node, a node that cannot be reached and a command that exits 255
+  give the exit codes of [ADR 0020](adr/0020-one-exit-code-rule-for-many-hosts.md),
+  and a timeout ends the command on the node;
+- a protected host is refused and a dry run changes nothing;
+- scp puts a file on every node and brings one back from each;
+- `slurm node drain` drains with the reason given and `resume` resumes, as
+  `scontrol` on the controller reads them, while a drain nobody confirmed, or
+  of a node Slurm does not know, changes nothing; a job submitted past
+  clusterctl is found by the filters of `slurm job list`; a group resolves
+  through the real `sinfo`;
+- `hostkey verify` finds the keys sind collected, and reports a key that
+  changed, which ssh then refuses until `hostkey refresh` has written it.
+
+`worker-9` is in the inventory and not in the cluster, and stands for a node
+that does not answer.
+
+The suite has a build tag, `e2e`, so `go test ./...` never needs Docker;
+`make lint` vets it and golangci-lint lints it all the same. `make e2e-up`
+creates the cluster, `make e2e` runs the suite against it and `make e2e-down`
+deletes it. The suite fails, rather than skips, when sind or the cluster is
+missing. It needs Linux with Docker and cgroup v2, and sind, which
+`mise install` installs at the version `mise.toml` pins. The host key
+commands dial the nodes with a handshake of their own rather than through the
+relay, so for them the node names have to resolve: `make e2e-hosts` prints
+the lines to add to `/etc/hosts`. CI runs the suite with
+[sind-action](https://github.com/GSI-HPC/sind-action) on each Slurm release
+line sind publishes a node image for, and keeps the logs of the nodes when it
+fails.
+
 ## What is deliberately not tested
 
-Anything that needs real hardware or a real cluster: IPMI against a service
-processor, fabric diagnostics, a Slurm controller, a PXE boot. Those paths are
-covered up to the point where a command is handed to the transport — the
-command that would be sent is asserted, its effect is not.
+Anything that needs real hardware: IPMI against a service processor, fabric
+diagnostics, a PXE boot. Those paths are covered up to the point where a
+command is handed to the transport — the command that would be sent is
+asserted, its effect is not. The accounting commands are covered the same
+way, since sind stands up no slurmdbd yet.
 
 That boundary is honest, not convenient. The alternative is mocking a fabric
 diagnostic tool's output and testing the mock.
 
 If this is ever taken further, the review that preceded the rewrite names the
-backends worth standing up: the DMTF Redfish mockup server, sushy-tools,
-OpenIPMI's `ipmi_sim`, a containerised Slurm, and ClusterShell itself as the
-reference for node set output.
+other backends worth standing up: the DMTF Redfish mockup server,
+sushy-tools, OpenIPMI's `ipmi_sim`, and ClusterShell itself as the reference
+for node set output.
 
 ## Coverage
 

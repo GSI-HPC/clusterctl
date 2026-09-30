@@ -187,6 +187,7 @@ The rest is updated by hand:
 | The Go release line | `go` in `mise.toml` | As described under [the Go toolchain](#the-go-toolchain). |
 | sops for the tests | `sops` in `mise.toml` | Change it to the new release; CI builds it from its tag. The sops that reads a site's secrets is the workstation's own ([ADR 0019](adr/0019-decrypt-with-the-sops-command.md)), updated by the distribution or the version manager that installed it. |
 | The oldest sops supported | `SOPS_MIN_VERSION` in `ci.yml`, `MinSopsVersion` in `internal/secrets` | Raise both together, with a line in the release notes, when clusterctl comes to need a newer sops. |
+| sind for the end-to-end tests | `github:GSI-HPC/sind` in `mise.toml` | Change it to the new release; CI installs it with sind-action, whose own version Dependabot proposes. Read sind's release notes for a change to the node images or the ssh configuration it exports ([ADR 0024](adr/0024-end-to-end-tests-on-sind.md)). |
 
 golangci-lint and govulncheck need nothing, and neither does GoReleaser within
 its major version: the workflows take their latest release every time.

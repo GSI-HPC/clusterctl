@@ -34,3 +34,4 @@ A decision is superseded by a later record, never edited.
 | [0021](0021-progress-as-our-own-events.md) | Report progress as our own span-shaped events | accepted |
 | [0022](0022-bounded-pools-and-power-batches.md) | Bounded pools, and power actions in batches | accepted |
 | [0023](0023-ssh-or-openpgp-release-tags.md) | A release tag is signed with an SSH or an OpenPGP key | accepted |
+| [0024](0024-end-to-end-tests-on-sind.md) | End-to-end tests against a sind cluster | accepted |
