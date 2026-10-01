@@ -562,11 +562,23 @@ fails.
 				return err
 			}
 			// One listing answers for every node, rather than one connection
-			// per node as the shell version did.
+			// per node as the shell version did. DHCP, which names what
+			// the inventory gives no address, does not depend on it, and
+			// is read beside it rather than after it; the listing's
+			// failure ends that read.
+			dhcpCtx, stopDHCP := context.WithCancel(a.Context())
+			defer stopDHCP()
+			var dhcpRead sync.WaitGroup
+			if bootStatusAsksDHCP(a, ns) {
+				dhcpRead.Go(func() { _, _ = a.DHCPConfig(dhcpCtx) })
+			}
 			links, err := readBootLinks(a.Context(), a, role, root)
 			if err != nil {
+				stopDHCP()
+				dhcpRead.Wait()
 				return err
 			}
+			dhcpRead.Wait()
 
 			suffix := a.Spec.Services.PXESrv.StaticSuffix
 			if ns == nil {
@@ -619,6 +631,24 @@ fails.
 			}
 			return nil
 		}))
+}
+
+// bootStatusAsksDHCP says whether boot status asks DHCP for an address: for
+// a node of ns the inventory gives none, or, without a node set, for any
+// node of the inventory that has none, when a role runs the DHCP server.
+func bootStatusAsksDHCP(a *app.App, ns *nodeset.NodeSet) bool {
+	if ns == nil {
+		if a.Spec.Services.DHCP.Role == "" {
+			return false
+		}
+		return slices.ContainsFunc(a.Inventory.All(), func(n *inventory.Node) bool { return n.Address == "" })
+	}
+	for _, node := range ns.Expand() {
+		if entry, ok := a.Inventory.Lookup(node); !ok || entry.Address == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // addressLinks are the boot links named after one address, and the nodes
