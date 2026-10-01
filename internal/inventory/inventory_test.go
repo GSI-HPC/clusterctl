@@ -197,21 +197,69 @@ func TestBootPath(t *testing.T) {
 		{Nodes: "exe3", Path: "/srv/pxesrv/boot/other"},
 	}
 
-	path, static, err := inventory.BootPath(inv, rules, "exe1")
+	paths := inventory.NewBootPaths(inv, rules)
+	path, static, err := paths.Of("exe1")
 	if err != nil || path != "/srv/pxesrv/boot/exe" || static {
-		t.Errorf("BootPath(exe1) = %q, %v, %v", path, static, err)
+		t.Errorf("Of(exe1) = %q, %v, %v", path, static, err)
 	}
 	// The node's own entry wins over the cluster rules.
-	path, _, err = inventory.BootPath(inv, rules, "exe4")
+	path, _, err = paths.Of("exe4")
 	if err != nil || path != "/srv/pxesrv/boot/special" {
-		t.Errorf("BootPath(exe4) = %q, %v", path, err)
+		t.Errorf("Of(exe4) = %q, %v", path, err)
 	}
 	// Two rules naming one node is a mistake worth stopping for.
-	if _, _, err := inventory.BootPath(inv, rules, "exe3"); err == nil {
+	if _, _, err := paths.Of("exe3"); err == nil {
 		t.Error("two rules for one node should be reported")
 	}
-	if _, _, err := inventory.BootPath(inv, rules, "exe2x"); err == nil {
+	if _, _, err := paths.Of("exe2x"); err == nil {
 		t.Error("a node with no boot path should be reported")
+	}
+}
+
+// A rule that cannot be parsed is reported for every node that needs the
+// rules, and for none that has a boot path of its own.
+func TestBootPathRuleErrorsWaitForANodeThatNeedsTheRules(t *testing.T) {
+	t.Parallel()
+
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe[1-2]"},
+		{Nodes: "exe2", BootPath: "/srv/pxesrv/boot/special"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := inventory.NewBootPaths(inv, []v1alpha1.BootPathRule{
+		{Nodes: "exe1", Path: "/srv/pxesrv/boot/exe"},
+		{Nodes: "exe[", Path: "/srv/pxesrv/boot/broken"},
+	})
+	if path, _, err := paths.Of("exe2"); err != nil || path != "/srv/pxesrv/boot/special" {
+		t.Errorf("Of(exe2) = %q, %v; a node's own boot path needs no rule", path, err)
+	}
+	for range 2 {
+		if _, _, err := paths.Of("exe1"); err == nil || !strings.Contains(err.Error(), "boot path rule 2") {
+			t.Errorf("Of(exe1) = %v, want rule 2 reported", err)
+		}
+	}
+}
+
+// Every rule was parsed again for every node, so that resolving the boot
+// paths of 10,000 nodes took 19 seconds.
+func TestBootPathRulesAreParsedOnce(t *testing.T) {
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe[0001-4000]"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := inventory.NewBootPaths(inv, []v1alpha1.BootPathRule{
+		{Nodes: "exe[0001-4000]", Path: "/srv/pxesrv/boot/exe"},
+	})
+	if _, _, err := paths.Of("exe0001"); err != nil {
+		t.Fatal(err)
+	}
+	// Parsing the rule again allocates for each of its 4,000 nodes.
+	if allocs := testing.AllocsPerRun(10, func() { _, _, _ = paths.Of("exe0002") }); allocs > 100 {
+		t.Errorf("Of allocates %.0f times for one node of a rule of 4,000", allocs)
 	}
 }
 

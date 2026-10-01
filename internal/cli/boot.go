@@ -204,10 +204,11 @@ func resolveBootLinks(ctx context.Context, a *app.App, ns *nodeset.NodeSet, expl
 	}
 	links := make([]bootLink, len(nodes))
 	var persistentNodes []string
+	paths := inventory.NewBootPaths(a.Inventory, a.Spec.BootPaths)
 	for i, node := range nodes {
 		path, static := explicit, persistent
 		if path == "" {
-			resolved, ruleStatic, err := inventory.BootPath(a.Inventory, a.Spec.BootPaths, node)
+			resolved, ruleStatic, err := paths.Of(node)
 			if err != nil {
 				return nil, exitcode.Wrap(exitcode.Usage, err)
 			}
