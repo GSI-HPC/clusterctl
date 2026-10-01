@@ -192,6 +192,21 @@ func (a *App) BMCCredential(ctx context.Context, node string) (credentials.Crede
 	return cred, nil
 }
 
+// PrefetchBMCCredentials reads the accounts of the nodes' service processors
+// side by side, those whose reads cannot use the terminal, before the
+// clients of the nodes are built one after the other: one account for each
+// vendor's processors, each read by a helper or from a Secret, was read in
+// turn.
+func (a *App) PrefetchBMCCredentials(ctx context.Context, nodes []string) {
+	var names []string
+	for _, node := range nodes {
+		if name := a.BMCCredentialName(node); name != "" {
+			names = append(names, name)
+		}
+	}
+	a.Credentials().Prefetch(ctx, names)
+}
+
 // RedfishClient builds a client for a node's service processor.
 func (a *App) RedfishClient(ctx context.Context, node string) (*redfish.Client, error) {
 	host, err := a.BMCHost(node)

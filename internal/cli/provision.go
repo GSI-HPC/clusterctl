@@ -1313,6 +1313,11 @@ func planReinstall(ctx context.Context, a *app.App, ns *nodeset.NodeSet, explici
 				"boot set, bmc boot set, hostkey remove and bmc power reset", fold(elsewhere))
 	}
 
+	nodes := make([]string, len(links))
+	for i, l := range links {
+		nodes[i] = l.Node
+	}
+	a.PrefetchBMCCredentials(ctx, nodes)
 	for _, l := range links {
 		n := &reinstallNode{Node: l.Node, Address: l.Address, BootPath: l.Path, Mode: l.Mode, State: stateUnchanged}
 		if a.DryRun() {
@@ -1697,6 +1702,7 @@ command exits 130.`,
 			// links.
 			clients := make([]*redfish.Client, len(nodes))
 			clientErrs := make([]error, len(nodes))
+			a.PrefetchBMCCredentials(a.Context(), nodes)
 			for i, s := range states {
 				// A node whose client fails is reported and the rest go
 				// on, but once the command is interrupted no credential

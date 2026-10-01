@@ -70,6 +70,7 @@ var redfishClientFor = func(a *app.App, ctx context.Context, node string) (*redf
 // that a missing credential or processor name stops the command as a usage
 // error instead of turning up as one failed row per node.
 func redfishClients(ctx context.Context, a *app.App, names []string) ([]*redfish.Client, error) {
+	a.PrefetchBMCCredentials(ctx, names)
 	clients := make([]*redfish.Client, len(names))
 	for i, node := range names {
 		c, err := redfishClientFor(a, ctx, node)
@@ -414,7 +415,9 @@ func (p *bmcPlan) describe(a *app.App) string {
 // transport of each needs, before anything is sent. A missing credential or
 // IPMI host role stops the command as a usage error.
 func (p *bmcPlan) resolve(ctx context.Context, a *app.App) error {
-	for _, node := range p.nodes.Expand() {
+	nodes := p.nodes.Expand()
+	a.PrefetchBMCCredentials(ctx, nodes)
+	for _, node := range nodes {
 		switch p.order[node][0] {
 		case app.TransportRedfish:
 			if _, err := p.client(ctx, a, node); err != nil {

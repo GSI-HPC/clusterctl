@@ -17,6 +17,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/credentials"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 )
 
 func resolver(t *testing.T, creds map[string]v1alpha1.Credential, env map[string]string) *credentials.Resolver {
@@ -632,5 +633,69 @@ func TestHelperHasNoTerminalWithoutOne(t *testing.T) {
 		if cred.Password() != tc.want {
 			t.Errorf("NoTerminal %v: the helper's session is %q, want %q", tc.noTerminal, cred.Password(), tc.want)
 		}
+	}
+}
+
+// With nobody at the terminal, as under the MCP server, the accounts of the
+// processors of several vendors were read one after the other, each Secret
+// or helper waiting for the one before, under one lock for every name.
+// Prefetch reads them side by side, here three that each wait for the
+// others to be under way.
+func TestPrefetchReadsTheAccountsSideBySide(t *testing.T) {
+	t.Parallel()
+	creds := map[string]v1alpha1.Credential{}
+	for _, name := range []string{"bmc", "vendor1", "vendor2"} {
+		creds[name] = v1alpha1.Credential{Username: "admin", Password: v1alpha1.PasswordSource{
+			SecretRef: &v1alpha1.SecretKeyRef{Name: "vault", Key: name}}}
+	}
+	reads := &fanouttest.InFlight{Hold: 3}
+	r := resolver(t, creds, nil)
+	r.NoTerminal = true
+	r.Secret = func(_ context.Context, ref v1alpha1.SecretKeyRef) ([]byte, error) {
+		defer reads.Enter()()
+		return []byte("pw-" + ref.Key), nil
+	}
+	r.Prefetch(context.Background(), []string{"bmc", "vendor1", "bmc", "vendor2", "unknown"})
+	if got := reads.Peak(); got != 3 {
+		t.Errorf("%d reads were under way at once, want 3", got)
+	}
+	for _, name := range []string{"bmc", "vendor1", "vendor2"} {
+		if cred, err := r.Get(context.Background(), name); err != nil || cred.Password() != "pw-"+name {
+			t.Errorf("Get(%s) = %v, %v", name, cred, err)
+		}
+	}
+	if got := reads.Started(); got != 3 {
+		t.Errorf("the Secrets were read %d times, want once each", got)
+	}
+}
+
+// A read that may use the terminal is left to Get, so that the questions
+// come one at a time and in the order the command asks them: a prompt, and,
+// with someone at the terminal, a Secret, whose sops may ask for a PIN.
+func TestPrefetchLeavesTheTerminalAlone(t *testing.T) {
+	t.Parallel()
+	var (
+		mu    sync.Mutex
+		reads []string
+	)
+	read := func(what string) {
+		mu.Lock()
+		reads = append(reads, what)
+		mu.Unlock()
+	}
+	r := resolver(t, map[string]v1alpha1.Credential{
+		"asked": {Username: "admin", Password: v1alpha1.PasswordSource{Prompt: true}},
+		"vault": {Username: "admin", Password: v1alpha1.PasswordSource{
+			SecretRef: &v1alpha1.SecretKeyRef{Name: "vault", Key: "bmc"}}},
+		"env": {Username: "admin", Password: v1alpha1.PasswordSource{FromEnv: "BMC_PASSWORD"}},
+	}, map[string]string{"BMC_PASSWORD": "from-env"})
+	r.Prompt = func(string) (string, error) { read("prompt"); return "typed", nil }
+	r.Secret = func(context.Context, v1alpha1.SecretKeyRef) ([]byte, error) { read("secret"); return []byte("pw"), nil }
+	r.Prefetch(context.Background(), []string{"asked", "vault", "env"})
+	if len(reads) != 0 {
+		t.Errorf("Prefetch read %q, which may use the terminal", reads)
+	}
+	if cred, err := r.Get(context.Background(), "env"); err != nil || cred.Password() != "from-env" {
+		t.Errorf("Get(env) = %v, %v", cred, err)
 	}
 }
