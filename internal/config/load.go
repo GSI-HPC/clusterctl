@@ -63,6 +63,12 @@ func Load(files []string) (*Bundle, error) {
 // load is Load with the files read by read, so that a configuration that is
 // not on disk yet can be checked the same way.
 func load(files []string, read func(string) ([]byte, error)) (*Bundle, error) {
+	// The schemas take about 18ms to compile, once a process, which the
+	// first document and the first override checked would wait for. They
+	// are compiled while the files are read and parsed.
+	go schemaOnce.Do(buildSchemas)
+	go effectiveOnce.Do(buildEffectiveSchema)
+
 	b := &Bundle{
 		Files:        files,
 		Sites:        map[string]*Document{},
