@@ -900,7 +900,7 @@ a boot path may point at.`,
 				return err
 			}
 			path := a.Spec.Services.PXESrv.BootPath
-			result, err := a.RunOnRole(a.Context(), role, transport.Request{
+			result, err := a.ReadOnRole(a.Context(), role, transport.Request{
 				Argv: []string{"find", path, "-type", "f", "-name", "ipxe.*", "-o", "-type", "f", "-name", "grub.cfg*"},
 			})
 			if err != nil {
@@ -985,7 +985,7 @@ for a boot configuration and does not get the expected one.`,
 				return err
 			}
 			path := a.Spec.Services.PXESrv.LogPath
-			result, err := a.RunOnRole(a.Context(), role, transport.Request{
+			result, err := a.ReadOnRole(a.Context(), role, transport.Request{
 				Argv: []string{"tail", "-n", fmt.Sprint(lines), path},
 			})
 			if err != nil {
@@ -1136,7 +1136,7 @@ atftpd or dnsmasq-tftp.`,
 			}
 			// A pipeline exits with its last command, so a log that cannot
 			// be read is looked for first, rather than shown as empty.
-			result, err := a.RunOnRole(a.Context(), spec.Role, transport.Request{
+			result, err := a.ReadOnRole(a.Context(), spec.Role, transport.Request{
 				Argv: []string{"sh", "-c",
 					`[ -r "$1" ] || { echo "$1 cannot be read" >&2; exit 1; }; ` +
 						`grep -a -E -e '(tftpd|dnsmasq-tftp)(\[[0-9]+\])?:' -- "$1" | tail -n "$2"`,

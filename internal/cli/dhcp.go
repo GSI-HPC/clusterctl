@@ -153,7 +153,7 @@ to the journal alone, fails the command rather than showing nothing.`,
 			}
 			// A pipeline exits with its last command, so a log that cannot
 			// be read is looked for first, rather than shown as empty.
-			result, err := a.RunOnRole(a.Context(), spec.Role, transport.Request{
+			result, err := a.ReadOnRole(a.Context(), spec.Role, transport.Request{
 				Argv: []string{"sh", "-c",
 					`[ -r "$1" ] || { echo "$1 cannot be read" >&2; exit 1; }; ` +
 						`grep -a -e dhcpd -- "$1" | tail -n "$2"`,
