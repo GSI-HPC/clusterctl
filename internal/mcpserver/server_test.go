@@ -332,6 +332,40 @@ func TestDescribeNodesJoinsInventoryAndSlurm(t *testing.T) {
 	}
 }
 
+// A job is listed under the nodes it runs on that were asked about, however
+// Slurm pads their numbers: the views were looked up by the job's spelling,
+// and a job on exe[02-03] was listed under none of exe[0001-0003].
+func TestDescribeNodesListsAJobWhateverItsPadding(t *testing.T) {
+	f := start(t, setup{runner: func(next transport.Runner) transport.Runner {
+		return runnerFunc(func(ctx context.Context, target transport.Target, req transport.Request) (*transport.Result, error) {
+			if len(req.Argv) == 0 || req.Argv[0] != "squeue" {
+				return next.Run(ctx, target, req)
+			}
+			return &transport.Result{Target: target, Stdout: slurm.Render(req, slurm.Row{"i": "4712", "u": "bob",
+				"a": "physics", "P": "main", "T": "RUNNING", "N": "exe[02-03,7000]", "D": "3", "C": "192",
+				"l": "1-00:00:00", "M": "2:00:00", "Q": "100", "r": "None", "Z": "/home/bob", "o": "job.sh"})}, nil
+		})
+	}})
+	var out struct {
+		Items []struct {
+			Name string `json:"name"`
+			Jobs []struct {
+				ID string `json:"id"`
+			} `json:"jobs"`
+		} `json:"items"`
+	}
+	f.call(t, "describe_nodes", map[string]any{"nodes": "exe[1-3]", "facets": []string{"jobs"}}, &out)
+	var got []string
+	for _, item := range out.Items {
+		for _, job := range item.Jobs {
+			got = append(got, item.Name+":"+job.ID)
+		}
+	}
+	if want := "exe0002:4712 exe0003:4712"; strings.Join(got, " ") != want {
+		t.Errorf("jobs %q, want %q", got, want)
+	}
+}
+
 func TestQuerySlurmFiltersAndLimits(t *testing.T) {
 	f := start(t, setup{})
 	var out struct {

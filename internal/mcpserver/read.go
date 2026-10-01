@@ -330,7 +330,10 @@ func (sl slurmReads) merge(ns *nodeset.NodeSet, byName map[string]*nodeView, err
 			if err != nil {
 				continue
 			}
-			for _, name := range on.Intersection(ns).Expand() {
+			// The nodes asked about that the job runs on, as they were
+			// asked about, which is how the views are found: the job's own
+			// set may be thousands of nodes, and spell them otherwise.
+			for _, name := range ns.Intersection(on).Expand() {
 				if view, ok := byName[name]; ok {
 					view.Jobs = append(view.Jobs, jobView{
 						ID: j.ID, User: j.User, State: j.State, Runtime: j.Runtime, Nodes: j.Nodes,
