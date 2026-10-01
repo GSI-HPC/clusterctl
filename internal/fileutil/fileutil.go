@@ -332,6 +332,52 @@ func Update(ctx context.Context, path string, perm os.FileMode, change func([]by
 	return WriteAtomic(path, next, perm)
 }
 
+// Locked runs fn holding the lock Update takes for a path, and hands it the
+// path the lock belongs to, a link resolved, for the same reason.
+func Locked(ctx context.Context, path string, fn func(path string) error) error {
+	path, err := resolve(path)
+	if err != nil {
+		return err
+	}
+	unlock, err := Lock(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn(path)
+}
+
+// AppendSync appends data to a file, creating it as WriteAtomic does when
+// there is none, and returns once the data has reached the disk. The caller
+// holds the file's lock, from Locked.
+//
+// A file that is only ever appended to keeps every line it had, so a reader
+// needs no lock as long as each append ends a line: whatever it reads is
+// whole but for a last line that has not ended yet. Write permission for
+// anyone is taken away, as a rewrite would.
+func AppendSync(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if errors.Is(err, fs.ErrNotExist) {
+		return WriteAtomic(path, data, perm)
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	if info, err := f.Stat(); err == nil && info.Mode().Perm()&0o002 != 0 {
+		if err := f.Chmod(info.Mode().Perm() &^ 0o002); err != nil {
+			return err
+		}
+	}
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	return f.Close()
+}
+
 // Lock takes an exclusive lock for a path and returns the function that
 // releases it. The lock lives in a sibling file, so that the locked file can
 // still be replaced atomically. A lock held elsewhere is waited for, for

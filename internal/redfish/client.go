@@ -197,10 +197,17 @@ func (c *Client) pinVerifier(ctx context.Context) func([][]byte, [][]*x509.Certi
 		}
 		recorded, ok, err := c.Pins.Get(c.Host)
 		if err != nil {
-			return err
+			return &PinStoreError{Host: c.Host, Err: err}
 		}
 		if !ok {
-			return c.Pins.Set(ctx, c.Host, seen)
+			// A concurrent first contact may have recorded another
+			// certificate meanwhile; anything else is the store's.
+			err := c.Pins.Set(ctx, c.Host, seen)
+			var mismatch *PinMismatchError
+			if err != nil && !errors.As(err, &mismatch) {
+				return &PinStoreError{Host: c.Host, Err: err}
+			}
+			return err
 		}
 		if recorded != seen {
 			return &PinMismatchError{Host: c.Host, Recorded: recorded, Seen: seen}

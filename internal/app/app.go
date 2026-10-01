@@ -36,6 +36,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
 	"github.com/GSI-HPC/clusterctl/internal/output"
+	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
@@ -208,6 +209,8 @@ type App struct {
 
 	machinesOnce sync.Once
 	machines     *machines
+	pinsOnce     sync.Once
+	pins         *redfish.PinStore
 }
 
 // ensureDirs creates the state and cache directories, or checks the ones
