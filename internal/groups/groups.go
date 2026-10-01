@@ -25,6 +25,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
@@ -73,6 +74,8 @@ type Resolver struct {
 	inventory *inventory.Inventory
 	runner    transport.Runner
 	target    TargetFunc
+	hosts     *fanout.Hosts
+	on        func(transport.Target) []string
 	cacheDir  string
 	scope     string
 	timeout   time.Duration
@@ -116,6 +119,14 @@ type Options struct {
 	Runner transport.Runner
 	// Target resolves the host role an exec source runs on.
 	Target TargetFunc
+	// Hosts bounds the sessions the commands of exec sources open to each
+	// host, a place held for each command while it runs. One Hosts shared
+	// with the other work of a command bounds them together; nil bounds
+	// the resolver's own.
+	Hosts *fanout.Hosts
+	// On names the hosts a session to a target opens a connection to, a
+	// jump host on the way among them; nil is the target's host alone.
+	On func(transport.Target) []string
 	// CacheDir holds the resolved groups of sources that ask to be cached.
 	// An empty directory keeps the cache in memory only.
 	CacheDir string
@@ -144,12 +155,22 @@ func New(opts Options) *Resolver {
 			def = name
 		}
 	}
+	hosts := opts.Hosts
+	if hosts == nil {
+		hosts = &fanout.Hosts{}
+	}
+	on := opts.On
+	if on == nil {
+		on = func(t transport.Target) []string { return []string{t.Host} }
+	}
 	return &Resolver{
 		sources:   opts.Spec.Sources,
 		def:       def,
 		inventory: opts.Inventory,
 		runner:    opts.Runner,
 		target:    opts.Target,
+		hosts:     hosts,
+		on:        on,
 		cacheDir:  opts.CacheDir,
 		scope:     opts.Scope,
 		timeout:   opts.Timeout,
@@ -270,20 +291,44 @@ func (r *Resolver) All(source string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		parts := make([]string, 0, len(names))
-		for _, group := range names {
-			one, err := r.resolveIn(q.ctx, source, group)
-			if err != nil {
-				return "", err
-			}
-			part, err := unionOperand(source, group, one)
-			if err != nil {
-				return "", err
-			}
-			parts = append(parts, part)
-		}
-		return strings.Join(parts, ","), nil
+		return r.union(q.ctx, source, names)
 	})
+}
+
+// union looks up the groups of a source side by side, fanout.PerHost at a
+// time, which is as many as the source's host takes, and returns them as
+// one union, in the order of names. The first failure starts no further
+// lookup, ends those under way and is what union returns.
+func (r *Resolver) union(ctx context.Context, source string, names []string) (string, error) {
+	pool, stop := context.WithCancel(ctx)
+	defer stop()
+	parts := make([]string, len(names))
+	var (
+		mu     sync.Mutex
+		failed error
+	)
+	fanout.Each(pool, len(names), fanout.PerHost, func(i int) {
+		one, err := r.resolveIn(pool, source, names[i])
+		if err == nil {
+			parts[i], err = unionOperand(source, names[i], one)
+		}
+		if err != nil {
+			mu.Lock()
+			defer mu.Unlock()
+			if failed == nil {
+				failed = err
+				stop()
+			}
+		}
+	})
+	if failed != nil {
+		return "", failed
+	}
+	// An interrupt starts no further lookup, and leaves the union short.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return strings.Join(parts, ","), nil
 }
 
 // unionOperand writes a group's expression as one operand of the union All
@@ -425,12 +470,27 @@ func (r *Resolver) groupsIn(ctx context.Context, name, node string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
+	// The groups are looked up side by side, fanout.PerHost at a time,
+	// which is as many as the source's host takes, and read in their
+	// order. One that fails does not stop the others.
+	exprs := make([]string, len(groups))
+	lookupErrs := make([]error, len(groups))
+	looked := make([]bool, len(groups))
+	fanout.Each(ctx, len(groups), fanout.PerHost, func(i int) {
+		exprs[i], lookupErrs[i] = r.resolveIn(ctx, name, groups[i])
+		looked[i] = true
+	})
 	var (
 		member []string
 		errs   []error
 	)
-	for _, group := range groups {
-		expr, err := r.resolveIn(ctx, name, group)
+	for i, group := range groups {
+		if !looked[i] {
+			// An interrupt starts no further lookup.
+			errs = append(errs, ctx.Err())
+			break
+		}
+		expr, err := exprs[i], lookupErrs[i]
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -515,11 +575,19 @@ func (r *Resolver) prepare(src *v1alpha1.ExecGroupSource, argv []string, vars ma
 
 // run runs one prepared command and returns its output as a node set list.
 //
-// An error already carrying an exit code, such as the transport failure of
-// an ssh that could not connect, keeps it. A command that failed on a host
-// that answered is that host's failure, reported with what it printed.
+// It holds a place on every host the session reaches while the command
+// runs, and only then, so that a lookup that waits for another's answer
+// holds none. An error already carrying an exit code, such as the
+// transport failure of an ssh that could not connect, keeps it. A command
+// that failed on a host that answered is that host's failure, reported
+// with what it printed.
 func (r *Resolver) run(q *asking, target transport.Target, command []string) (string, error) {
 	q.cache = "miss"
+	release, err := r.hosts.Acquire(q.ctx, r.on(target)...)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	result, err := r.runner.Run(q.ctx, target, transport.Request{
 		Argv:    command,
 		Timeout: r.timeout,

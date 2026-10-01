@@ -229,21 +229,54 @@ command fail, after what the other sources answered has been printed.`,
 				return groupsError(node, groupErr)
 			}
 
+			// The sources are listed side by side, and then their groups
+			// looked up side by side, fanout.max at a time, the resolver
+			// holding each host to fanout.PerHost sessions: one after the
+			// other, twenty groups of a source that runs a command took
+			// twenty round trips. The rows keep the order of the sources
+			// and of their groups.
+			ctx := a.Context()
+			sources := a.Groups.Sources()
+			lists := make([][]string, len(sources))
+			listErrs := make([]error, len(sources))
+			fanout.Each(ctx, len(sources), a.Spec.Fanout.Max, func(i int) {
+				lists[i], listErrs[i] = a.Groups.List(sources[i])
+			})
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			type group struct{ source, name string }
+			var all []group
+			for i, source := range sources {
+				for _, name := range lists[i] {
+					all = append(all, group{source, name})
+				}
+			}
+			exprs := make([]string, len(all))
+			errs := make([]error, len(all))
+			fanout.Each(ctx, len(all), a.Spec.Fanout.Max, func(i int) {
+				exprs[i], errs[i] = a.Groups.Resolve(all[i].source, all[i].name)
+			})
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
 			t := output.NewTable(output.Cols("SOURCE", "GROUP", "NODES").Wide("NODES")...)
 			listing := map[string][]string{}
 			var failed []error
-			for _, source := range a.Groups.Sources() {
-				names, err := a.Groups.List(source)
-				if err != nil {
+			next := 0
+			for i, source := range sources {
+				if err := listErrs[i]; err != nil {
 					t.Add(source, "", "cannot be listed: "+err.Error())
 					if !errors.Is(err, groups.ErrCannotList) {
 						failed = append(failed, err)
 					}
 					continue
 				}
-				listing[source] = names
-				for _, name := range names {
-					expr, err := a.Groups.Resolve(source, name)
+				listing[source] = lists[i]
+				for _, name := range lists[i] {
+					expr, err := exprs[next], errs[next]
+					next++
 					if err != nil {
 						t.Add(source, name, "error: "+err.Error())
 						failed = append(failed, err)
