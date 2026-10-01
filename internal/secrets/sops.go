@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 )
 
@@ -215,22 +216,28 @@ func InspectSops(data []byte) (SopsInfo, error) {
 	return doc.info, nil
 }
 
+// readSops reads a sops encrypted document. The file is parsed once, and
+// its one document decoded from what was parsed, as a map and as the sops
+// metadata: each decode parsed the file again, three parses of every
+// Secret document every time the configuration loaded.
 func readSops(data []byte) (sopsDocument, error) {
 	file, err := parser.ParseBytes(data, 0)
 	if err != nil {
 		return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
 	}
 	docs := 0
+	var body ast.Node
 	for _, d := range file.Docs {
 		if d.Body != nil {
 			docs++
+			body = d.Body
 		}
 	}
 	if docs != 1 {
 		return sopsDocument{}, fmt.Errorf("reading the sops metadata: the file holds %d documents, want 1", docs)
 	}
 	var values map[string]any
-	if err := yaml.Unmarshal(data, &values); err != nil {
+	if err := yaml.NodeToValue(body, &values); err != nil {
 		return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
 	}
 	raw, ok := values["sops"].(map[string]any)
@@ -241,7 +248,7 @@ func readSops(data []byte) (sopsDocument, error) {
 	var meta struct {
 		Sops sopsMetadata `yaml:"sops"`
 	}
-	if err := yaml.Unmarshal(data, &meta); err != nil {
+	if err := yaml.NodeToValue(body, &meta); err != nil {
 		return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
 	}
 	info, err := inspect(meta.Sops)
