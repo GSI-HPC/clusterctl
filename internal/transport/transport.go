@@ -44,9 +44,10 @@ const (
 	// killGrace is how long a command gets after its timeout before it is
 	// killed outright.
 	killGrace = 5 * time.Second
-	// maxArgBytes is the size of one argument the kernel accepts. A remote
-	// command longer than this has to travel over stdin instead.
-	maxArgBytes = 131072
+	// maxArgBytes is the longest argument the kernel accepts: Linux's
+	// MAX_ARG_STRLEN, 32 pages of 4 KiB, counts the NUL that ends it. A
+	// remote command longer than this has to travel over stdin instead.
+	maxArgBytes = 131072 - 1
 	// sshConnectionFailed is the exit status ssh itself reports when it
 	// could not reach or authenticate with the host.
 	sshConnectionFailed = 255
@@ -400,13 +401,9 @@ func (c *Client) Args(target Target, req Request) ([]string, error) {
 	}
 	if command != "" && !req.NoShell {
 		// The command's words follow the guard's, so sh hands them to it
-		// as "$@", exactly as they were quoted.
-		command = shellquote.Join([]string{"sh", "-c", statusGuard, "sh"}) + " " + command
-		if len(command) > maxArgBytes {
-			return nil, fmt.Errorf(
-				"the remote command is %d bytes, over the %d byte limit on one argument; send it over stdin instead",
-				len(command), maxArgBytes)
-		}
+		// as "$@", exactly as they were quoted. RemoteCommand counted the
+		// guard in.
+		command = guardPrefix + command
 	}
 	if command != "" {
 		args = append(args, command)
@@ -442,10 +439,18 @@ func (c *Client) userFor(target Target) string {
 	return c.defaultUser
 }
 
+// guardPrefix is what the command of a request that runs in a shell is sent
+// behind, which sh hands the command's words to as "$@".
+var guardPrefix = shellquote.Join([]string{"sh", "-c", statusGuard, "sh"}) + " "
+
 // RemoteCommand renders a request as the single argument ssh is given.
 //
 // The result is one shell command line. The remote shell splits it back into
-// the original argument vector, because every word was quoted.
+// the original argument vector, because every word was quoted. It is refused
+// when what ssh is given would be over the limit on one argument, the guard
+// a request that runs in a shell is sent behind included: the recorder of a
+// dry run, which has no guard to add, refused a command some 50 bytes
+// shorter than the one ssh would have been refused.
 func RemoteCommand(req Request) (string, error) {
 	if len(req.Argv) > 0 && req.Script != "" {
 		return "", errors.New("a request carries both an argument vector and a script")
@@ -469,10 +474,14 @@ func RemoteCommand(req Request) (string, error) {
 	}
 
 	command := shellquote.Join(parts)
-	if len(command) > maxArgBytes {
+	sent := len(command)
+	if !req.NoShell {
+		sent += len(guardPrefix)
+	}
+	if sent > maxArgBytes {
 		return "", fmt.Errorf(
 			"the remote command is %d bytes, over the %d byte limit on one argument; send it over stdin instead",
-			len(command), maxArgBytes)
+			sent, maxArgBytes)
 	}
 	return command, nil
 }

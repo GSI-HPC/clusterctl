@@ -249,6 +249,44 @@ func TestRemoteCommandRejectsBadRequests(t *testing.T) {
 	}
 }
 
+// The kernel caps one argument at 131,072 bytes, the NUL that ends it
+// among them, so a command of exactly that many bytes was let through and
+// refused by the kernel. And the recorder of a dry run measured the
+// command without the guard ssh sends it behind, so it let through a
+// command some 50 bytes longer than ssh's. Both now refuse what ssh would:
+// what ssh is given is at most 131,071 bytes, and the client and the
+// recorder agree on every size around it.
+func TestTheLimitOnOneArgumentIsTheKernels(t *testing.T) {
+	t.Parallel()
+	c := testClient(t)
+	target := transport.Target{Name: "exe0001", Host: "exe0001.hpc.example.org"}
+	for _, noShell := range []bool{false, true} {
+		var refused []int
+		for size := 131000; size <= 131080; size++ {
+			req := transport.Request{Argv: []string{strings.Repeat("x", size)}, NoShell: noShell}
+			args, clientErr := c.Args(target, req)
+			_, recorderErr := (&transport.Recorder{}).Run(context.Background(), target, req)
+			if (clientErr == nil) != (recorderErr == nil) {
+				t.Errorf("noShell %v, %d bytes: the client says %v and the recorder %v", noShell, size, clientErr, recorderErr)
+			}
+			if clientErr != nil {
+				refused = append(refused, size)
+				continue
+			}
+			if sent := len(args[len(args)-1]); sent > 131071 {
+				t.Errorf("noShell %v, %d bytes: ssh is given an argument of %d bytes", noShell, size, sent)
+			}
+		}
+		if len(refused) == 0 {
+			t.Fatalf("noShell %v: nothing was refused", noShell)
+		}
+		args, _ := c.Args(target, transport.Request{Argv: []string{strings.Repeat("x", refused[0]-1)}, NoShell: noShell})
+		if sent := len(args[len(args)-1]); sent != 131071 {
+			t.Errorf("noShell %v: the longest command let through is %d bytes, want 131,071", noShell, sent)
+		}
+	}
+}
+
 func TestCopyArgs(t *testing.T) {
 	t.Parallel()
 	c := testClient(t)
