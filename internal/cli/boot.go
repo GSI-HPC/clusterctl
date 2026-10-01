@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -276,7 +277,23 @@ func describeBootLinks(links []bootLink) string {
 // and a one-shot link is refused over a persistent one, which the PXE
 // service would keep offering after the first request. It only reads, so a
 // dry run makes the same check and is refused where the real run would be.
+//
+// The links are listed beside the check of the paths, which they do not
+// depend on: one session after the other cost a round trip to the PXE host
+// before every boot set and reinstall. What the check finds is reported
+// first, as it was when the listing waited for it.
 func checkBootLinks(ctx context.Context, a *app.App, role, root string, links []bootLink) error {
+	suffix := a.Spec.Services.PXESrv.StaticSuffix
+	var (
+		existing map[string]string
+		listErr  error
+		listing  sync.WaitGroup
+	)
+	if suffix != "" {
+		listing.Go(func() { existing, listErr = readBootLinks(ctx, a, role, root) })
+	}
+	defer listing.Wait()
+
 	var paths []string
 	seen := map[string]bool{}
 	for _, l := range links {
@@ -309,13 +326,12 @@ func checkBootLinks(ctx context.Context, a *app.App, role, root string, links []
 			role, strings.Join(missing, ", "))
 	}
 
-	suffix := a.Spec.Services.PXESrv.StaticSuffix
 	if suffix == "" {
 		return nil
 	}
-	existing, err := readBootLinks(ctx, a, role, root)
-	if err != nil {
-		return err
+	listing.Wait()
+	if listErr != nil {
+		return listErr
 	}
 	var held []string
 	for _, l := range links {

@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -467,6 +468,36 @@ func TestBootSetRefusesOverAPersistentLink(t *testing.T) {
 	}
 	if p.exists("10.0.2.1") || len(p.changes()) != 0 {
 		t.Errorf("a link was written: %q", p.changes())
+	}
+}
+
+// boot set checked that the boot paths exist and only then listed the
+// links, one session to the PXE host after the other. The two are read
+// side by side: each is held until a third is under way, which never
+// comes, so both are under way at once only when neither waits for the
+// other. A missing boot path is still what is reported, although the
+// listing found a persistent link too.
+func TestBootSetChecksThePathsBesideListingTheLinks(t *testing.T) {
+	p := newPXEHost(t, pxeOptions{})
+	calls := &fanouttest.InFlight{Hold: 3}
+	p.rec = &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		defer calls.Enter()()
+		return p.reply(tg, req)
+	}}
+	if h, err := p.run(t, harnessOptions{}, "--set", staticSuffix, "boot", "set", "-n", "exe0001", "-y"); err != nil {
+		t.Fatalf("boot set failed: %v\n%s", err, h.errOut)
+	}
+	if got := calls.Peak(); got != 2 {
+		t.Errorf("%d reads of the PXE host were under way at once, want the check and the listing", got)
+	}
+
+	p.link(t, "10.0.2.1.static", p.exePath())
+	if err := os.Remove(p.exePath()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.run(t, harnessOptions{}, "--set", staticSuffix, "boot", "set", "-n", "exe0001", "-y")
+	if err == nil || !strings.Contains(err.Error(), "no boot configuration exists") {
+		t.Errorf("error = %v, want the missing boot path", err)
 	}
 }
 
