@@ -30,9 +30,9 @@ import (
 
 // secrets push decrypts every file before it asks, by sops for a key of a
 // Secret document and by age for a file of its own, and then writes them
-// onto the nodes, a target each, every file a step of the node's own, one
-// after the other: a node that could not be reached for one file skips the
-// rest.
+// onto the nodes, a target each with one call, every file a step of the
+// node's own, ended as the node reports on it: a node that could not be
+// reached fails the first file and skips the rest.
 func TestSecretsPushReportsItsDecryptionsAndEachFile(t *testing.T) {
 	site := secretSite{values: bmcSecret, identities: true}
 	dir, keyFile := site.write(t)
@@ -56,14 +56,13 @@ command secrets push: failed (transport): 1 of 3 nodes failed: exe0002: exe0002 
   call decrypt the Secret example source=sops [hidden]: ok
   step write the secrets total=3 limit=24 [fold]: failed (transport): 1 of 3 failed: exe0002
     target exe0002: failed (transport): {} ({}): ssh: connect to host {} port 22: Connection timed out
+      call ssh node={} host={} timeout=10m0s exit=255: failed (transport): {} ({}): ssh: connect to host {} port 22: Connection timed out
       step write /etc/munge/munge.key [hidden]: failed (transport): {} ({}): ssh: connect to host {} port 22: Connection timed out
-        call ssh node={} host={} timeout=10m0s exit=255 [hidden]: failed (transport): {} ({}): ssh: connect to host {} port 22: Connection timed out
       step write /etc/nslcd.keytab [hidden]: skipped: the node could not be reached
     target exe[0001,0003]: ok
+      call ssh node={} host={} timeout=10m0s exit=0: ok
       step write /etc/munge/munge.key [hidden]: ok
-        call ssh node={} host={} timeout=10m0s exit=0 [hidden]: ok
       step write /etc/nslcd.keytab [hidden]: ok
-        call ssh node={} host={} timeout=10m0s exit=0 [hidden]: ok
   wait confirm message=write secrets onto 3 hosts: ok
 `
 	if got := strings.ReplaceAll(tree(), dir, "DIR"); got != want[1:] {

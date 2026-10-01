@@ -828,7 +828,7 @@ contexts:
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	h, err = run(t, harnessOptions{bare: true, config: []string{dir}, tty: true, stdin: "y\n"}, "secrets", "push", "-n", "exe0001")
+	h, err = run(t, harnessOptions{bare: true, config: []string{dir}, tty: true, stdin: "y\n", recorder: pushRecorder()}, "secrets", "push", "-n", "exe0001")
 	if err != nil {
 		t.Fatalf("secrets push failed: %v", err)
 	}

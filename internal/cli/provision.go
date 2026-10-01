@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"maps"
@@ -88,11 +89,11 @@ last would stay, after the first had been in place for a while. Each file is
 written beside its target and moved into place only once all of it has
 arrived, so a lost connection leaves the old file as it was.
 
-The nodes are written to side by side, fanout.max at once, each its secrets
-one after the other, so no node waits for another's file before its next. A
-node that cannot be reached is not tried again for the next secret; when a
-node that failed could not be reached, for any of its secrets, the command
-exits 3, even when another node refused.
+The nodes are written to side by side, fanout.max at once, each all its
+secrets in one session, one after the other, so no node waits for another's
+file before its next. A secret a node refuses does not stop the next; a node
+lost half way is sent nothing more, and when a node that failed could not be
+reached the command exits 3, even when another node refused.
 
 This overwrites files on the nodes, so it asks first.
 
@@ -139,14 +140,11 @@ This overwrites files on the nodes, so it asks first.
 				return err
 			}
 
-			// Each node is written its secrets in order by a worker of its
-			// own, so that a node that hangs holds up no other. What became
-			// of each secret on each node is kept in written, which the
-			// worker fills as it goes.
-			push := secretPush{a: a, files: files, contents: contents, scripts: make([]string, len(files))}
-			for i, file := range files {
-				push.scripts[i] = secretScript(file, len(contents[i]))
-			}
+			// Each node is written its secrets in one session by a worker
+			// of its own, so that a node that hangs holds up no other. What
+			// became of each secret on each node is kept in written, which
+			// the worker fills as the node reports.
+			push := newSecretPush(a, files, contents)
 			written := make([][]*transport.Result, len(targets))
 			nodes := make([]int, len(targets))
 			for k := range targets {
@@ -239,55 +237,101 @@ func leftOut(err error) string {
 	return secretUnreached
 }
 
-// secretPush writes the decrypted secrets onto the nodes.
+// secretPush writes the decrypted secrets onto the nodes, each node in one
+// session. A session for each secret on each node made a push to 500 nodes
+// of five secrets open 2,500 connections, each spending most of its time on
+// the handshake, and took five times as long as one connection a node.
 type secretPush struct {
-	a        *app.App
-	files    []v1alpha1.SecretFile
-	contents [][]byte
-	scripts  []string
+	a     *app.App
+	files []v1alpha1.SecretFile
+	// script writes every file, and is the same on every node; payload is
+	// what it reads on standard input.
+	script  string
+	payload []byte
 }
 
-// node writes the secrets onto one node, one after the other, each as a
-// step of its own, and records in written what became of each. Once one
-// could not be written because the node could not be reached, or the
-// command was interrupted, the rest are left out, skipped, saying which.
-// It returns the node's first failure. The steps are plumbing to the
-// displays, shown when one fails or takes long: the node's target says
-// how it fared, and a line for every file on every node would drown it.
+func newSecretPush(a *app.App, files []v1alpha1.SecretFile, contents [][]byte) secretPush {
+	sizes := make([]int, len(contents))
+	var payload bytes.Buffer
+	for i, c := range contents {
+		sizes[i] = len(c)
+		payload.WriteString(base64.StdEncoding.EncodeToString(c))
+		payload.WriteByte('\n')
+	}
+	return secretPush{a: a, files: files, script: secretScript(files, sizes), payload: payload.Bytes()}
+}
+
+// node writes the secrets onto one node and records in written what became
+// of each, as the node reports on it. A file the node never reported on
+// fails with what ended the session; when that is that the node could not
+// be reached, or the command was interrupted, only the first such file
+// does, and the rest are skipped, saying which. It returns the node's first
+// failure. Each file is a step of its own, plumbing to the displays, shown
+// when one fails or takes long: the node's target says how it fared, and a
+// line for every file on every node would drown it.
 func (p secretPush) node(ctx context.Context, tg transport.Target, written []*transport.Result) error {
-	var first error
-	gone := ""
-	for i, file := range p.files {
-		stepCtx, step := progress.Start(ctx, progress.KindStep, "write "+file.Target, progress.WithFlags(progress.Hidden))
-		if gone != "" {
-			written[i] = &transport.Result{Target: tg, ExitCode: -1, Err: fanout.Skip(gone)}
-			step.Skip(gone)
-			continue
-		}
-		res := p.write(stepCtx, tg, i)
+	steps := make([]*progress.Span, len(p.files))
+	start := func(i int) {
+		_, steps[i] = progress.Start(ctx, progress.KindStep, "write "+p.files[i].Target, progress.WithFlags(progress.Hidden))
+	}
+	end := func(i int, res *transport.Result) {
 		written[i] = res
-		if !res.Failed() {
-			step.End(nil)
-			continue
-		}
-		err := pushError(res)
-		step.End(err)
-		if first == nil {
-			first = err
-		}
-		if nodeUnreachable(err) {
-			gone = leftOut(err)
+		switch {
+		case fanout.IsSkipped(res.Err):
+			steps[i].Skip(res.Err.Error())
+		case res.Failed():
+			steps[i].End(pushError(res))
+		default:
+			steps[i].End(nil)
 		}
 	}
-	return first
+
+	// The node reports on the files in their order, so the next line
+	// is about the file after the last one it reported on. The lines
+	// arrive from the goroutine that reads standard output, one after
+	// the other, and all of them before run returns.
+	next := 0
+	start(0)
+	res := p.run(ctx, tg, func(stream progress.Stream, line string) {
+		if stream != progress.Stdout || next == len(p.files) {
+			return
+		}
+		if reported, ok := secretReported(tg, next, line); ok {
+			end(next, reported)
+			if next++; next < len(p.files) {
+				start(next)
+			}
+		}
+	})
+
+	if next < len(p.files) && !res.Failed() {
+		res = &transport.Result{Target: tg, ExitCode: -1,
+			Err: fmt.Errorf("%s: the session ended without saying whether the file was written", tg)}
+	}
+	gone := next < len(p.files) && nodeUnreachable(pushError(res))
+	for i := next; i < len(p.files); i++ {
+		if i > next {
+			start(i)
+		}
+		if gone && i > next {
+			end(i, &transport.Result{Target: tg, ExitCode: -1, Err: fanout.Skip(leftOut(pushError(res)))})
+			continue
+		}
+		end(i, res)
+	}
+	for _, res := range written {
+		if res.Failed() {
+			return pushError(res)
+		}
+	}
+	return nil
 }
 
-// write writes one secret onto one node, with the payload on standard
-// input, a reader of its own for every write. Nothing is sent once the
-// command is interrupted. A panic while it is written is that write's
-// failure, as a panic on one target of a fan-out is, and the node goes on
-// with the next secret.
-func (p secretPush) write(ctx context.Context, tg transport.Target, i int) (res *transport.Result) {
+// run starts the session that writes the secrets onto one node, with the
+// payload on standard input, a reader of its own for every node. Nothing is
+// sent once the command is interrupted. A panic while it runs is the node's
+// failure, as a panic on one target of a fan-out is.
+func (p secretPush) run(ctx context.Context, tg transport.Target, onLine func(progress.Stream, string)) (res *transport.Result) {
 	if err := ctx.Err(); err != nil {
 		return &transport.Result{Target: tg, ExitCode: -1, Err: err}
 	}
@@ -296,7 +340,11 @@ func (p secretPush) write(ctx context.Context, tg transport.Target, i int) (res 
 			res = &transport.Result{Target: tg, ExitCode: -1, Err: err}
 		}
 	}()
-	res, err := p.a.Runner.Run(ctx, tg, p.a.Collect(transport.Request{Script: p.scripts[i], Stdin: bytes.NewReader(p.contents[i])}))
+	res, err := p.a.Runner.Run(ctx, tg, p.a.Collect(transport.Request{
+		Script: p.script,
+		Stdin:  bytes.NewReader(p.payload),
+		OnLine: onLine,
+	}))
 	if res == nil {
 		res = &transport.Result{Target: tg, ExitCode: -1}
 	}
@@ -304,6 +352,25 @@ func (p secretPush) write(ctx context.Context, tg transport.Target, i int) (res 
 		res.Err = err
 	}
 	return res
+}
+
+// secretReported reads the line a node printed about file i: "ok", or
+// "fail" and why, each followed by the file's index, separated by tabs.
+// Any other line is not about the file. What became of the file is told
+// as the result of a command that wrote it alone.
+func secretReported(tg transport.Target, i int, line string) (*transport.Result, bool) {
+	verdict, rest, _ := strings.Cut(line, "\t")
+	index, why, _ := strings.Cut(rest, "\t")
+	if index != strconv.Itoa(i) {
+		return nil, false
+	}
+	switch verdict {
+	case "ok":
+		return &transport.Result{Target: tg}, true
+	case "fail":
+		return transport.ExitResult(tg, 1, "", why+"\n"), true
+	}
+	return nil, false
 }
 
 // notPushed fills in what became of the secrets of a node that the pool
@@ -326,32 +393,72 @@ func notPushed(tg transport.Target, written []*transport.Result, why error) {
 	}
 }
 
-// secretScript writes the payload on standard input to a temporary file
-// beside the target, checks that all of it arrived and only then moves it
-// into place, so that a connection lost half way leaves the old file, not
-// an empty one. A missing directory is created readable by root alone; one
-// that exists is left as it is. The payload is never an argument and never
-// a file on this machine.
-func secretScript(file v1alpha1.SecretFile, size int) string {
-	mode := cmp.Or(file.Mode, "0600")
-	dir := shellquote.Quote(path.Dir(file.Target))
+// secretScriptHead defines what secretScript calls for each file.
+//
+// put reads the next line of standard input, the file's contents base64
+// encoded, before anything else, so that a file that fails leaves the next
+// its own line, and prints how the file fared: "ok", or "fail" and the last
+// line write printed, after its index. write runs in a subshell of its own,
+// reading nothing, so that the traps and an exit are the file's.
+//
+// write puts the contents in a temporary file beside the target, checks that
+// all of them arrived and only then moves the file into place, so that a
+// connection lost half way leaves the old file, not an empty one. A missing
+// directory is created readable by root alone; one that exists is left as it
+// is. The contents are never an argument and never a file on this machine.
+const secretScriptHead = `set -u
+umask 077
+failed=0
+put() {
+	IFS= read -r data || :
+	if why=$(write "$2" "$3" "$4" "$5" "$6" 2>&1 </dev/null); then
+		printf 'ok\t%s\n' "$1"
+	else
+		status=$?
+		failed=1
+		why=${why##*$'\n'}
+		why=${why//$'\t'/ }
+		printf 'fail\t%s\t%s\n' "$1" "${why:-exited $status}"
+	fi
+}
+write() {
+	mkdir -p -m 0700 "$1" || exit
+	tmp=$(mktemp "$1/.clusterctl.XXXXXX") || exit
+	trap 'rm -f "$tmp"' EXIT
+	trap 'rm -f "$tmp"; exit 1' HUP INT TERM PIPE
+	printf '%s' "$data" | base64 -d > "$tmp" 2>/dev/null
+	size=$(wc -c < "$tmp") || exit
+	if [ "$size" -ne "$3" ]; then
+		echo "received $size of $3 bytes; the file was left as it was" >&2
+		exit 1
+	fi
+	if [ -n "$5" ]; then
+		chown "$5" "$tmp" || exit
+	fi
+	chmod "$4" "$tmp" || exit
+	mv -f "$tmp" "$2" || exit
+	trap - EXIT
+}
+`
+
+// secretScript writes the files onto a node, one after the other, from
+// their contents on standard input, base64 encoded, a line each in the
+// order of the files, so that one stream carries them all: a shell reads a
+// line without reading past it, which it does for no count of bytes, and
+// keeps no NUL in a variable. It exits 1 when a file failed.
+func secretScript(files []v1alpha1.SecretFile, sizes []int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "set -eu\numask 077\nmkdir -p -m 0700 %s\n", dir)
-	fmt.Fprintf(&b, "tmp=$(mktemp %s/.clusterctl.XXXXXX)\n", dir)
-	b.WriteString("trap 'rm -f \"$tmp\"' EXIT\ntrap 'rm -f \"$tmp\"; exit 1' HUP INT TERM PIPE\n")
-	b.WriteString("cat > \"$tmp\"\n")
-	b.WriteString("size=$(wc -c < \"$tmp\")\n")
-	fmt.Fprintf(&b, "if [ \"$size\" -ne %d ]; then echo \"received $size of %d bytes; the file was left as it was\" >&2; exit 1; fi\n", size, size)
-	if file.Owner != "" {
+	b.WriteString(secretScriptHead)
+	for i, file := range files {
 		owner := file.Owner
-		if file.Group != "" {
+		if owner != "" && file.Group != "" {
 			owner += ":" + file.Group
 		}
-		fmt.Fprintf(&b, "chown %s \"$tmp\"\n", shellquote.Quote(owner))
+		fmt.Fprintf(&b, "put %d %s\n", i, shellquote.Join([]string{
+			path.Dir(file.Target), file.Target, strconv.Itoa(sizes[i]), cmp.Or(file.Mode, "0600"), owner,
+		}))
 	}
-	fmt.Fprintf(&b, "chmod %s \"$tmp\"\n", shellquote.Quote(mode))
-	fmt.Fprintf(&b, "mv -f \"$tmp\" %s\n", shellquote.Quote(file.Target))
-	b.WriteString("trap - EXIT\n")
+	b.WriteString("exit \"$failed\"\n")
 	return b.String()
 }
 
