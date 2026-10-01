@@ -44,6 +44,43 @@ type Inventory struct {
 	// node a name written with other padding refers to needs it for every
 	// name of every selection.
 	all *nodeset.NodeSet
+
+	// attributes holds, for each attribute asked about, the nodes of each
+	// of its values, built the first time it is asked about: finding the
+	// nodes of one value walked the whole inventory, and listing every
+	// value with its nodes, or every group of a node, walked it once for
+	// each value. An inventory is shared by the calls of the MCP server,
+	// so attributesMu guards it.
+	attributesMu sync.Mutex
+	attributes   map[string]map[string]*nodeset.NodeSet
+}
+
+// byValue returns the nodes of each value of an attribute, an empty value
+// among them, built in one pass over the inventory the first time.
+func (inv *Inventory) byValue(key string) map[string]*nodeset.NodeSet {
+	inv.attributesMu.Lock()
+	defer inv.attributesMu.Unlock()
+	if index, ok := inv.attributes[key]; ok {
+		return index
+	}
+	index := map[string]*nodeset.NodeSet{}
+	for _, name := range inv.order {
+		v, ok := inv.nodes[name].Attributes[key]
+		if !ok {
+			continue
+		}
+		ns := index[v]
+		if ns == nil {
+			ns = nodeset.New()
+			index[v] = ns
+		}
+		_ = ns.Add(name)
+	}
+	if inv.attributes == nil {
+		inv.attributes = map[string]map[string]*nodeset.NodeSet{}
+	}
+	inv.attributes[key] = index
+	return index
 }
 
 // Document is one NodeInventory together with a way to say where each of its
@@ -482,17 +519,14 @@ func (inv *Inventory) Select(ns *nodeset.NodeSet) (known []*Node, unknown []stri
 
 // AttributeValues lists the distinct values of an attribute, in sorted order.
 func (inv *Inventory) AttributeValues(key string) []string {
-	seen := map[string]bool{}
-	for _, name := range inv.order {
-		if v, ok := inv.nodes[name].Attributes[key]; ok && v != "" {
-			seen[v] = true
-		}
-	}
+	index := inv.byValue(key)
 	// Not slices.Sorted, which returns nil for no values: node attrs prints
 	// an attribute that has none as [], not null.
-	out := make([]string, 0, len(seen))
-	for v := range seen {
-		out = append(out, v)
+	out := make([]string, 0, len(index))
+	for v := range index {
+		if v != "" {
+			out = append(out, v)
+		}
 	}
 	sort.Strings(out)
 	return out
@@ -513,13 +547,18 @@ func (inv *Inventory) AttributeKeys() []string {
 // empty value matches every node that carries the attribute at all, the way
 // a genders attribute without a value did.
 func (inv *Inventory) WithAttribute(key, value string) *nodeset.NodeSet {
+	index := inv.byValue(key)
+	if value != "" {
+		if ns, ok := index[value]; ok {
+			return ns.Clone()
+		}
+		return nodeset.New()
+	}
+	// Every node that carries the attribute, whatever its value: one pass,
+	// where a union of the values' sets would grow once for each value.
 	ns := nodeset.New()
 	for _, name := range inv.order {
-		v, ok := inv.nodes[name].Attributes[key]
-		if !ok {
-			continue
-		}
-		if value == "" || v == value {
+		if _, ok := inv.nodes[name].Attributes[key]; ok {
 			_ = ns.Add(name)
 		}
 	}

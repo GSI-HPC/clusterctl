@@ -458,6 +458,18 @@ func (r *Resolver) GroupsOfContext(ctx context.Context, node string) (map[string
 // ctx.
 func (r *Resolver) groupsIn(ctx context.Context, name, node string) ([]string, error) {
 	src := r.sources[name]
+	if src.Attribute != "" && r.inventory != nil {
+		// A node is in the group of its own value of the attribute and in
+		// no other, so the node is asked rather than every group expanded:
+		// with a value for each node that cost a pass over the inventory
+		// for every node there is.
+		if n, ok := r.inventory.Lookup(node); ok {
+			if value := n.Attributes[src.Attribute]; value != "" {
+				return []string{value}, nil
+			}
+		}
+		return nil, nil
+	}
 	if src.Exec != nil && len(src.Exec.Reverse) > 0 {
 		answer, err := r.exec(&asking{ctx: ctx}, src.Exec, src.Exec.Reverse, map[string]string{PlaceholderNode: node})
 		if err != nil {
