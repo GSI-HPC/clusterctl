@@ -195,6 +195,10 @@ type App struct {
 	ReadRunner transport.Runner
 	// DryRunRecorder holds what a dry run would have sent.
 	DryRunRecorder *transport.Recorder
+	// Hosts bounds the sessions the command's lookups open to each
+	// infrastructure host, those of the group sources among them, to
+	// fanout.PerHost, whatever work they are made for.
+	Hosts *fanout.Hosts
 	// Gate guards the destructive commands.
 	Gate *safety.Gate
 	// Format is the output format.
@@ -365,11 +369,14 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	// the host.
 	a.Runner = transport.Traced(runner, opts.DryRun)
 	a.ReadRunner = transport.Traced(reader, false)
+	a.Hosts = &fanout.Hosts{}
 	a.Groups = groups.New(groups.Options{
 		Spec:      a.Spec.Groups,
 		Inventory: a.Inventory,
 		Runner:    a.ReadRunner, // group lookups only read, so a dry run still resolves them
 		Target:    a.Role,
+		Hosts:     a.Hosts,
+		On:        a.SessionHosts,
 		CacheDir:  streams.CacheDir,
 		Scope:     a.cacheScope(),
 		Timeout:   a.Timeout().Get(),
@@ -573,6 +580,12 @@ func absolute(path string) string {
 		return abs
 	}
 	return path
+}
+
+// SessionHosts names the hosts a session to target opens a connection to:
+// each jump host on the way, and the target's own.
+func (a *App) SessionHosts(target transport.Target) []string {
+	return append(a.SSH.JumpHosts(target.Host), target.Host)
 }
 
 // Role returns the target of an infrastructure role.

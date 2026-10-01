@@ -52,7 +52,10 @@ that a group is not its own, so a bare name that reaches it stops there; name
 the source of a group that lives further down the search order.
 
 An `exec` source runs on the host role it names, which is required, and each
-command is bounded by `fanout.commandTimeout` on that host. A cached answer is
+command is bounded by `fanout.commandTimeout` on that host. The groups that
+`node groups`, `@source:*` and a node's memberships need are looked up side by
+side, but a command opens at most four sessions at a time to any one host, a
+jump host on the way included, whatever work they are for. A cached answer is
 stored under a key made of the site, the cluster and the context, the host
 the command ran on and the exact argument vector, so no two clusters, and no
 two group names, ever share an entry.

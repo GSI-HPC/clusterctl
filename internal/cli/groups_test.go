@@ -18,6 +18,8 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -387,5 +389,43 @@ func TestNodeGroupsRefusesWhatIsNotOneNode(t *testing.T) {
 		if calls := h.recorder.Calls(); len(calls) != 0 {
 			t.Errorf("node groups %q: sent %d commands, want none", arg, len(calls))
 		}
+	}
+}
+
+// node groups looked up every group of a source that runs a command one
+// after the other: eight partitions, eight round trips to the login node in
+// a row. They are looked up side by side, as many at once as the host
+// takes: each command is held until one more than fanout.PerHost are under
+// way, which never happens while the bound is kept. The rows keep the
+// order of the listing.
+func TestNodeGroupsLooksUpTheGroupsSideBySide(t *testing.T) {
+	partitions := map[string]string{}
+	var want []string
+	for i := range 8 {
+		name, nodes := fmt.Sprintf("p%d", i), fmt.Sprintf("exe%04d", i+1)
+		partitions[name] = nodes
+		want = append(want, name+" "+nodes)
+	}
+	calls := &fanouttest.InFlight{Hold: fanout.PerHost + 1}
+	reply := fakeSinfo(partitions)
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		defer calls.Enter()()
+		return reply(tg, req)
+	}}
+	h, err := run(t, harnessOptions{recorder: rec}, "node", "groups", "-o", "wide")
+	if err != nil {
+		t.Fatalf("node groups: %v\n%s", err, h.out)
+	}
+	if peak := calls.Peak(); peak != fanout.PerHost {
+		t.Errorf("%d commands were under way on the login node at once, want %d", peak, fanout.PerHost)
+	}
+	var got []string
+	for line := range strings.Lines(h.out.String()) {
+		if fields := strings.Fields(line); len(fields) == 3 && fields[0] == "slurm" {
+			got = append(got, fields[1]+" "+fields[2])
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the slurm rows read %q, want %q\n%s", got, want, h.out)
 	}
 }

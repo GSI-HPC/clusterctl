@@ -248,28 +248,18 @@ func (s *Server) describeNodes(ctx context.Context, _ *mcp.CallToolRequest, in d
 }
 
 // readGroups reads the groups of every node, fanout.PerHost nodes at a
-// time, each holding a place on every host a group source sends its
-// commands to, and returns them in the order of the names, with the first
-// error in that order.
+// time, and returns them in the order of the names, with the first error in
+// that order. The resolver holds a place on a host only while a command of
+// a group source runs there, in the call's places, which the Slurm reads
+// share: a node that waits for a lookup another node made holds none.
+// Holding them for a node's every lookup left the Slurm reads on the same
+// host waiting for the groups of four nodes.
 func readGroups(r *reads, names []string) ([]map[string][]string, error) {
-	var on []string
-	for _, src := range r.a.Spec.Groups.Sources {
-		if src.Exec == nil {
-			continue
-		}
-		// A role that cannot be resolved fails the lookup, which says so.
-		if target, err := r.a.Role(src.Exec.Role); err == nil {
-			on = append(on, r.on(target)...)
-		}
-	}
 	outcomes := fanout.Map(r.ctx, names, fanout.Options[string]{
 		Step:     "read the groups",
 		Limit:    fanout.PerHost,
 		Describe: func(name string) (node, host, role string) { return name, "", "" },
 		PanicLog: r.a.WorkerDiag,
-		Acquire: func(ctx context.Context, _ string) (func(), error) {
-			return r.hosts.Acquire(ctx, on...)
-		},
 	}, func(ctx context.Context, name string) (map[string][]string, error) {
 		return r.a.Groups.GroupsOfContext(ctx, name)
 	})
@@ -359,15 +349,23 @@ func (sl slurmReads) merge(ns *nodeset.NodeSet, byName map[string]*nodeView, err
 type reads struct {
 	ctx   context.Context
 	a     *app.App
-	hosts fanout.Hosts
+	hosts *fanout.Hosts
 	wg    sync.WaitGroup
 }
 
-func newReads(ctx context.Context, a *app.App) *reads { return &reads{ctx: ctx, a: a} }
+// newReads makes the reads of one call, in the places of a's hosts, which
+// its group lookups take too.
+func newReads(ctx context.Context, a *app.App) *reads {
+	hosts := a.Hosts
+	if hosts == nil {
+		hosts = &fanout.Hosts{}
+	}
+	return &reads{ctx: ctx, a: a, hosts: hosts}
+}
 
 // on returns the hosts a session to target opens a connection to.
 func (r *reads) on(target transport.Target) []string {
-	return append(r.a.SSH.JumpHosts(target.Host), target.Host)
+	return r.a.SessionHosts(target)
 }
 
 // wait returns once every read has.
