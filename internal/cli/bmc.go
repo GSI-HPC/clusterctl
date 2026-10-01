@@ -379,7 +379,7 @@ accepts.`,
 				return err
 			}
 			calls := redfishEach(a.Context(), a, "read the boot override", nodes.Expand(), clients, false, func(ctx context.Context, _ string, c *redfish.Client) (*redfish.System, error) {
-				return c.System(ctx)
+				return c.BootOverride(ctx)
 			})
 			t := output.NewTable(output.Cols("NODE", "SOURCE", "MODE", "ACCEPTS", "ERROR").Wide("ACCEPTS")...)
 			type row struct {

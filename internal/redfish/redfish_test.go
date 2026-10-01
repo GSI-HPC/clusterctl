@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,16 @@ type fakeBMC struct {
 	// it carried credentials.
 	requests atomic.Int32
 	withAuth atomic.Int32
+	// log is the method and path of every request, in order.
+	logMu sync.Mutex
+	log   []string
+}
+
+// requestLog returns the method and path of every request so far.
+func (f *fakeBMC) requestLog() []string {
+	f.logMu.Lock()
+	defer f.logMu.Unlock()
+	return append([]string(nil), f.log...)
 }
 
 func newFakeBMC(t *testing.T, resetTypes []string) *fakeBMC {
@@ -121,6 +132,9 @@ func newFakeBMC(t *testing.T, resetTypes []string) *fakeBMC {
 		if r.Header.Get("Authorization") != "" {
 			f.withAuth.Add(1)
 		}
+		f.logMu.Lock()
+		f.log = append(f.log, r.Method+" "+r.URL.Path)
+		f.logMu.Unlock()
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(f.server.Close)
@@ -507,6 +521,60 @@ func TestResetFollowsActionInfo(t *testing.T) {
 	}
 	if got := f.resets.Load(); got != 1 {
 		t.Errorf("the action was sent %d times, want exactly once", got)
+	}
+}
+
+// A reinstall sets the boot override of every machine and then resets
+// them. The reset used to read the system resource again, and its
+// ActionInfo, for what the override's read had already found.
+func TestAResetAfterABootOverrideDoesNotReadTheSystemAgain(t *testing.T) {
+	t.Parallel()
+
+	for _, viaActionInfo := range []bool{false, true} {
+		f := newFakeBMC(t, []string{"On", "ForceOff", "ForceRestart"})
+		f.actionInfo.Store(viaActionInfo)
+		c := f.client(t)
+		ctx := context.Background()
+		if err := c.SetBootOverride(ctx, "Pxe", false); err != nil {
+			t.Fatalf("SetBootOverride failed: %v", err)
+		}
+		if err := c.Reset(ctx, redfish.ResetGracefulShutdown); err == nil {
+			t.Fatal("an unsupported reset type should be refused before it is sent")
+		}
+		if err := c.Reset(ctx, redfish.ResetForceRestart); err != nil {
+			t.Fatalf("Reset failed: %v", err)
+		}
+		want := []string{
+			"GET /redfish/v1/Systems/1",
+			"PATCH /redfish/v1/Systems/1",
+			"POST /redfish/v1/Systems/1/Actions/ComputerSystem.Reset",
+		}
+		if viaActionInfo {
+			want = slices.Insert(want, 2, "GET /redfish/v1/Systems/1/ResetActionInfo")
+		}
+		if got := f.requestLog(); !slices.Equal(got, want) {
+			t.Errorf("ActionInfo %v: requests\n%s\nwant\n%s", viaActionInfo,
+				strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+	}
+}
+
+// bmc boot show shows the boot override and not the reset types, which
+// some firmware lists in a resource of its own.
+func TestReadingTheBootOverrideDoesNotReadTheResetTypes(t *testing.T) {
+	t.Parallel()
+
+	f := newFakeBMC(t, []string{"On", "ForceOff"})
+	f.actionInfo.Store(true)
+	sys, err := f.client(t).BootOverride(context.Background())
+	if err != nil {
+		t.Fatalf("BootOverride failed: %v", err)
+	}
+	if got, want := strings.Join(sys.BootTargets, ","), "None,Pxe,Hdd"; got != want {
+		t.Errorf("BootTargets = %q, want %q", got, want)
+	}
+	if got, want := f.requestLog(), []string{"GET /redfish/v1/Systems/1"}; !slices.Equal(got, want) {
+		t.Errorf("requests %q, want %q", got, want)
 	}
 }
 
