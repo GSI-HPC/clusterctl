@@ -695,12 +695,16 @@ is said on standard error, and it fails the command.`,
 			if err != nil {
 				return err
 			}
+			// ibstat is asked about each adapter once: it takes a tenth
+			// of a second or more, and a GPU node has a dozen adapters.
 			const script = adapterList + `
 for dev in $devs; do
-  state=$(ibstat "$dev" 1 2>/dev/null | awk -F': *' '/State:/{print $2}')
-  phys=$(ibstat "$dev" 1 2>/dev/null | awk -F': *' '/Physical state:/{print $2}')
-  rate=$(ibstat "$dev" 1 2>/dev/null | awk -F': *' '/Rate:/{print $2}')
-  printf '%s|%s|%s|%s\n' "$dev" "$state" "$phys" "$rate"
+  printf '%s|' "$dev"
+  ibstat "$dev" 1 2>/dev/null | awk -F': *' '
+    /^[ \t]*State:/          { state = $2 }
+    /^[ \t]*Physical state:/ { phys = $2 }
+    /^[ \t]*Rate:/           { rate = $2 }
+    END { printf "%s|%s|%s\n", state, phys, rate }'
 done
 `
 			results, err := runOnNodes(a.Context(), a, ns, transport.Request{Script: script})

@@ -859,6 +859,43 @@ func TestHCAReportsANodeWithoutAdapters(t *testing.T) {
 	}
 }
 
+// hca link ran ibstat three times for each adapter, once for each field it
+// shows. It runs it once, and reads the fields from ibstat's own layout,
+// where a port's lines are indented under a heading.
+func TestHCALinkAsksIbstatOnceForEachAdapter(t *testing.T) {
+	t.Parallel()
+	bin := t.TempDir()
+	calls := filepath.Join(bin, "calls")
+	fakeTool(t, bin, "ibstat", `echo "$*" >> `+calls+`
+case "$1" in
+-l) printf 'mlx5_0\nmlx5_1\nmlx5_2\n' ;;
+mlx5_0) printf "CA 'mlx5_0'\n\tPort 1:\n\t\tState: Active\n\t\tPhysical state: LinkUp\n\t\tRate: 200\n\t\tLink layer: InfiniBand\n" ;;
+mlx5_1) printf 'State: Down\nPhysical state: Polling\nRate: 10\n' ;;
+mlx5_2) exit 1 ;;
+esac
+`)
+	shell, _ := shellRunner(t, bin, "")
+	h, err := run(t, harnessOptions{recorder: shell}, "hca", "link", "-n", "exe0001")
+	if err != nil {
+		t.Fatalf("hca link failed: %v", err)
+	}
+	want := `NODE     DEVICE  STATE   PHYSICAL  RATE
+exe0001  mlx5_0  Active  LinkUp    200
+exe0001  mlx5_1  Down    Polling   10
+exe0001  mlx5_2
+`
+	if got := trimLines(h.out.String()); got != want {
+		t.Errorf("output:\n%s\nwant:\n%s", got, want)
+	}
+	data, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "-l\nmlx5_0 1\nmlx5_1 1\nmlx5_2 1\n"; got != want {
+		t.Errorf("ibstat ran as\n%s\nwant\n%s", got, want)
+	}
+}
+
 // Each adapter of a node is a row of hca link and hca firmware, and a node
 // that could not be reached is one too, with how it failed.
 func TestHCAListsEveryAdapterAndEveryNode(t *testing.T) {
