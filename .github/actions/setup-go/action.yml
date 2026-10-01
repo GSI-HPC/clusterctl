@@ -13,6 +13,14 @@ inputs:
   sops-version:
     description: A sops other than the one mise.toml pins, such as the oldest supported.
     default: ''
+  cache:
+    description: >-
+      The kind of job the Go module and build caches are kept for. A job
+      that builds much of its own, such as the race detector's, keeps a
+      cache of its own: under one key for every job, the first job to end
+      saved it, a quick one, and the heavy ones started cold. Jobs that
+      build little share one.
+    default: shared
 
 runs:
   using: composite
@@ -36,18 +44,61 @@ runs:
     # The newest patch of the release line, because Go ships the standard
     # library's security fixes as patch releases, and a binary is only as
     # patched as the toolchain that linked it. go.mod states the oldest
-    # version the code compiles with.
-    - uses: actions/setup-go@v7
+    # version the code compiles with. The caches are kept below, by kind.
+    - id: go
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ steps.versions.outputs.go }}
         check-latest: true
+        cache: false
+
+    - id: paths
+      shell: bash
+      run: |
+        echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+    # A cache of another kind is a better start than none: the modules and
+    # most of the standard library are the same.
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ${{ steps.paths.outputs.modules }}
+          ${{ steps.paths.outputs.build }}
+        key: go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ inputs.cache }}-${{ hashFiles('go.sum') }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ inputs.cache }}-
+          go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
 
     # Built from its tagged source, which the Go checksum database vouches
-    # for, the same way on every runner.
-    - if: inputs.sops == 'true' || inputs.sops-version != ''
+    # for, the same way on every runner, once for each sops and Go version:
+    # the build took over a minute of every job that tests Secret documents.
+    # Each version has a directory of its own.
+    - id: sops
+      if: inputs.sops == 'true' || inputs.sops-version != ''
       shell: bash
       env:
         SOPS_VERSION: ${{ steps.versions.outputs.sops }}
+      run: echo "dir=$HOME/.local/sops/$SOPS_VERSION" >> "$GITHUB_OUTPUT"
+
+    - id: sops-cache
+      if: steps.sops.outputs.dir != ''
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.sops.outputs.dir }}
+        key: sops-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.sops }}-go${{ steps.go.outputs.go-version }}
+
+    - if: steps.sops.outputs.dir != '' && steps.sops-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        SOPS_VERSION: ${{ steps.versions.outputs.sops }}
+        GOBIN: ${{ steps.sops.outputs.dir }}
+      run: go install "github.com/getsops/sops/v3/cmd/sops@v${SOPS_VERSION}"
+
+    - if: steps.sops.outputs.dir != ''
+      shell: bash
+      env:
+        DIR: ${{ steps.sops.outputs.dir }}
       run: |
-        go install "github.com/getsops/sops/v3/cmd/sops@v${SOPS_VERSION}"
+        echo "$DIR" >> "$GITHUB_PATH"
         echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
