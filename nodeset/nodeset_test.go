@@ -629,6 +629,12 @@ func equal(a, b []string) bool {
 // measures allocation across the whole process, so it must not run in
 // parallel.
 func TestOversizedExpressionsAreRefusedEarly(t *testing.T) {
+	// Parsing a million hosts three times over took eight seconds under
+	// the race detector, which has no bearing on what is allocated; the
+	// plain run checks it.
+	if raceDetector {
+		t.Skip("the allocations are checked without the race detector")
+	}
 	full := "[0-1048575]"
 	allocated := func(expr string) (uint64, error) {
 		var before, after runtime.MemStats
