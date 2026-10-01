@@ -17,6 +17,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/groups"
+	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -180,5 +181,57 @@ func TestAllStopsAtTheFirstGroupItCannotLookUp(t *testing.T) {
 	}
 	if n := sent.Load(); n != fanout.PerHost {
 		t.Errorf("%d groups were looked up, want only the %d under way when p02 failed", n, fanout.PerHost)
+	}
+}
+
+// The groups of a node in a source of node attributes were found by
+// expanding every group of the source, one for each value, each a pass
+// over the inventory: with a value for each of 20,000 nodes, minutes. The
+// node's own value answers, and says what expanding every group said.
+func TestTheGroupsOfANodeInAnAttributeSourceAreItsValue(t *testing.T) {
+	t.Parallel()
+	var entries []v1alpha1.NodeEntry
+	for i := range 20000 {
+		entries = append(entries, v1alpha1.NodeEntry{
+			Nodes:      fmt.Sprintf("n%05d", i),
+			Attributes: map[string]string{"serial": fmt.Sprintf("s%05d", i), "rack": fmt.Sprintf("r%02d", i%50)},
+		})
+	}
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: entries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := testOptions(t, nil, "")
+	opts.Inventory = inv
+	opts.Spec = v1alpha1.GroupsSpec{DefaultSource: "serial", Sources: map[string]v1alpha1.GroupSource{
+		"serial": {Attribute: "serial"},
+		"rack":   {Attribute: "rack"},
+		"none":   {Attribute: "absent"},
+	}}
+	r := groups.New(opts)
+	start := time.Now()
+	for _, node := range []string{"n12345", "n00007", "n7"} {
+		got, err := r.GroupsOf(node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var want map[string][]string
+		switch node {
+		case "n12345":
+			want = map[string][]string{"serial": {"s12345"}, "rack": {"r45"}}
+		default:
+			want = map[string][]string{"serial": {"s00007"}, "rack": {"r07"}}
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("GroupsOf(%s) = %v, want %v", node, got, want)
+		}
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("the groups of three nodes took %v", elapsed)
+	}
+	// What the groups say when expanded agrees with the node's value.
+	ns, err := nodeset.ParseWith("@rack:r45", r)
+	if err != nil || !ns.Contains("n12345") || ns.Len() != 400 {
+		t.Errorf("@rack:r45 = %v (%v), want 400 nodes, n12345 among them", ns, err)
 	}
 }
