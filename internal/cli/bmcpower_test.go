@@ -13,6 +13,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -381,6 +382,61 @@ func TestBMCPowerRunsTheAccountsSideBySide(t *testing.T) {
 				t.Errorf("the rows are for %v, want %v", nodes, want)
 			}
 		})
+	}
+}
+
+// A step whose nodes go over different transports, as when one vendor's
+// processors are asked over IPMI and the rest over Redfish, sent the action
+// over Redfish and only then over IPMI, each waiting for the other's
+// slowest processor. The two go side by side: here each waits for the
+// other to be under way, which one after the other never is.
+func TestBMCPowerSendsOverBothTransportsAtOnce(t *testing.T) {
+	isolateHome(t)
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	t.Setenv("V1_PASSWORD", "v1pass")
+	site := exampleWith(t, "site.yaml", func(s string) string {
+		s = strings.Replace(s, "  credentials:\n",
+			"  credentials:\n    bmc-v1:\n      username: admin1\n      password:\n        fromEnv: V1_PASSWORD\n", 1)
+		return strings.Replace(s, "    vendors:\n", "    vendors:\n      vendor1:\n        credential: bmc-v1\n        order: [ipmi]\n", 1)
+	})
+	var redfishOnce, ipmiOnce sync.Once
+	redfishUnderWay, ipmiUnderWay := make(chan struct{}), make(chan struct{})
+	underWay := func(ch chan struct{}) bool {
+		select {
+		case <-ch:
+			return true
+		case <-time.After(5 * time.Second):
+			return false
+		}
+	}
+	fakeRedfish(t, func(req *http.Request) (*http.Response, error) {
+		redfishOnce.Do(func() { close(redfishUnderWay) })
+		if !underWay(ipmiUnderWay) {
+			return answer(req, http.StatusServiceUnavailable, `{"error":{"message":"IPMI was not under way"}}`), nil
+		}
+		return answer(req, http.StatusOK, system), nil
+	})
+	reply := ipmiOK().Reply
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if strings.Contains(req.Script, "--hostname") {
+			ipmiOnce.Do(func() { close(ipmiUnderWay) })
+			if !underWay(redfishUnderWay) {
+				return &transport.Result{Target: tg, ExitCode: 1, Stderr: "Redfish was not under way\n"}, nil
+			}
+		}
+		return reply(tg, req)
+	}}
+	h, err := run(t, harnessOptions{config: []string{site}, recorder: rec},
+		append(noSlurm, "-o", "json", "bmc", "power", "status", "-n", "dbm01,exe0005")...)
+	if err != nil {
+		t.Fatalf("bmc power status failed: %v\n%s", err, h.errOut)
+	}
+	var got []string
+	for _, row := range jsonRows(t, h) {
+		got = append(got, fmt.Sprint(row["node"], " ", row["via"], " ", row["state"]))
+	}
+	if want := []string{"dbm01 ipmi on", "exe0005 redfish On"}; !slices.Equal(got, want) {
+		t.Errorf("rows %q, want %q", got, want)
 	}
 }
 

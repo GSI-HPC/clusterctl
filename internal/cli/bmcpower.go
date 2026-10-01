@@ -492,19 +492,47 @@ func (p *bmcPlan) run(ctx context.Context, a *app.App, names []string, action st
 			transport := p.order[node][r.step]
 			byTransport[transport] = append(byTransport[transport], node)
 		}
-		var next []string
+		// Each transport's nodes are made ready one transport after the
+		// other, since a credential may be asked for at the terminal, and
+		// then sent the action side by side: the two go to different
+		// places, and the Redfish nodes of a step used to wait for the
+		// slowest processor the IPMI backend asked, or the other way round.
+		// The answers are taken in the order of the transports once both
+		// are in, so that a node tried again says so in the same order.
+		var (
+			transports []string
+			sends      []func() []bmcResult
+		)
 		for _, transport := range []string{app.TransportRedfish, app.TransportIPMI} {
 			nodes := byTransport[transport]
 			if len(nodes) == 0 {
 				continue
 			}
-			var rows []bmcResult
+			transports = append(transports, transport)
 			if transport == app.TransportIPMI {
-				rows = r.runIPMI(ctx, a, nodes)
+				sends = append(sends, r.prepareIPMI(ctx, a, nodes))
 			} else {
-				rows = r.runRedfish(ctx, a, nodes)
+				sends = append(sends, r.prepareRedfish(ctx, a, nodes))
 			}
-			for _, row := range rows {
+		}
+		answers := make([][]bmcResult, len(sends))
+		var wg sync.WaitGroup
+		for i, send := range sends {
+			wg.Go(func() {
+				// recover reaches only its own goroutine: a panic in a
+				// transport's run is the failure of each of its nodes.
+				defer func() {
+					if err := fanout.Recovered(a.WorkerDiag, transportTitle(transports[i]), recover()); err != nil {
+						answers[i] = r.failed(byTransport[transports[i]], transports[i], err)
+					}
+				}()
+				answers[i] = send()
+			})
+		}
+		wg.Wait()
+		var next []string
+		for i, transport := range transports {
+			for _, row := range answers[i] {
 				row, again := r.settle(ctx, transport, row)
 				r.results[row.Node] = row
 				if !again {
@@ -591,8 +619,9 @@ func mayFallBack(action, transport string, err error) bool {
 	}
 }
 
-// runRedfish carries out a power action over Redfish.
-func (r *bmcRun) runRedfish(ctx context.Context, a *app.App, names []string) []bmcResult {
+// prepareRedfish makes ready a power action over Redfish, building the client
+// of each node, and returns what sends it, which returns a row for each.
+func (r *bmcRun) prepareRedfish(ctx context.Context, a *app.App, names []string) func() []bmcResult {
 	p := r.plan
 	var (
 		sendable []string
@@ -612,24 +641,35 @@ func (r *bmcRun) runRedfish(ctx context.Context, a *app.App, names []string) []b
 	}
 
 	if r.action == ipmi.ActionStatus {
-		calls := r.redfish(ctx, a, sendable, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
-			return c.PowerState(ctx)
-		})
-		return append(rows, callResults(calls, false, func(s string) string { return s })...)
+		return func() []bmcResult {
+			calls := r.redfish(ctx, a, sendable, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+				return c.PowerState(ctx)
+			})
+			return append(rows, callResults(calls, false, func(s string) string { return s })...)
+		}
 	}
 	resetType, err := resetTypeFor(r.action)
 	if err != nil {
-		for _, node := range sendable {
-			row := bmcResult{Node: node, BMC: p.bmc[node], Via: app.TransportRedfish}
-			row.fail(err)
-			rows = append(rows, row)
-		}
-		return rows
+		return func() []bmcResult { return append(rows, r.failed(sendable, app.TransportRedfish, err)...) }
 	}
-	calls := r.redfish(ctx, a, sendable, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
-		return resetType + " sent", c.Reset(ctx, resetType)
-	})
-	return append(rows, callResults(calls, true, func(s string) string { return s })...)
+	return func() []bmcResult {
+		calls := r.redfish(ctx, a, sendable, clients, true, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
+			return resetType + " sent", c.Reset(ctx, resetType)
+		})
+		return append(rows, callResults(calls, true, func(s string) string { return s })...)
+	}
+}
+
+// failed is the rows of nodes that were not sent an action over transport,
+// all of them failed with err.
+func (r *bmcRun) failed(nodes []string, transport string, err error) []bmcResult {
+	rows := make([]bmcResult, 0, len(nodes))
+	for _, node := range nodes {
+		row := bmcResult{Node: node, BMC: r.plan.bmc[node], Via: transport}
+		row.fail(err)
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 // redfish sends a request to the processor of every node, at most
@@ -655,18 +695,19 @@ func (r *bmcRun) redfish(ctx context.Context, a *app.App, names []string, client
 	return calls
 }
 
-// runIPMI carries out a power action over IPMI, one backend run per account,
-// which marks the targets of all its nodes running at once.
+// prepareIPMI makes ready a power action over IPMI, one backend run per
+// account, and returns what carries it out, which returns a row for each
+// node. A run marks the targets of all its nodes running at once.
 //
-// The backends are resolved one after the other, since a credential may be
-// asked for at the terminal. The runs then go side by side, each a session
+// The backends are resolved one after the other, here, since a credential
+// may be asked for at the terminal. The runs then go side by side, each a session
 // to the gateway: one after the other, each waited for its slowest
 // processor, some 20 seconds for one that is dead, before the next account
 // began. As many run at once as fanout.PerHost and the bound on the
 // processors asked at once allow, and that bound is shared out among them
 // by their sizes, so that together they ask no more processors at once
 // than one run would. The rows keep the order of the accounts.
-func (r *bmcRun) runIPMI(ctx context.Context, a *app.App, names []string) []bmcResult {
+func (r *bmcRun) prepareIPMI(ctx context.Context, a *app.App, names []string) func() []bmcResult {
 	p := r.plan
 	var (
 		accounts []string
@@ -698,7 +739,7 @@ func (r *bmcRun) runIPMI(ctx context.Context, a *app.App, names []string) []bmcR
 		runnable = append(runnable, i)
 	}
 	if len(runnable) == 0 {
-		return slices.Concat(rows...)
+		return func() []bmcResult { return slices.Concat(rows...) }
 	}
 
 	sizes := make([]int, len(runnable))
@@ -715,25 +756,27 @@ func (r *bmcRun) runIPMI(ctx context.Context, a *app.App, names []string) []bmcR
 	if first.Fanout > 0 {
 		bound, fanouts = min(bound, first.Fanout), shareOut(first.Fanout, sizes)
 	}
-	started := make([]bool, len(runnable))
-	fanout.Each(ctx, len(runnable), bound, func(k int) {
-		i := runnable[k]
-		started[k] = true
-		live := *backends[i]
-		if processors != nil {
-			live.Spec.MaxConcurrent = processors[k]
+	return func() []bmcResult {
+		started := make([]bool, len(runnable))
+		fanout.Each(ctx, len(runnable), bound, func(k int) {
+			i := runnable[k]
+			started[k] = true
+			live := *backends[i]
+			if processors != nil {
+				live.Spec.MaxConcurrent = processors[k]
+			}
+			if fanouts != nil {
+				live.Fanout = fanouts[k]
+			}
+			rows[i] = r.ipmiAccount(ctx, &live, groups[accounts[i]])
+		})
+		for k, i := range runnable {
+			if !started[k] {
+				rows[i] = r.ipmiFailed(groups[accounts[i]], errNotSent(), outcomeNotSent, "not sent")
+			}
 		}
-		if fanouts != nil {
-			live.Fanout = fanouts[k]
-		}
-		rows[i] = r.ipmiAccount(ctx, &live, groups[accounts[i]])
-	})
-	for k, i := range runnable {
-		if !started[k] {
-			rows[i] = r.ipmiFailed(groups[accounts[i]], errNotSent(), outcomeNotSent, "not sent")
-		}
+		return slices.Concat(rows...)
 	}
-	return slices.Concat(rows...)
 }
 
 // shareOut divides total among runs of the given sizes in proportion to
