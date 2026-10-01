@@ -445,8 +445,10 @@ func (t *Tree) mark(status progress.Status) string {
 type folded struct {
 	ok, canceled, skipped names
 	// failures are grouped by what their class and error read with each
-	// target's own name as {}, in the order the first of each failed.
+	// target's own name as {}, in the order the first of each failed;
+	// byText finds the group of a text.
 	failures []*failure
+	byText   map[string]*failure
 	// reason is why the targets were left out, when they all say the
 	// same; reasons counts the reasons they gave.
 	reason  string
@@ -483,15 +485,16 @@ func (f *folded) add(s *treeSpan, e progress.Event) {
 // fail adds some to the targets that failed as text says, a new row of
 // failures when none failed so before, and returns the names of that row.
 func (f *folded) fail(text string, some *names) *names {
-	for _, g := range f.failures {
-		if g.text == text {
-			g.names.merge(some)
-			return &g.names
+	g := f.byText[text]
+	if g == nil {
+		g = &failure{text: text}
+		if f.byText == nil {
+			f.byText = map[string]*failure{}
 		}
+		f.byText[text] = g
+		f.failures = append(f.failures, g)
 	}
-	g := &failure{text: text}
 	g.names.merge(some)
-	f.failures = append(f.failures, g)
 	return &g.names
 }
 
@@ -574,11 +577,15 @@ func (n *names) add(name string) {
 }
 
 func (n *names) merge(o *names) {
-	if o.set != nil {
+	if o.set != nil && !o.set.IsEmpty() {
 		if n.set == nil {
 			n.set = nodeset.New()
 		}
-		n.set = n.set.Union(o.set)
+		// Added in place, as the folded set reads back: a union copies the
+		// set it grows, the step's for each batch that ends.
+		if err := n.set.Add(o.set.String()); err != nil {
+			n.set = n.set.Union(o.set)
+		}
 	}
 	n.other = append(n.other, o.other...)
 	n.stale = true
