@@ -1691,54 +1691,55 @@ command exits 130.`,
 				states[i] = &provisionState{Node: node}
 			}
 
-			// One listing answers for every node.
-			suffix := a.Spec.Services.PXESrv.StaticSuffix
-			links, linkErr := readBootLinks(a.Context(), a, role, root)
-			for _, s := range states {
-				address, err := nodeAddress(a.Context(), a, s.Node)
-				if err != nil {
-					s.fail(err)
-					continue
-				}
-				s.Address = address
-				if linkErr != nil {
-					s.fail(fmt.Errorf("reading the boot links on %s: %w", role, linkErr))
-					continue
-				}
-				s.BootPath = output.EscapeCell(cmp.Or(links[address], "none"))
-				if suffix != "" {
-					s.PersistentBootPath = output.EscapeCell(cmp.Or(links[address+suffix], "none"))
-				}
-			}
-
-			// The credentials are looked up before either half starts,
-			// so that a prompt for one never comes while either runs.
+			// The credentials are looked up before anything is asked, so
+			// that a prompt for one never comes while a read runs. Why a
+			// client failed is taken in with the rest, after the boot
+			// links.
 			clients := make([]*redfish.Client, len(nodes))
+			clientErrs := make([]error, len(nodes))
 			for i, s := range states {
 				// A node whose client fails is reported and the rest go
 				// on, but once the command is interrupted no credential
 				// is looked up for the others: at a prompt, each would
 				// ask again.
 				if a.Context().Err() != nil {
-					s.fail(errNotSent())
+					clientErrs[i] = errNotSent()
 					continue
 				}
 				c, err := provisionClient(a, a.Context(), s.Node)
 				if err != nil {
-					s.fail(err)
+					clientErrs[i] = err
 					continue
 				}
 				clients[i], s.BMC = c, c.Host
 			}
 
-			// The processors and the nodes are asked side by side, each
-			// half within its own bound, and what they answered is taken
-			// in once both are done, the processors' first.
+			// The boot links, which one listing answers for every node,
+			// the addresses, the processors and the nodes are asked side
+			// by side, the processors and the nodes each within its own
+			// bound. The links and the addresses were read before the
+			// others, a round trip or two to the PXE host and the DHCP
+			// server that none of the rest depends on. What all of them
+			// answered is taken in once all are done, in the order they
+			// were once asked in: the links, the processors, the nodes.
+			suffix := a.Spec.Services.PXESrv.StaticSuffix
 			var (
-				calls   []redfishCall[string]
-				results []*transport.Result
-				halves  sync.WaitGroup
+				links     map[string]string
+				linkErr   error
+				addresses = make([]string, len(nodes))
+				addrErrs  = make([]error, len(nodes))
+				calls     []redfishCall[string]
+				results   []*transport.Result
+				halves    sync.WaitGroup
 			)
+			halves.Go(func() {
+				links, linkErr = readBootLinks(a.Context(), a, role, root)
+			})
+			halves.Go(func() {
+				for i, node := range nodes {
+					addresses[i], addrErrs[i] = nodeAddress(a.Context(), a, node)
+				}
+			})
 			halves.Go(func() {
 				calls = redfishEach(a.Context(), a, "read the power state", nodes, clients, false, func(ctx context.Context, _ string, c *redfish.Client) (string, error) {
 					return c.PowerState(ctx)
@@ -1755,6 +1756,24 @@ command exits 130.`,
 				}))
 			})
 			halves.Wait()
+			for i, s := range states {
+				switch {
+				case addrErrs[i] != nil:
+					s.fail(addrErrs[i])
+				case linkErr != nil:
+					s.Address = addresses[i]
+					s.fail(fmt.Errorf("reading the boot links on %s: %w", role, linkErr))
+				default:
+					s.Address = addresses[i]
+					s.BootPath = output.EscapeCell(cmp.Or(links[addresses[i]], "none"))
+					if suffix != "" {
+						s.PersistentBootPath = output.EscapeCell(cmp.Or(links[addresses[i]+suffix], "none"))
+					}
+				}
+				if clientErrs[i] != nil {
+					s.fail(clientErrs[i])
+				}
+			}
 			for i, s := range states {
 				if calls[i].err != nil {
 					s.fail(calls[i].err)
