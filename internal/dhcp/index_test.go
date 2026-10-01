@@ -5,6 +5,7 @@ package dhcp_test
 
 import (
 	"fmt"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -102,7 +103,8 @@ func TestLookupsDoNotReadEveryDeclaration(t *testing.T) {
 			t.Fatal(err)
 		}
 		best := time.Duration(1 << 62)
-		for range 3 {
+		for range 5 {
+			runtime.GC()
 			start := time.Now()
 			for i := range n {
 				node := fmt.Sprintf("exe%05d", i)
@@ -114,9 +116,12 @@ func TestLookupsDoNotReadEveryDeclaration(t *testing.T) {
 		}
 		return best
 	}
-	small, large := cost(800), cost(8000)
+	// Large enough sets that the time is the work's and not the timer's or
+	// the scheduler's: 800 nodes took under a millisecond, and a macOS
+	// runner made 8,000 take 37 times that.
+	small, large := cost(2000), cost(20000)
 	if large > 30*small {
-		t.Errorf("looking up 8,000 nodes took %v, %d times what 800 took; it should be about 10",
+		t.Errorf("looking up 20,000 nodes took %v, %d times what 2,000 took; it should be about 10",
 			large, large/max(small, 1))
 	}
 }
