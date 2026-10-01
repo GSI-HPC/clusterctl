@@ -36,10 +36,9 @@ type machines struct {
 // machineIndex builds the index of the inventory's names once.
 func (a *App) machineIndex() *machines {
 	a.machinesOnce.Do(func() {
-		m := &machines{known: nodeset.New(), names: map[string]string{}}
+		// The inventory writes every name in lower case.
+		m := &machines{known: a.knownNodes(), names: map[string]string{}}
 		if a.Inventory != nil {
-			// The inventory writes every name in lower case.
-			m.known = a.Inventory.NodeSet()
 			for _, n := range a.Inventory.All() {
 				m.names[n.Name] = n.Name
 			}
@@ -47,6 +46,19 @@ func (a *App) machineIndex() *machines {
 		a.machines = m
 	})
 	return a.machines
+}
+
+// knownNodes returns the set of the inventory's nodes, copied from it once.
+// It is only read: copied for each reader, it cost a copy of the whole set
+// for every protected hosts entry and two more, on every command.
+func (a *App) knownNodes() *nodeset.NodeSet {
+	a.knownOnce.Do(func() {
+		a.known = nodeset.New()
+		if a.Inventory != nil {
+			a.known = a.Inventory.NodeSet()
+		}
+	})
+	return a.known
 }
 
 // aliasOf returns the inventory name a lowercased name or address refers to,
@@ -181,7 +193,7 @@ func (a *App) protectedHosts(expr string) (*nodeset.NodeSet, error) {
 		return nil, err
 	}
 	if a.Inventory != nil && a.Inventory.Len() > 0 {
-		if unknown := ns.Difference(a.Inventory.NodeSet()); !unknown.IsEmpty() {
+		if unknown := ns.Difference(a.knownNodes()); !unknown.IsEmpty() {
 			return nil, exitcode.Errorf(exitcode.Usage,
 				"it names %s, which the inventory does not know; write the inventory name of the machine", unknown)
 		}
