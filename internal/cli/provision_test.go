@@ -23,6 +23,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -231,6 +232,41 @@ func TestReinstallReinstalls(t *testing.T) {
 	if !strings.Contains(out.out.String(), `exe[0001-0003] is reinstalling`) {
 		t.Errorf("output does not say the set is reinstalling:\n%s", out.out)
 	}
+}
+
+// reinstall asked Slurm whether the nodes run jobs and only then the PXE
+// host whether their boot paths exist. The two are asked side by side:
+// each is held until a third read is under way, which never comes, so both
+// are under way at once only when neither waits for the other. A refusal
+// of Slurm's is what is reported, although a boot path is missing too.
+func TestReinstallAsksSlurmBesideThePXEHost(t *testing.T) {
+	h := newReinstallHost(t, pxeOptions{})
+	calls := &fanouttest.InFlight{Hold: 3}
+	reply := h.rec.Reply
+	h.rec.Reply = func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if isSinfo(req) || isBootPathCheck(req) {
+			defer calls.Enter()()
+		}
+		return reply(tg, req)
+	}
+	if out, err := h.run(t, harnessOptions{}, "provision", "reinstall", "-n", "exe0001", "--dry-run"); err != nil {
+		t.Fatalf("reinstall --dry-run failed: %v\n%s", err, out.errOut)
+	}
+	if got := calls.Peak(); got != 2 {
+		t.Errorf("%d checks were under way at once, want Slurm's and the boot paths'", got)
+	}
+
+	h.sinfo = func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, Stdout: "exe0001 allocated\n"}, nil
+	}
+	if err := os.Remove(h.exePath()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := h.run(t, harnessOptions{}, "provision", "reinstall", "-n", "exe0001", "-y")
+	if err == nil || !strings.Contains(err.Error(), "--lose-jobs") {
+		t.Errorf("error = %v, want Slurm's refusal", err)
+	}
+	h.untouched(t)
 }
 
 // Section 3.3 of the September 2026 review: reinstall force-restarted nodes
