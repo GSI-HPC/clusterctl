@@ -1033,3 +1033,45 @@ exec · 0:01
     ✗ exe1  failed
 `)
 }
+
+// A set of more than 256 targets is folded again once a second rather than
+// for every frame, so its row may name the targets that ended a second ago,
+// while the step's count is current. The line the step leaves names every
+// one.
+func TestTheTreeFoldsALargeSetOnceASecond(t *testing.T) {
+	t.Parallel()
+	f := newTreeFixture(t, "exec", treeSetup{})
+	ctx, step := progress.Start(f.ctx, progress.KindStep, "run", progress.WithFlags(progress.Fold),
+		progress.Total(400), progress.Limit(400))
+	_, spans := targets(ctx, nodes(400)...)
+	fail := func(from, to int) {
+		for _, span := range spans[from:to] {
+			span.Run()
+			span.End(errors.New("exit 1"))
+		}
+	}
+	fail(0, 300)
+	checkScreen(t, f.draw(time.Second), `
+exec · 0:01
+  run  300/400 · 300 failed · 100 queued
+    ✗ exe[1-300]  target: exit 1
+`)
+	fail(300, 301)
+	checkScreen(t, f.draw(500*time.Millisecond), `
+exec · 0:01
+  run  301/400 · 301 failed · 99 queued
+    ✗ exe[1-300]  target: exit 1
+`)
+	checkScreen(t, f.draw(500*time.Millisecond), `
+exec · 0:02
+  run  301/400 · 301 failed · 99 queued
+    ✗ exe[1-301]  target: exit 1
+`)
+	fail(301, 302)
+	step.End(errors.New("302 of 400 failed"))
+	checkScreen(t, f.draw(100*time.Millisecond), `
+✗ run  2.0s  0 ok, 302 failed, 98 canceled
+  ✗ exe[1-302]  target: exit 1
+exec · 0:02
+`)
+}

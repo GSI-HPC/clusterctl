@@ -78,3 +78,57 @@ func TestEndingTheTargetsOfAStepCostsWhatTheyNumber(t *testing.T) {
 		t.Errorf("30,000 targets took %v, %d times what 1,000 took; it should be about 30", large, large/max(small, 1))
 	}
 }
+
+// Each frame folded the targets that ended well again whenever one more
+// had ended, ten times a second, under the lock the Bus waits for: 3ms a
+// frame at 10,000 targets. A large set is folded at most once a second, so
+// the frames of the second after it was cost about the same over 30,000
+// targets as over 300.
+func TestFramesDoNotFoldALargeSetEachTime(t *testing.T) {
+	if raceDetector {
+		t.Skip("the costs are measured without the race detector")
+	}
+	cost := func(n int) time.Duration {
+		best := time.Duration(1 << 62)
+		for range 5 {
+			screen := &progresstest.Screen{Width: 100}
+			term := display.NewTerminal(screen, func() (int, int, error) { return 100, 30, nil })
+			c := &clock{now: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)}
+			tree := display.NewTree(term, display.TreeOptions{Now: c.Now})
+			bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{tree}, Now: c.Now})
+			ctx, command := progress.Start(progress.WithBus(context.Background(), bus), progress.KindCommand, "exec")
+			ctx, step := progress.Start(ctx, progress.KindStep, "run", progress.WithFlags(progress.Fold),
+				progress.Total(n+9), progress.Limit(n+9))
+			spans := make([]*progress.Span, n+9)
+			for i := range spans {
+				name := fmt.Sprintf("exe%05d", i+1)
+				_, spans[i] = progress.Start(ctx, progress.KindTarget, name, progress.Queued(), progress.Node(name))
+			}
+			for _, span := range spans[:n] {
+				span.Run()
+				span.End(nil)
+			}
+			c.Add(time.Second)
+			tree.Draw()
+			runtime.GC()
+			start := time.Now()
+			for _, span := range spans[n:] {
+				span.Run()
+				span.End(nil)
+				c.Add(100 * time.Millisecond)
+				tree.Draw()
+			}
+			best = min(best, time.Since(start))
+			step.End(nil)
+			command.End(nil)
+			bus.Close()
+			tree.Close()
+		}
+		return best
+	}
+	small, large := cost(300), cost(30000)
+	if large > 10*small {
+		t.Errorf("frames over 30,000 targets took %v, %d times what frames over 300 took; it should be about the same",
+			large, large/max(small, 1))
+	}
+}
