@@ -115,7 +115,11 @@ func ParseFile(file string, read Reader) (*Config, error) {
 func parse(file string, data []byte, read Reader) (*Config, error) {
 	cfg := &Config{}
 	files := 1
-	p := &parser{file: file, read: read, cfg: cfg, files: &files}
+	p := &parser{file: file, cfg: cfg, files: &files}
+	if read != nil {
+		p.fetch = newFetcher(read)
+		defer p.fetch.stop()
+	}
 	if err := p.run(data); err != nil {
 		return nil, err
 	}
@@ -223,8 +227,9 @@ func tokenize(data []byte) ([]token, error) {
 
 type parser struct {
 	file string
-	read Reader
-	cfg  *Config
+	// fetch reads the included files; nil follows none.
+	fetch *fetcher
+	cfg   *Config
 	// chain is the include chain that led to this file.
 	chain []string
 	files *int
@@ -256,6 +261,9 @@ func (p *parser) run(data []byte) error {
 		return err
 	}
 	p.toks = toks
+	if p.fetch != nil {
+		p.fetch.ahead(p.includes())
+	}
 	return p.block(0)
 }
 
@@ -499,7 +507,7 @@ func (p *parser) include(words []token) error {
 		return p.errorf(line, "include needs one quoted file name, not %s", describe(words[1:]))
 	}
 	file := words[1].text
-	if p.read == nil {
+	if p.fetch == nil {
 		return p.errorf(line, "include %q cannot be followed here", file)
 	}
 	// dhcpd resolves a relative name against its working directory, which
@@ -517,13 +525,13 @@ func (p *parser) include(words []token) error {
 	if p.depth > maxDepth {
 		return p.errorf(line, "includes nest more than %d deep", maxDepth)
 	}
-	data, err := p.read(file)
+	data, err := p.fetch.get(file)
 	if err != nil {
 		return p.errorf(line, "include %q: %w", file, err)
 	}
 	sub := &parser{
 		file:  file,
-		read:  p.read,
+		fetch: p.fetch,
 		cfg:   p.cfg,
 		chain: append(append([]string(nil), p.chain...), p.file),
 		files: p.files,
