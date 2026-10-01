@@ -627,10 +627,17 @@ func (n *names) String() string {
 // A frame is a list of parts, each a row or a list of rows that may be cut
 // down to fit the region.
 type part struct {
-	rows []string
+	// rows are the rows of a part that is drawn as it is. A list has size
+	// rows instead, of which render draws the first keep once fit has
+	// settled how many fit: of thousands of targets running, a frame shows
+	// a few.
+	rows   []string
+	size   int
+	render func(keep int) []string
 	// cut, for a list, is the row that says how many of its rows are left
-	// out, given those left out; nil for a row that is never cut.
-	cut func(left []int) string
+	// out, given how many and the targets they stand for; nil for a row
+	// that is never cut.
+	cut func(rows, targets int) string
 	// weights are what each row of a list stands for, the targets of a
 	// failure; one each when nil.
 	weights []int
@@ -639,10 +646,18 @@ type part struct {
 	rank, keep int
 }
 
+// len is how many rows the part has.
+func (p *part) len() int {
+	if p.render != nil {
+		return p.size
+	}
+	return len(p.rows)
+}
+
 // cost is how many rows the part takes with keep of its rows kept.
 func (p *part) cost() int {
-	if p.cut == nil || p.keep == len(p.rows) {
-		return len(p.rows)
+	if p.cut == nil || p.keep == p.len() {
+		return p.len()
 	}
 	return p.keep + 1
 }
@@ -670,13 +685,13 @@ func (t *Tree) frame(now time.Time, height int) []string {
 func fit(parts []*part, height int, g glyphs) []string {
 	used := 0
 	for _, p := range parts {
-		p.keep = len(p.rows)
-		used += len(p.rows)
+		p.keep = p.len()
+		used += p.keep
 	}
 	for rank := 0; rank < 2 && used > height; rank++ {
 		var lists []*part
 		for _, p := range parts {
-			if p.cut != nil && p.rank == rank && len(p.rows) > 0 {
+			if p.cut != nil && p.rank == rank && p.len() > 0 {
 				lists = append(lists, p)
 			}
 		}
@@ -690,11 +705,11 @@ func fit(parts []*part, height int, g glyphs) []string {
 		for gave := true; gave; {
 			gave = false
 			for _, p := range lists {
-				if p.keep == len(p.rows) {
+				if p.keep == p.len() {
 					continue
 				}
 				extra := 1
-				if p.keep+1 == len(p.rows) {
+				if p.keep+1 == p.len() {
 					extra = 0
 				}
 				if used+extra <= height {
@@ -707,17 +722,20 @@ func fit(parts []*part, height int, g glyphs) []string {
 	}
 	var rows []string
 	for _, p := range parts {
-		rows = append(rows, p.rows[:p.keep]...)
-		if p.keep < len(p.rows) {
-			left := make([]int, 0, len(p.rows)-p.keep)
-			for i := p.keep; i < len(p.rows); i++ {
-				w := 1
-				if p.weights != nil {
-					w = p.weights[i]
+		if p.render != nil {
+			rows = append(rows, p.render(p.keep)...)
+		} else {
+			rows = append(rows, p.rows[:p.keep]...)
+		}
+		if n := p.len(); p.keep < n {
+			targets := n - p.keep
+			if p.weights != nil {
+				targets = 0
+				for _, w := range p.weights[p.keep:] {
+					targets += w
 				}
-				left = append(left, w)
 			}
-			rows = append(rows, p.cut(left))
+			rows = append(rows, p.cut(n-p.keep, targets))
 		}
 	}
 	if len(rows) > height {
@@ -837,14 +855,22 @@ func (f *frame) below(s *treeSpan, depth int) {
 	pad := indent(depth)
 	folded := s.ended
 	if folded != nil && len(folded.failures) > 0 {
-		failures := &part{rank: 1, cut: func(left []int) string {
-			return pad + g.failed + " " + g.more + " " + more(left, len(folded.failures), "failed")
-		}}
-		for _, fl := range folded.failures {
-			failures.rows = append(failures.rows, fmt.Sprintf("%s%s %s  %s", pad, g.failed, fl.names.drawn(f.now), fl.text))
-			failures.weights = append(failures.weights, fl.names.len())
+		failures := folded.failures
+		list := &part{rank: 1, size: len(failures), weights: make([]int, len(failures)),
+			cut: func(rows, targets int) string {
+				return pad + g.failed + " " + g.more + " " + more(rows, targets, len(failures), "failed")
+			},
+			render: func(keep int) []string {
+				rows := make([]string, keep)
+				for i, fl := range failures[:keep] {
+					rows[i] = fmt.Sprintf("%s%s %s  %s", pad, g.failed, fl.names.drawn(f.now), fl.text)
+				}
+				return rows
+			}}
+		for i, fl := range failures {
+			list.weights[i] = fl.names.len()
 		}
-		f.parts = append(f.parts, failures)
+		f.parts = append(f.parts, list)
 	}
 	if folded != nil && folded.canceled.len() > 0 {
 		f.row(depth, g.canceled+" "+folded.canceled.drawn(f.now)+"  canceled")
@@ -868,34 +894,59 @@ func (f *frame) below(s *treeSpan, depth int) {
 		}
 	}
 	if len(running) > 0 {
-		// The longest running first, by the seconds a row shows: those
-		// that started in the same second stay in the order they were
-		// queued, rather than in the order a pool happened to start them.
-		slices.SortStableFunc(running, func(a, b *treeSpan) int {
-			return cmp.Compare(f.now.Sub(b.ran)/time.Second, f.now.Sub(a.ran)/time.Second)
-		})
-		list := &part{cut: func(left []int) string { return pad + g.more + " " + more(left, len(running), "running") }}
-		for _, target := range running {
-			list.rows = append(list.rows, pad+f.target(target))
-		}
-		f.parts = append(f.parts, list)
+		f.parts = append(f.parts, &part{size: len(running),
+			cut: func(rows, targets int) string {
+				return pad + g.more + " " + more(rows, targets, len(running), "running")
+			},
+			render: func(keep int) []string {
+				rows := make([]string, 0, keep)
+				for _, target := range longest(running, keep, f.now) {
+					rows = append(rows, pad+f.target(target))
+				}
+				return rows
+			}})
 	}
 	if folded != nil && folded.ok.len() > 0 {
 		f.row(depth, g.ok+" "+folded.ok.drawn(f.now))
 	}
 }
 
-// more says how many of a list's rows are left out, given what each stands
-// for: "6 more running", or "6 running" when none of the list is shown.
-func more(left []int, of int, what string) string {
-	n := 0
-	for _, w := range left {
-		n += w
+// more says how many targets the rows a list leaves out stand for: "6 more
+// running", or "6 running" when none of the list's of rows is shown.
+func more(rows, targets, of int, what string) string {
+	if rows < of {
+		return fmt.Sprintf("%d more %s", targets, what)
 	}
-	if len(left) < of {
-		return fmt.Sprintf("%d more %s", n, what)
+	return fmt.Sprintf("%d %s", targets, what)
+}
+
+// longest returns the k targets of running that have run longest, in that
+// order, by the seconds a row shows: those that started in the same second
+// in the order they were queued, rather than in the order a pool happened
+// to start them. Only the targets that get a row are picked out, rather
+// than all of them sorted.
+func longest(running []*treeSpan, k int, now time.Time) []*treeSpan {
+	age := func(s *treeSpan) time.Duration { return now.Sub(s.ran) / time.Second }
+	if k >= len(running) {
+		slices.SortStableFunc(running, func(a, b *treeSpan) int { return cmp.Compare(age(b), age(a)) })
+		return running
 	}
-	return fmt.Sprintf("%d %s", n, what)
+	top := make([]*treeSpan, 0, k+1)
+	for _, s := range running {
+		// After every one picked that has run as long, which was queued
+		// before it.
+		i := len(top)
+		for i > 0 && age(top[i-1]) < age(s) {
+			i--
+		}
+		if i < k {
+			top = slices.Insert(top, i, s)
+			if len(top) > k {
+				top = top[:k]
+			}
+		}
+	}
+	return top
 }
 
 // target is the row of a running target: its name, how long it has run,

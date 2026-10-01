@@ -197,3 +197,55 @@ func TestBatchesThatEndCostWhatTheirTargetsNumber(t *testing.T) {
 			large, large/max(small, 1))
 	}
 }
+
+// A frame sorted every running target and drew a row for each, of which
+// it kept about a third of the terminal's rows: 2.9ms a frame with 10,000
+// targets running, as an IPMI step marks every node, over thirty times
+// what a frame took over as many queued, which are only counted. It draws
+// the rows that fit, and picks out only the targets that get them.
+func TestAFrameDrawsTheRunningTargetsThatFit(t *testing.T) {
+	if raceDetector {
+		t.Skip("the costs are measured without the race detector")
+	}
+	const n = 30000
+	cost := func(run bool) time.Duration {
+		screen := &progresstest.Screen{Width: 100}
+		term := display.NewTerminal(screen, func() (int, int, error) { return 100, 30, nil })
+		c := &clock{now: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)}
+		tree := display.NewTree(term, display.TreeOptions{Now: c.Now})
+		bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{tree}, Now: c.Now})
+		defer tree.Close()
+		defer bus.Close()
+		ctx, _ := progress.Start(progress.WithBus(context.Background(), bus), progress.KindCommand, "bmc power status")
+		ctx, _ = progress.Start(ctx, progress.KindStep, "ipmipower", progress.WithFlags(progress.Fold),
+			progress.Total(n), progress.Limit(n))
+		for i := range n {
+			name := fmt.Sprintf("exe%05d", i+1)
+			_, span := progress.Start(ctx, progress.KindTarget, name, progress.Queued(), progress.Node(name))
+			if run {
+				// A few seconds apart, as a pool starts them.
+				if i%1000 == 0 {
+					c.Add(time.Second)
+				}
+				span.Run()
+			}
+		}
+		c.Add(time.Second)
+		best := time.Duration(1 << 62)
+		for range 5 {
+			runtime.GC()
+			start := time.Now()
+			for range 5 {
+				c.Add(100 * time.Millisecond)
+				tree.Draw()
+			}
+			best = min(best, time.Since(start))
+		}
+		return best
+	}
+	queued, running := cost(false), cost(true)
+	if running > 15*queued {
+		t.Errorf("frames over %d targets running took %v, %d times what they took over as many queued",
+			n, running, running/max(queued, 1))
+	}
+}
