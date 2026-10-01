@@ -6,6 +6,7 @@ package cli
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -16,30 +17,60 @@ import (
 // given for its path, reports every link of a boot link script as made, and
 // answers every other request with an empty success.
 func serveDHCP(files map[string]string) *transport.Recorder {
-	return &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+	log := &linkLog{}
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if len(req.Argv) == 2 && req.Argv[0] == "cat" {
 			if content, ok := files[req.Argv[1]]; ok {
 				return &transport.Result{Target: tg, Stdout: content}, nil
 			}
 			return &transport.Result{Target: tg, ExitCode: 1, Stderr: "No such file or directory"}, nil
 		}
-		var report strings.Builder
-		for line := range strings.SplitSeq(req.Script, "\n") {
-			if fields := strings.Fields(line); len(fields) > 1 && fields[0] == "bootlink" {
-				report.WriteString("ok\t" + fields[1] + "\n")
+		if req.Script == bootLinkScript {
+			var report strings.Builder
+			for _, r := range linkRecordsOf(req, 3) {
+				log.add(strings.Join(r, " "))
+				report.WriteString("ok\t" + r[0] + "\n")
 			}
+			return &transport.Result{Target: tg, Stdout: report.String()}, nil
 		}
-		return &transport.Result{Target: tg, Stdout: report.String()}, nil
+		return &transport.Result{Target: tg}, nil
 	}}
+	linkLogs.Store(rec, log)
+	return rec
 }
 
-// linkScripts returns the scripts sent to the install host.
+// linkLog keeps the links the boot link scripts of one recorder were given,
+// which travel on standard input and are gone from the calls it records.
+type linkLog struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *linkLog) add(line string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, line)
+}
+
+// linkLogs holds the log of each recorder serveDHCP made.
+var linkLogs sync.Map
+
+// linkScripts returns the scripts sent to the install host, followed by the
+// links they were given, "INDEX TARGET LINK" on a line each.
 func linkScripts(rec *transport.Recorder) string {
 	var out []string
 	for _, c := range rec.Calls() {
 		if c.Request.Script != "" {
 			out = append(out, c.Request.Script)
 		}
+	}
+	if log, ok := linkLogs.Load(rec); ok {
+		log := log.(*linkLog)
+		log.mu.Lock()
+		for _, line := range log.lines {
+			out = append(out, line+"\n")
+		}
+		log.mu.Unlock()
 	}
 	return strings.Join(out, "\n")
 }

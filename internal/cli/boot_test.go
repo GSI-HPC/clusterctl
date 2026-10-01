@@ -8,12 +8,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -94,6 +97,7 @@ func (p *pxeHost) reply(tg transport.Target, req transport.Request) (*transport.
 		return p.listLinks(tg, req.Argv[1])
 	case req.Script != "":
 		cmd = exec.CommandContext(context.Background(), "bash", "-c", req.Script)
+		cmd.Stdin = req.Stdin
 	case len(req.Argv) > 0:
 		cmd = exec.CommandContext(context.Background(), req.Argv[0], req.Argv[1:]...) //nolint:gosec // the test's own requests
 	default:
@@ -178,7 +182,38 @@ func (p *pxeHost) scripts() []string {
 // isBootPathCheck says whether a request is the check that the boot paths
 // exist on the PXE host, which only reads.
 func isBootPathCheck(req transport.Request) bool {
-	return strings.HasPrefix(req.Script, "for p in") && strings.Contains(req.Script, `[ -f "$p" ]`)
+	return req.Script == bootPathCheckScript
+}
+
+// linkRecordsOf reads the records a link script is given on standard input,
+// each of the given number of fields.
+func linkRecordsOf(req transport.Request, fields int) [][]string {
+	if req.Stdin == nil {
+		return nil
+	}
+	data, err := io.ReadAll(req.Stdin)
+	if err != nil {
+		panic(err)
+	}
+	parts := strings.Split(string(data), "\x00")
+	if parts[len(parts)-1] != "" || (len(parts)-1)%fields != 0 {
+		panic(fmt.Sprintf("the records %q are not of %d fields each", data, fields))
+	}
+	var out [][]string
+	for i := 0; i+fields <= len(parts)-1; i += fields {
+		out = append(out, parts[i:i+fields])
+	}
+	return out
+}
+
+// reportLinks answers a link script as a PXE host that changed every link
+// it was given.
+func reportLinks(req transport.Request) string {
+	var out strings.Builder
+	for _, r := range linkRecordsOf(req, 3) {
+		out.WriteString("ok\t" + r[0] + "\n")
+	}
+	return out.String()
 }
 
 func (p *pxeHost) changes() []string {
@@ -207,6 +242,102 @@ func TestBootUnsetRemovesThePersistentLink(t *testing.T) {
 	for _, name := range []string{"10.0.2.1", "10.0.2.1.static"} {
 		if p.exists(name) {
 			t.Errorf("%s is still there after boot unset", name)
+		}
+	}
+}
+
+// The links travel to the PXE host as NUL-terminated fields, so a boot path
+// arrives exactly as configured whatever it holds: a space, a quote, a word
+// a shell would expand, even a line break.
+func TestBootLinksArriveExactlyWhateverThePathHolds(t *testing.T) {
+	p := newPXEHost(t, pxeOptions{})
+	odd := filepath.Join(p.root, "boot", "it's \"odd\"\n$HOME;*", "ipxe.net2")
+	mustWrite(t, odd, "#!ipxe\n")
+	quoted, err := json.Marshal(odd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(p.layer, "extra.yaml"), `apiVersion: clusterctl/v1alpha1
+kind: NodeInventory
+metadata:
+  name: zz-extra
+spec:
+  nodes:
+    - nodes: exe0002
+      address: 10.0.2.2
+      bootPath: `+string(quoted)+"\n")
+
+	for _, mode := range []struct {
+		flags []string
+		link  string
+	}{{nil, "10.0.2.2"}, {[]string{"--persistent"}, "10.0.2.2.static"}} {
+		args := append([]string{"--set", staticSuffix, "boot", "set", "-y", "-n", "exe0002"}, mode.flags...)
+		h, err := p.run(t, harnessOptions{}, args...)
+		if err != nil {
+			t.Fatalf("boot set %v failed: %v\n%s", mode.flags, err, h.errOut)
+		}
+		if got := p.target(mode.link); got != odd {
+			t.Errorf("boot set %v linked %s to %q, want %q", mode.flags, mode.link, got, odd)
+		}
+	}
+	h, err := p.run(t, harnessOptions{}, "--set", staticSuffix, "boot", "unset", "-y", "-n", "exe0002")
+	if err != nil {
+		t.Fatalf("boot unset failed: %v\n%s", err, h.errOut)
+	}
+	for _, name := range []string{"10.0.2.2", "10.0.2.2.static"} {
+		if p.exists(name) {
+			t.Errorf("%s is still there after boot unset", name)
+		}
+	}
+}
+
+// The links went into the script, one argument to ssh, which the kernel
+// caps at 128 KiB. boot set was refused above some 1,650 nodes, and boot
+// unset with a static suffix above some 1,940, after the confirmation;
+// between the two, a reinstall armed nodes its rollback could not disarm.
+// The script is now the same for any number of nodes.
+func TestBootLinksReachThousandsOfNodes(t *testing.T) {
+	const n = 2000
+	var entries strings.Builder
+	for i := range n {
+		fmt.Fprintf(&entries, "    - nodes: big%04d\n      address: 10.9.%d.%d\n      bootPath: /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2\n",
+			i+1, i/250, i%250+1)
+	}
+	layer := t.TempDir()
+	mustWrite(t, filepath.Join(layer, "extra.yaml"), `apiVersion: clusterctl/v1alpha1
+kind: NodeInventory
+metadata:
+  name: zz-extra
+spec:
+  nodes:
+`+entries.String())
+
+	var mu sync.Mutex
+	sent := map[string][]int{}
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if req.Script != bootLinkScript && req.Script != bootUnlinkScript {
+			return &transport.Result{Target: tg}, nil
+		}
+		records := linkRecordsOf(req, 3)
+		mu.Lock()
+		sent[req.Script] = append(sent[req.Script], len(records))
+		mu.Unlock()
+		var out strings.Builder
+		for _, r := range records {
+			out.WriteString("ok\t" + r[0] + "\n")
+		}
+		return &transport.Result{Target: tg, Stdout: out.String()}, nil
+	}}
+	for _, verb := range []string{"set", "unset"} {
+		h, err := run(t, harnessOptions{recorder: rec, config: []string{layer}},
+			"--set", staticSuffix, "boot", verb, "-y", "-n", fmt.Sprintf("big[0001-%04d]", n))
+		if err != nil {
+			t.Fatalf("boot %s of %d nodes failed: %v\n%s", verb, n, err, h.errOut)
+		}
+	}
+	for script, name := range map[string]string{bootLinkScript: "set", bootUnlinkScript: "unset"} {
+		if got := sent[script]; !slices.Equal(got, []int{n}) {
+			t.Errorf("boot %s sent links in %v, want all %d in one request", name, got, n)
 		}
 	}
 }
