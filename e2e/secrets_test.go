@@ -25,6 +25,7 @@ import (
 // mode asked for, and a file that cannot be written, its directory being a
 // file, fails alone and leaves the next to be written.
 func TestSecretsPushWritesEachFileExactly(t *testing.T) {
+	t.Parallel()
 	const remote = "/tmp/clusterctl-e2e-secrets"
 	big := make([]byte, 64<<10)
 	for i := range big {

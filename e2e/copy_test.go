@@ -16,6 +16,7 @@ import (
 // the same generated configuration as ssh, and reads it back on each node
 // past clusterctl.
 func TestCopyUploadsToEachNode(t *testing.T) {
+	t.Parallel()
 	const remote = "/tmp/clusterctl-e2e-upload"
 	content := "uploaded by the end-to-end tests\nwith a second line\n"
 	local := filepath.Join(t.TempDir(), "upload")
@@ -47,6 +48,7 @@ func TestCopyUploadsToEachNode(t *testing.T) {
 // TestCopyDownloadsIntoADirectoryPerNode collects a file that differs on
 // every node, and checks that each node's copy lands under its own name.
 func TestCopyDownloadsIntoADirectoryPerNode(t *testing.T) {
+	t.Parallel()
 	const remote = "/tmp/clusterctl-e2e-download"
 	for _, node := range workers {
 		onNode(t, node, "sh", "-c", "uname -n > "+remote)

@@ -47,6 +47,7 @@ func replies(t *testing.T, r result, nodes ...string) map[string]reply {
 // through sind's relay. Each node has to answer with its own name, as the
 // account the context names.
 func TestExecReachesEachNode(t *testing.T) {
+	t.Parallel()
 	r := clusterctl(t, "exec", "-n", "worker-[0-2]", "-o", "json", "--", "uname", "-n")
 	r.wantCode(t, 0)
 	for node, rep := range replies(t, r, workers...) {
@@ -62,6 +63,7 @@ func TestExecReachesEachNode(t *testing.T) {
 // TestExecDedupFoldsTheSameAnswers checks that nodes which answered alike
 // are shown once, under the node set that answered.
 func TestExecDedupFoldsTheSameAnswers(t *testing.T) {
+	t.Parallel()
 	r := clusterctl(t, "exec", "-n", "worker-[0-2]", "--dedup", "--", "uname", "-s")
 	r.wantCode(t, 0)
 	if want := "worker-[0-2] (3): ok\n  Linux\n"; r.stdout != want {
@@ -75,6 +77,7 @@ func TestExecDedupFoldsTheSameAnswers(t *testing.T) {
 // tests check the quoting against a local shell; this checks it against the
 // login shell of the node, at the end of the whole path.
 func TestExecArgumentsArriveUnchanged(t *testing.T) {
+	t.Parallel()
 	args := []string{
 		"*.log", "a  b", "it's", `"quoted"`, "$HOME", "${PATH}", "`uname`", "$(uname)",
 		"x;y", "a|b", "a&&b", "back\\slash", "tab\there", "new\nline", "", " ", "~", "-n", "--",
@@ -90,6 +93,7 @@ func TestExecArgumentsArriveUnchanged(t *testing.T) {
 // TestExecStdinArrivesUnchanged sends a payload that is not text, and larger
 // than a pipe holds, to several nodes at once; each has to read every byte.
 func TestExecStdinArrivesUnchanged(t *testing.T) {
+	t.Parallel()
 	payload := make([]byte, 256<<10)
 	for i := range payload {
 		payload[i] = byte(i*7 + i>>8)
@@ -109,6 +113,7 @@ func TestExecStdinArrivesUnchanged(t *testing.T) {
 // TestExecScriptRunsInAShell checks that --script hands a program with
 // pipes and expansions to a shell on the node rather than to a command.
 func TestExecScriptRunsInAShell(t *testing.T) {
+	t.Parallel()
 	r := clusterctl(t, "exec", "-n", "worker-1", "-o", "json", "--script", `n=$(uname -n); echo "${n%%-*}" | tr a-z A-Z`)
 	r.wantCode(t, 0)
 	if got := replies(t, r, "worker-1")["worker-1"].Stdout; got != "WORKER\n" {
@@ -122,6 +127,7 @@ func TestExecScriptRunsInAShell(t *testing.T) {
 // could not be reached decides the code without stopping the others.
 // worker-9 is in the inventory and not in sind, so ssh cannot reach it.
 func TestExecExitCodes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		nodes string
@@ -176,6 +182,7 @@ func TestExecExitCodes(t *testing.T) {
 // too long is ended on the node itself, by timeout(1), rather than left
 // running there when the local ssh goes.
 func TestExecTimeoutStopsTheCommandOnTheNode(t *testing.T) {
+	t.Parallel()
 	// An argument no other process on the node has, to find it by.
 	const marker = "3017"
 	r := clusterctl(t, "exec", "-n", "worker-0", "-o", "json", "--timeout", "2s", "--", "sleep", marker)
@@ -195,6 +202,7 @@ func TestExecTimeoutStopsTheCommandOnTheNode(t *testing.T) {
 // TestExecRefusesAProtectedHost checks that the controller, a protected host
 // of the site, is refused without --force and reached with it.
 func TestExecRefusesAProtectedHost(t *testing.T) {
+	t.Parallel()
 	r := clusterctl(t, "exec", "-n", "controller", "--", "uname", "-n")
 	r.wantCode(t, 2)
 	if !strings.Contains(r.stderr, "protected host controller") || r.stdout != "" {
@@ -211,6 +219,7 @@ func TestExecRefusesAProtectedHost(t *testing.T) {
 // TestExecDryRunChangesNothing checks that a dry run leaves the node as it
 // was: what would be run is shown, and nothing is.
 func TestExecDryRunChangesNothing(t *testing.T) {
+	t.Parallel()
 	const path = "/tmp/clusterctl-e2e-dry-run"
 	onNode(t, "worker-0", "rm", "-f", path)
 	r := clusterctl(t, "exec", "--dry-run", "-n", "worker-0", "--", "touch", path)
