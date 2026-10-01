@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -646,5 +647,106 @@ func TestDNSAliasesReadTheReverseEntriesSideBySide(t *testing.T) {
 		if want := "sub0001.hpc.example.org sub0002.hpc.example.org sub0003.hpc.example.org sub0004.hpc.example.org"; strings.Join(hosts, " ") != want {
 			t.Errorf("%s leads to %v, want %s", alias, hosts, want)
 		}
+	}
+}
+
+// blackholeDNS takes queries over UDP on the loopback address and answers
+// none, as a name server that is down behind a firewall that drops its
+// packets. It returns its address and the count of queries it took, and
+// calls onQuery, when it is set, as each arrives.
+func blackholeDNS(t *testing.T, onQuery func()) (string, *atomic.Int32) {
+	t.Helper()
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	var asked atomic.Int32
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			if _, _, err := conn.ReadFrom(buf); err != nil {
+				return
+			}
+			asked.Add(1)
+			if onQuery != nil {
+				onQuery()
+			}
+		}
+	}()
+	return conn.LocalAddr().String(), &asked
+}
+
+// A name server that was down was asked first about every name, twice, and
+// each query waited out the timeout before the next server was asked: a
+// thousand names took over ten minutes. It is asked last once a query to it
+// ran out of time.
+func TestDNSAsksAServerThatDidNotAnswerLast(t *testing.T) {
+	t.Parallel()
+	zone := map[string][]dnsmessage.Resource{}
+	var names []string
+	for i := range 20 {
+		name := fmt.Sprintf("exe%04d.hpc.example.org.", i+1)
+		zone[name] = []dnsmessage.Resource{aRR(name, fmt.Sprintf("10.0.0.%d", i+1))}
+		names = append(names, name)
+	}
+	down, asked := blackholeDNS(t, nil)
+	c := newDNSServers([]string{down, fakeDNS(t, zone)}, 200*time.Millisecond)
+	for i, name := range names {
+		_, addresses, err := c.lookupHost(context.Background(), name)
+		if want := fmt.Sprintf("10.0.0.%d", i+1); err != nil || !slices.Equal(addresses, []string{want}) {
+			t.Fatalf("%s: %v, %v; want %s", name, addresses, err, want)
+		}
+	}
+	if got := asked.Load(); got != 1 {
+		t.Errorf("the server that is down was asked %d times, want once", got)
+	}
+}
+
+// A query the command interrupted says nothing about the server it was
+// waiting for, which is still asked first.
+func TestDNSAnInterruptedQueryDoesNotDemoteTheServer(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	down, _ := blackholeDNS(t, cancel)
+	up := fakeDNS(t, map[string][]dnsmessage.Resource{})
+	c := newDNSServers([]string{down, up}, time.Minute)
+	if _, _, err := c.lookupHost(ctx, "exe0001.hpc.example.org"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("the lookup returned %v, want it interrupted", err)
+	}
+	if got := c.order(); !slices.Equal(got, []int{0, 1}) {
+		t.Errorf("the servers are asked in the order %v, want [0 1]", got)
+	}
+}
+
+// Every UDP exchange read its answer into a buffer of 64 KiB of its own:
+// over a gigabyte for a lookup of 10,000 nodes. The buffers are reused.
+func TestDNSLookupsReuseTheirReadBuffers(t *testing.T) {
+	// The race detector has a pool drop some of what it is given, to
+	// find code that counts on getting it back.
+	if raceDetector {
+		t.Skip("the allocations are checked without the race detector")
+	}
+	const name = "exe0001.hpc.example.org."
+	c := newDNSServers([]string{fakeDNS(t, map[string][]dnsmessage.Resource{
+		name: {aRR(name, "10.0.0.1")},
+	})}, 5*time.Second)
+	lookup := func() {
+		if _, _, err := c.lookupHost(context.Background(), name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lookup()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	const lookups = 100
+	for range lookups {
+		lookup()
+	}
+	runtime.ReadMemStats(&after)
+	// A lookup asks for A and AAAA records, two exchanges.
+	if per := (after.TotalAlloc - before.TotalAlloc) / lookups; per > 32<<10 {
+		t.Errorf("a lookup allocated %d bytes; its read buffers are not reused", per)
 	}
 }
