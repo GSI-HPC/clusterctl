@@ -51,6 +51,13 @@ jobs:
       - uses: actions/configure-pages@v6
         id: pages
 
+      # The Hugo releases build.sh fetches, and checks against their
+      # checksums, for every manual: the one main names is kept.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/clusterctl-site
+          key: hugo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('site/hugo-version') }}
+
       # The latest release at the root, every minor line under /vX.Y/ and
       # main under /dev/, each built from its own tree. The command reference
       # and the JSON Schemas describe the binary they are generated from, so

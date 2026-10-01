@@ -374,6 +374,13 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup-go
 
+      # The Hugo releases build.sh fetches, and checks against their
+      # checksums, for every manual: the one main names is kept.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/clusterctl-site
+          key: hugo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('site/hugo-version') }}
+
       # The site as the Pages workflow publishes it, every release's manual
       # included, so a change that would break publishing fails here. The
       # command reference and the schemas are generated on the way, so a
