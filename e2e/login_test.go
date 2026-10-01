@@ -10,6 +10,7 @@ import "testing"
 // TestLoginRunsACommand checks that login reaches a node by its name and a
 // role by the role's name, and runs what follows -- there.
 func TestLoginRunsACommand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string

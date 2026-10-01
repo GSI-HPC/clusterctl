@@ -11,6 +11,7 @@ import "testing"
 // of the site and finds the Slurm clients on the login role, which is what
 // the slurm commands need of it.
 func TestDoctorReachesTheRoles(t *testing.T) {
+	t.Parallel()
 	r := clusterctl(t, "doctor", "--remote", "-o", "json")
 	r.wantCode(t, 0)
 	checks := map[string]string{}
