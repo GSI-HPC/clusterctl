@@ -63,13 +63,15 @@ func newTunnelListCommand(r *root) *cobra.Command {
 List the tunnel profiles the site offers and what each one routes.`,
 		cobra.NoArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, _ []string) error {
-			m := manager(a)
+			// One look at the processes serves the table and the object:
+			// each is a ps per tunnel on macOS.
+			status := manager(a).Status()
 			t := output.NewTable(output.Cols("NAME", "REMOTE", "SUBNETS", "DESCRIPTION").
 				Wide("DESCRIPTION")...)
-			for _, s := range m.Status() {
+			for _, s := range status {
 				t.Add(s.Name, s.Remote, s.Subnets, s.Description)
 			}
-			return a.Print(output.Result{Table: t, Object: m.Status()})
+			return a.Print(output.Result{Table: t, Object: status})
 		}))
 }
 
