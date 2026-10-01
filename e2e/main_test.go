@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"filippo.io/age"
 )
 
 // The sind cluster the suite runs against, as testdata/sind-cluster.yaml
@@ -53,6 +55,9 @@ var (
 	sindKnownHosts string
 	// environ is the environment clusterctl runs in.
 	environ []string
+	// identity is the age identity the workstation decrypts with, which
+	// the secrets tests seal their files to.
+	identity *age.X25519Identity
 )
 
 func TestMain(m *testing.M) {
@@ -107,7 +112,14 @@ func setUp(dir string) error {
 	if err := copyFile(sindKnownHosts, knownHosts); err != nil {
 		return err
 	}
-	if err := writeWorkstation(filepath.Join(config, "workstation.yaml"), sshConfig); err != nil {
+	if identity, err = age.GenerateX25519Identity(); err != nil {
+		return err
+	}
+	identityFile := filepath.Join(dir, "identity")
+	if err := os.WriteFile(identityFile, []byte(identity.String()+"\n"), 0o600); err != nil {
+		return err
+	}
+	if err := writeWorkstation(filepath.Join(config, "workstation.yaml"), sshConfig, identityFile); err != nil {
 		return err
 	}
 
@@ -204,21 +216,28 @@ func containsAll(have, want []string) bool {
 }
 
 // writeWorkstation writes the workstation document, which holds what is
-// true of this machine: where sind exported its ssh configuration. Only
-// the system's configuration is included besides it, not the caller's own.
-func writeWorkstation(path, sshConfig string) error {
+// true of this machine: where sind exported its ssh configuration, and the
+// identity secrets are decrypted with. Only the system's configuration is
+// included besides it, not the caller's own.
+func writeWorkstation(path, sshConfig, identityFile string) error {
 	quoted, err := json.Marshal(sshConfig)
+	if err != nil {
+		return err
+	}
+	id, err := json.Marshal(identityFile)
 	if err != nil {
 		return err
 	}
 	doc := fmt.Sprintf(`apiVersion: clusterctl/v1alpha1
 kind: Workstation
 spec:
+  identities:
+    - %s
   overrides:
     ssh.include:
       - %s
       - /etc/ssh/ssh_config
-`, quoted)
+`, id, quoted)
 	return os.WriteFile(path, []byte(doc), 0o644)
 }
 

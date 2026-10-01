@@ -4,9 +4,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +23,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/secrets"
@@ -336,13 +340,43 @@ const twoSecretFiles = `        - target: /etc/munge/munge.key
 `
 
 // exe0002Unreachable answers exe0002 the way the ssh transport does when it cannot
-// connect, and every other node with success.
-func exe0002Unreachable(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+// connect, and every other node with success: a secrets push with every
+// file written.
+func exe0002Unreachable(tg transport.Target, req transport.Request) (*transport.Result, error) {
 	if tg.Name == "exe0002" {
 		return &transport.Result{Target: tg, ExitCode: 255, Stderr: "ssh: connect to host exe0002 port 22: Connection timed out\n",
 			Err: exitcode.Wrap(exitcode.Transport, fmt.Errorf("%s: ssh: connect to host exe0002 port 22: Connection timed out", tg))}, nil
 	}
-	return &transport.Result{Target: tg}, nil
+	return allWritten(tg, req)
+}
+
+// allWritten answers a secrets push the way its script does when it wrote
+// every file: a line for each file whose contents it read.
+func allWritten(tg transport.Target, req transport.Request) (*transport.Result, error) {
+	return &transport.Result{Target: tg, Stdout: secretLines(req, nil)}, nil
+}
+
+// secretLines is what the script of a secrets push prints when every file
+// whose contents it reads is written but those failed names, with why.
+func secretLines(req transport.Request, failed map[int]string) string {
+	var payload []byte
+	if req.Stdin != nil {
+		payload, _ = io.ReadAll(req.Stdin)
+	}
+	var b strings.Builder
+	for i := range bytes.Count(payload, []byte("\n")) {
+		if why, ok := failed[i]; ok {
+			fmt.Fprintf(&b, "fail\t%d\t%s\n", i, why)
+			continue
+		}
+		fmt.Fprintf(&b, "ok\t%d\n", i)
+	}
+	return b.String()
+}
+
+// pushRecorder answers every secrets push with every file written.
+func pushRecorder() *transport.Recorder {
+	return &transport.Recorder{Reply: allWritten}
 }
 
 // TestSecretsPushReportsAnUnreachableNode is the secrets push part of report
@@ -375,11 +409,11 @@ func TestSecretsPushReportsAnUnreachableNode(t *testing.T) {
 
 	// A node that answered and refused is a target failure, and the reason
 	// is shown even when the node wrote nothing to stderr.
-	rec = &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+	rec = &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if tg.Name == "exe0003" {
 			return &transport.Result{Target: tg, ExitCode: 1, Err: fmt.Errorf("%s: command exited 1", tg)}, nil
 		}
-		return &transport.Result{Target: tg}, nil
+		return allWritten(tg, req)
 	}}
 	h, err = run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-3]", "-y")
 	if got := exitcode.From(err); got != exitcode.TargetFailed || !strings.Contains(err.Error(), "exe0003") {
@@ -416,7 +450,7 @@ func TestSecretsPushReplacesTheFileWhole(t *testing.T) {
 		values: bmcSecret, identities: true,
 		secrets: "        - target: " + target + "\n          secretRef: {name: example, key: munge-key}\n          mode: \"0400\"\n",
 	}.write(t)
-	h, err := run(t, harnessOptions{config: []string{dir}}, "secrets", "push", "-n", "exe0001", "-y")
+	h, err := run(t, harnessOptions{config: []string{dir}, recorder: pushRecorder()}, "secrets", "push", "-n", "exe0001", "-y")
 	if err != nil {
 		t.Fatalf("secrets push failed: %v\n%s", err, h.out)
 	}
@@ -427,26 +461,34 @@ func TestSecretsPushReplacesTheFileWhole(t *testing.T) {
 	script := calls[0].Request.Script
 
 	runScript := func(payload string) (string, error) {
-		cmd := exec.Command("sh", "-c", script)
+		cmd := exec.Command("bash", "-c", script)
 		cmd.Stdin = strings.NewReader(payload)
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
+	line := base64.StdEncoding.EncodeToString([]byte("s3cr3t-key")) + "\n"
 
-	// A payload cut short leaves no file behind, and says so.
-	if out, err := runScript("s3cr"); err == nil {
-		t.Fatalf("a short payload was accepted: %s", out)
-	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Errorf("a short payload left the target behind: %v", err)
-	}
-	leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(target), "*"))
-	if len(leftovers) != 0 {
-		t.Errorf("a short payload left files behind: %q", leftovers)
+	// A payload cut short leaves no file behind, and says so, whether its
+	// line ended or the stream did.
+	for _, payload := range []string{base64.StdEncoding.EncodeToString([]byte("s3cr")) + "\n", line[:7], ""} {
+		out, err := runScript(payload)
+		if err == nil {
+			t.Fatalf("a short payload %q was accepted: %s", payload, out)
+		}
+		if !strings.HasPrefix(out, "fail\t0\treceived ") || !strings.HasSuffix(out, " of 10 bytes; the file was left as it was\n") {
+			t.Errorf("a short payload %q was reported as %q", payload, out)
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("a short payload left the target behind: %v", err)
+		}
+		leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(target), "*"))
+		if len(leftovers) != 0 {
+			t.Errorf("a short payload left files behind: %q", leftovers)
+		}
 	}
 
-	if out, err := runScript("s3cr3t-key"); err != nil {
-		t.Fatalf("the script failed: %v\n%s", err, out)
+	if out, err := runScript(line); err != nil || out != "ok\t0\n" {
+		t.Fatalf("the script printed %q, %v; want the file reported written\n", out, err)
 	}
 	got, err := os.ReadFile(target)
 	if err != nil || string(got) != "s3cr3t-key" {
@@ -470,11 +512,90 @@ func TestSecretsPushReplacesTheFileWhole(t *testing.T) {
 	if err := os.Chmod(filepath.Dir(target), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := runScript("s3cr3t-key"); err != nil {
+	if out, err := runScript(line); err != nil {
 		t.Fatalf("the script failed on an existing file: %v\n%s", err, out)
 	}
 	if info, _ := os.Stat(filepath.Dir(target)); info.Mode().Perm() != 0o755 {
 		t.Errorf("an existing directory was changed to %#o", info.Mode().Perm())
+	}
+}
+
+// A node is sent the contents of all its files on one stream, and each
+// arrives exactly as it was, whatever bytes it holds: a line end, a NUL, a
+// carriage return, nothing at all, or more than a shell reads at once. A
+// file that fails reads its contents all the same, so the next is written
+// with its own. The script is run here, in a real shell, against
+// directories standing in for the node's.
+func TestSecretsPushSendsEveryFileOnOneStream(t *testing.T) {
+	root := t.TempDir()
+	notADir := filepath.Join(root, "file")
+	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	big := make([]byte, 100_000)
+	for i := range big {
+		big[i] = byte(i * 7)
+	}
+	files := []v1alpha1.SecretFile{
+		{Target: filepath.Join(root, "a", "lines")},
+		{Target: filepath.Join(notADir, "key")},
+		{Target: filepath.Join(root, "b", "binary"), Mode: "0440"},
+		{Target: filepath.Join(root, "a", "empty")},
+		{Target: filepath.Join(root, "c", "big")},
+	}
+	contents := [][]byte{
+		[]byte("line one\nline two\n"),
+		[]byte("never written"),
+		{0, 1, 2, '\n', 0xff, 0, '\r', '\n', '\\', '\t'},
+		{},
+		big,
+	}
+	push := newSecretPush(nil, files, contents)
+	cmd := exec.Command("bash", "-c", push.script)
+	cmd.Stdin = bytes.NewReader(push.payload)
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Errorf("the script ended with %v, want exit 1 for the file that failed", err)
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("the script wrote to standard error: %s", stderr.String())
+	}
+
+	tg := transport.Target{Name: "exe0001"}
+	lines := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
+	if len(lines) != len(files) {
+		t.Fatalf("the script printed %q, want a line for each file", stdout.String())
+	}
+	for i, line := range lines {
+		res, ok := secretReported(tg, i, line)
+		switch {
+		case !ok:
+			t.Errorf("line %d, %q, is not a report on file %d", i, line, i)
+		case i == 1:
+			if !res.Failed() || !strings.HasPrefix(res.Stderr, "mkdir: ") {
+				t.Errorf("file 1 was reported %q, want it failed by mkdir", line)
+			}
+		case res.Failed():
+			t.Errorf("file %d was reported %q, want it written", i, line)
+		}
+	}
+	for i, file := range files {
+		got, err := os.ReadFile(file.Target)
+		if i == 1 {
+			if err == nil {
+				t.Errorf("%s was written", file.Target)
+			}
+			continue
+		}
+		if err != nil || !bytes.Equal(got, contents[i]) {
+			t.Errorf("%s holds %q, %v; want %q", file.Target, got, err, contents[i])
+		}
+	}
+	if info, err := os.Stat(files[2].Target); err != nil || info.Mode().Perm() != 0o440 {
+		t.Errorf("%s: %v, %v; want mode 0440", files[2].Target, info, err)
 	}
 }
 
@@ -513,30 +634,41 @@ func TestSecretsPushRefusesTwoSecretsForOneTarget(t *testing.T) {
 }
 
 // Each file was a fan-out of its own, so every node waited for the slowest
-// node of one file before any was written the next. A node now writes its
-// files one after the other on a worker of its own: the first write to
-// exe0001 is held until exe0002 has been sent its second file, which no
-// node could be while exe0001 held up the first file's fan-out.
-func TestSecretsPushWritesEachNodeWithoutWaitingForTheOthers(t *testing.T) {
+// node of one file before any was written the next, and then a session of
+// its own for every file. A node is now written all its files in one
+// session, beside the other nodes: the session to exe0001 is held until
+// exe0002 has been sent its files, which it could not be if exe0001 held up
+// the other nodes.
+func TestSecretsPushWritesEachNodeInOneSession(t *testing.T) {
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
-	second := make(chan struct{})
+	sent := make(chan struct{})
 	var once sync.Once
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
-		switch {
-		case tg.Name == "exe0001" && strings.Contains(req.Script, "munge.key"):
+		switch tg.Name {
+		case "exe0001":
 			select {
-			case <-second:
+			case <-sent:
 			case <-time.After(5 * time.Second):
-				t.Error("exe0002 was not sent its second secret while exe0001 was sent its first")
+				t.Error("exe0002 was not sent its secrets while exe0001 was")
 			}
-		case tg.Name == "exe0002" && strings.Contains(req.Script, "bmc.pass"):
-			once.Do(func() { close(second) })
+		case "exe0002":
+			once.Do(func() { close(sent) })
 		}
-		return &transport.Result{Target: tg}, nil
+		return allWritten(tg, req)
 	}}
 	h, err := run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-2]", "-y")
 	if err != nil {
 		t.Fatalf("secrets push failed: %v\n%s", err, h.out)
+	}
+	sessions := map[string]int{}
+	for _, c := range rec.Calls() {
+		sessions[c.Target.Name]++
+		if !strings.Contains(c.Request.Script, "/etc/munge/munge.key") || !strings.Contains(c.Request.Script, "/etc/bmc.pass") {
+			t.Errorf("the session to %s does not write both files:\n%s", c.Target.Name, c.Request.Script)
+		}
+	}
+	if sessions["exe0001"] != 1 || sessions["exe0002"] != 1 || len(sessions) != 2 {
+		t.Errorf("sessions by node: %v, want one each", sessions)
 	}
 	// The table lists the files one after the other, each on every node,
 	// whatever order the nodes were written in.
@@ -553,16 +685,15 @@ exe0002  /etc/bmc.pass         written
 }
 
 // The nodes are written to fanout.max at a time, and --fanout lowers it:
-// each write is held until one more than the limit are under way, which
-// never happens while the limit is kept. A node writes its files one after
-// the other, so the writes under way are the nodes under way.
+// each session is held until one more than the limit are under way, which
+// never happens while the limit is kept.
 func TestSecretsPushKeepsToTheFanOut(t *testing.T) {
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
 	for _, limit := range []int{1, 3} {
 		calls := &fanouttest.InFlight{Hold: limit + 1}
-		rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 			defer calls.Enter()()
-			return &transport.Result{Target: tg}, nil
+			return allWritten(tg, req)
 		}}
 		_, err := run(t, harnessOptions{config: []string{dir}, recorder: rec},
 			"--fanout", fmt.Sprint(limit), "secrets", "push", "-n", "exe[1-4]", "-y")
@@ -570,45 +701,55 @@ func TestSecretsPushKeepsToTheFanOut(t *testing.T) {
 			t.Fatalf("--fanout %d: secrets push failed: %v", limit, err)
 		}
 		if got := calls.Peak(); got != limit {
-			t.Errorf("--fanout %d: %d writes were under way at once, want %d", limit, got, limit)
+			t.Errorf("--fanout %d: %d sessions were under way at once, want %d", limit, got, limit)
 		}
-		if got := calls.Started(); got != 8 {
-			t.Errorf("--fanout %d: %d writes were sent, want both files to each of 4 nodes", limit, got)
+		if got := calls.Started(); got != 4 {
+			t.Errorf("--fanout %d: %d sessions were made, want one to each of 4 nodes", limit, got)
 		}
 	}
 }
 
-// A node that could not be reached for one secret is not tried again for
-// the next, even when an earlier secret failed there for another reason,
-// as the help says; a node that refused one secret is still sent the next.
-// A node that could not be reached makes the push exit 3, whatever failed
-// there first.
+// A node lost half way through its session is sent nothing more: the first
+// file it did not report on fails with what the transport said and the
+// rest are skipped, as the help says, even when a file before failed for
+// another reason. A node that refused one file reports on the next, and a
+// session that ended without a word on a file fails it. A node that could
+// not be reached makes the push exit 3, whatever failed there first.
 func TestSecretsPushStopsANodeAtTheFirstSecretItCouldNotBeSent(t *testing.T) {
 	three := twoSecretFiles + "        - target: /etc/nslcd.conf\n          secretRef: {name: example, key: bmc-password}\n"
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: three}.write(t)
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
-		switch {
-		case tg.Name == "exe0001" && strings.Contains(req.Script, "munge.key"):
-			return transport.ExitResult(tg, 1, "", "chown: invalid user: 'munge:munge'\n"), nil
-		case tg.Name == "exe0001" && strings.Contains(req.Script, "bmc.pass"):
-			return exe0002Unreachable(transport.Target{Name: "exe0002", Host: tg.Host}, req)
-		case tg.Name == "exe0002" && strings.Contains(req.Script, "munge.key"):
-			return transport.ExitResult(tg, 1, "", "received 3 of 10 bytes; the file was left as it was\n"), nil
+		switch tg.Name {
+		case "exe0001":
+			lines := secretLines(req, map[int]string{0: "chown: invalid user: 'munge:munge'"})
+			first, _, _ := strings.Cut(lines, "\n")
+			return transport.ExitResult(tg, 255, first+"\n", "Connection to exe0001.hpc.example.org closed by remote host.\n"), nil
+		case "exe0002":
+			return transport.ExitResult(tg, 1, secretLines(req, map[int]string{0: "received 3 of 10 bytes; the file was left as it was"}), ""), nil
+		case "exe0003":
+			// A line out of its turn and one of no report are not
+			// taken for one.
+			_ = secretLines(req, nil)
+			return &transport.Result{Target: tg, Stdout: "ok\t1\nwelcome to exe0003\nok\t0\n"}, nil
 		}
-		return &transport.Result{Target: tg}, nil
+		return nil, fmt.Errorf("unexpected node %s", tg.Name)
 	}}
-	h, err := run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-2]", "-y")
+	h, err := run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-3]", "-y")
 	// A node's first failure is the one it is reported with, and the worst
 	// of them the code the command exits with.
 	wantCode(t, err, exitcode.Transport)
+	silent := "failed: exe0003 (exe0003.hpc.example.org): the session ended without saying whether the file was written"
 	want := `
 NODE     SECRET                STATUS
 exe0001  /etc/munge/munge.key  failed: chown: invalid user: 'munge:munge'
 exe0002  /etc/munge/munge.key  failed: received 3 of 10 bytes; the file was left as it was
-exe0001  /etc/bmc.pass         failed: ssh: connect to host exe0002 port 22: Connection timed out
+exe0003  /etc/munge/munge.key  written
+exe0001  /etc/bmc.pass         failed: Connection to exe0001.hpc.example.org closed by remote host.
 exe0002  /etc/bmc.pass         written
+exe0003  /etc/bmc.pass         ` + silent + `
 exe0001  /etc/nslcd.conf       skipped: the node could not be reached
 exe0002  /etc/nslcd.conf       written
+exe0003  /etc/nslcd.conf       ` + silent + `
 `
 	if got := h.out.String(); got != want[1:] {
 		t.Errorf("output:\n%s\nwant:\n%s", got, want[1:])
@@ -633,7 +774,7 @@ func TestSecretsPushStartsNothingOnceInterrupted(t *testing.T) {
 		t.Errorf("error = %v, want the interrupt", err)
 	}
 	if calls := rec.Calls(); len(calls) != 1 {
-		t.Errorf("%d writes were sent, want only the one under way when the interrupt came", len(calls))
+		t.Errorf("%d sessions were made, want only the one under way when the interrupt came", len(calls))
 	}
 	want := `
 NODE     SECRET                STATUS
@@ -654,7 +795,7 @@ exe0003  /etc/bmc.pass         skipped: the command was interrupted
 func TestPlainLinesOfASecretsPushNameNoFile(t *testing.T) {
 	fakeDisplays(t)
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
-	h, err := runPlain(t, harnessOptions{config: []string{dir}, recorder: &transport.Recorder{}}, "secrets", "push", "-n", "exe[1-3]", "-y")
+	h, err := runPlain(t, harnessOptions{config: []string{dir}, recorder: pushRecorder()}, "secrets", "push", "-n", "exe[1-3]", "-y")
 	if err != nil {
 		t.Fatalf("secrets push: %v", err)
 	}
