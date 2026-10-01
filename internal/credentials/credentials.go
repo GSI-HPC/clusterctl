@@ -74,16 +74,19 @@ type Resolver struct {
 	// nil is the process's.
 	Stderr io.Writer
 
-	// reading is held across a whole lookup, so that concurrent callers
-	// wait for the one read instead of each prompting or running the
-	// helper. Reads are rare and two prompts must not share a terminal, so
-	// one lock for every name is enough.
-	reading sync.Mutex
-	mu      sync.Mutex
+	// terminal is held across a read that may use the terminal, so that
+	// two never share it: a prompt, and, while someone is at the terminal,
+	// a helper, age or sops, which may ask there for a passphrase or a PIN.
+	terminal sync.Mutex
+	mu       sync.Mutex
 	// cache holds the credentials that were read, and failed the reads that
 	// failed, by name.
 	cache  map[string]Credential
 	failed map[string]error
+	// reading holds the reads under way, by name, each closed once its read
+	// is over: a caller asking for a name being read waits for that read
+	// rather than prompting or running the helper again.
+	reading map[string]chan struct{}
 }
 
 // Get resolves a credential by name, reading its password once per process.
@@ -98,32 +101,75 @@ func (r *Resolver) Get(ctx context.Context, name string) (Credential, error) {
 	if name == "" {
 		return Credential{}, fmt.Errorf("no credential was named")
 	}
-	if err := ctx.Err(); err != nil {
-		return Credential{}, notRead(name, err)
+	for {
+		if err := ctx.Err(); err != nil {
+			return Credential{}, notRead(name, err)
+		}
+		r.mu.Lock()
+		if cached, ok := r.cache[name]; ok {
+			r.mu.Unlock()
+			return cached, nil
+		}
+		if failed := r.failed[name]; failed != nil {
+			r.mu.Unlock()
+			return Credential{}, failed
+		}
+		if done, ok := r.reading[name]; ok {
+			r.mu.Unlock()
+			// Another caller reads it; its answer is this one's too,
+			// unless it was interrupted, and then it is read afresh.
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return Credential{}, notRead(name, ctx.Err())
+			}
+		}
+		if r.reading == nil {
+			r.reading = map[string]chan struct{}{}
+		}
+		done := make(chan struct{})
+		r.reading[name] = done
+		r.mu.Unlock()
+		return r.readOnce(ctx, name, done)
 	}
-	r.reading.Lock()
-	defer r.reading.Unlock()
+}
 
-	r.mu.Lock()
-	cached, ok := r.cache[name]
-	failed := r.failed[name]
-	r.mu.Unlock()
-	if ok {
-		return cached, nil
-	}
-	if failed != nil {
-		return Credential{}, failed
-	}
-	// A caller that waited for another's read may have been interrupted
-	// meanwhile.
-	if err := ctx.Err(); err != nil {
-		return Credential{}, notRead(name, err)
-	}
+// readOnce reads the credential name for Get, which marked it as being read
+// with done, and keeps what it found.
+func (r *Resolver) readOnce(ctx context.Context, name string, done chan struct{}) (cred Credential, err error) {
+	defer func() {
+		r.mu.Lock()
+		switch {
+		case err == nil:
+			if r.cache == nil {
+				r.cache = map[string]Credential{}
+			}
+			r.cache[name] = cred
+		case ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded):
+			if r.failed == nil {
+				r.failed = map[string]error{}
+			}
+			r.failed[name] = err
+		}
+		delete(r.reading, name)
+		close(done)
+		r.mu.Unlock()
+	}()
 
 	spec, ok := r.Credentials[name]
 	if !ok {
 		return Credential{}, fmt.Errorf("unknown credential %q; the site defines %s",
 			name, strings.Join(slices.Sorted(maps.Keys(r.Credentials)), ", "))
+	}
+	if r.interactive(spec.Password) {
+		r.terminal.Lock()
+		defer r.terminal.Unlock()
+		// A caller that waited for the terminal may have been interrupted
+		// meanwhile.
+		if err := ctx.Err(); err != nil {
+			return Credential{}, notRead(name, err)
+		}
 	}
 	// The read is reported, by the credential's name and the kind of its
 	// source; what was read is not. A lookup answered from memory reads
@@ -135,25 +181,36 @@ func (r *Resolver) Get(ctx context.Context, name string) (Credential, error) {
 	// commands report it, not a host's refusal.
 	lookup.End(exitcode.Default(exitcode.Usage, err))
 	if err != nil {
-		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			r.mu.Lock()
-			if r.failed == nil {
-				r.failed = map[string]error{}
-			}
-			r.failed[name] = err
-			r.mu.Unlock()
-		}
 		return Credential{}, err
 	}
-	out := Credential{Name: name, Username: spec.Username, password: password}
+	return Credential{Name: name, Username: spec.Username, password: password}, nil
+}
 
-	r.mu.Lock()
-	if r.cache == nil {
-		r.cache = map[string]Credential{}
+// interactive says whether reading src may use the terminal: a prompt
+// always, and a helper, age or sops while someone is at the terminal, any of
+// which may ask there for a passphrase or a PIN.
+func (r *Resolver) interactive(src v1alpha1.PasswordSource) bool {
+	return src.Prompt || !r.NoTerminal && (len(src.Command) > 0 || src.AgeFile != "" || src.SecretRef != nil)
+}
+
+// Prefetch reads the credentials named that are not read yet side by side,
+// so that a command that needs several, one for each vendor's processors,
+// waits for the slowest rather than for each in turn. What it reads, or how
+// a read failed, is what Get returns for the name. A credential whose read
+// may use the terminal is left to Get, so that the questions come one at a
+// time and in the order the command asks them.
+func (r *Resolver) Prefetch(ctx context.Context, names []string) {
+	var wg sync.WaitGroup
+	seen := map[string]bool{}
+	for _, name := range names {
+		spec, ok := r.Credentials[name]
+		if !ok || seen[name] || r.interactive(spec.Password) {
+			continue
+		}
+		seen[name] = true
+		wg.Go(func() { _, _ = r.Get(ctx, name) })
 	}
-	r.cache[name] = out
-	r.mu.Unlock()
-	return out, nil
+	wg.Wait()
 }
 
 // notRead is the error of a lookup that read nothing because its context
