@@ -134,8 +134,8 @@ build() {
   (cd "$tree/site" && HUGO_ENVIRONMENT=production "$hugo" "${args[@]}")
 }
 
-# checkout TAG checks the tag out below the work directory and generates its
-# pages there.
+# checkout TAG checks the tag out below the work directory, for gendocs to
+# generate its pages there.
 checkout() {
   local tag=$1 tree=$work/$1 file
   if ! git -C "$repo" rev-parse --quiet --verify "refs/tags/$tag^{commit}" >/dev/null; then
@@ -149,7 +149,12 @@ checkout() {
       cp "$repo/site/$file" "$tree/site/$file"
     fi
   done
-  (cd "$tree" && go run ./internal/tools/gendocs)
+}
+
+# gendocs TREE generates the command reference and the schemas of the manual
+# in TREE, with TREE's own gendocs.
+gendocs() {
+  (cd "$1" && go run ./internal/tools/gendocs)
 }
 
 if [ -z "${RELEASES+set}" ]; then
@@ -182,7 +187,22 @@ list+='      - {version: main, path: "dev/", note: unreleased}'
 
 rm -rf "$out"
 
-(cd "$repo" && go run ./internal/tools/gendocs)
+# The trees are checked out one after the other, as git takes them, and the
+# pages of each are generated side by side, each tree's gendocs compiled and
+# run on its own: one after the other they took about a minute. Each run is
+# waited for by itself, so that one that fails fails the build. The manuals
+# are then built one after the other.
+gendocs "$repo" &
+generating=("$!")
+for tag in $lines; do
+  checkout "$tag"
+  gendocs "$work/$tag" &
+  generating+=("$!")
+done
+for pid in "${generating[@]}"; do
+  wait "$pid"
+done
+
 if [ -z "$latest" ]; then
   # Before the first release, main's manual is the only one.
   build "$repo" main ""
@@ -191,7 +211,6 @@ fi
 build "$repo" main dev/
 
 for tag in $lines; do
-  checkout "$tag"
   build "$work/$tag" "$tag" "${tag%.*}/"
   if [ "$tag" = "$latest" ]; then
     build "$work/$tag" "$tag" ""
