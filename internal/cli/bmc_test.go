@@ -341,6 +341,7 @@ func TestInventoryNameWithCapitalsIsRefused(t *testing.T) {
 // PDU instead of switching the outlet off, and a word between the rack and
 // -- was lost too. A -- before the rack ran the rack as the command.
 func TestPDUShellRefusesWordsAfterTheRack(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"pdu", "shell", "1", "R02", "olOff", "5"},
 		{"pdu", "shell", "1", "R02", "olOff", "--", "5"},
@@ -372,6 +373,7 @@ func TestPDUShellRefusesWordsAfterTheRack(t *testing.T) {
 // name ended up in the URL that is opened in the browser, where exe0003/x?
 // made the node itself the host.
 func TestBMCWebSelectsTheNode(t *testing.T) {
+	t.Parallel()
 	for _, arg := range []string{"exe0003/x?", "exe0003#", "exe[0001-0002]", "-exe0001", " "} {
 		h, err := run(t, harnessOptions{}, "bmc", "web", "--", arg)
 		if err == nil {

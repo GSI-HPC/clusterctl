@@ -34,6 +34,7 @@ func exitCodeOf(t *testing.T, opts harnessOptions, args ...string) (*harness, in
 // unhealthy", and a misspelt subcommand below the root printed its group's
 // help and exited 0, so that "&& clusterctl bmc power off" went ahead.
 func TestUsageErrorsExitTwo(t *testing.T) {
+	t.Parallel()
 	tests := [][]string{
 		{"bmc", "power", "off", "--bogus", "-n", "exe0001"},
 		{"bmc", "web"},
@@ -70,6 +71,7 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 // left a file of help text behind a success, an extra argument exited 1, and
 // a help topic that names no command printed the root help and exited 0.
 func TestBuiltinUsageErrorsExitTwo(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args []string
 		want []string
@@ -102,6 +104,7 @@ func TestBuiltinUsageErrorsExitTwo(t *testing.T) {
 // TestBuiltinsStillWork checks the other side: every shell still gets its
 // script, and help on a real command, or on none, still prints that help.
 func TestBuiltinsStillWork(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args []string
 		want string
@@ -135,6 +138,7 @@ func TestBuiltinsStillWork(t *testing.T) {
 // TestUnknownSubcommandIsNamed checks that the refusal says which word was
 // not understood and suggests what was probably meant.
 func TestUnknownSubcommandIsNamed(t *testing.T) {
+	t.Parallel()
 	h, code := exitCodeOf(t, harnessOptions{}, "slurm", "node", "drian", "x", "-n", "exe0001", "-y")
 	if code != exitcode.Usage {
 		t.Fatalf("exit code = %d, want %d", code, exitcode.Usage)
@@ -149,6 +153,7 @@ func TestUnknownSubcommandIsNamed(t *testing.T) {
 // TestGroupWithoutArgumentsPrintsHelp checks that a group on its own still
 // lists its subcommands and succeeds.
 func TestGroupWithoutArgumentsPrintsHelp(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{{"slurm", "node"}, {}} {
 		h, code := exitCodeOf(t, harnessOptions{}, args...)
 		if code != exitcode.OK {
@@ -165,6 +170,7 @@ func TestGroupWithoutArgumentsPrintsHelp(t *testing.T) {
 // host that could not be reached. The host answered; exit 3 sent the
 // administrator to check the network, and the tool's message was dropped.
 func TestFailedCommandOnARoleIsNotUnreachable(t *testing.T) {
+	t.Parallel()
 	const complaint = "ibwarn: mad_rpc_open_port: can't open UMAD port"
 	failing := func() *transport.Recorder {
 		return &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
@@ -190,6 +196,7 @@ func TestFailedCommandOnARoleIsNotUnreachable(t *testing.T) {
 // TestUnreachableRoleIsUnreachable checks the other side: ssh's own failure
 // on a role still exits 3.
 func TestUnreachableRoleIsUnreachable(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return transport.ExitResult(tg, 255, "", "ssh: connect to host ibgw01 port 22: Connection refused\n"), nil
 	}}
@@ -205,6 +212,7 @@ func TestUnreachableRoleIsUnreachable(t *testing.T) {
 // interrupt stopped it, would otherwise report the administrator's own Ctrl-C
 // as a failed or unreachable host.
 func TestInterruptedCommandExits130(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		// The interrupt arrives while the command runs.
@@ -225,6 +233,7 @@ func TestInterruptedCommandExits130(t *testing.T) {
 // its input when interrupted, and sends nothing. The read ignored the
 // context, so Ctrl-C was lost while it waited.
 func TestInterruptEndsTheStdinRead(t *testing.T) {
+	t.Parallel()
 	stdin, typing := io.Pipe()
 	t.Cleanup(func() { _ = typing.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
@@ -255,6 +264,7 @@ func TestInterruptEndsTheStdinRead(t *testing.T) {
 // TestNoTerminalRunsSshInBatchMode checks that ssh is told not to prompt when
 // clusterctl has no terminal, which is how the MCP server runs every command.
 func TestNoTerminalRunsSshInBatchMode(t *testing.T) {
+	t.Parallel()
 	for _, tty := range []bool{false, true} {
 		h, err := run(t, harnessOptions{tty: tty}, "login", "--dry-run", "install", "--", "uptime")
 		if err != nil {
@@ -272,6 +282,7 @@ func TestNoTerminalRunsSshInBatchMode(t *testing.T) {
 // secrets push exit 1 and exec 3, and a node without a service processor
 // exited 2 from provision and 1 from exec.
 func TestFanOutsAgreeOnTheExitCode(t *testing.T) {
+	t.Parallel()
 	refused := func(name string) error { return fmt.Errorf("%s: command exited 1", name) }
 	unreachable := func(name string) error {
 		return exitcode.Wrap(exitcode.Transport, fmt.Errorf("%s: Connection refused", name))

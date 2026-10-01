@@ -56,6 +56,7 @@ func scpCalls(t *testing.T, dir string) [][]string {
 // destination used to be DESTINATION<node>-<first source's base name>, a
 // file path, so scp failed on every node.
 func TestCopyDownloadsEachNodeIntoItsOwnDirectory(t *testing.T) {
+	t.Parallel()
 	binary, dir := fakeScp(t, "exit 0")
 	logs := filepath.Join(t.TempDir(), "logs") + "/"
 
@@ -119,6 +120,7 @@ exit 0`)
 // stream when one transfer runs at a time, and the null device otherwise,
 // where scp draws nothing.
 func TestCopyShowsAProgressMeterOnlyForOneTransferAtATime(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		args      []string
@@ -190,6 +192,7 @@ func TestCopyGivesUpOnAStalledTransfer(t *testing.T) {
 // path, while SFTP mode takes it literally. A path the two would read
 // differently is refused rather than guessed at.
 func TestCopyRefusesShellSyntaxInRemotePaths(t *testing.T) {
+	t.Parallel()
 	tests := [][]string{
 		{"copy", "-n", "exe1", "/etc/hosts", "/tmp/a b"},
 		{"copy", "-n", "exe1", "/etc/hosts", "/tmp/$(reboot)"},
@@ -214,6 +217,7 @@ func TestCopyRefusesShellSyntaxInRemotePaths(t *testing.T) {
 // a transfer scp failed is the node's failure, and one given up on at its
 // timeout ran out of time.
 func TestCopyReportsEachTransferAsACall(t *testing.T) {
+	t.Parallel()
 	binary, _ := fakeScp(t, `case "$*" in
 *exe0002*) echo "scp: /etc/hosts: Permission denied" >&2; exit 1 ;;
 *exe0003*) exec sleep 30 ;;

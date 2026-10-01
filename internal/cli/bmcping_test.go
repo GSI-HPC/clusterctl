@@ -17,6 +17,7 @@ import (
 // A line of white space from the gateway panicked, and a missing fping or an
 // unreachable gateway was reported as every processor down, exit 1.
 func TestBMCPingReadsTheSweepCarefully(t *testing.T) {
+	t.Parallel()
 	reply := func(r *transport.Result) *transport.Recorder {
 		return &transport.Recorder{Responses: []*transport.Result{r}}
 	}
@@ -51,6 +52,7 @@ func TestBMCPingReadsTheSweepCarefully(t *testing.T) {
 // A dry run sent no sweep, read every processor as silent and exited 1,
 // although a lookup that only reads runs for real in a dry run.
 func TestBMCPingSweepsInADryRun(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Responses: []*transport.Result{{
 		Stdout: "exe0001.mgmt.hpc.example.org\nexe0002.mgmt.hpc.example.org\n",
 	}}}
@@ -70,6 +72,7 @@ func TestBMCPingSweepsInADryRun(t *testing.T) {
 // one call that asks them all; fping says which answered only once it is
 // done, so there is no target for each.
 func TestBMCPingReportsTheSweepAsAStep(t *testing.T) {
+	t.Parallel()
 	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "exe0001.mgmt.hpc.example.org\n", ExitCode: 1}}}
 	_, err := run(t, harnessOptions{ctx: ctx, recorder: rec}, "bmc", "ping", "-n", "exe[0001-0002]")
@@ -101,6 +104,7 @@ func pingedNames(req transport.Request) string {
 // one argument of at most 128 KiB, so a sweep of some 4,000 was refused.
 // They travel on standard input, so the command is the same for any number.
 func TestBMCPingSweepsAnyNumberOfProcessors(t *testing.T) {
+	t.Parallel()
 	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
 		return s + "    - nodes: big[0001-5000]\n"
 	})

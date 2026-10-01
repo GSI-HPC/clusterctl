@@ -16,6 +16,7 @@ import (
 // and drop the rest, so "login mgmt uptime" opened a shell instead of
 // running uptime.
 func TestLoginRejectsASecondName(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"login", "mgmt", "uptime"},
 		{"login", "mgmt", "extra", "--", "uptime"},
@@ -45,6 +46,7 @@ func TestLoginRejectsASecondName(t *testing.T) {
 // role, else to mgmt, else to the first role in name order, and names none
 // when the site has no role.
 func TestDefaultRolePrefersLoginThenMgmt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		roles []string
@@ -73,6 +75,7 @@ func TestDefaultRolePrefersLoginThenMgmt(t *testing.T) {
 // exe1.hpc.example.org, while exec -n exe1 reaches exe0001, because a bare
 // name that was not a role went to the naming rules as it was written.
 func TestLoginReachesTheNodeANameSelects(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"exe1", "EXE0001", "exe0001"} {
 		t.Run(name, func(t *testing.T) {
 			h, err := run(t, harnessOptions{}, "--dry-run", "login", name)

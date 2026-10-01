@@ -85,6 +85,7 @@ func shellRunner(t *testing.T, bin, role string) (*transport.Recorder, string) {
 // name from the inventory was written bare into the script that runs as root
 // on the fabric host, so $(...) in a name ran there.
 func TestFabricStateKeepsNodeNamesOutOfTheScript(t *testing.T) {
+	t.Parallel()
 	const evil = "$(touch${IFS}PWNED)"
 	inventory := writeConfig(t, "inventory.yaml", `
 apiVersion: clusterctl/v1alpha1
@@ -142,6 +143,7 @@ LinkSpeedActive:.................10.0 Gbps
 // names LinkWidthActive and LinkSpeedActive contain "Active", so every port
 // that answered was reported up, whatever its link state.
 func TestFabricStateIsUpOnlyForAnActiveLink(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		state, phys string
 		up          bool
@@ -194,6 +196,7 @@ cat <<'EOF'
 }
 
 func TestFabricStateReportsAPortWithoutAnswer(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	fakeTool(t, bin, "ibportstate", "exit 1\n")
 	rec, _ := shellRunner(t, bin, "fabric")
@@ -225,6 +228,7 @@ func fabricAnswers(stdout string, code int, stderr string) *transport.Recorder {
 // fails with the reason it stopped; one that printed nothing still fails
 // with nothing to show.
 func TestFabricStateKeepsThePortsThatAnswered(t *testing.T) {
+	t.Parallel()
 	const answered = "0|Active|LinkUp|4X|10.0 Gbps\n1|"
 	for _, tc := range []struct {
 		name, stdout, stderr string
@@ -262,6 +266,7 @@ func TestFabricStateKeepsThePortsThatAnswered(t *testing.T) {
 // An interrupt while the fabric answers prints no table: the ports not yet
 // asked would read as if they had not answered. The command exits 130.
 func TestFabricStatePrintsNothingOnceInterrupted(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
@@ -280,6 +285,7 @@ func TestFabricStatePrintsNothingOnceInterrupted(t *testing.T) {
 // a dry run reported every port without an answer and failed. It only reads,
 // and a dry run asks the fabric as the real run does.
 func TestFabricStateAsksTheFabricInADryRun(t *testing.T) {
+	t.Parallel()
 	rec := fabricAnswers("0|Active|LinkUp|4X|10.0 Gbps\n", 0, "")
 	h, err := run(t, harnessOptions{recorder: rec}, "fabric", "state", "-n", "exe0001", "--dry-run")
 	if err != nil {
@@ -309,6 +315,7 @@ func fabricNodes(t *testing.T, n int) (config, set string) {
 // and the ports travel on its standard input, an index and an identifier
 // a line, with no node name.
 func TestFabricStateSendsThePortsOnStandardInput(t *testing.T) {
+	t.Parallel()
 	var (
 		mu      sync.Mutex
 		scripts []string
@@ -358,6 +365,7 @@ func TestFabricStateSendsThePortsOnStandardInput(t *testing.T) {
 // table lists the ports in the order of the nodes whatever order the
 // answers came in, and a display never counts more running than the bound.
 func TestFabricStateAsksAboutFourPortsAtOnce(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	state := t.TempDir()
 	if err := os.Mkdir(filepath.Join(state, "running"), 0o700); err != nil {
@@ -435,6 +443,7 @@ func readFields(t *testing.T, path string) []string {
 // is under way, which never comes, so both are under way at once only
 // when neither waits for the other.
 func TestFabricCountersUplinkReadsTheCabledSwitchPort(t *testing.T) {
+	t.Parallel()
 	reads := &fanouttest.InFlight{Hold: 3}
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if len(req.Argv) > 0 && (req.Argv[0] == "ibaddr" || req.Argv[0] == "iblinkinfo") {
@@ -474,6 +483,7 @@ func TestFabricCountersUplinkReadsTheCabledSwitchPort(t *testing.T) {
 // A LID that cannot be read is what --uplink reports, as when it was asked
 // for before the links were listed.
 func TestFabricCountersUplinkReportsTheLIDFirst(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		switch req.Argv[0] {
 		case "ibaddr":
@@ -493,6 +503,7 @@ func TestFabricCountersUplinkReportsTheLIDFirst(t *testing.T) {
 // DHCP declaration and read the port of the inventory's address, which may
 // be stale, and EXE0001 was refused. The name is resolved the way -n is.
 func TestFabricCountersFindsTheNodeOfAnySpelling(t *testing.T) {
+	t.Parallel()
 	for _, spelling := range []string{"exe0001", "exe1", "EXE0001", "exe0001.hpc.example.org"} {
 		t.Run(spelling, func(t *testing.T) {
 			rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
@@ -520,6 +531,7 @@ func TestFabricCountersFindsTheNodeOfAnySpelling(t *testing.T) {
 // NODE is one node, and a name that is not a host name is refused before
 // anything is asked.
 func TestFabricCountersRefusesWhatIsNotOneNode(t *testing.T) {
+	t.Parallel()
 	for _, arg := range []string{"exe[0001-0002]", "exe0001;id", " "} {
 		t.Run(arg, func(t *testing.T) {
 			h, err := run(t, harnessOptions{}, "fabric", "counters", "--", arg)
@@ -530,6 +542,7 @@ func TestFabricCountersRefusesWhatIsNotOneNode(t *testing.T) {
 }
 
 func TestFabricCountersUplinkRefusesToGuess(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		out := ""
 		if req.Argv[0] == "ibaddr" {
@@ -551,6 +564,7 @@ func TestFabricCountersUplinkRefusesToGuess(t *testing.T) {
 // TestFabricGUIDReportsNodesItCannotIdentify is the report's 12.7: a node
 // without an identifier was left out of -o json and the command exited 0.
 func TestFabricGUIDReportsNodesItCannotIdentify(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "fabric", "guid", "-n", "exe[1-3]", "-o", "json")
 	if err == nil {
 		t.Fatalf("nodes without an identifier were not reported:\n%s", h.out)
@@ -571,6 +585,7 @@ func TestFabricGUIDReportsNodesItCannotIdentify(t *testing.T) {
 }
 
 func TestFabricGUIDFailsWhenDHCPCannotBeRead(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return nil, errors.New("connection refused")
 	}}
@@ -585,6 +600,7 @@ func TestFabricGUIDFailsWhenDHCPCannotBeRead(t *testing.T) {
 // whenever there was one, the reverse of the documented order, so a stale
 // inventory entry named the wrong port.
 func TestFabricGUIDPrefersDHCP(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Responses: []*transport.Result{{
 		Stdout: "host exe0001 {\n  hardware ethernet aa:bb:cc:11:22:33;\n  fixed-address 10.0.2.1;\n}\n",
 	}}}
@@ -606,6 +622,7 @@ func TestFabricGUIDPrefersDHCP(t *testing.T) {
 // while the node's link was up. Only the declaration named after the node,
 // the one it boots with, names its port.
 func TestFabricLeavesTheBMCDeclarationOut(t *testing.T) {
+	t.Parallel()
 	const dhcpd = `host exe0001 {
   hardware ethernet aa:bb:cc:11:22:33;
   fixed-address 10.0.2.1;
@@ -653,6 +670,7 @@ cat <<'EOF'
 // value were written bare into the script, so a value of "1; reboot" ran
 // reboot on every selected node.
 func TestHCAConfigSetRefusesWhatIsNotASetting(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"KEEP_LINK_UP_ON_BOOT_P1", "1; reboot"},
 		{"KEEP_LINK_UP_ON_BOOT_P1=1;reboot", "1"},
@@ -676,6 +694,7 @@ func TestHCAConfigSetRefusesWhatIsNotASetting(t *testing.T) {
 // other way round would be refused for the wrong one. hca config get checks
 // its key the same way.
 func TestHCAConfigSaysWhichArgumentIsRefused(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		args []string
 		says string
@@ -696,6 +715,7 @@ func TestHCAConfigSaysWhichArgumentIsRefused(t *testing.T) {
 }
 
 func TestHCAConfigSetQuotesTheSetting(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "hca", "config", "set", "MODULE_SPLIT_M0[1..3]", "1", "-n", "exe0001", "-y")
 	if err != nil {
 		t.Fatalf("hca config set failed: %v", err)
@@ -741,6 +761,7 @@ func TestHCAConfigNeverTakesANodeForTheValue(t *testing.T) {
 // TestHCAConfigSetChangesEveryAdapter is the report's 12.10: only the first
 // adapter ibstat listed was changed, and the node was reported ok.
 func TestHCAConfigSetChangesEveryAdapter(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	fakeTool(t, bin, "ibstat", `[ "$1" = -l ] && printf 'mlx5_0\nmlx5_1\n'`+"\n")
 	fakeTool(t, bin, "mlxconfig", `
@@ -772,6 +793,7 @@ exit 0
 // and mlxconfig's message were lost. A node whose script ran shows each
 // adapter, and one it could not reach, or without an adapter, how it failed.
 func TestHCAConfigSetShowsWhyAnAdapterFailed(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	fakeTool(t, bin, "ibstat", `[ "$1" = -l ] && printf 'mlx5_0\nmlx5_1\n'`+"\n")
 	fakeTool(t, bin, "mlxconfig", `
@@ -810,6 +832,7 @@ exe0002          unreachable  ssh: connect to host: Connection refused
 // exited 0: a firmware audit skipped it without a word. Such a node has a
 // row, is named on standard error with why, and fails the command.
 func TestHCAReportsANodeWithoutAdapters(t *testing.T) {
+	t.Parallel()
 	for _, command := range []string{"link", "firmware"} {
 		for _, tc := range []struct {
 			name, ibstat, reason string
@@ -839,6 +862,7 @@ func TestHCAReportsANodeWithoutAdapters(t *testing.T) {
 // Each adapter of a node is a row of hca link and hca firmware, and a node
 // that could not be reached is one too, with how it failed.
 func TestHCAListsEveryAdapterAndEveryNode(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	fakeTool(t, bin, "ibstat", `
 case "$1" in
@@ -922,6 +946,7 @@ esac
 // one of the indices a range names; an adapter without it is named on
 // standard error and fails the command.
 func TestHCAConfigGetReadsTheSettingOfEachAdapter(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		key         string
 		code        int
@@ -982,6 +1007,7 @@ Length        : 10 m
 // adapters reported one. Each cable is a row, named as mlxcables names it,
 // and a node where none is found is named with why and fails the command.
 func TestHCACableReportsEveryCable(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, mlxcables string
 		code            int

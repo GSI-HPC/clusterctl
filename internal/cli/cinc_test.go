@@ -93,6 +93,7 @@ func sourced(t *testing.T, dir, path string) (url, runList string) {
 // run list with a space ran its second half as a command, and a command
 // substitution in the URL ran on the node.
 func TestCincConfigWritesAFileSafeToSource(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, url, runList string
 	}{
@@ -139,6 +140,7 @@ func TestCincConfigWritesAFileSafeToSource(t *testing.T) {
 }
 
 func TestCincConfigRejectsWhatIsNotAnArchiveURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -166,6 +168,7 @@ func TestCincConfigRejectsWhatIsNotAnArchiveURL(t *testing.T) {
 // connection that dropped in between left an empty file, and install -D
 // created missing directories whatever the umask said.
 func TestCincConfigReplacesTheFileWhole(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "etc", "cinc", "solo")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -245,6 +248,7 @@ func clientRuns(rec *transport.Recorder) [][]string {
 // what cinc config writes without --run-list, stopped every run with
 // "CHEF_RUN_LIST: unbound variable".
 func TestCincRunPassesTheFileAsArguments(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, content string
 		flags         []string
@@ -301,6 +305,7 @@ func TestCincRunPassesTheFileAsArguments(t *testing.T) {
 // minutes now, and the setting when it allows longer; reading the file
 // keeps the setting.
 func TestCincRunGivesTheClientThirtyMinutes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		set        []string
@@ -338,6 +343,7 @@ func TestCincRunGivesTheClientThirtyMinutes(t *testing.T) {
 // A file that would do more than assign when sourced, or names no archive,
 // is refused on that node, and the client is not started there.
 func TestCincRunRefusesAFileThatIsNotPlainAssignments(t *testing.T) {
+	t.Parallel()
 	for name, content := range map[string]string{
 		"an unquoted command substitution": "CHEF_RECIPE_URL=http://installer/cinc/$(touch PWNED).tgz\n",
 		"backticks in double quotes":       "CHEF_RECIPE_URL=\"http://installer/`id`.tgz\"\n",
@@ -368,6 +374,7 @@ func TestCincRunRefusesAFileThatIsNotPlainAssignments(t *testing.T) {
 // Report 10.7: cinc show listed a node it could not reach as "not
 // configured" and exited 0.
 func TestCincShowReportsNodesItCouldNotRead(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		switch tg.Name {
 		case "exe0003":
@@ -427,6 +434,7 @@ func TestCincShowReportsNodesItCouldNotRead(t *testing.T) {
 // A file that is not plain assignments is shown as such rather than as what
 // sourcing it would have produced, and counts as a failure.
 func TestCincShowFlagsAFileItCannotRead(t *testing.T) {
+	t.Parallel()
 	rec := cincNode("CHEF_RECIPE_URL=http://installer/$(id)\x1b[2J.tgz\n")
 	h, err := run(t, harnessOptions{recorder: rec}, "cinc", "show", "-n", "exe0001")
 	wantCode(t, err, exitcode.TargetFailed)
@@ -438,6 +446,7 @@ func TestCincShowFlagsAFileItCannotRead(t *testing.T) {
 // Whatever cinc config quotes, cinc run reads back unchanged, and the plain
 // values the shell toolkit wrote are read as the shell read them.
 func TestCincFileRoundTrips(t *testing.T) {
+	t.Parallel()
 	for _, value := range []string{
 		"role[exe]", "role[base], role[exe]", "it's", `a"b`, `back\slash`, "$(id)", "`id`",
 		"a;b&c|d<e>f(g)~h", "#hash", "",
@@ -465,6 +474,7 @@ func TestCincFileRoundTrips(t *testing.T) {
 // A dry run stops at the preview, before each node's file is read, so the
 // preview says what it could not look at.
 func TestCincRunDryRunNamesTheReadItSkips(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "cinc", "run", "-n", "exe0001", "--dry-run")
 	if err != nil {
 		t.Fatalf("cinc run --dry-run failed: %v", err)

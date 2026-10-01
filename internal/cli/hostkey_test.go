@@ -96,6 +96,7 @@ func fakeSSH(t *testing.T) (binary, argsFile string) {
 // TestHostkeyScanGoesThroughTheJumpHost: the dhcp role sits behind mgmt, and
 // the scanner used to dial it directly from the workstation.
 func TestHostkeyScanGoesThroughTheJumpHost(t *testing.T) {
+	t.Parallel()
 	binary, argsFile := fakeSSH(t)
 	h, err := run(t, harnessOptions{},
 		"--set", "ssh.binary="+binary, "hostkey", "scan", "-n", "dhcp01", "--timeout", "5s")
@@ -124,6 +125,7 @@ func TestHostkeyScanGoesThroughTheJumpHost(t *testing.T) {
 // uses the context's account, and passed an element such as root@mgmt or
 // mgmt:2222 to ssh as it was written, a host no name resolves.
 func TestHostkeyScanReachesTheJumpHostAsTheConfigurationDoes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		proxyJump string
 		want      []string
@@ -325,6 +327,7 @@ func TestHostkeyScanReachesTheInventoryBMCAddress(t *testing.T) {
 // TestHostkeyRemoveTakesTheInventoryBMCAddress: remove --bmc removed the
 // entry of the derived name, so the key recorded under the bmcAddress stayed.
 func TestHostkeyRemoveTakesTheInventoryBMCAddress(t *testing.T) {
+	t.Parallel()
 	known := filepath.Join(t.TempDir(), "known_hosts")
 	file := "10.9.0.77 ssh-ed25519 AAAArecorded\n" +
 		"exe0003.mgmt.hpc.example.org ssh-ed25519 AAAAderived\n"
@@ -353,6 +356,7 @@ func TestHostkeyRemoveTakesTheInventoryBMCAddress(t *testing.T) {
 // entry under the node's short name, which is the node's own key written
 // before the naming rules were in place, not its service processor's.
 func TestHostkeyRemoveOfABMCKeepsTheNodesOwnKey(t *testing.T) {
+	t.Parallel()
 	known := filepath.Join(t.TempDir(), "known_hosts")
 	file := "exe0003 ssh-ed25519 AAAAnode\n" +
 		"exe0003.mgmt.hpc.example.org ssh-ed25519 AAAAbmc\n"
@@ -377,6 +381,7 @@ func TestHostkeyRemoveOfABMCKeepsTheNodesOwnKey(t *testing.T) {
 // TestHostkeyListShowsTheMarkers: the table left out @revoked and
 // @cert-authority, so a revoked key read as a second trusted key of its host.
 func TestHostkeyListShowsTheMarkers(t *testing.T) {
+	t.Parallel()
 	known := filepath.Join(t.TempDir(), "known_hosts")
 	file := "exe0001.hpc.example.org ssh-ed25519 AAAAtrusted\n" +
 		"@revoked exe0001.hpc.example.org ssh-ed25519 AAAArevoked\n" +
@@ -410,6 +415,7 @@ func TestHostkeyListShowsTheMarkers(t *testing.T) {
 // TestMatchesWantsEveryOfferedKeyInTheFile: a host matches the file when each
 // key it offers is there under the same type; the file may hold more.
 func TestMatchesWantsEveryOfferedKeyInTheFile(t *testing.T) {
+	t.Parallel()
 	ed := hostkeys.Entry{Type: "ssh-ed25519", Key: "AAAAed"}
 	rsa := hostkeys.Entry{Type: "ssh-rsa", Key: "AAAArsa"}
 	tests := []struct {

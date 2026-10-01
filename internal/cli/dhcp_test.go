@@ -81,6 +81,7 @@ const dhcpdPath = "/etc/dhcp/dhcpd.conf"
 // A comment above a neighbour's declaration that names the node gave the node
 // the neighbour's address, and boot set armed the neighbour (report 5.1).
 func TestBootSetIgnoresACommentThatNamesTheNode(t *testing.T) {
+	t.Parallel()
 	rec := serveDHCP(map[string]string{dhcpdPath: `
 # chassis C07: exe0003 exe0004
 host exe0003 {
@@ -129,6 +130,7 @@ host exe0002 {
 // A declaration closed on the line of its last statement swallowed the next
 // declaration, whose address then went to the first node (report 5.2).
 func TestBootSetReadsADeclarationClosedOnItsLastLine(t *testing.T) {
+	t.Parallel()
 	conf := `
 host exe0003 {
   hardware ethernet aa:bb:cc:00:00:03;
@@ -165,6 +167,7 @@ host exe0004 {
 // A second interface or the BMC sorted before the node's own declaration and
 // became its boot address (report 5.3).
 func TestBootSetTakesTheAddressOfTheNodesOwnDeclaration(t *testing.T) {
+	t.Parallel()
 	rec := serveDHCP(map[string]string{dhcpdPath: `
 host exe0005.hpc.example.org {
   fixed-address 10.0.2.5;
@@ -188,6 +191,7 @@ host exe0005-bmc.mgmt.hpc.example.org {
 // Two declarations named after the node that both carry an address leave the
 // boot address undecided, so nothing is linked (report 5.3).
 func TestBootSetRefusesTwoDeclarationsOfTheNode(t *testing.T) {
+	t.Parallel()
 	rec := serveDHCP(map[string]string{dhcpdPath: `
 host exe0006 {
   fixed-address 10.0.2.6;
@@ -214,6 +218,7 @@ host exe0006.hpc.example.org {
 // dhcp hosts shows a declaration found only through a comment, but says so,
 // and does not count it as the node's own.
 func TestDHCPHostsMarksACommentMatch(t *testing.T) {
+	t.Parallel()
 	rec := serveDHCP(map[string]string{dhcpdPath: `
 # a node named only in the comment: exe0007
 host weird-name-0001 {
@@ -233,6 +238,7 @@ host weird-name-0001 {
 // An include statement is followed, so the declarations in the included file
 // are known.
 func TestDHCPHostsFollowsInclude(t *testing.T) {
+	t.Parallel()
 	rec := serveDHCP(map[string]string{
 		dhcpdPath: "include \"/etc/dhcp/hosts.conf\";\n",
 		"/etc/dhcp/hosts.conf": "host exe0008 { hardware ethernet aa:bb:cc:00:00:08; " +
@@ -250,6 +256,7 @@ func TestDHCPHostsFollowsInclude(t *testing.T) {
 // A file that cannot be parsed stops the command instead of reporting
 // whatever was read up to the fault.
 func TestDHCPHostsRefusesAHostInsideAHost(t *testing.T) {
+	t.Parallel()
 	rec := serveDHCP(map[string]string{dhcpdPath: `
 host exe0003 {
   fixed-address 10.0.2.3;
@@ -269,6 +276,7 @@ host exe0004 {
 
 // The log path was spliced into sh -c unquoted (report 1.7).
 func TestDHCPLogQuotesTheLogPath(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{}
 	_, err := run(t, harnessOptions{recorder: rec},
 		"--set", "services.dhcp.logPath=/var/log/dhcp;touch /tmp/pwned", "dhcp", "log")
@@ -293,6 +301,7 @@ func TestDHCPLogQuotesTheLogPath(t *testing.T) {
 // DHCP line does. The command runs in a real shell against a log in a
 // temporary directory.
 func TestDHCPLogSaysWhenTheLogCannotBeRead(t *testing.T) {
+	t.Parallel()
 	log := filepath.Join(t.TempDir(), "syslog")
 	mustWrite(t, log, `Sep 25 10:00:01 dhcp01 dhcpd[11]: DHCPDISCOVER from aa:bb:cc:00:00:01 via ib0
 Sep 25 10:00:02 dhcp01 cron[7]: (root) CMD (true)
@@ -331,6 +340,7 @@ Sep 25 10:00:04 dhcp01 dhcpd[11]: DHCPACK on 10.0.2.1 to aa:bb:cc:00:00:01 via i
 // (report 10.3), and --seconds below one no longer drops the time limit
 // (report 1.7).
 func TestDHCPLogAndCaptureRejectUnboundedArguments(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"dhcp", "log", "--lines", "0"},
 		{"dhcp", "log", "--lines", "-5"},
@@ -354,6 +364,7 @@ func TestDHCPLogAndCaptureRejectUnboundedArguments(t *testing.T) {
 // limit at all, so tcpdump ran as root until something stopped it, the
 // very case the lower bound is there to prevent.
 func TestDHCPCaptureAlwaysStopsOnItsOwn(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "--dry-run", "dhcp", "capture", "--seconds", "3600")
 	if err != nil {
 		t.Fatalf("dhcp capture --seconds 3600: %v", err)
@@ -377,6 +388,7 @@ func TestDHCPCaptureAlwaysStopsOnItsOwn(t *testing.T) {
 // server instead of running uptime, and boot shell and cinc shell did the
 // same. login refuses such a word, and so do they now.
 func TestServiceShellRefusesACommandBeforeTheDash(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"dhcp", "shell", "uptime"},
 		{"boot", "shell", "uptime"},
@@ -400,6 +412,7 @@ func TestServiceShellRefusesACommandBeforeTheDash(t *testing.T) {
 // A service shell reaches the host of the service's role, and runs what
 // follows -- there, or opens a login shell when nothing does.
 func TestServiceShellReachesTheRoleOfTheService(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		args []string
 		host string
@@ -434,6 +447,7 @@ func TestServiceShellReachesTheRoleOfTheService(t *testing.T) {
 // The log holds what the nodes sent, so a terminal escape in it is shown
 // rather than obeyed.
 func TestDHCPLogEscapesControlCharacters(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Responses: []*transport.Result{{
 		Stdout: "dhcpd: DHCPREQUEST from aa:bb (evil\x1b[2J)\ndhcpd: DHCPACK\ton eth0",
 	}}}
@@ -456,6 +470,7 @@ func TestDHCPLogEscapesControlCharacters(t *testing.T) {
 // armed exe0006 as well. A second interface of the node itself holding its
 // address is still the node.
 func TestBootRefusesAnAddressDHCPHandsToAnotherNode(t *testing.T) {
+	t.Parallel()
 	shared := `
 host exe0005 {
   hardware ethernet aa:bb:cc:00:00:05;
@@ -512,6 +527,7 @@ host exe0005-eth1 {
 // both are under way at once only when neither waits for the other. A
 // selection that fails is what is reported.
 func TestDHCPHostsReadsTheConfigurationWhileSelecting(t *testing.T) {
+	t.Parallel()
 	dhcpd := serveDHCP(map[string]string{dhcpdPath: "host exe0001 { hardware ethernet 00:11:22:33:44:55; }\n"})
 	sinfo := fakeSinfo(map[string]string{"main": "exe0001"})
 	calls := &fanouttest.InFlight{Hold: 3}

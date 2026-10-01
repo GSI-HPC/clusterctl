@@ -14,6 +14,7 @@ import (
 // list command of every exec group source over ssh, sinfo on the Slurm host
 // in the example, on every press of Tab.
 func TestCompletionContactsNothing(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"__complete", "node", "list", "-n", ""},
 		{"__complete", "node", "select", ""},
@@ -50,6 +51,7 @@ func TestCompletionContactsNothing(t *testing.T) {
 // are still offered for cobra's own commands, now that they are part of the
 // tree from the start.
 func TestCompletionOfTheBuiltins(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args []string
 		want []string
@@ -85,6 +87,7 @@ func TestCompletionOfTheBuiltins(t *testing.T) {
 // completing: tunnel names and the context of use-context were read with
 // r.App, which then read every file twice and refused, and offered nothing.
 func TestCompletionOfConfiguredNames(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args []string
 		want []string

@@ -186,14 +186,9 @@ func (r *root) context() context.Context {
 	return context.Background()
 }
 
-// builtRoots remembers which root state belongs to which command tree, so
-// that a test can reach the flags of a tree it did not build itself.
-var builtRoots = map[*cobra.Command]*root{}
-
 // NewRootCommand builds the command tree.
 func NewRootCommand(ctx context.Context, streams app.Streams) *cobra.Command {
-	cmd, r := newRoot(ctx, streams)
-	builtRoots[cmd] = r
+	cmd, _ := newRoot(ctx, streams)
 	return cmd
 }
 

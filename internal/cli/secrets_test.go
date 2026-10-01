@@ -108,6 +108,7 @@ func retype(to string) func([]byte) []byte {
 // the value. The tag is readable without a key, so the file is refused when
 // the configuration loads, and nothing of the value reaches any output.
 func TestSecretTypeTagsAreRefusedBeforeDecrypting(t *testing.T) {
+	t.Parallel()
 	for _, typ := range []string{"int", "float", "bool", "time", "bytes"} {
 		t.Run(typ, func(t *testing.T) {
 			dir, _ := secretSite{values: bmcSecret, identities: true, edit: retype(typ)}.write(t)
@@ -138,6 +139,7 @@ func TestSecretTypeTagsAreRefusedBeforeDecrypting(t *testing.T) {
 // stores an unquoted 0600 as the integer 384, which clusterctl then wrote
 // onto the node as written. It is refused with how to keep it as written.
 func TestSecretValuesThatSopsWouldRetypeAreRefused(t *testing.T) {
+	t.Parallel()
 	for _, value := range []string{"0600", "007", "True", "2001-12-14", "1.5"} {
 		t.Run(value, func(t *testing.T) {
 			dir, _ := secretSite{values: withPin(value), identities: true}.write(t)
@@ -169,6 +171,7 @@ func withPin(value string) string {
 // file was written out as YAML and parsed again by another library, whose
 // error quoted the lines around a value it could not read back.
 func TestSecretValuesAreNotParsedTwice(t *testing.T) {
+	t.Parallel()
 	dir, _ := secretSite{
 		values:     "data:\n  bmc-password: hunter2\n  spacer: \"\\n\"\n  tabbed: \"\\tx\\ny\"\n  separator: \"a\\u2028b\"\nbinaryData:\n  munge-key: czNjcjN0LWtleQ==\n",
 		identities: true,
@@ -306,6 +309,7 @@ func TestCommandsWithoutASecretNeedNoSops(t *testing.T) {
 // mac_only_encrypted the message authentication code does not cover the
 // kind and the name, so they could be edited without a key.
 func TestSecretsRefuseAMACOverEncryptedValuesOnly(t *testing.T) {
+	t.Parallel()
 	dir, _ := secretSite{values: bmcSecret, identities: true, opts: sopstest.Options{MACOnlyEncrypted: true}}.write(t)
 	_, err := run(t, harnessOptions{config: []string{dir}}, "config", "validate")
 	if got := exitcode.From(err); got != exitcode.Usage || !strings.Contains(err.Error(), "mac_only_encrypted") {
@@ -317,6 +321,7 @@ func TestSecretsRefuseAMACOverEncryptedValuesOnly(t *testing.T) {
 // section 2.12: the dry run approved a push that would then stop at a secret
 // this workstation cannot open, and the real run asked first.
 func TestSecretsPushDecryptsBeforeItAsks(t *testing.T) {
+	t.Parallel()
 	// The example's own Secret is encrypted to keys nobody has.
 	h, err := run(t, harnessOptions{}, "secrets", "push", "-n", "exe0001", "--dry-run")
 	if got := exitcode.From(err); got != exitcode.Usage {
@@ -384,6 +389,7 @@ func pushRecorder() *transport.Recorder {
 // as a failed write, exited 1 without its name and was tried again for every
 // secret.
 func TestSecretsPushReportsAnUnreachableNode(t *testing.T) {
+	t.Parallel()
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
 	rec := &transport.Recorder{Reply: exe0002Unreachable}
 	h, err := run(t, harnessOptions{config: []string{dir}, recorder: rec}, "secrets", "push", "-n", "exe[1-3]", "-y")
@@ -428,6 +434,7 @@ func TestSecretsPushReportsAnUnreachableNode(t *testing.T) {
 // 11.9: the error of each node is kept, not its string, so that an
 // interrupt still reaches the process as one.
 func TestSecretsPushKeepsAnInterrupt(t *testing.T) {
+	t.Parallel()
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, ExitCode: -1, Err: fmt.Errorf("%s: %w", tg, context.Canceled)}, nil
@@ -444,6 +451,7 @@ func TestSecretsPushKeepsAnInterrupt(t *testing.T) {
 // missing directories readable by everyone. The script is run here, in a
 // real shell, against a directory standing in for the node's.
 func TestSecretsPushReplacesTheFileWhole(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	target := filepath.Join(root, "etc", "munge", "munge.key")
 	dir, _ := secretSite{
@@ -527,6 +535,7 @@ func TestSecretsPushReplacesTheFileWhole(t *testing.T) {
 // with its own. The script is run here, in a real shell, against
 // directories standing in for the node's.
 func TestSecretsPushSendsEveryFileOnOneStream(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	notADir := filepath.Join(root, "file")
 	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
@@ -614,6 +623,7 @@ func leaked(h *harness, err error) bool {
 // this workstation lacks, as it lacks the example's, is not what is
 // reported, and before anything is asked, however the path is spelt.
 func TestSecretsPushRefusesTwoSecretsForOneTarget(t *testing.T) {
+	t.Parallel()
 	secrets := `services.cinc.secrets=[` +
 		`{"target":"/etc/munge/munge.key","secretRef":{"name":"example","key":"munge-key"}},` +
 		`{"target":"/etc/nslcd.keytab","source":"nslcd.keytab.age"},` +
@@ -640,6 +650,7 @@ func TestSecretsPushRefusesTwoSecretsForOneTarget(t *testing.T) {
 // exe0002 has been sent its files, which it could not be if exe0001 held up
 // the other nodes.
 func TestSecretsPushWritesEachNodeInOneSession(t *testing.T) {
+	t.Parallel()
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
 	sent := make(chan struct{})
 	var once sync.Once
@@ -688,6 +699,7 @@ exe0002  /etc/bmc.pass         written
 // each session is held until one more than the limit are under way, which
 // never happens while the limit is kept.
 func TestSecretsPushKeepsToTheFanOut(t *testing.T) {
+	t.Parallel()
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
 	for _, limit := range []int{1, 3} {
 		calls := &fanouttest.InFlight{Hold: limit + 1}
@@ -716,6 +728,7 @@ func TestSecretsPushKeepsToTheFanOut(t *testing.T) {
 // session that ended without a word on a file fails it. A node that could
 // not be reached makes the push exit 3, whatever failed there first.
 func TestSecretsPushStopsANodeAtTheFirstSecretItCouldNotBeSent(t *testing.T) {
+	t.Parallel()
 	three := twoSecretFiles + "        - target: /etc/nslcd.conf\n          secretRef: {name: example, key: bmc-password}\n"
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: three}.write(t)
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
@@ -761,6 +774,7 @@ exe0003  /etc/nslcd.conf       ` + silent + `
 // skips the rest, saying that the command was interrupted, not that the
 // node could not be reached, and the command stops as interrupted.
 func TestSecretsPushStartsNothingOnceInterrupted(t *testing.T) {
+	t.Parallel()
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

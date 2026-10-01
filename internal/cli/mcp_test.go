@@ -48,6 +48,7 @@ func completed(tree *cobra.Command) []string {
 // trees for each read_command, each function holding the root and the
 // configuration the command had read: some 50 MB a call at 10,000 nodes.
 func TestAnAgentTreeRegistersNoCompletion(t *testing.T) {
+	t.Parallel()
 	shell, _ := newRoot(context.Background(), app.Streams{Out: io.Discard, Err: io.Discard})
 	if len(completed(shell)) == 0 {
 		t.Fatal("the shell's tree completes no flag, so this test would see nothing")
@@ -60,6 +61,7 @@ func TestAnAgentTreeRegistersNoCompletion(t *testing.T) {
 // TestAnAgentTreeIsFreedOnceDropped checks that nothing outlives a tree built
 // for an agent: once the server has dropped it, its flags are collected.
 func TestAnAgentTreeIsFreedOnceDropped(t *testing.T) {
+	t.Parallel()
 	flags := dropTree()
 	runtime.GC()
 	for name, p := range flags {

@@ -52,6 +52,7 @@ func dhcpServer(prefix string) func(transport.Target, transport.Request) (*trans
 // Report 2.13: a dry run read dhcpd.conf from the recorder, got nothing and
 // failed for a node whose address comes from DHCP.
 func TestDryRunReadsDHCPForReal(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: dhcpServer("10.0.2")}
 	h, err := run(t, harnessOptions{recorder: rec}, "boot", "set", "-n", "exe0007", "--dry-run")
 	if err != nil {
@@ -79,6 +80,7 @@ func TestDryRunReadsDHCPForReal(t *testing.T) {
 // Report 5.10: the cached dhcpd.conf of one site answered another site's
 // lookup, because the key held only the role name.
 func TestDHCPCacheIsKeptPerTarget(t *testing.T) {
+	t.Parallel()
 	cache := t.TempDir()
 
 	siteA := &transport.Recorder{Reply: dhcpServer("10.0.2")}
@@ -112,6 +114,7 @@ func TestDHCPCacheIsKeptPerTarget(t *testing.T) {
 // The RemoteFile half of report 11.2: a cat that fails on a host that
 // answered is that host's failure, and what it said is kept.
 func TestDHCPReadFailureKeepsTheMessage(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{
 			Target: tg, ExitCode: 1,
@@ -142,6 +145,7 @@ func TestDHCPReadFailureKeepsTheMessage(t *testing.T) {
 // each, and a good one was fetched once per node once its cached copy had
 // expired. The command reads it once.
 func TestBootStatusReadsDHCPOnce(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		reply func(transport.Target, transport.Request) (*transport.Result, error)
@@ -181,6 +185,7 @@ func TestBootStatusReadsDHCPOnce(t *testing.T) {
 // no switch port linked to the node. They read through the transport in a
 // dry run too, as a lookup does, and show what the host answered.
 func TestReadingCommandsReadInADryRun(t *testing.T) {
+	t.Parallel()
 	answers := map[string]string{
 		"find":          "/srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2\n",
 		"tail":          "Sep 30 10:00:01 pxe pxesrv[42]: exe0001 fetched ipxe.net2\n",

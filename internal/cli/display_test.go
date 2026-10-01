@@ -236,6 +236,7 @@ func TestTheVariableFailsNoCommand(t *testing.T) {
 // terminal shows it, as the C library reads the locale, and in ASCII
 // elsewhere.
 func TestTheTreeDrawsInTheLocalesCharacters(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		env  map[string]string

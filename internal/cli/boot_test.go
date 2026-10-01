@@ -232,6 +232,7 @@ const staticSuffix = "services.pxesrv.staticSuffix=.static"
 // 5.5: the persistent link is what reinstalls a machine at every boot, so
 // removing the boot configuration has to remove it too.
 func TestBootUnsetRemovesThePersistentLink(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{})
 	p.link(t, "10.0.2.1", p.exePath())
 	p.link(t, "10.0.2.1.static", p.exePath())
@@ -251,6 +252,7 @@ func TestBootUnsetRemovesThePersistentLink(t *testing.T) {
 // arrives exactly as configured whatever it holds: a space, a quote, a word
 // a shell would expand, even a line break.
 func TestBootLinksArriveExactlyWhateverThePathHolds(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{})
 	odd := filepath.Join(p.root, "boot", "it's \"odd\"\n$HOME;*", "ipxe.net2")
 	mustWrite(t, odd, "#!ipxe\n")
@@ -298,6 +300,7 @@ spec:
 // between the two, a reinstall armed nodes its rollback could not disarm.
 // The script is now the same for any number of nodes.
 func TestBootLinksReachThousandsOfNodes(t *testing.T) {
+	t.Parallel()
 	const n = 2000
 	var entries strings.Builder
 	for i := range n {
@@ -344,6 +347,7 @@ spec:
 }
 
 func TestBootStatusShowsThePersistentLink(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{})
 	p.link(t, "10.0.2.1.static", p.exePath())
 
@@ -379,6 +383,7 @@ func TestBootStatusShowsThePersistentLink(t *testing.T) {
 // one-shot and the persistent link side by side and the inventory node
 // whose boot address it is, from the inventory or from DHCP.
 func TestBootStatusListsEveryLinkInOrderWithItsNode(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{dhcp: "host exe0002 {\n  fixed-address 10.0.2.2;\n}\n"})
 	for _, name := range []string{"10.0.2.10", "10.0.2.1.static", "10.0.2.2", "10.0.2.1", "default"} {
 		p.link(t, name, p.exePath())
@@ -433,6 +438,7 @@ func TestBootStatusListsEveryLinkInOrderWithItsNode(t *testing.T) {
 // be read: the links are listed with the nodes that are known, and the
 // command fails with the reason.
 func TestBootStatusFailsWhenDHCPCannotNameTheNodes(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if len(req.Argv) > 0 && req.Argv[0] == "find" {
 			return &transport.Result{Target: tg, Stdout: "10.0.2.2\t/srv/pxesrv/boot/exe/ipxe.net2\n" +
@@ -456,6 +462,7 @@ func TestBootStatusFailsWhenDHCPCannotNameTheNodes(t *testing.T) {
 }
 
 func TestBootSetRefusesOverAPersistentLink(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{})
 	p.link(t, "10.0.2.1.static", p.exePath())
 
@@ -478,6 +485,7 @@ func TestBootSetRefusesOverAPersistentLink(t *testing.T) {
 // other. A missing boot path is still what is reported, although the
 // listing found a persistent link too.
 func TestBootSetChecksThePathsBesideListingTheLinks(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{})
 	calls := &fanouttest.InFlight{Hold: 3}
 	p.rec = &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
@@ -507,6 +515,7 @@ func TestBootSetChecksThePathsBesideListingTheLinks(t *testing.T) {
 // once only when neither waits for the other. A listing that fails ends
 // the DHCP read, and is what is reported.
 func TestBootStatusReadsDHCPBesideTheLinks(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{dhcp: fmt.Sprintf(dhcpdConf, "10.0.2.7", "10.0.2.2")})
 	p.link(t, "10.0.2.7", p.exePath())
 	calls := &fanouttest.InFlight{Hold: 3}
@@ -540,6 +549,7 @@ func TestBootStatusReadsDHCPBesideTheLinks(t *testing.T) {
 // 1.4: an address becomes a file name under the PXE root, on a host where
 // the script runs as root.
 func TestBootAddressesAreCheckedBeforeAnythingIsSent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		inventory string
@@ -600,6 +610,7 @@ func TestBootAddressesAreCheckedBeforeAnythingIsSent(t *testing.T) {
 // 2.12: boot unset resolves the addresses before it asks, so the preview
 // never approves a run that then stops.
 func TestBootUnsetResolvesBeforeTheGate(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{inventory: "    - nodes: exe0002\n      address: 10.0.2.2/24\n"})
 
 	h, err := p.run(t, harnessOptions{}, "boot", "unset", "-n", "exe0002", "--dry-run")
@@ -620,6 +631,7 @@ func TestBootUnsetResolvesBeforeTheGate(t *testing.T) {
 // 5.7: one failing line must not leave the rest of the set unchanged
 // without saying so.
 func TestBootSetAndUnsetReportEachNode(t *testing.T) {
+	t.Parallel()
 	inventory := "    - nodes: exe0002\n      address: 10.0.2.2\n" +
 		"    - nodes: exe0003\n      address: 10.0.2.3\n" +
 		"    - nodes: exe0004\n      address: 10.0.2.4\n"
@@ -675,6 +687,7 @@ func TestBootSetAndUnsetReportEachNode(t *testing.T) {
 
 // 5.8: --persistent without a suffix writes exactly the one-shot link.
 func TestBootSetPersistentNeedsAStaticSuffix(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{})
 	_, err := p.run(t, harnessOptions{}, "boot", "set", "-n", "exe0001", "--persistent", "-y")
 	if err == nil {
@@ -697,6 +710,7 @@ func TestBootSetPersistentNeedsAStaticSuffix(t *testing.T) {
 }
 
 func TestBootSetHonoursAStaticRule(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{static: true})
 	_, err := p.run(t, harnessOptions{}, "boot", "set", "-n", "exe0001", "-y")
 	if err == nil || !strings.Contains(err.Error(), "staticSuffix") {
@@ -716,6 +730,7 @@ func TestBootSetHonoursAStaticRule(t *testing.T) {
 }
 
 func TestBootGrubSetSaysItPersistsAndCanBeUnset(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "boot", "grub", "set", "exe0001", "/srv/tftp/grub/1.0/grub.cfg.install-exec", "--dry-run")
 	if err != nil {
 		t.Fatalf("boot grub set --dry-run failed: %v", err)
@@ -744,6 +759,7 @@ func TestBootGrubSetSaysItPersistsAndCanBeUnset(t *testing.T) {
 // exe1 was shown as exe1 rather than as exe0001, and exe[1-2] was taken for
 // one node without an address instead of being refused as two.
 func TestBootGrubShowResolvesTheNodeAsSetDoes(t *testing.T) {
+	t.Parallel()
 	for _, arg := range []string{"exe0001", "exe1", "EXE0001", "exe0001.hpc.example.org"} {
 		t.Run(arg, func(t *testing.T) {
 			h, err := run(t, harnessOptions{}, "-o", "json", "boot", "grub", "show", arg)
@@ -779,6 +795,7 @@ func TestBootGrubShowResolvesTheNodeAsSetDoes(t *testing.T) {
 // The commands run in a real shell against a TFTP root in a temporary
 // directory.
 func TestBootGrubSetChecksTheTarget(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "grub/1.0/grub.cfg.install-exec"), "menuentry install {}\n")
 	mustWrite(t, filepath.Join(root, "images/rescue.cfg"), "menuentry rescue {}\n")
@@ -834,6 +851,7 @@ func TestBootGrubSetChecksTheTarget(t *testing.T) {
 // TFTP service for its GRUB configuration. The command runs in a real shell
 // against a log in a temporary directory.
 func TestBootGrubLogShowsWhatTheTFTPServiceLogged(t *testing.T) {
+	t.Parallel()
 	log := filepath.Join(t.TempDir(), "syslog")
 	mustWrite(t, log, `Sep 25 10:00:01 tftp in.tftpd[101]: RRQ from 10.0.2.1 filename grub/grub.cfg-0A000201
 Sep 25 10:00:02 tftp cron[7]: (root) CMD (true)
@@ -884,6 +902,7 @@ Sep 25 10:00:06 tftp dnsmasq-tftp[9]: sent /srv/tftp/grub/grub.cfg-0A000204 to 1
 
 // 5.9: the question has to show every boot path that will be written.
 func TestBootSetPreviewListsEveryPath(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "--force", "--dry-run", "boot", "set", "-n", "dbm01,exe0001")
 	if err != nil {
 		t.Fatalf("the dry run failed: %v", err)
@@ -901,6 +920,7 @@ func TestBootSetPreviewListsEveryPath(t *testing.T) {
 }
 
 func TestBootSetRefusesAMissingBootPath(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{})
 	missing := filepath.Join(p.root, "boot/cluster/1.O/exe/ipxe.net2")
 	_, err := p.run(t, harnessOptions{}, "boot", "set", "-n", "exe0001", missing, "-y")
@@ -918,6 +938,7 @@ func TestBootSetRefusesAMissingBootPath(t *testing.T) {
 // A dry run reads the PXE host as the real run does, so it is refused where
 // the real run would be: it used to skip the check and succeed.
 func TestBootSetDryRunChecksThePXEHost(t *testing.T) {
+	t.Parallel()
 	t.Run("a missing boot path", func(t *testing.T) {
 		p := newPXEHost(t, pxeOptions{})
 		missing := filepath.Join(p.root, "boot/cluster/1.O/exe/ipxe.net2")
@@ -968,6 +989,7 @@ func TestBootSetDryRunChecksThePXEHost(t *testing.T) {
 
 // 10.3: the log is read into memory whole, so the count is bounded.
 func TestBootLogBoundsTheLines(t *testing.T) {
+	t.Parallel()
 	for _, lines := range []string{"0", "-5", "100000000"} {
 		h, err := run(t, harnessOptions{}, "boot", "log", "--lines", lines)
 		if err == nil {
@@ -985,6 +1007,7 @@ func TestBootLogBoundsTheLines(t *testing.T) {
 
 // 10.7: a node the status cannot be read for is an error, in every format.
 func TestBootStatusReportsUnknownNodes(t *testing.T) {
+	t.Parallel()
 	p := newPXEHost(t, pxeOptions{})
 	p.link(t, "10.0.2.1", p.exePath())
 
@@ -1009,6 +1032,7 @@ func TestBootStatusReportsUnknownNodes(t *testing.T) {
 
 // 2.16: a pull changes what every node boots.
 func TestBootSyncGoesThroughTheGate(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "boot", "sync")
 	if err == nil || !strings.Contains(err.Error(), "-y") {
 		t.Errorf("boot sync without a terminal should ask for -y, got %v", err)

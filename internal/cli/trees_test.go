@@ -34,6 +34,7 @@ import (
 // node's own, ended as the node reports on it: a node that could not be
 // reached fails the first file and skips the rest.
 func TestSecretsPushReportsItsDecryptionsAndEachFile(t *testing.T) {
+	t.Parallel()
 	site := secretSite{values: bmcSecret, identities: true}
 	dir, keyFile := site.write(t)
 	sealed := filepath.Join(dir, "nslcd.keytab.age")
@@ -163,6 +164,7 @@ func TestProvisionStatusCountsANodeSshDoesNotReachAsAnswered(t *testing.T) {
 // whether they are there. A role that did not answer fails, with the
 // transport's error.
 func TestDoctorRemoteReportsTheCallsOfEachRole(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if tg.Role == "dhcp" {
 			return transport.ExitResult(tg, 255, "", "ssh: connect to host dhcp: Connection refused\n"), nil
@@ -212,6 +214,7 @@ func TestDoctorRemoteReportsTheCallsOfEachRole(t *testing.T) {
 // records what it would send: the group's command ends as it came back, the
 // command it would run ends skipped.
 func TestADryRunLooksUpItsGroupsAndRecordsTheRest(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if slices.Contains(req.Argv, "sinfo") {
 			return &transport.Result{Target: tg, Stdout: "exe[1-2]\n"}, nil
@@ -364,6 +367,7 @@ func endedDuring(events []progress.Event, role string) (during, after []string) 
 // is, no more than four are ever running, and the lost one ends with no
 // answer once the script is over.
 func TestFabricStateRunsFourPortsAtATime(t *testing.T) {
+	t.Parallel()
 	up := func(ports ...int) string {
 		var out strings.Builder
 		for _, i := range ports {
@@ -473,6 +477,7 @@ command bmc power: failed (target): 2 of 3 service processors failed
 // stopped. The line of the port under way when the script stopped never
 // ended, and is no answer.
 func TestFabricStateEndsEachPortAsItsAnswerArrives(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, stdout string
 		status, code int

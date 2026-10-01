@@ -19,6 +19,7 @@ import (
 const injectedOption = "-oProxyCommand=touch${IFS}/tmp/pwned1;#"
 
 func TestNodeNamesThatAreOptionsAreRefused(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"node", "hw", "-n", injectedOption},
 		{"hca", "link", "-n", injectedOption},
