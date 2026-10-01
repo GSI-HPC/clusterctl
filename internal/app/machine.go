@@ -5,6 +5,7 @@ package app
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
@@ -18,8 +19,13 @@ import (
 // records.
 type machines struct {
 	// aliases maps a lowercased name or address to the inventory name. An
-	// alias two machines share maps to "", so that it names neither.
-	aliases map[string]string
+	// alias two machines share maps to "", so that it names neither. It is
+	// built, by aliasOnce, when a name is first looked up that is no
+	// inventory name: it renders a host name and a service processor name
+	// for every node, which most lookups, of the names the inventory
+	// lists, never need.
+	aliases   map[string]string
+	aliasOnce sync.Once
 	// known holds the lowercased inventory names, for finding a name that
 	// was written with other padding.
 	known *nodeset.NodeSet
@@ -27,39 +33,55 @@ type machines struct {
 	names map[string]string
 }
 
-// machineIndex builds the index of the inventory once.
+// machineIndex builds the index of the inventory's names once.
 func (a *App) machineIndex() *machines {
 	a.machinesOnce.Do(func() {
-		m := &machines{aliases: map[string]string{}, known: nodeset.New(), names: map[string]string{}}
+		m := &machines{known: nodeset.New(), names: map[string]string{}}
 		if a.Inventory != nil {
-			nodes := a.Inventory.All()
-			// An inventory name is never taken over by another machine's
-			// alias, so the names go in first.
-			for _, n := range nodes {
-				lower := strings.ToLower(n.Name)
-				m.names[lower] = n.Name
-				m.aliases[lower] = n.Name
-				_ = m.known.Add(lower)
-			}
-			for _, n := range nodes {
-				var aliases []string
-				if a.Namer != nil {
-					if fqdn, err := a.Namer.FQDN(n.Name); err == nil {
-						aliases = append(aliases, fqdn)
-					}
-					if bmc, err := a.Namer.BMC(n.Name); err == nil {
-						aliases = append(aliases, bmc)
-					}
-				}
-				aliases = append(aliases, n.Address, n.BMCAddress)
-				for _, alias := range aliases {
-					m.alias(alias, n.Name)
-				}
+			// The inventory writes every name in lower case.
+			m.known = a.Inventory.NodeSet()
+			for _, n := range a.Inventory.All() {
+				m.names[n.Name] = n.Name
 			}
 		}
 		a.machines = m
 	})
 	return a.machines
+}
+
+// aliasOf returns the inventory name a lowercased name or address refers to,
+// and whether it is any machine's.
+func (a *App) aliasOf(alias string) (string, bool) {
+	m := a.machineIndex()
+	m.aliasOnce.Do(func() {
+		m.aliases = map[string]string{}
+		if a.Inventory == nil {
+			return
+		}
+		nodes := a.Inventory.All()
+		// An inventory name is never taken over by another machine's
+		// alias, so the names go in first.
+		for _, n := range nodes {
+			m.aliases[n.Name] = n.Name
+		}
+		for _, n := range nodes {
+			var aliases []string
+			if a.Namer != nil {
+				if fqdn, err := a.Namer.FQDN(n.Name); err == nil {
+					aliases = append(aliases, fqdn)
+				}
+				if bmc, err := a.Namer.BMC(n.Name); err == nil {
+					aliases = append(aliases, bmc)
+				}
+			}
+			aliases = append(aliases, n.Address, n.BMCAddress)
+			for _, alias := range aliases {
+				m.alias(alias, n.Name)
+			}
+		}
+	})
+	node, ok := m.aliases[alias]
+	return node, ok
 }
 
 func (m *machines) alias(alias, name string) {
@@ -107,7 +129,7 @@ func (a *App) machineOf(name, typed string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	node, ok := m.aliases[n]
+	node, ok := a.aliasOf(n)
 	if !ok {
 		return spelled, nil
 	}

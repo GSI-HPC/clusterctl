@@ -89,12 +89,12 @@ func FromDocuments(docs ...Document) (*Inventory, error) {
 		inv:      inv,
 		folded:   nodeset.New(),
 		spelling: map[string]string{},
-		named:    map[string]string{},
-		setBy:    map[string]map[string]string{},
+		named:    map[string]entryRef{},
+		setBy:    map[string]map[string]entryRef{},
 	}
 	for d, doc := range docs {
 		for i, entry := range doc.Spec.Nodes {
-			label := entryLabel(docs, d, i)
+			label := entryRef{docs, d, i}
 			ns, err := nodeset.Parse(entry.Nodes)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", label, err)
@@ -128,23 +128,30 @@ func FromDocuments(docs ...Document) (*Inventory, error) {
 		return nil, err
 	}
 	sort.Strings(inv.order)
-	inv.all = nodeset.New()
-	for _, name := range inv.order {
-		if err := inv.all.Add(name); err != nil {
-			return nil, err
-		}
-	}
+	// Every name was claimed as it is written, in lower case, so the set
+	// the builder folded them into is the set of the names.
+	inv.all = b.folded
 	return inv, nil
 }
 
-// entryLabel names an entry the way an error shows it.
-func entryLabel(docs []Document, d, i int) string {
-	label := fmt.Sprintf("inventory entry %d", i+1)
-	if len(docs) > 1 {
-		label = fmt.Sprintf("inventory %d entry %d", d+1, i+1)
+// entryRef is entry i of document d, named the way an error shows it only
+// when one does: a site of thousands of entries would otherwise format a
+// name, and look up where it was written, for each of them.
+type entryRef struct {
+	docs []Document
+	d, i int
+}
+
+func (e entryRef) String() string {
+	if e.docs == nil {
+		return ""
 	}
-	if where := docs[d].Where; where != nil {
-		if w := where(i); w != "" {
+	label := fmt.Sprintf("inventory entry %d", e.i+1)
+	if len(e.docs) > 1 {
+		label = fmt.Sprintf("inventory %d entry %d", e.d+1, e.i+1)
+	}
+	if where := e.docs[e.d].Where; where != nil {
+		if w := where(e.i); w != "" {
 			label += " (" + w + ")"
 		}
 	}
@@ -160,24 +167,32 @@ type builder struct {
 	// spelling maps a name of folded back to the name it was given as.
 	spelling map[string]string
 	// named records the entry that first named each host.
-	named map[string]string
+	named map[string]entryRef
 	// setBy records, for each host and field, the entry that last set it.
-	setBy map[string]map[string]string
+	setBy map[string]map[string]entryRef
 }
 
 // record notes which fields identifying a machine an entry set for a host.
-func (b *builder) record(name, label string, e v1alpha1.NodeEntry) {
-	fields := b.setBy[name]
-	if fields == nil {
-		fields = map[string]string{}
-		b.setBy[name] = fields
-	}
-	for field, set := range map[string]bool{
-		"address": e.Address != "", "bmcAddress": e.BMCAddress != "", "cid": e.CID != "", "macs": len(e.MACs) > 0,
-	} {
-		if set {
-			fields[field] = label
+func (b *builder) record(name string, label entryRef, e v1alpha1.NodeEntry) {
+	set := func(field string) {
+		fields := b.setBy[name]
+		if fields == nil {
+			fields = map[string]entryRef{}
+			b.setBy[name] = fields
 		}
+		fields[field] = label
+	}
+	if e.Address != "" {
+		set("address")
+	}
+	if e.BMCAddress != "" {
+		set("bmcAddress")
+	}
+	if e.CID != "" {
+		set("cid")
+	}
+	if len(e.MACs) > 0 {
+		set("macs")
 	}
 }
 
@@ -293,10 +308,22 @@ func ipAddress(s string) (netip.Addr, error) {
 
 // claim records that an entry names a host, and refuses a name that spells a
 // host already named differently.
-func (b *builder) claim(name, label string) error {
+func (b *builder) claim(name string, label entryRef) error {
+	// A name claimed before exactly as it is written now, by an entry
+	// refining hosts an earlier one named, needs no parse to tell.
+	if b.spelling[name] == name {
+		return nil
+	}
 	lower := strings.ToLower(name)
-	if held, ok := b.folded.Canonical(lower); ok {
-		if first := b.spelling[held]; first != name {
+	// Added first, so that a host new to the inventory, which most are,
+	// is told by the set growing, with one parse rather than two.
+	held := b.folded.Len()
+	if err := b.folded.Add(lower); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	if b.folded.Len() == held {
+		canonical, _ := b.folded.Canonical(lower)
+		if first := b.spelling[canonical]; first != name {
 			return fmt.Errorf("%s names %s, which %s wrote as %s; "+
 				"names differing only in padding or case are one host, so write it %s in both",
 				label, name, b.named[first], first, first)
@@ -309,9 +336,6 @@ func (b *builder) claim(name, label string) error {
 	if name != lower {
 		return fmt.Errorf("%s names %s; host names are not case sensitive, so write it %s",
 			label, name, lower)
-	}
-	if err := b.folded.Add(lower); err != nil {
-		return fmt.Errorf("%s: %w", label, err)
 	}
 	b.spelling[lower] = name
 	b.named[name] = label
