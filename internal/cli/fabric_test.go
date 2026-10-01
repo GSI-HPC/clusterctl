@@ -20,6 +20,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -429,8 +430,16 @@ func readFields(t *testing.T, path string) []string {
 
 // TestFabricCountersUplinkReadsTheCabledSwitchPort is the report's 12.7:
 // --uplink named no port at all and dumped every switch port of the fabric.
+// The links of the fabric are listed while the LID of the node's port is
+// asked for, rather than after it: each of the two is held until a third
+// is under way, which never comes, so both are under way at once only
+// when neither waits for the other.
 func TestFabricCountersUplinkReadsTheCabledSwitchPort(t *testing.T) {
+	reads := &fanouttest.InFlight{Hold: 3}
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if len(req.Argv) > 0 && (req.Argv[0] == "ibaddr" || req.Argv[0] == "iblinkinfo") {
+			defer reads.Enter()()
+		}
 		out := ""
 		switch {
 		case len(req.Argv) > 0 && req.Argv[0] == "ibaddr":
@@ -456,6 +465,27 @@ func TestFabricCountersUplinkReadsTheCabledSwitchPort(t *testing.T) {
 	}
 	if !strings.Contains(h.errOut.String(), "port 17") {
 		t.Errorf("the switch port is not named:\n%s", h.errOut)
+	}
+	if got := reads.Peak(); got != 2 {
+		t.Errorf("%d reads were under way at once, want the LID and the links", got)
+	}
+}
+
+// A LID that cannot be read is what --uplink reports, as when it was asked
+// for before the links were listed.
+func TestFabricCountersUplinkReportsTheLIDFirst(t *testing.T) {
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		switch req.Argv[0] {
+		case "ibaddr":
+			return transport.ExitResult(tg, 1, "", "ibwarn: [1234] mad_rpc_open_port: can't open UMAD port\n"), nil
+		case "iblinkinfo":
+			return transport.ExitResult(tg, 1, "", "iblinkinfo: the fabric could not be swept\n"), nil
+		}
+		return &transport.Result{Target: tg}, nil
+	}}
+	_, err := run(t, harnessOptions{recorder: rec}, "fabric", "counters", "exe0001", "--uplink")
+	if err == nil || strings.Contains(err.Error(), "swept") {
+		t.Errorf("error = %v, want the LID's", err)
 	}
 }
 
