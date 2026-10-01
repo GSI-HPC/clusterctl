@@ -263,7 +263,9 @@ func list(names []string) string {
 		if err != nil || one.Len() != 1 || one.String() != name {
 			return strings.Join(names, ",")
 		}
-		set = set.Union(one)
+		// Added in place: a union copies the set it grows, which for
+		// every name came to eight seconds for ten thousand of them.
+		_ = set.Add(name)
 	}
 	return set.String()
 }

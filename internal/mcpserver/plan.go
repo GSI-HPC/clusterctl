@@ -637,7 +637,9 @@ func answerText(p safety.Preview, content map[string]any) string {
 	return "no"
 }
 
-// nodesWithJobs returns the nodes of a set that run one of the jobs.
+// nodesWithJobs returns the nodes of a set that run one of the jobs. The
+// nodes of each job are added in place: a union copies the set it grows,
+// which for every job of a busy queue came to seconds and gigabytes.
 func nodesWithJobs(jobs []slurm.Job, ns *nodeset.NodeSet) *nodeset.NodeSet {
 	out := nodeset.New()
 	for _, j := range jobs {
@@ -645,7 +647,9 @@ func nodesWithJobs(jobs []slurm.Job, ns *nodeset.NodeSet) *nodeset.NodeSet {
 		if err != nil {
 			continue
 		}
-		out = out.Union(on.Intersection(ns))
+		if hit := on.Intersection(ns); !hit.IsEmpty() {
+			_ = out.Add(hit.String())
+		}
 	}
 	return out
 }
