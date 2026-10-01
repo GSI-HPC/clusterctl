@@ -840,6 +840,32 @@ func TestProvisionStatusAsksTheProcessorsAndTheNodesAtOnce(t *testing.T) {
 	}
 }
 
+// provision status listed the boot links on the PXE host before it asked
+// the processors and the nodes. The listing is read beside them: each ssh
+// read is held until a third is under way, which never comes, so the
+// listing and the one node's uptime are under way at once only when
+// neither waits for the other. What the table says is what it said.
+func TestProvisionStatusListsTheBootLinksBesideAskingTheNodes(t *testing.T) {
+	h := newReinstallHost(t, pxeOptions{})
+	h.link(t, "10.0.2.1", h.exePath())
+	calls := &fanouttest.InFlight{Hold: 3}
+	reply := h.rec.Reply
+	h.rec.Reply = func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		defer calls.Enter()()
+		return reply(tg, req)
+	}
+	out, err := h.run(t, harnessOptions{}, "-o", "json", "provision", "status", "-n", "exe0001")
+	if err != nil {
+		t.Fatalf("provision status failed: %v\n%s", err, out.errOut)
+	}
+	if got := calls.Peak(); got != 2 {
+		t.Errorf("%d reads were under way at once, want the listing and the uptime", got)
+	}
+	if !strings.Contains(out.out.String(), `"bootPath": "`+h.exePath()+`"`) {
+		t.Errorf("the boot path of exe0001 is missing:\n%s", out.out)
+	}
+}
+
 // The nodes are named before either half starts: a node the naming rules
 // cannot name stopped the command only once every processor had been
 // asked. The processors here have addresses of their own, so that only the
