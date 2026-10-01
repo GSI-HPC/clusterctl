@@ -38,14 +38,21 @@ type Counter struct {
 	start time.Time
 	g     glyphs
 
-	mu    sync.Mutex
+	mu     sync.Mutex
+	counts counting
+
+	stop, stopped chan struct{}
+	closing       sync.Once
+}
+
+// counting is what the line of a counter is drawn from, which a tree keeps
+// too, for the line it draws on a terminal too small for it. Its owner's
+// lock guards it.
+type counting struct {
 	tally progress.Tally
 	// named are the open steps and the command, the newest last, which the
 	// line names when no counted step is under way.
 	named []named
-
-	stop, stopped chan struct{}
-	closing       sync.Once
 }
 
 type named struct {
@@ -103,7 +110,7 @@ func (c *Counter) Draw() {
 	line := func() string {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		return c.line(now)
+		return c.counts.line(now, c.start, c.g)
 	}()
 	c.term.draw([]string{line})
 }
@@ -124,9 +131,15 @@ func (c *Counter) Close() {
 func (c *Counter) Handle(e progress.Event) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.tally.Add(e)
+	c.counts.add(e)
+}
+
+// add counts e in, and returns what the tally says of the step or batch e
+// counts towards, as progress.Tally.Add does.
+func (c *counting) add(e progress.Event) (progress.Count, bool) {
+	count, counted := c.tally.Add(e)
 	if e.Kind != progress.KindCommand && e.Kind != progress.KindStep {
-		return
+		return count, counted
 	}
 	switch e.Type {
 	case progress.TypeStart:
@@ -141,6 +154,7 @@ func (c *Counter) Handle(e progress.Event) {
 			}
 		}
 	}
+	return count, counted
 }
 
 // Suspend takes the line off the terminal until Resume.
@@ -149,12 +163,12 @@ func (c *Counter) Suspend() { c.term.suspend() }
 // Resume lets the line back.
 func (c *Counter) Resume() { c.term.resume() }
 
-// line is the line to draw at now. c.mu is held.
-func (c *Counter) line(now time.Time) string {
+// line is the line to draw at now, for a command that started at start.
+func (c *counting) line(now, start time.Time, g glyphs) string {
 	var segments []string
 	for _, root := range c.tally.Roots() {
 		if root.Flags&progress.Hidden == 0 {
-			segments = append(segments, segment(root, c.g.sep))
+			segments = append(segments, segment(root, g.sep))
 		}
 	}
 	if len(segments) == 0 && len(c.named) > 0 {
@@ -162,9 +176,9 @@ func (c *Counter) line(now time.Time) string {
 	}
 	line := strings.Join(segments, " | ")
 	if line != "" {
-		line += c.g.sep
+		line += g.sep
 	}
-	return line + elapsed(now.Sub(c.start))
+	return line + elapsed(now.Sub(start))
 }
 
 // segment says how far one counted step has got, its parts split by sep.
