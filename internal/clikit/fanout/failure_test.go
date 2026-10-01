@@ -6,6 +6,8 @@ package fanout_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/clikit/fanout"
@@ -62,5 +64,35 @@ func TestFailure(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestFailureNamesThousandsInLinearTime checks that naming the items that
+// failed costs in proportion to their number. Each name was added to a copy
+// of the set built so far: eight seconds and gigabytes for ten thousand
+// hosts, on every fan-out that failed or was interrupted, and twice for exec.
+// It measures allocation across the whole process, so it must not run in
+// parallel.
+func TestFailureNamesThousandsInLinearTime(t *testing.T) {
+	refused := errors.New("connection refused")
+	allocated := func(n int) uint64 {
+		names := make([]string, n)
+		errs := make([]error, n)
+		for i := range names {
+			names[i], errs[i] = fmt.Sprintf("exe%05d", i+1), refused
+		}
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		err := fanout.Failure("hosts", n, names, errs, false)
+		runtime.ReadMemStats(&after)
+		if want := fmt.Sprintf("%d of %d hosts failed: exe[00001-%05d]", n, n, n); err == nil || err.Error() != want {
+			t.Fatalf("Failure = %v, want %q", err, want)
+		}
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	small, large := allocated(800), allocated(8000)
+	if large > 20*small {
+		t.Errorf("naming 8,000 failures allocated %d KiB, %d times what 800 cost; it should be about 10",
+			large>>10, large/small)
 	}
 }
