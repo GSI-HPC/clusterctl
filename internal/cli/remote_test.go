@@ -174,3 +174,60 @@ func TestBootStatusReadsDHCPOnce(t *testing.T) {
 		})
 	}
 }
+
+// The commands that only read went through the runner a dry run records
+// to, so a dry run read nothing and showed it: boot list listed no boot
+// configuration, the logs were empty, and fabric counters --uplink found
+// no switch port linked to the node. They read through the transport in a
+// dry run too, as a lookup does, and show what the host answered.
+func TestReadingCommandsReadInADryRun(t *testing.T) {
+	answers := map[string]string{
+		"find":          "/srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2\n",
+		"tail":          "Sep 30 10:00:01 pxe pxesrv[42]: exe0001 fetched ipxe.net2\n",
+		"ibaddr":        "GID fe80::11:2203:33:4455 LID start 0x5 end 0x5\n",
+		"iblinkinfo":    `0x0002c90200404ad8 "SwitchX -  Mellanox Technologies"      4   17[  ] ==( 4X 25.78 Gbps Active/  LinkUp)==>  0x0011220300334455      5    1[  ] "exe0001 HCA-1" ( )` + "\n",
+		"perfquery":     "# Port counters: Lid 4 port 17\nSymbolErrorCounter:..............0\n",
+		"ibqueryerrors": "Errors for 0x0011220300334455\n",
+	}
+	scripts := map[string]string{
+		"dnsmasq-tftp": "Sep 30 10:00:02 tftp in.tftpd[7]: RRQ from 10.0.2.1 filename grub.cfg\n",
+		"dhcpd":        "Sep 30 10:00:00 dhcp01 dhcpd[9]: DHCPACK on 10.0.2.1 to aa:bb:cc:00:00:01\n",
+	}
+	reply := func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if len(req.Argv) == 0 {
+			return &transport.Result{Target: tg}, nil
+		}
+		if req.Argv[0] == "sh" {
+			for word, out := range scripts {
+				if strings.Contains(strings.Join(req.Argv, " "), word) {
+					return &transport.Result{Target: tg, Stdout: out}, nil
+				}
+			}
+		}
+		if req.Argv[0] == "cat" {
+			return &transport.Result{Target: tg, Stdout: "host exe0001 {\n  hardware ethernet 00:11:22:33:44:55;\n  option dhcp-client-identifier = ff:00:00:00:00:00:02:00:00:02:c9:00:00:11:22:03:00:33:44:55;\n}\n"}, nil
+		}
+		return &transport.Result{Target: tg, Stdout: answers[req.Argv[0]]}, nil
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"boot", "list"}, "ipxe.net2"},
+		{[]string{"boot", "log"}, "fetched ipxe.net2"},
+		{[]string{"boot", "grub", "log"}, "RRQ from 10.0.2.1"},
+		{[]string{"dhcp", "log"}, "DHCPACK on 10.0.2.1"},
+		{[]string{"fabric", "counters", "exe0001"}, "Errors for 0x0011220300334455"},
+		{[]string{"fabric", "counters", "exe0001", "--uplink"}, "SymbolErrorCounter"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			h, err := run(t, harnessOptions{recorder: &transport.Recorder{Reply: reply}}, append([]string{"--dry-run"}, tc.args...)...)
+			if err != nil {
+				t.Fatalf("%v --dry-run failed: %v\n%s", tc.args, err, h.errOut)
+			}
+			if !strings.Contains(h.out.String(), tc.want) {
+				t.Errorf("%v --dry-run printed:\n%s\nwant %q", tc.args, h.out, tc.want)
+			}
+		})
+	}
+}

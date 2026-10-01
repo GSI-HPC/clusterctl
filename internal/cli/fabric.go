@@ -498,7 +498,7 @@ var (
 
 // portLID asks the subnet manager for the LID of a port.
 func portLID(ctx context.Context, a *app.App, role, guid string) (int, error) {
-	result, err := a.RunOnRole(ctx, role, transport.Request{
+	result, err := a.ReadOnRole(ctx, role, transport.Request{
 		Argv: []string{"ibaddr", "-G", guid},
 	})
 	if err != nil {
@@ -587,7 +587,7 @@ only that port is read. The switch and port are named on standard error.`,
 					listing  sync.WaitGroup
 				)
 				listing.Go(func() {
-					links, linksErr = a.RunOnRole(listCtx, role, transport.Request{
+					links, linksErr = a.ReadOnRole(listCtx, role, transport.Request{
 						Argv: []string{"iblinkinfo", "--line"},
 					})
 				})
@@ -608,7 +608,7 @@ only that port is read. The switch and port are named on standard error.`,
 				a.Printf("%s is linked to port %d of switch %s (LID %d)\n", node, sw.Port, sw.GUID, sw.LID)
 				argv = []string{"perfquery", strconv.Itoa(sw.LID), strconv.Itoa(sw.Port)}
 			}
-			result, err := a.RunOnRole(a.Context(), role, transport.Request{
+			result, err := a.ReadOnRole(a.Context(), role, transport.Request{
 				Argv: argv,
 			})
 			if err != nil {
