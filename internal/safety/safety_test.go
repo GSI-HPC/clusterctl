@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -510,4 +511,60 @@ func TestForceNamesWhatItLetsThrough(t *testing.T) {
 			t.Errorf("Announce = %v and printed %q; want the refusal and nothing printed", err, out)
 		}
 	})
+}
+
+// ProtectedIn built the short names of the protected hosts for every check
+// and looked every target up twice. It now builds them once and looks up
+// only the targets that are not protected hosts themselves, and finds what
+// it found: the protected hosts, and the targets whose short name is one,
+// however padded, cased or qualified, and never an address.
+func TestProtectedInFindsWhatItFound(t *testing.T) {
+	t.Parallel()
+	protected := []string{"wlm01", "dbm[1-2].example.org", "10.0.0.5", "login.example.org"}
+	g, err := safety.NewGate(v1alpha1.SafetySpec{ProtectedHosts: protected, PowerOnBatch: 8}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := nodeset.New()
+	for _, expr := range protected {
+		_ = all.Add(expr)
+	}
+	// What ProtectedIn did, built afresh for each check.
+	before := func(targets *nodeset.NodeSet) *nodeset.NodeSet {
+		hit := targets.Intersection(all)
+		shorts := nodeset.New()
+		for _, name := range all.Expand() {
+			if net.ParseIP(name) == nil {
+				_ = shorts.Add(strings.ToLower(strings.SplitN(name, ".", 2)[0]))
+			}
+		}
+		for _, name := range targets.Expand() {
+			if net.ParseIP(name) != nil || hit.Contains(name) {
+				continue
+			}
+			if shorts.Contains(strings.ToLower(strings.SplitN(name, ".", 2)[0])) {
+				_ = hit.Add(name)
+			}
+		}
+		return hit
+	}
+	for _, expr := range []string{
+		"wlm01", "wlm1", "WLM001.elsewhere.org", "wlm011", "dbm2", "dbm02.other", "dbm3.example.org",
+		"10.0.0.5", "10.0.0.6", "login", "login.example.org", "LOGIN.lab", "exe[0001-2000]",
+		"exe[1-5],wlm1.lab,dbm[1-3],10.0.0.5", "",
+	} {
+		targets := nodeset.New()
+		if expr != "" {
+			if err := targets.Add(expr); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := g.ProtectedIn(targets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := before(targets); got.String() != want.String() {
+			t.Errorf("ProtectedIn(%s) = %s, want %s", expr, got, want)
+		}
+	}
 }
