@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -237,8 +238,10 @@ func printExec(a *app.App, cmd *cobra.Command, results []*transport.Result, dedu
 	}
 
 	// A node controls its own output, so none of it reaches the terminal
-	// as a control sequence.
-	out := cmd.OutOrStdout()
+	// as a control sequence. The lines are written 64 KiB at a time: a
+	// write for each made a printout of a million lines a million writes,
+	// each under the terminal's lock while a display is drawn.
+	out := bufio.NewWriterSize(cmd.OutOrStdout(), 64<<10)
 	var groups []fanout.Group
 	grouped := false
 	if dedup {
@@ -271,6 +274,10 @@ func printExec(a *app.App, cmd *cobra.Command, results []*transport.Result, dedu
 				}
 			}
 		}
+	}
+	// What the nodes printed is all out before a failure is named.
+	if err := out.Flush(); err != nil {
+		return err
 	}
 	for _, res := range results {
 		if !res.Failed() {

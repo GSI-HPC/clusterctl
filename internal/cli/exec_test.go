@@ -7,10 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
@@ -396,5 +399,69 @@ func TestExecDedupShowsEachGroupsStatus(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output does not contain %q:\n%s", want, out)
 		}
+	}
+}
+
+// sequence records the writes to two streams in the order they came.
+type sequence struct {
+	mu     sync.Mutex
+	writes []string
+}
+
+// stream is a writer whose writes the sequence records under name.
+func (s *sequence) stream(name string) io.Writer {
+	return writerFunc(func(p []byte) (int, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.writes = append(s.writes, name+" "+string(p))
+		return len(p), nil
+	})
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// exec wrote every line the nodes printed on its own, a million writes for
+// a million lines, each under the terminal's lock while a display was
+// drawn. They are written 64 KiB at a time, and all of them before a
+// failure is named on standard error.
+func TestExecWritesWhatTheNodesPrintedInFewWrites(t *testing.T) {
+	lines := strings.Repeat("a line of output\n", 10_000)
+	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+		if tg.Name == "exe0002" {
+			return transport.ExitResult(tg, 1, lines, "boom\n"), nil
+		}
+		return &transport.Result{Target: tg, Stdout: lines}, nil
+	}}
+	var seq sequence
+	_, cmd := build(t, harnessOptions{recorder: rec, streams: func(s *app.Streams) { s.Err = seq.stream("err") }},
+		"exec", "-n", "exe[1-3]", "--", "true")
+	cmd.SetOut(seq.stream("out"))
+	wantCode(t, cmd.Execute(), exitcode.TargetFailed)
+
+	var out strings.Builder
+	writes, failure := 0, -1
+	for i, w := range seq.writes {
+		stream, text, _ := strings.Cut(w, " ")
+		switch {
+		case stream == "out":
+			writes++
+			out.WriteString(text)
+			if failure >= 0 {
+				t.Errorf("output was written after the failure was named: write %d", i)
+			}
+		case strings.HasPrefix(text, "exe0002: "):
+			failure = i
+		}
+	}
+	if failure < 0 {
+		t.Errorf("the failure of exe0002 was not named on standard error")
+	}
+	if got := strings.Count(out.String(), "\n"); got != 30_000 {
+		t.Errorf("%d lines were written, want 30,000", got)
+	}
+	if writes > 16 {
+		t.Errorf("%d writes for %d bytes", writes, out.Len())
 	}
 }
