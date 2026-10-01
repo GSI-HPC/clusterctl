@@ -217,8 +217,13 @@ type App struct {
 
 	machinesOnce sync.Once
 	machines     *machines
-	pinsOnce     sync.Once
-	pins         *redfish.PinStore
+	// known is the set of the inventory's nodes, copied from it once for
+	// the gate, the index of the machines' names and the check of each
+	// protected hosts entry, which only read it.
+	knownOnce sync.Once
+	known     *nodeset.NodeSet
+	pinsOnce  sync.Once
+	pins      *redfish.PinStore
 }
 
 // ensureDirs creates the state and cache directories, or checks the ones
@@ -392,7 +397,7 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 	if a.Inventory.Len() > 0 {
-		a.Gate.Known = a.Inventory.NodeSet()
+		a.Gate.Known = a.knownNodes()
 	}
 	// Entries without a group need nothing but the configuration, so a
 	// wrong one is reported by every command, config validate included.
