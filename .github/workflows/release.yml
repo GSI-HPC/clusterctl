@@ -35,6 +35,8 @@ jobs:
           ALLOWED_PGP_KEYS: ${{ vars.RELEASE_ALLOWED_PGP_KEYS }}
         run: .github/scripts/verify-release-tag.sh
 
+  # The tests and the checks of the source run side by side, and the
+  # release waits for both.
   test:
     name: Test
     needs: verify-tag
@@ -47,12 +49,24 @@ jobs:
       - uses: ./.github/actions/setup-go
         with:
           sops: true
-      - run: make lint
+          cache: test
       - run: go test ./...
+
+  lint:
+    name: Lint
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify-tag.outputs.commit }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go
+      - run: make lint
 
   release:
     name: Build and publish
-    needs: [verify-tag, test]
+    needs: [verify-tag, test, lint]
     runs-on: ubuntu-latest
     permissions:
       contents: write

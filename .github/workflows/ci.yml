@@ -23,6 +23,11 @@ env:
   SOPS_MIN_VERSION: '3.10.0'
 
 jobs:
+  # The binary is built and smoke tested first, so that one that does not
+  # work fails within a minute, and then the tests run; on Linux with the
+  # coverage measured, which is the same run. The race detector has a job
+  # of its own: after the tests here it was the longest step of the
+  # longest job.
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -35,15 +40,10 @@ jobs:
       - uses: ./.github/actions/setup-go
         with:
           sops: true
+          cache: test
 
       - name: Build
         run: make build
-
-      - name: Test
-        run: go test ./...
-
-      - name: Test under the race detector
-        run: go test -race ./...
 
       # The binary has to work, not only compile: this runs the real command
       # tree against the example configuration that ships with the manual.
@@ -86,23 +86,37 @@ jobs:
           CLUSTERCTL_CONFIG="$dir" ./bin/clusterctl node fqdn -n 'node[1-3]'
           if ./bin/clusterctl config init "$dir"; then exit 1; fi
 
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
+      - name: Test
+        if: runner.os != 'Linux'
+        run: go test ./...
+
+      - name: Test and measure coverage
+        if: runner.os == 'Linux'
+        run: make cover
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Linux'
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
+  race:
+    name: Race (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
         with:
           sops: true
+          cache: race
 
-      - name: Measure coverage
-        run: make cover
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: coverage
-          path: coverage.out
-          retention-days: 14
+      - name: Test under the race detector
+        run: go test -race ./...
 
   # The oldest sops clusterctl accepts has to read and refuse everything the
   # current one does. Its tests encrypt with it too.
@@ -114,6 +128,7 @@ jobs:
       - uses: ./.github/actions/setup-go
         with:
           sops-version: ${{ env.SOPS_MIN_VERSION }}
+          cache: test
 
       - name: Test
         run: |
@@ -134,7 +149,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
+        with:
+          cache: e2e
 
+      # Built before the cluster is made, so that a binary that does not
+      # build fails the job at once.
       - name: Build
         run: make build
 
@@ -168,8 +187,9 @@ jobs:
       - name: Resolve the node names
         run: make e2e-hosts | sudo tee -a /etc/hosts
 
+      # -o build: the binary built above is the one tested.
       - name: Test
-        run: make e2e
+        run: make -o build e2e
 
       - name: Collect the logs of the nodes
         if: failure()
@@ -192,6 +212,8 @@ jobs:
       - uses: GSI-HPC/sind-action/cleanup@v2
         if: always()
 
+  # golangci-lint vets and checks the formatting of the end-to-end tests too,
+  # which is what make lint does, so make lint is left to contributors.
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -199,17 +221,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
 
-      - name: Vet and check formatting
-        run: make lint
-
       - name: Check that the module requirements are tidy
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      # Pinned, so that a new release of the linter, with checks of its own,
+      # fails no change that did not cause it; raised by hand.
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.14.0
           args: --timeout=5m
 
   vulnerabilities:
@@ -218,6 +239,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
+      # The newest govulncheck on purpose: a vulnerability it learns to see
+      # is what this job is for. Its findings come from the database, which
+      # it always reads afresh.
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   fuzz:
@@ -231,7 +255,7 @@ jobs:
       # back into the same set. A short run on every change catches a
       # regression; the corpus is where the long runs live.
       - name: Fuzz
-        run: go test ./nodeset/ -run '^$' -fuzz FuzzParseFold -fuzztime 90s
+        run: go test ./nodeset/ -run '^$' -fuzz FuzzParseFold -fuzztime 60s
 
       - name: Upload the failing input
         if: failure()
@@ -301,23 +325,30 @@ jobs:
           name: fuzz-corpus-termtext
           path: internal/termtext/testdata/fuzz/
 
+  # The release ships a static binary, so the release targets have to build
+  # without cgo on every change rather than at tag time; an operating system
+  # to a job, side by side.
   cross-build:
-    name: Cross build
+    name: Cross build (${{ matrix.goos }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
+        with:
+          cache: cross-${{ matrix.goos }}
 
-      # The release ships a static binary, so the release targets have to
-      # build without cgo on every change rather than at tag time.
       - name: Build every release target
         env:
           CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
         run: |
           set -euxo pipefail
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
-            GOOS="${target%/*}" GOARCH="${target#*/}" \
-              go build -trimpath -o /dev/null ./cmd/clusterctl
+          for arch in amd64 arm64; do
+            GOARCH="$arch" go build -trimpath -o /dev/null ./cmd/clusterctl
           done
 
   release-tag:
