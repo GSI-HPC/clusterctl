@@ -85,7 +85,7 @@ Register it with Claude Code:
 	cmd.Flags().StringVar(&confirm, "confirm", string(mcpserver.ConfirmElicit),
 		"who confirms a change: "+strings.Join(mcpserver.ConfirmModes(), " or "))
 	cmd.Flags().DurationVar(&planTTL, "plan-ttl", 10*time.Minute, "how long a plan may wait to be applied")
-	_ = cmd.RegisterFlagCompletionFunc("confirm", fixed(mcpserver.ConfirmModes()...))
+	r.completeFlag(cmd, "confirm", fixed(mcpserver.ConfirmModes()...))
 	return cmd
 }
 
@@ -97,9 +97,7 @@ Register it with Claude Code:
 // it does in the tests.
 func CommandTree(runner transport.Runner) func(context.Context, app.Streams) *cobra.Command {
 	return func(ctx context.Context, streams app.Streams) *cobra.Command {
-		cmd, r := newRoot(ctx, streams)
-		r.runner = runner
-		r.agent = true
+		cmd, _ := buildRoot(&root{streams: streams, ctx: ctx, runner: runner, agent: true})
 		// help and completion are the shell's commands, not the cluster's,
 		// and a completion script has no place in the protocol.
 		cmd.CompletionOptions.DisableDefaultCmd = true
