@@ -199,7 +199,13 @@ func NewRootCommand(ctx context.Context, streams app.Streams) *cobra.Command {
 
 // newRoot builds the command tree and returns the state its flags write to.
 func newRoot(ctx context.Context, streams app.Streams) (*cobra.Command, *root) {
-	r := &root{streams: streams, ctx: ctx}
+	return buildRoot(&root{streams: streams, ctx: ctx})
+}
+
+// buildRoot builds the command tree on the given state. What the state says
+// of the tree, such as that it runs an agent's commands, is set before the
+// tree is built, so that every command is built knowing it.
+func buildRoot(r *root) (*cobra.Command, *root) {
 	r.traceparent, r.tracestate = takeTraceContext()
 
 	cmd := &cobra.Command{
@@ -279,7 +285,7 @@ are about to do and ask before doing it.`),
 		newMCPCommand(r),
 		newVersionCommand(r),
 	)
-	builtins(cmd, streams)
+	builtins(cmd, r.streams)
 	annotateEffects(cmd)
 	usageArgs(cmd)
 	traceLeaves(cmd, r)

@@ -97,7 +97,7 @@ resume change them all the same.
 		}))
 
 	cmd.Flags().StringVar(&state, "state", "", "limit to a state or a state group: "+strings.Join(stateGroupNames(), ", "))
-	_ = cmd.RegisterFlagCompletionFunc("state", fixed(stateGroupNames()...))
+	r.completeFlag(cmd, "state", fixed(stateGroupNames()...))
 	return cmd
 }
 
@@ -308,7 +308,7 @@ nodes they run on.
 
 	cmd.Flags().StringVar(&state, "state", "", "limit to a job state, for example running or pending")
 	cmd.Flags().StringVarP(&user, "user", "u", "", "limit to one or more users")
-	_ = cmd.RegisterFlagCompletionFunc("state", fixed("running", "pending", "completing", "suspended"))
+	r.completeFlag(cmd, "state", fixed("running", "pending", "completing", "suspended"))
 	return cmd
 }
 
@@ -359,7 +359,7 @@ Read what finished out of the accounting database.
 	cmd.Flags().StringVar(&state, "state", "", "limit to job states, for example failed,timeout")
 	cmd.Flags().StringVarP(&user, "user", "u", "", "limit to one or more users")
 	cmd.Flags().StringVar(&ids, "jobs", "", "look up specific job identifiers instead of a time window")
-	_ = cmd.RegisterFlagCompletionFunc("state", fixed("completed", "failed", "timeout", "cancelled", "node_fail"))
+	r.completeFlag(cmd, "state", fixed("completed", "failed", "timeout", "cancelled", "node_fail"))
 	return cmd
 }
 
@@ -387,7 +387,7 @@ before deciding whose work is filling the queue.`,
 		}))
 
 	cmd.Flags().StringVar(&state, "state", "PENDING", "the job state to count")
-	_ = cmd.RegisterFlagCompletionFunc("state", fixed("PENDING", "RUNNING"))
+	r.completeFlag(cmd, "state", fixed("PENDING", "RUNNING"))
 	return cmd
 }
 

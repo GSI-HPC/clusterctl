@@ -238,13 +238,25 @@ func uniqueWords(words []string) []string {
 // registerCompletions wires shell completion for the flags whose values come
 // from the configuration, or from a fixed list.
 func registerCompletions(cmd *cobra.Command, r *root) {
-	_ = cmd.RegisterFlagCompletionFunc("output",
+	r.completeFlag(cmd, "output",
 		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 			return output.Formats(), cobra.ShellCompDirectiveNoFileComp
 		})
-	_ = cmd.RegisterFlagCompletionFunc("context", completeContexts(r))
-	_ = cmd.RegisterFlagCompletionFunc("nodes", completeGroups(r))
-	_ = cmd.RegisterFlagCompletionFunc("progress", fixed(progressModes...))
+	r.completeFlag(cmd, "context", completeContexts(r))
+	r.completeFlag(cmd, "nodes", completeGroups(r))
+	r.completeFlag(cmd, "progress", fixed(progressModes...))
+}
+
+// completeFlag registers how the shell completes the values of a flag. A
+// tree built for an agent registers nothing: cobra keeps every function it
+// is given, in a map of its own keyed by the flag, for as long as the
+// process runs, and the MCP server builds two trees for each command it
+// runs, whose functions hold the root and the configuration it read. Such a
+// tree has no shell to complete for.
+func (r *root) completeFlag(cmd *cobra.Command, flag string, f cobra.CompletionFunc) {
+	if !r.agent {
+		_ = cmd.RegisterFlagCompletionFunc(flag, f)
+	}
 }
 
 // complete offers the words names returns for the command context, and none
