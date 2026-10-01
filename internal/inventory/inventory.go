@@ -16,6 +16,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
@@ -540,29 +541,59 @@ func (inv *Inventory) InRack(rack string) *nodeset.NodeSet {
 	return inv.WithAttribute("rack", rack)
 }
 
-// BootPath returns the boot path configured for a node: the one on its
+// BootPaths resolves the boot path configured for a node: the one on its
 // inventory entry, else the first cluster rule that names it.
 //
 // A node matched by more than one rule is an error rather than a silent
 // first-match, because two rules pointing at different installations is a
 // mistake worth stopping for.
-func BootPath(inv *Inventory, rules []v1alpha1.BootPathRule, node string) (string, bool, error) {
-	if n, ok := inv.Lookup(node); ok && n.BootPath != "" {
+//
+// The rules are parsed once, when the first node with no boot path of its
+// own needs them, and a rule that cannot be parsed is reported then, as it
+// would be if each node parsed them. Parsing them for every node took 19
+// seconds for 10,000 nodes before boot set or a reinstall even asked.
+type BootPaths struct {
+	inv   *Inventory
+	rules []v1alpha1.BootPathRule
+	once  sync.Once
+	sets  []*nodeset.NodeSet
+	err   error
+}
+
+// NewBootPaths resolves boot paths from an inventory and a cluster's rules.
+func NewBootPaths(inv *Inventory, rules []v1alpha1.BootPathRule) *BootPaths {
+	return &BootPaths{inv: inv, rules: rules}
+}
+
+// Of returns the boot path of a node, and whether its rule asks for it to be
+// kept after the first request.
+func (b *BootPaths) Of(node string) (string, bool, error) {
+	if n, ok := b.inv.Lookup(node); ok && n.BootPath != "" {
 		return n.BootPath, false, nil
+	}
+	b.once.Do(func() {
+		b.sets = make([]*nodeset.NodeSet, len(b.rules))
+		for i, rule := range b.rules {
+			ns, err := nodeset.Parse(rule.Nodes)
+			if err != nil {
+				b.err = fmt.Errorf("boot path rule %d: %w", i+1, err)
+				return
+			}
+			b.sets[i] = ns
+		}
+	})
+	if b.err != nil {
+		return "", false, b.err
 	}
 	var (
 		found  string
 		static bool
 		count  int
 	)
-	for i, rule := range rules {
-		ns, err := nodeset.Parse(rule.Nodes)
-		if err != nil {
-			return "", false, fmt.Errorf("boot path rule %d: %w", i+1, err)
-		}
+	for i, ns := range b.sets {
 		if ns.Contains(node) {
 			count++
-			found, static = rule.Path, rule.Static
+			found, static = b.rules[i].Path, b.rules[i].Static
 		}
 	}
 	switch count {
