@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -16,9 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
+	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -719,5 +723,39 @@ func TestBMCPowerKeepsTheAnswersThatCameBeforeAnInterrupt(t *testing.T) {
 	}
 	if got := tree(); !strings.Contains(got, "target exe0002: failed (target)") {
 		t.Errorf("progress:\n%s\nwant exe0002 failed as its row says", got)
+	}
+}
+
+// A pin store that could not be read or written, such as one whose lock
+// another process held for too long, stops the handshake before any request
+// is written, so a power action may fall back to IPMI as for a processor
+// that could not be reached. A changed certificate stops it too, but may not
+// be the processor, so it falls back to nothing.
+func TestAFailedPinStoreIsARequestNeverSent(t *testing.T) {
+	t.Parallel()
+
+	wrap := func(err error) error {
+		return &url.Error{Op: "Get", URL: "https://exe0001-bmc/redfish/v1/Systems/1", Err: err}
+	}
+	locked := wrap(&redfish.PinStoreError{Host: "exe0001-bmc", Err: fmt.Errorf("pins is locked: %w", context.DeadlineExceeded)})
+	changed := wrap(&redfish.PinMismatchError{Host: "exe0001-bmc", Recorded: "sha256:aa", Seen: "sha256:bb"})
+	timedOut := wrap(context.DeadlineExceeded)
+
+	for _, tc := range []struct {
+		name      string
+		err       error
+		never     bool
+		fallsBack bool
+	}{
+		{"a pin store that failed", locked, true, true},
+		{"a changed certificate", changed, true, false},
+		{"a request that timed out", timedOut, false, false},
+	} {
+		if got := neverSent(tc.err); got != tc.never {
+			t.Errorf("%s: neverSent = %v, want %v", tc.name, got, tc.never)
+		}
+		if got := mayFallBack(ipmi.ActionOff, app.TransportRedfish, tc.err); got != tc.fallsBack {
+			t.Errorf("%s: mayFallBack = %v, want %v", tc.name, got, tc.fallsBack)
+		}
 	}
 }

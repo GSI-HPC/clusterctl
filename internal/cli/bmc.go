@@ -728,10 +728,16 @@ it is shown and sends the BMC account to it.`,
 			}); err != nil {
 				return err
 			}
+			hosts := make([]string, len(drops))
+			for i, d := range drops {
+				hosts[i] = d.host
+			}
+			// One rewrite of the file for all of them, rather than one
+			// with its lock and its two syncs for each.
+			if err := store.RemoveAll(a.Context(), hosts); err != nil {
+				return err
+			}
 			for _, d := range drops {
-				if err := store.Remove(a.Context(), d.host); err != nil {
-					return err
-				}
 				a.Printf("forgot the certificate of %s, %s\n", d.host, d.fingerprint)
 			}
 			return nil

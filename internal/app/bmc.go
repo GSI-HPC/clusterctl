@@ -10,7 +10,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"sync"
 
 	"golang.org/x/term"
 
@@ -240,25 +239,25 @@ func (a *App) RedfishClient(ctx context.Context, node string) (*redfish.Client, 
 	}, nil
 }
 
-// noteMu keeps the notes of clients built in parallel from interleaving.
-var noteMu sync.Mutex
+// PinStore is where the certificate fingerprints of the service processors
+// are recorded: bmc.redfish.pinStore, or a file in the state directory. One
+// store serves every client of a command, so that the file is read once
+// rather than for every client and every handshake.
+func (a *App) PinStore() *redfish.PinStore {
+	a.pinsOnce.Do(func() {
+		a.pins = &redfish.PinStore{Path: cmp.Or(a.Path(a.Spec.BMC.Redfish.PinStore), a.StatePath("bmc-pins"))}
+	})
+	return a.pins
+}
 
 // noteFirstContact says so when no certificate is recorded for a service
 // processor yet. The client records whatever the host presents, and sends
 // the BMC account to it, so the administrator should know it trusted a
 // certificate nobody vouched for, and which host it came from.
-// PinStore is where the certificate fingerprints of the service processors
-// are recorded: bmc.redfish.pinStore, or a file in the state directory.
-func (a *App) PinStore() *redfish.PinStore {
-	return &redfish.PinStore{Path: cmp.Or(a.Path(a.Spec.BMC.Redfish.PinStore), a.StatePath("bmc-pins"))}
-}
-
 func (a *App) noteFirstContact(pins *redfish.PinStore, host string) {
 	if _, ok, err := pins.Get(host); err != nil || ok {
 		return
 	}
-	noteMu.Lock()
-	defer noteMu.Unlock()
 	a.Printf("no certificate is recorded for %s yet; the one it presents now will be recorded and trusted from then on\n", host)
 }
 

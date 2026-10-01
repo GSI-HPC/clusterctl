@@ -770,3 +770,53 @@ func TestCacheKeepsAnAnswerForItsKeyAndTTL(t *testing.T) {
 		t.Error("an entry written in the future was trusted")
 	}
 }
+
+// AppendSync creates a file the way WriteAtomic does, appends to one that
+// exists, and takes write permission for anyone away as a rewrite would;
+// Locked holds the lock Update takes, on the file a link points at.
+func TestAppendSyncUnderLocked(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pins")
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink("pins", link); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, line := range []string{"a 1\n", "b 2\n"} {
+		err := fileutil.Locked(ctx, link, func(resolved string) error {
+			if resolved != path {
+				t.Errorf("Locked handed %s, want the file the link points at, %s", resolved, path)
+			}
+			return fileutil.AppendSync(resolved, []byte(line), 0o600)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "a 1\nb 2\n" {
+		t.Errorf("the file holds %q", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("a new file has mode %o, want 600", got)
+	}
+
+	if err := os.Chmod(path, 0o606); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileutil.AppendSync(path, []byte("c 3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o604 {
+		t.Errorf("after an append the mode is %v, %v; want 604, writable by nobody else", info.Mode().Perm(), err)
+	}
+}

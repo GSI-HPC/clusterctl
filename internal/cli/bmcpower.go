@@ -201,16 +201,18 @@ func bmcError(ctx context.Context, err error, changes bool) error {
 
 // neverSent says whether an error proves that a Redfish request never
 // reached the processor: its name did not resolve, nothing accepted the
-// connection, or it presented another certificate than the one recorded,
-// which the handshake refuses before the request is written. A request
-// that failed any other way may have been carried out.
+// connection, it presented another certificate than the one recorded, or
+// the pin store could not be read or written to check it, which stops the
+// handshake before the request is written. A request that failed any other
+// way may have been carried out.
 func neverSent(err error) bool {
 	var (
 		dnsErr *net.DNSError
 		opErr  *net.OpError
 		pin    *redfish.PinMismatchError
+		store  *redfish.PinStoreError
 	)
-	return errors.As(err, &dnsErr) || errors.As(err, &pin) ||
+	return errors.As(err, &dnsErr) || errors.As(err, &pin) || errors.As(err, &store) ||
 		(errors.As(err, &opErr) && opErr.Op == "dial")
 }
 
