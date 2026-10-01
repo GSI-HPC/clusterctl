@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -55,6 +56,9 @@ type root struct {
 
 	// runner replaces the transport; only the tests set it.
 	runner transport.Runner
+	// killGrace shortens the time ssh and scp have to stop; only the
+	// tests set it.
+	killGrace time.Duration
 	// agent says the tree runs the commands of an MCP client: there is no
 	// default node set, and only the site's hosts may be named.
 	agent bool
@@ -112,6 +116,7 @@ func (r *root) options() (app.Options, error) {
 		Set:         set,
 		Fanout:      r.fanout,
 		Runner:      r.runner,
+		KillGrace:   r.killGrace,
 	}, nil
 }
 

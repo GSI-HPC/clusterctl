@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -218,7 +220,7 @@ func TestRunBoundsACommandWithATimeout(t *testing.T) {
 		atLeast time.Duration
 	}{
 		{"a host that stopped answering", "exec sleep 60", background,
-			exitcode.Transport, "no answer 6s after the command's 100ms timeout ran out", progress.ClassTimeout, 6100 * time.Millisecond},
+			exitcode.Transport, "no answer 1.5s after the command's 100ms timeout ran out", progress.ClassTimeout, 1600 * time.Millisecond},
 		{"a host that answered after its timeout", "sleep 1; exit 124", background,
 			exitcode.TargetFailed, "command exited 124", progress.ClassTimeout, time.Second},
 		{"an interrupt", "exec sleep 60", cancelSoon,
@@ -227,9 +229,12 @@ func TestRunBoundsACommandWithATimeout(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// One attempt of one second: reaching the host may take a
-			// second, the least the generated configuration can say.
+			// second, the least the generated configuration can say. The
+			// grace is the client's, shortened from five seconds so that
+			// the test does not wait it out.
 			c := fakeClientWith(t, tc.script, transport.Options{SSH: v1alpha1.SSHSpec{
-				ConnectTimeout: v1alpha1.Duration(100 * time.Millisecond), ConnectionAttempts: 1}})
+				ConnectTimeout: v1alpha1.Duration(100 * time.Millisecond), ConnectionAttempts: 1},
+				KillGrace: 500 * time.Millisecond})
 			start := time.Now()
 			result, err := c.Run(tc.ctx(t), target, transport.Request{Argv: []string{"true"}, Timeout: 100 * time.Millisecond})
 			elapsed := time.Since(start)
@@ -456,13 +461,24 @@ func TestRunClassifiesTheExitStatus(t *testing.T) {
 // output pipe open. Wait used to block until that process exited.
 func TestRunReturnsWhenADescendantHoldsTheOutput(t *testing.T) {
 	t.Parallel()
-	c := fakeClient(t, "sleep 60 & exec sleep 60")
+	// The descendant outlives the client, which gives up on it after the
+	// grace, shortened here; it is not left behind for the rest of the run.
+	child := filepath.Join(t.TempDir(), "child")
+	c := fakeClientWith(t, "sleep 60 & echo $! > "+shellquote.Quote(child)+"; exec sleep 60",
+		transport.Options{KillGrace: 500 * time.Millisecond})
+	t.Cleanup(func() {
+		if data, err := os.ReadFile(child); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
 	start := time.Now()
 	result, err := c.Run(cancelSoon(t), target, transport.Request{Argv: []string{"true"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(start); elapsed > 20*time.Second {
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("Run took %v to return after the interrupt", elapsed)
 	}
 	if !errors.Is(result.Err, context.Canceled) {

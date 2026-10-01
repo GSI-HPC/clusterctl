@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/term"
 
@@ -167,6 +168,9 @@ type Options struct {
 	// dry run sets it to a recorder, and the tests use it to drive the
 	// commands without a cluster.
 	Runner transport.Runner
+	// KillGrace is how long ssh and scp have to stop before they are
+	// killed; zero is the transport's own. The tests shorten it.
+	KillGrace time.Duration
 }
 
 // App is the resolved context a command runs against.
@@ -351,6 +355,7 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 		DefaultUser:    a.Spec.DefaultUser,
 		NoTerminal:     !streams.IsTTY,
 		Context:        ctx,
+		KillGrace:      opts.KillGrace,
 	}
 	if err := sshOpts.Validate(); err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
