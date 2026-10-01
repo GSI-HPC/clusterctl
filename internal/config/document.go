@@ -11,14 +11,15 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"math"
 	"strconv"
 	"strings"
 
-	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
-	"github.com/goccy/go-yaml/token"
+	"go.yaml.in/yaml/v3"
 )
 
 // Origin says where a value came from.
@@ -86,22 +87,17 @@ func (d *Document) Position(path string) Origin {
 // ParseDocuments reads a YAML stream into documents, recording where every
 // value was written.
 func ParseDocuments(file string, data []byte) ([]*Document, error) {
-	var astDocs []*ast.DocumentNode
-	for _, tokens := range splitStream(lexer.Tokenize(string(data))) {
-		f, err := parser.Parse(tokens, 0)
-		if err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var docs []*Document
+	for i := 0; ; i++ {
+		var root yaml.Node
+		if err := dec.Decode(&root); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
 			return nil, fmt.Errorf("%s: %w", file, err)
 		}
-		astDocs = append(astDocs, f.Docs...)
-	}
-
-	docs := make([]*Document, 0, len(astDocs))
-	for i, astDoc := range astDocs {
-		if astDoc.Body == nil {
-			continue
-		}
 		doc := &Document{File: file, Index: i, Positions: map[string]Origin{}}
-		value, err := doc.convert(astDoc.Body, "")
+		value, err := doc.convert(&root, "")
 		if err != nil {
 			return nil, fmt.Errorf("%s: document %d: %w", file, i+1, err)
 		}
@@ -120,89 +116,47 @@ func ParseDocuments(file string, data []byte) ([]*Document, error) {
 	return docs, nil
 }
 
-// splitStream cuts a YAML stream before each document marker that follows
-// another with nothing but comments between them, to be parsed on its own.
-// The parser takes such a second marker for the end of the stream and drops
-// every document after it without an error: a file holding a Site, a
-// document of comments and a Cluster would load without the Cluster.
-func splitStream(tokens token.Tokens) []token.Tokens {
-	var parts []token.Tokens
-	start, afterMarker := 0, false
-	for i, tk := range tokens {
-		switch tk.Type {
-		case token.CommentType:
-		case token.DocumentHeaderType:
-			if afterMarker {
-				parts = append(parts, tokens[start:i])
-				start = i
-			}
-			afterMarker = true
-		default:
-			afterMarker = false
-		}
-	}
-	return append(parts, tokens[start:])
-}
-
 // convert turns a YAML node into a plain tree, recording positions as it
 // goes.
-func (d *Document) convert(node ast.Node, path string) (any, error) {
-	switch n := node.(type) {
-	case *ast.DocumentNode:
-		return d.convert(n.Body, path)
-	case *ast.MappingNode:
-		out := make(map[string]any, len(n.Values))
-		for _, v := range n.Values {
-			if err := d.convertPair(v, path, out); err != nil {
+func (d *Document) convert(n *yaml.Node, path string) (any, error) {
+	switch n.Kind {
+	case yaml.DocumentNode:
+		if len(n.Content) == 0 {
+			return nil, nil
+		}
+		return d.convert(n.Content[0], path)
+	case yaml.MappingNode:
+		out := make(map[string]any, len(n.Content)/2)
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if err := d.convertPair(n.Content[i], n.Content[i+1], path, out); err != nil {
 				return nil, err
 			}
 		}
 		return out, nil
-	case *ast.MappingValueNode:
-		out := make(map[string]any, 1)
-		if err := d.convertPair(n, path, out); err != nil {
-			return nil, err
-		}
-		return out, nil
-	case *ast.SequenceNode:
-		out := make([]any, 0, len(n.Values))
-		for i, v := range n.Values {
-			item, err := d.convert(v, fmt.Sprintf("%s[%d]", path, i))
+	case yaml.SequenceNode:
+		out := make([]any, 0, len(n.Content))
+		for i, v := range n.Content {
+			item, err := d.convert(v, path+"["+strconv.Itoa(i)+"]")
 			if err != nil {
 				return nil, err
 			}
 			out = append(out, item)
 		}
 		return out, nil
-	case *ast.AnchorNode:
-		return d.convert(n.Value, path)
-	case *ast.AliasNode:
+	case yaml.AliasNode:
 		return nil, fmt.Errorf("anchors and aliases are not supported in the configuration (at %s)", path)
-	case *ast.TagNode:
-		return d.convert(n.Value, path)
-	case *ast.NullNode:
-		return nil, nil
-	case *ast.BoolNode:
-		return n.Value, nil
-	case *ast.FloatNode:
-		return n.Value, nil
-	case *ast.IntegerNode:
-		return integerValue(n), nil
-	case *ast.StringNode:
-		return n.Value, nil
-	case *ast.LiteralNode:
-		return n.Value.Value, nil
-	case *ast.InfinityNode, *ast.NanNode:
-		return nil, fmt.Errorf("the value at %s is not a number the configuration accepts", path)
+	case yaml.ScalarNode:
+		return scalarValue(n, path)
 	default:
 		return nil, fmt.Errorf("unsupported YAML construct at %s", path)
 	}
 }
 
-// convertPair converts one key and value of a mapping.
-func (d *Document) convertPair(pair *ast.MappingValueNode, path string, out map[string]any) error {
-	key, ok := pair.Key.(*ast.StringNode)
-	if !ok {
+// convertPair converts one key and value of a mapping. A key has to read as
+// text, untagged: a key 8 or true would be a number or a boolean in some
+// other reader's eyes.
+func (d *Document) convertPair(key, value *yaml.Node, path string, out map[string]any) error {
+	if key.Kind != yaml.ScalarNode || key.Style&yaml.TaggedStyle != 0 || scalarTag(key) != strTag || key.ShortTag() == mergeTag {
 		return fmt.Errorf("a mapping key must be a string (at %s)", path)
 	}
 	child := key.Value
@@ -212,39 +166,106 @@ func (d *Document) convertPair(pair *ast.MappingValueNode, path string, out map[
 	if _, exists := out[key.Value]; exists {
 		return fmt.Errorf("duplicate key %q at %s", key.Value, child)
 	}
-	value, err := d.convert(pair.Value, child)
+	v, err := d.convert(value, child)
 	if err != nil {
 		return err
 	}
-	out[key.Value] = value
-	pos := key.GetToken().Position
-	d.Positions[child] = Origin{File: d.File, Line: pos.Line, Column: pos.Column}
+	out[key.Value] = v
+	d.Positions[child] = Origin{File: d.File, Line: key.Line, Column: key.Column}
 	return nil
 }
 
-// integerValue reads an integer scalar.
+// The tags a scalar is read as.
+const (
+	strTag   = "!!str"
+	intTag   = "!!int"
+	floatTag = "!!float"
+	boolTag  = "!!bool"
+	nullTag  = "!!null"
+	// mergeTag is <<, which some readers take for a merge of another
+	// mapping into this one.
+	mergeTag = "!!merge"
+)
+
+// scalarTag is the type a scalar is read as: a string when it is quoted or
+// a block, and otherwise what its text resolves to. A standard tag written
+// on the value is not followed, so that !!int "8" and !!str 8 read as they
+// are written rather than as they are tagged; a value with a tag of the
+// site's own, !secret 8, is text.
+//
+// The configuration takes as numbers only what reads as one to every YAML
+// reader, as the parser it was first read with did: a whole number in
+// decimal, or after 0x, 0o or 0b, and a number with a decimal point. 1e3,
+// 0X1F, a whole number too large for 64 bits and a date are text, which a
+// field that takes a number refuses rather than reads as something else.
+func scalarTag(n *yaml.Node) string {
+	if n.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle|yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+		return strTag
+	}
+	tag := n.ShortTag()
+	if n.Style&yaml.TaggedStyle != 0 {
+		plain := yaml.Node{Kind: yaml.ScalarNode, Value: n.Value}
+		tag = plain.ShortTag()
+		if tag != nullTag && !strings.HasPrefix(n.Tag, "!!") && !strings.HasPrefix(n.Tag, "tag:yaml.org,2002:") {
+			return strTag
+		}
+	}
+	switch tag {
+	case intTag:
+		if digits := strings.TrimLeft(n.Value, "+-"); len(digits) > 1 && digits[0] == '0' && strings.ContainsRune("XOB", rune(digits[1])) {
+			return strTag
+		}
+	case floatTag:
+		if !strings.Contains(n.Value, ".") {
+			return strTag
+		}
+	case nullTag, boolTag, strTag:
+	default:
+		return strTag
+	}
+	return tag
+}
+
+// scalarValue reads a scalar as a string, a whole number, a number, a
+// boolean or nothing.
 //
 // A literal written with a leading zero is kept as a string. YAML
 // implementations disagree about whether "0600" is six hundred or octal three
 // hundred and eighty-four, and a file mode silently becoming 384 is the kind
 // of bug that only shows up on the node. Fields that take a mode are declared
 // as strings for the same reason.
-func integerValue(n *ast.IntegerNode) any {
-	lit := n.GetToken().Value
-	trimmed := strings.TrimLeft(lit, "+-")
-	if len(trimmed) > 1 && trimmed[0] == '0' && isDigits(trimmed) {
-		return lit
-	}
-	switch v := n.Value.(type) {
-	case uint64:
-		if v <= 1<<63-1 {
-			return int64(v)
+func scalarValue(n *yaml.Node, path string) (any, error) {
+	tag := scalarTag(n)
+	lit := n.Value
+	if tag == intTag || tag == floatTag {
+		if digits := strings.TrimLeft(lit, "+-"); len(digits) > 1 && digits[0] == '0' && isDigits(digits) {
+			return lit, nil
 		}
-		return strconv.FormatUint(v, 10)
-	case int64:
-		return v
+	}
+	switch tag {
+	case nullTag:
+		return nil, nil
+	case boolTag:
+		return strconv.ParseBool(lit)
+	case intTag:
+		plain := strings.ReplaceAll(lit, "_", "")
+		if v, err := strconv.ParseInt(plain, 0, 64); err == nil {
+			return v, nil
+		}
+		if v, err := strconv.ParseUint(plain, 0, 64); err == nil {
+			return strconv.FormatUint(v, 10), nil
+		}
+		return nil, fmt.Errorf("the value at %s is not a number the configuration accepts", path)
+	case floatTag:
+		v, err := strconv.ParseFloat(strings.ReplaceAll(lit, "_", ""), 64)
+		if err != nil || math.IsInf(v, 0) || math.IsNaN(v) {
+			return nil, fmt.Errorf("the value at %s is not a number the configuration accepts", path)
+		}
+		return v, nil
 	default:
-		return n.Value
+		// Text, and what YAML would read as a time or binary data, which
+		// the configuration takes as text.
+		return lit, nil
 	}
 }
 

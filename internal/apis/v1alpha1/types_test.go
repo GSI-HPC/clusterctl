@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goccy/go-yaml"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 )

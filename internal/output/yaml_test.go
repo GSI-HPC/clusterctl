@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goccy/go-yaml"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/GSI-HPC/clusterctl/internal/output"
 )
@@ -78,8 +78,8 @@ func TestYAMLQuotesWhatAResolverWouldMisread(t *testing.T) {
 	}
 }
 
-// TestYAMLLayout pins the shape of the output, which is what the goccy
-// encoder printed before.
+// TestYAMLLayout pins the shape of the output, which is what the YAML library
+// this program first printed with printed.
 func TestYAMLLayout(t *testing.T) {
 	t.Parallel()
 

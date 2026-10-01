@@ -69,7 +69,7 @@ func yamlBlock(b *strings.Builder, v any, indent int) {
 
 // yamlValue writes the value that follows a "key:" or a "-" at the given
 // indent. A sequence under a key is not indented further, which is how the
-// goccy encoder printed it.
+// YAML library this program first printed with did it.
 func yamlValue(b *strings.Builder, v any, indent int, underKey bool) {
 	nested := false
 	switch t := v.(type) {

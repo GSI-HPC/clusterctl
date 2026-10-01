@@ -296,3 +296,7 @@ because it would read as nanoseconds.
 
 **File modes** are strings: `"0600"`. A number with a leading zero is read as a
 string for the same reason.
+
+**Numbers** are whole numbers in decimal, or after `0x`, `0o` or `0b`, and
+numbers with a decimal point. `1e3`, `0X1F` and a date are strings, as a field
+that takes a number says.
