@@ -162,7 +162,11 @@ confirmation come with it.
   names the context.
 - **Fresh configuration per call.** Each call builds its own `app.App`, so
   an edit to the inventory or to the protected hosts takes effect without a
-  restart. Each call also gets its own streams, and nothing a command prints
+  restart. The documents and the inventory are kept in an `app.Cache`
+  while every file is still the file read, which each call looks at: an
+  edited file is read again by the next call. Everything resolved from
+  them, overrides included, is resolved for each call. Each call also gets
+  its own streams, and nothing a command prints
   can reach the protocol on standard output. What a command reports goes to
   the call's `notes`; what a password helper writes on its standard error
   goes to the server's log instead, as the stack of a panic does.
@@ -223,7 +227,7 @@ confirmation come with it.
   allows, so calls an agent sends side by side would multiply that. The
   server works on two at once; another call waits until one of them ends, and
   a call the client gives up on while it waits is not run. Every tool counts,
-  since each reads the configuration afresh and may reach a host:
+  since each resolves the configuration afresh and may reach a host:
   `select_nodes` can run a group source's command. A place is taken for each
   run of a handler, not for the whole call. `apply_plan` ends one run when it
   puts its question, and the answer starts another, whether the client sends
