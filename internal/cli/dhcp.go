@@ -5,9 +5,11 @@ package cli
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -56,13 +58,27 @@ has only those counts as missing.
   clusterctl dhcp hosts -n exe0001 -o yaml`,
 		cobra.ArbitraryArgs,
 		r.run(func(a *app.App, cmd *cobra.Command, args []string) error {
+			// The configuration does not depend on the nodes, so it is
+			// read while they are selected, which may ask a group source
+			// on another host. A selection that fails ends the read, and
+			// is what is reported.
+			readCtx, stopRead := context.WithCancel(a.Context())
+			defer stopRead()
+			var (
+				cfg     *dhcp.Config
+				cfgErr  error
+				reading sync.WaitGroup
+			)
+			reading.Go(func() { cfg, cfgErr = a.DHCPConfig(readCtx) })
 			ns, err := selection(a, args)
 			if err != nil {
+				stopRead()
+				reading.Wait()
 				return err
 			}
-			cfg, err := a.DHCPConfig(a.Context())
-			if err != nil {
-				return err
+			reading.Wait()
+			if cfgErr != nil {
+				return cfgErr
 			}
 
 			t := output.NewTable(output.Cols(
