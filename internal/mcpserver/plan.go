@@ -325,8 +325,18 @@ func (s *Server) preparePlan(ctx context.Context, in planInput, entry *auditEntr
 	}
 	// slurmctld expands ALL and NodeSet names, which the preview counts as
 	// one host each; the plan stands only for a set Slurm reads as itself.
-	if err := c.CheckNodes(ctx, ns); err != nil {
-		return nil, nil, err
+	// The current state helps the administrator judge the plan. The check,
+	// the nodes and the jobs are read side by side, and a refusal of the
+	// check wins over everything else; when the workload manager does not
+	// answer for the state alone, the plan still stands, and says so.
+	r := newReads(ctx, a)
+	on := r.on(c.Target)
+	check := read(r, "the check of the nodes", on, func() (struct{}, error) { return struct{}{}, c.CheckNodes(ctx, ns) })
+	nodes := read(r, "sinfo", on, func() ([]slurm.Node, error) { return c.Nodes(ctx, ns, nil) })
+	jobs := read(r, "squeue", on, func() ([]slurm.Job, error) { return c.Jobs(ctx, slurm.JobFilter{Nodes: ns}) })
+	r.wait()
+	if check.err != nil {
+		return nil, nil, check.err
 	}
 	// The action is run against a recorder: what it records is exactly what
 	// apply_plan will send, rendered the way --dry-run prints it.
@@ -354,14 +364,6 @@ func (s *Server) preparePlan(ctx context.Context, in planInput, entry *auditEntr
 		Commands:      p.commands,
 	}
 
-	// The current state helps the administrator judge the plan. When the
-	// workload manager does not answer the plan still stands, and says so.
-	// The nodes and the jobs are read side by side.
-	r := newReads(ctx, a)
-	on := r.on(c.Target)
-	nodes := read(r, "sinfo", on, func() ([]slurm.Node, error) { return c.Nodes(ctx, ns, nil) })
-	jobs := read(r, "squeue", on, func() ([]slurm.Job, error) { return c.Jobs(ctx, slurm.JobFilter{Nodes: ns}) })
-	r.wait()
 	if err := errors.Join(nodes.err, jobs.err); err != nil {
 		out.Warnings = append(out.Warnings, "the current state could not be read: "+err.Error())
 	} else {
