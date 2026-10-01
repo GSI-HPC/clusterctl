@@ -6,10 +6,13 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
 // exampleCopy copies the example configuration into a temporary directory
@@ -175,6 +178,31 @@ func TestProtectedHostsEntryMayBeAGroup(t *testing.T) {
 		"bmc", "power", "off", "-n", "wlm01.hpc.example.org", "--dry-run")
 	if err == nil || !strings.Contains(err.Error(), "protected host wlm01") {
 		t.Errorf("error = %v, want wlm01 refused as protected", err)
+	}
+}
+
+// The safety.protectedHosts entries were resolved one after the other,
+// and an exec source's group is a round trip to its host. The groups they
+// name are looked up side by side when the gate first needs them, here
+// two that each wait for the other to be under way.
+func TestProtectedHostsGroupsAreLookedUpSideBySide(t *testing.T) {
+	t.Parallel()
+	dir := exampleCopy(t, "      - wlm01\n", "      - \"@slurm:infra\"\n      - \"@slurm:service\"\n")
+	lookups := &fanouttest.InFlight{Hold: 2}
+	sinfo := fakeSinfo(map[string]string{"infra": "wlm01", "service": "dbm01", "main": "exe[0001-0010]"})
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if slices.Contains(req.Argv, "-p") {
+			defer lookups.Enter()()
+		}
+		return sinfo(tg, req)
+	}}
+	_, err := run(t, harnessOptions{bare: true, config: []string{dir}, recorder: rec},
+		"exec", "--confirm", "-y", "-n", "dbm01", "--", "true")
+	if err == nil || !strings.Contains(err.Error(), "protected host dbm01") {
+		t.Errorf("error = %v, want dbm01 refused as protected", err)
+	}
+	if peak := lookups.Peak(); peak != 2 {
+		t.Errorf("%d lookups were under way at once, want 2", peak)
 	}
 }
 

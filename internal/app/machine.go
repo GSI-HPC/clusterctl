@@ -185,7 +185,11 @@ func (a *App) spelling(n, typed string) (string, error) {
 // than spellings. An entry naming a machine the inventory does not know is
 // refused: it most likely protects nothing.
 func (a *App) protectedHosts(expr string) (*nodeset.NodeSet, error) {
-	ns, err := nodeset.ParseWith(expr, a.Groups)
+	a.protectedOnce.Do(func() {
+		a.protectedGroups = nodeset.NewBatch(a.Groups)
+		a.protectedGroups.Prefetch(a.Spec.Safety.ProtectedHosts...)
+	})
+	ns, err := nodeset.ParseWith(expr, a.protectedGroups)
 	if err != nil {
 		return nil, err
 	}

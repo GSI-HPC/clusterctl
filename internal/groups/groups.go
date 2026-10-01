@@ -223,6 +223,24 @@ func (r *Resolver) Resolve(source, group string) (string, error) {
 	return "", notDefined("no group source defines %q (sources: %s)", group, strings.Join(r.Sources(), ", "))
 }
 
+// ResolveAll implements nodeset.BatchResolver: it looks up the groups side
+// by side, fanout.PerHost at a time, each as Resolve does, so that an
+// expression that names several groups of a source that runs commands
+// waits for about one round trip rather than one for each. A group not
+// looked up, once the command is interrupted, is left to Resolve.
+func (r *Resolver) ResolveAll(refs []nodeset.GroupRef) []nodeset.GroupAnswer {
+	answers := make([]nodeset.GroupAnswer, len(refs))
+	looked := make([]bool, len(refs))
+	fanout.Each(r.ctx, len(refs), fanout.PerHost, func(i int) {
+		answers[i].Expr, answers[i].Err = r.Resolve(refs[i].Source, refs[i].Group)
+		looked[i] = true
+	})
+	if i := slices.Index(looked, false); i >= 0 {
+		return answers[:i]
+	}
+	return answers
+}
+
 // resolveIn asks one source for one group, a lookup made under ctx.
 func (r *Resolver) resolveIn(ctx context.Context, name, group string) (string, error) {
 	src, ok := r.sources[name]

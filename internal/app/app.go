@@ -222,8 +222,13 @@ type App struct {
 	// protected hosts entry, which only read it.
 	knownOnce sync.Once
 	known     *nodeset.NodeSet
-	pinsOnce  sync.Once
-	pins      *redfish.PinStore
+	// protectedGroups answers the safety.protectedHosts entries from the
+	// groups they name, looked up side by side when the gate first resolves
+	// one: an exec source's groups are each a round trip to its host.
+	protectedOnce   sync.Once
+	protectedGroups *nodeset.Batch
+	pinsOnce        sync.Once
+	pins            *redfish.PinStore
 }
 
 // ensureDirs creates the state and cache directories, or checks the ones

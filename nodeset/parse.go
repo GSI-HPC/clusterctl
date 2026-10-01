@@ -81,6 +81,9 @@ func parseExpression(expr string, res Resolver, depth int, b *budget) (*NodeSet,
 	if depth > maxGroupDepth {
 		return nil, fmt.Errorf("group references nested more than %d levels deep", maxGroupDepth)
 	}
+	if b, ok := res.(*Batch); ok {
+		b.Prefetch(expr)
+	}
 	result := New()
 	op := opUnion
 	// operand reports whether the last thing read was an operand, and
