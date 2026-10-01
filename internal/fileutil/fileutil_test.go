@@ -783,11 +783,18 @@ func TestAppendSyncUnderLocked(t *testing.T) {
 	if err := os.Symlink("pins", link); err != nil {
 		t.Fatal(err)
 	}
+	// The temporary directory may lie behind a link of its own, as
+	// macOS's /var does, which Locked resolves too.
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(real, "pins")
 	ctx := context.Background()
 	for _, line := range []string{"a 1\n", "b 2\n"} {
 		err := fileutil.Locked(ctx, link, func(resolved string) error {
-			if resolved != path {
-				t.Errorf("Locked handed %s, want the file the link points at, %s", resolved, path)
+			if resolved != want {
+				t.Errorf("Locked handed %s, want the file the link points at, %s", resolved, want)
 			}
 			return fileutil.AppendSync(resolved, []byte(line), 0o600)
 		})

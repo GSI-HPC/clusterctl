@@ -8,6 +8,7 @@ import (
 	"crypto/sha1" // ssh hashes known_hosts names with HMAC-SHA1
 	"encoding/base64"
 	"fmt"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -203,11 +204,12 @@ func TestHostKeyOperationsDoNotReadTheFileForEachHost(t *testing.T) {
 			return []hostkeys.Entry{{Hosts: []string{host}, Type: "ssh-ed25519", Key: "NEW"}}
 		}
 		best := time.Duration(1 << 62)
-		for range 3 {
+		for range 5 {
 			f, err := hostkeys.Parse([]byte(b.String()))
 			if err != nil {
 				t.Fatal(err)
 			}
+			runtime.GC()
 			start := time.Now()
 			index := f.Index()
 			for _, h := range hosts {
@@ -224,8 +226,11 @@ func TestHostKeyOperationsDoNotReadTheFileForEachHost(t *testing.T) {
 		}
 		return best
 	}
-	small, large := cost(500), cost(5000)
+	// Large enough sets that the time is the work's and not the timer's
+	// or the scheduler's: 500 hosts took under a millisecond, and a macOS
+	// runner made 5,000 take 61 times that, linear as the work is.
+	small, large := cost(2000), cost(20000)
 	if large > 30*small {
-		t.Errorf("5,000 hosts took %v, %d times what 500 took; it should be about 10", large, large/max(small, 1))
+		t.Errorf("20,000 hosts took %v, %d times what 2,000 took; it should be about 10", large, large/max(small, 1))
 	}
 }
