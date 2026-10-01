@@ -368,12 +368,17 @@ func (b *Backend) collect(result *transport.Result, bmcs *nodeset.NodeSet, answe
 	}
 	names := bmcs.Expand()
 	statuses := make([]Status, 0, len(names))
+	// Why a processor was not answered for is the run's, the same for
+	// each, and is read out of its whole error stream.
+	var cause error
 	for _, bmc := range names {
 		if text, found := said[bmc]; found {
 			statuses = append(statuses, answered(bmc, text, answer))
 			continue
 		}
-		cause := b.unreported(result)
+		if cause == nil {
+			cause = b.unreported(result)
+		}
 		statuses = append(statuses, Status{BMC: bmc, State: "unknown", Err: cause.Error(), Cause: cause})
 	}
 	return statuses
@@ -464,8 +469,8 @@ func (b *Backend) unreported(result *transport.Result) error {
 }
 
 func lastLine(s string) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	return strings.TrimSpace(lines[len(lines)-1])
+	s = strings.TrimSpace(s)
+	return strings.TrimSpace(s[strings.LastIndexByte(s, '\n')+1:])
 }
 
 // passwordFilePlaceholder is replaced by the private file the wrapper writes
