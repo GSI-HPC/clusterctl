@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Host is one host declaration.
@@ -48,6 +49,40 @@ type Host struct {
 // Config is a parsed dhcpd configuration.
 type Config struct {
 	Hosts []Host `json:"hosts" yaml:"hosts"`
+
+	// index is built from Hosts when the first node is looked up, so that
+	// a lookup does not read every declaration: a command over 10,000
+	// nodes read all 10,000 for each of them. Hosts is not changed after.
+	indexOnce sync.Once
+	index     hostIndex
+}
+
+// hostIndex finds the declarations of a node without reading every one.
+type hostIndex struct {
+	// sorted says that Hosts is in the order of their names, as Parse
+	// leaves it, so that the names starting with a node's are found by
+	// a binary search.
+	sorted bool
+	// mentioned maps each word of the comments above the declarations to
+	// the declarations it is above, in their order.
+	mentioned map[string][]int
+}
+
+func (c *Config) indexed() *hostIndex {
+	c.indexOnce.Do(func() {
+		c.index.sorted = slices.IsSortedFunc(c.Hosts, func(a, b Host) int { return strings.Compare(a.Name, b.Name) })
+		c.index.mentioned = map[string][]int{}
+		for i, h := range c.Hosts {
+			for _, comment := range h.Comments {
+				for _, word := range commentWords(comment) {
+					if seen := c.index.mentioned[word]; len(seen) == 0 || seen[len(seen)-1] != i {
+						c.index.mentioned[word] = append(seen, i)
+					}
+				}
+			}
+		}
+	})
+	return &c.index
 }
 
 // Reader returns the content of a file that an include statement names.
@@ -550,11 +585,42 @@ type Match struct {
 // A comment that names the node is not enough; Mentions finds those.
 func (c *Config) Lookup(node string) []Match {
 	var out []Match
-	for _, h := range c.Hosts {
-		if kind, ok := matchName(h.Name, node); ok {
-			out = append(out, Match{Host: h, By: kind})
+	for _, i := range c.named(node) {
+		kind, _ := matchName(c.Hosts[i].Name, node)
+		out = append(out, Match{Host: c.Hosts[i], By: kind})
+	}
+	return out
+}
+
+// named returns the declarations that belong to a node by their name, in
+// their order. In sorted declarations, each name a node's own or its other
+// interfaces' can be starts with the node's name and then nothing, ".", "-"
+// or "_", and the names of each of the four sit side by side.
+func (c *Config) named(node string) []int {
+	if !c.indexed().sorted {
+		var out []int
+		for i, h := range c.Hosts {
+			if _, ok := matchName(h.Name, node); ok {
+				out = append(out, i)
+			}
+		}
+		return out
+	}
+	var out []int
+	for _, prefix := range []string{node, node + "-", node + ".", node + "_"} {
+		i, _ := slices.BinarySearchFunc(c.Hosts, prefix, func(h Host, p string) int { return strings.Compare(h.Name, p) })
+		for ; i < len(c.Hosts) && strings.HasPrefix(c.Hosts[i].Name, prefix); i++ {
+			// Within node's own range, only the name itself; the others
+			// are walked from their own start.
+			if prefix == node && c.Hosts[i].Name != node {
+				break
+			}
+			if _, ok := matchName(c.Hosts[i].Name, node); ok {
+				out = append(out, i)
+			}
 		}
 	}
+	slices.Sort(out)
 	return out
 }
 
@@ -563,14 +629,15 @@ func (c *Config) Lookup(node string) []Match {
 // "# chassis C07: exe0003 exe0004" names several nodes, so these are for
 // display only.
 func (c *Config) Mentions(node string) []Match {
+	if node == "" {
+		return nil
+	}
 	var out []Match
-	for _, h := range c.Hosts {
-		if _, ok := matchName(h.Name, node); ok {
+	for _, i := range c.indexed().mentioned[node] {
+		if _, ok := matchName(c.Hosts[i].Name, node); ok {
 			continue
 		}
-		if mentions(h.Comments, node) {
-			out = append(out, Match{Host: h, By: ByComment})
-		}
+		out = append(out, Match{Host: c.Hosts[i], By: ByComment})
 	}
 	return out
 }
@@ -590,15 +657,11 @@ func matchName(name, node string) (MatchKind, bool) {
 	return "", false
 }
 
-func mentions(comments []string, node string) bool {
-	for _, comment := range comments {
-		if slices.Contains(strings.FieldsFunc(comment, func(r rune) bool {
-			return r == ' ' || r == '\t' || r == ',' || r == ':' || r == ';' || r == '(' || r == ')'
-		}), node) {
-			return true
-		}
-	}
-	return false
+// commentWords splits a comment into the words a node name may be one of.
+func commentWords(comment string) []string {
+	return strings.FieldsFunc(comment, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == ',' || r == ':' || r == ';' || r == '(' || r == ')'
+	})
 }
 
 var (
