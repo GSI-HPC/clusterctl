@@ -5,8 +5,10 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -116,19 +118,30 @@ func ipmiRequestHosts(req transport.Request) []string {
 			return ns.Expand()
 		}
 		// ipmitool is handed the processors on the gateway by xargs, from
-		// printf '%s\0' and the names.
-		if f == "printf" && i+1 < len(fields) && fields[i+1] == `'%s\0'` {
-			var hosts []string
-			for _, h := range fields[i+2:] {
-				if h == "|" {
-					break
-				}
-				hosts = append(hosts, strings.Trim(h, `'`))
-			}
-			return hosts
+		// standard input after the password's line, each ended by a NUL.
+		if f == "xargs" {
+			return ipmitoolHosts(req)
 		}
 	}
 	return nil
+}
+
+// ipmitoolHosts reads the processors an ipmitool run is handed on standard
+// input: a recorded call's has been read, and is read again from its start.
+func ipmitoolHosts(req transport.Request) []string {
+	stdin, ok := req.Stdin.(io.ReadSeeker)
+	if !ok {
+		return nil
+	}
+	if _, err := stdin.Seek(0, io.SeekStart); err != nil {
+		return nil
+	}
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		return nil
+	}
+	_, names, _ := strings.Cut(string(data), "\n")
+	return strings.Split(strings.TrimSuffix(names, "\x00"), "\x00")
 }
 
 // With a bmc template and a bmcAddress, the derived name won, so a stale DNS
@@ -282,15 +295,16 @@ func TestBMCKeepsTheVendorProfileForEverySpelling(t *testing.T) {
 		}
 		// The Slurm check runs first; the IPMI run is the last call.
 		calls := h.recorder.Calls()
-		command := calls[len(calls)-1].Command
+		last := calls[len(calls)-1]
+		command := last.Command
 		if !strings.Contains(command, "chassis power") {
 			t.Fatalf("-n %s: the last command is not the IPMI run:\n%s", spelling, command)
 		}
 		if !strings.Contains(command, "v2admin") {
 			t.Errorf("-n %s: IPMI did not use the vendor's account:\n%s", spelling, command)
 		}
-		if !strings.Contains(command, "exe0001.mgmt.hpc.example.org") {
-			t.Errorf("-n %s: IPMI was not sent to exe0001's service processor:\n%s", spelling, command)
+		if hosts := ipmiRequestHosts(last.Request); !slices.Equal(hosts, []string{"exe0001.mgmt.hpc.example.org"}) {
+			t.Errorf("-n %s: IPMI was sent to %q, want exe0001's service processor", spelling, hosts)
 		}
 	}
 }
