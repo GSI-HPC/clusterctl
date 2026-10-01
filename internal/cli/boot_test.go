@@ -501,6 +501,42 @@ func TestBootSetChecksThePathsBesideListingTheLinks(t *testing.T) {
 	}
 }
 
+// boot status listed the boot links and only then read DHCP for a node the
+// inventory gives no address. The two are read side by side: each is held
+// until a third is under way, which never comes, so both are under way at
+// once only when neither waits for the other. A listing that fails ends
+// the DHCP read, and is what is reported.
+func TestBootStatusReadsDHCPBesideTheLinks(t *testing.T) {
+	p := newPXEHost(t, pxeOptions{dhcp: fmt.Sprintf(dhcpdConf, "10.0.2.7", "10.0.2.2")})
+	p.link(t, "10.0.2.7", p.exePath())
+	calls := &fanouttest.InFlight{Hold: 3}
+	p.rec = &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		defer calls.Enter()()
+		return p.reply(tg, req)
+	}}
+	h, err := p.run(t, harnessOptions{}, "boot", "status", "-n", "exe0007")
+	if err != nil {
+		t.Fatalf("boot status failed: %v\n%s", err, h.errOut)
+	}
+	if got := calls.Peak(); got != 2 {
+		t.Errorf("%d reads were under way at once, want the listing and DHCP", got)
+	}
+	if !strings.Contains(h.out.String(), "10.0.2.7") || !strings.Contains(h.out.String(), p.exePath()) {
+		t.Errorf("the boot path of exe0007 is missing:\n%s", h.out)
+	}
+
+	p.rec = &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		if len(req.Argv) > 0 && req.Argv[0] == "find" {
+			return transport.ExitResult(tg, 255, "", "ssh: connect to host installer port 22: Connection refused\n"), nil
+		}
+		return p.reply(tg, req)
+	}}
+	_, err = p.run(t, harnessOptions{}, "boot", "status", "-n", "exe0007")
+	if err == nil || !strings.Contains(err.Error(), "Connection refused") {
+		t.Errorf("error = %v, want the listing's", err)
+	}
+}
+
 // 1.4: an address becomes a file name under the PXE root, on a host where
 // the script runs as root.
 func TestBootAddressesAreCheckedBeforeAnythingIsSent(t *testing.T) {
