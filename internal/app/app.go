@@ -267,7 +267,8 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 			strings.Join(config.ConfigDirs(), " or "), config.EnvConfig)
 	}
 
-	bundle, err := config.Load(files)
+	cache := cacheFrom(ctx)
+	bundle, err := cache.load(files)
 	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
@@ -322,7 +323,10 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	if a.Namer, err = naming.New(a.Spec.Naming, a.Spec.Domains); err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
-	if a.Inventory, err = a.loadInventory(bundle); err != nil {
+	a.Inventory, err = cache.inventory(bundle, resolved.ClusterName, func() (*inventory.Inventory, error) {
+		return a.loadInventory(bundle)
+	})
+	if err != nil {
 		return nil, exitcode.Wrap(exitcode.Usage, err)
 	}
 

@@ -20,6 +20,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 )
@@ -83,7 +84,7 @@ func (s *Server) readCommand(ctx context.Context, _ *mcp.CallToolRequest, in com
 	stderr := &boundedWriter{limit: maxCommandOutput, stop: stop}
 	streams := s.streams(stderr)
 	streams.Out = stdout
-	root := s.opts.Command(ctx, streams)
+	root := s.opts.Command(app.WithCache(ctx, s.cache), streams)
 	// A command prints its result through the streams it was built with, and
 	// its help through the command's own; both are captured.
 	root.SetOut(stdout)

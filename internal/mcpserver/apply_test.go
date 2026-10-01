@@ -6,6 +6,7 @@ package mcpserver_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -252,5 +253,41 @@ func TestACancelledApplyStillCompletesAndIsRecorded(t *testing.T) {
 	}
 	if got := f.cluster.sent(); len(got) != 1 {
 		t.Errorf("sent %v, want the resume", got)
+	}
+}
+
+// The server keeps the configuration it read while no file changes, and an
+// edit to a file is seen by the very next call, by the tools and by the
+// commands read_command runs alike.
+func TestAnEditIsSeenByTheNextCall(t *testing.T) {
+	dir := configtest.CopyDir(t, exampleDir)
+	f := start(t, setup{config: dir})
+	selectRack := func(rack string) string {
+		var out struct {
+			Nodes string `json:"nodes"`
+		}
+		f.call(t, "select_nodes", map[string]any{"expression": "@rack:" + rack}, &out)
+		return out.Nodes
+	}
+	listRack := func(rack string) string {
+		var out struct {
+			Output any `json:"output"`
+		}
+		f.call(t, "read_command", map[string]any{"args": []string{"node", "rack", rack}}, &out)
+		return fmt.Sprint(out.Output)
+	}
+	if got := selectRack("R03"); got != "sub[0001-0002]" {
+		t.Fatalf("@rack:R03 = %q before the edit", got)
+	}
+	if got := listRack("R03"); !strings.Contains(got, "sub[0001-0002]") {
+		t.Fatalf("node rack R03 = %s before the edit", got)
+	}
+
+	edit(t, dir, "inventory.yaml", "rack: R03\n", "rack: R09\n")
+	if got := selectRack("R09"); got != "sub[0001-0002]" {
+		t.Errorf("@rack:R09 = %q after the edit, want sub[0001-0002]", got)
+	}
+	if got := listRack("R09"); !strings.Contains(got, "sub[0001-0002]") {
+		t.Errorf("node rack R09 = %s after the edit, want the nodes moved there", got)
 	}
 }
