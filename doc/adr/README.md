@@ -11,7 +11,7 @@ A decision is superseded by a later record, never edited.
 
 | | Decision | Status |
 | --- | --- | --- |
-| [0001](0001-go.md) | Go as the implementation language | accepted |
+| [0001](0001-go.md) | Go as the implementation language | superseded in part by [0025](0025-yaml-v3.md) |
 | [0002](0002-own-nodeset-engine.md) | Port the node set engine rather than depend on one | accepted |
 | [0003](0003-layered-yaml-configuration.md) | Layered YAML documents with provenance | accepted |
 | [0004](0004-drive-openssh.md) | Drive OpenSSH rather than speak SSH | accepted |
@@ -35,3 +35,4 @@ A decision is superseded by a later record, never edited.
 | [0022](0022-bounded-pools-and-power-batches.md) | Bounded pools, and power actions in batches | accepted |
 | [0023](0023-ssh-or-openpgp-release-tags.md) | A release tag is signed with an SSH or an OpenPGP key | accepted |
 | [0024](0024-end-to-end-tests-on-sind.md) | End-to-end tests against a sind cluster | accepted |
+| [0025](0025-yaml-v3.md) | Read YAML with yaml.v3 | accepted |

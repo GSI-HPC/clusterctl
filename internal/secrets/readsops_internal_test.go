@@ -5,9 +5,10 @@ package secrets
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
-	"github.com/goccy/go-yaml"
+	"go.yaml.in/yaml/v3"
 )
 
 // readSops parsed a file three times, once for its documents and once for
@@ -61,5 +62,26 @@ sops:
 		if !reflect.DeepEqual(got.values, values) || !reflect.DeepEqual(got.info, info) {
 			t.Errorf("readSops = %+v, %+v; the decodes of the file read %+v, %+v", got.values, got.info, values, info)
 		}
+	}
+}
+
+// A Secret document after a document of comments alone was read as no
+// document at all: the parser took the second marker for the end of the
+// stream. It is read, and two documents are still refused.
+func TestReadSopsReadsTheDocumentAfterAnEmptyOne(t *testing.T) {
+	t.Parallel()
+	const doc = "kind: Secret\nsops: {lastmodified: '2026-09-01T10:00:00Z', mac: m, version: 3.9.0, age: [{recipient: r, enc: e}]}\n"
+	for _, src := range []string{"---\n# retired\n---\n" + doc, doc + "---\n# the end\n", "---\n---\n" + doc} {
+		got, err := readSops([]byte(src))
+		if err != nil {
+			t.Errorf("readSops(%q): %v", src, err)
+			continue
+		}
+		if len(got.info.Keys) != 1 || got.values["kind"] != "Secret" {
+			t.Errorf("readSops(%q) = %+v", src, got)
+		}
+	}
+	if _, err := readSops([]byte(doc + "---\n" + doc)); err == nil || !strings.Contains(err.Error(), "2 documents") {
+		t.Errorf("two documents: %v, want them refused", err)
 	}
 }

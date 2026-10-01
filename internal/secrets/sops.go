@@ -4,7 +4,10 @@
 package secrets
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"regexp"
 	"slices"
@@ -12,9 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goccy/go-yaml"
-	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
+	"go.yaml.in/yaml/v3"
 )
 
 // sopsValue is how sops writes an encrypted value; it is the expression sops
@@ -221,23 +222,26 @@ func InspectSops(data []byte) (SopsInfo, error) {
 // metadata: each decode parsed the file again, three parses of every
 // Secret document every time the configuration loaded.
 func readSops(data []byte) (sopsDocument, error) {
-	file, err := parser.ParseBytes(data, 0)
-	if err != nil {
-		return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
-	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	docs := 0
-	var body ast.Node
-	for _, d := range file.Docs {
-		if d.Body != nil {
+	var body *yaml.Node
+	for {
+		var doc yaml.Node
+		if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
+		}
+		if !emptyDocument(&doc) {
 			docs++
-			body = d.Body
+			body = &doc
 		}
 	}
 	if docs != 1 {
 		return sopsDocument{}, fmt.Errorf("reading the sops metadata: the file holds %d documents, want 1", docs)
 	}
 	var values map[string]any
-	if err := yaml.NodeToValue(body, &values); err != nil {
+	if err := body.Decode(&values); err != nil {
 		return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
 	}
 	raw, ok := values["sops"].(map[string]any)
@@ -248,7 +252,7 @@ func readSops(data []byte) (sopsDocument, error) {
 	var meta struct {
 		Sops sopsMetadata `yaml:"sops"`
 	}
-	if err := yaml.NodeToValue(body, &meta); err != nil {
+	if err := body.Decode(&meta); err != nil {
 		return sopsDocument{}, fmt.Errorf("reading the sops metadata: %w", err)
 	}
 	info, err := inspect(meta.Sops)
@@ -259,6 +263,16 @@ func readSops(data []byte) (sopsDocument, error) {
 		return sopsDocument{}, err
 	}
 	return sopsDocument{info: info, values: values}, nil
+}
+
+// emptyDocument reports whether a document of a stream holds nothing, as
+// one of comments alone does.
+func emptyDocument(doc *yaml.Node) bool {
+	if len(doc.Content) == 0 {
+		return true
+	}
+	n := doc.Content[0]
+	return n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null" && n.Value == "" && n.Style == 0
 }
 
 // checkFields refuses a field of the sops mapping, or of one of its key

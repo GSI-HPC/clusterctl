@@ -203,6 +203,11 @@ YAML implementations disagree about whether a literal with a leading zero is
 decimal or octal, and a file mode that silently becomes 384 only shows up on
 the node. Fields that take a mode are declared as strings for the same reason.
 
+A number is a whole number in decimal, or after `0x`, `0o` or `0b`, or one
+with a decimal point. Everything else that some YAML reader takes for a number
+or a time is a string: `1e3`, `0X1F`, a date. A field that takes a number
+refuses it rather than read it as something else.
+
 ## Paths
 
 A path in a document is resolved against the directory of the `Site` document,
