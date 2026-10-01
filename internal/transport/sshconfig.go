@@ -523,13 +523,19 @@ func (c *Client) resolveJumps(value string) (string, []string, error) {
 }
 
 // roleByHost returns the first role, in name order, whose host is host.
-func (c *Client) roleByHost(host string) string {
-	for _, name := range slices.Sorted(maps.Keys(c.roles)) {
-		if c.roles[name].Host == host {
-			return name
+func (c *Client) roleByHost(host string) string { return c.byHost[host] }
+
+// rolesByHost maps the host of each role to the first role, in name order,
+// whose host it is. Every target's connection is bounded through it, and
+// sorting the roles for each cost microseconds a target.
+func rolesByHost(roles map[string]v1alpha1.HostRole) map[string]string {
+	out := make(map[string]string, len(roles))
+	for _, name := range slices.Sorted(maps.Keys(roles)) {
+		if _, ok := out[roles[name].Host]; !ok {
+			out[roles[name].Host] = name
 		}
 	}
-	return ""
+	return out
 }
 
 // reach is how long reaching target may take before its command starts, as

@@ -272,6 +272,7 @@ type Runner interface {
 type Client struct {
 	spec        v1alpha1.SSHSpec
 	roles       map[string]v1alpha1.HostRole
+	byHost      map[string]string
 	stateDir    string
 	knownHosts  string
 	defaultUser string
@@ -319,6 +320,7 @@ func New(opts Options) *Client {
 	return &Client{
 		spec:        opts.SSH,
 		roles:       opts.Roles,
+		byHost:      rolesByHost(opts.Roles),
 		stateDir:    opts.StateDir,
 		knownHosts:  opts.KnownHostsFile,
 		defaultUser: opts.DefaultUser,
