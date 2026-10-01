@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
+	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
 // probe is the argument list that runs the read command of tree.
@@ -172,5 +173,22 @@ func TestACallCancelledWhileItWaitsIsNotRun(t *testing.T) {
 	f.callAtOnce(t, 1, probe)
 	if ranLate.Load() {
 		t.Error("the call the client gave up on was run once a place came free")
+	}
+}
+
+// plan_change had Slurm check the nodes and only then read their state and
+// their jobs, side by side. The three are read side by side: each is held
+// until a fourth is under way, which never comes, so that all three are
+// under way at once only when none waits for another. What the plan says
+// is what it said before.
+func TestPlanChangeChecksTheNodesBesideReadingThem(t *testing.T) {
+	calls := &fanouttest.InFlight{Hold: 4}
+	f := start(t, setup{runner: func(next transport.Runner) transport.Runner { return calls.Runner(next) }})
+	p := f.plan(t, map[string]any{"action": "drain", "nodes": "exe[1-3]", "reason": "ticket 4712: fans"})
+	if got := calls.Peak(); got != 3 {
+		t.Errorf("%d reads were under way at once, want the check, the state and the jobs", got)
+	}
+	if p.Nodes != "exe[0001-0003]" || p.Count != 3 || len(p.Commands) != 1 {
+		t.Errorf("plan = %+v", p)
 	}
 }
