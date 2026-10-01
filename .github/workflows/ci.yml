@@ -283,6 +283,26 @@ jobs:
           name: fuzz-corpus-dhcp
           path: internal/dhcp/testdata/fuzz/
 
+  fuzz-config:
+    name: Fuzz the configuration parser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go
+
+      # Every command reads the configuration, and the loader turns what
+      # the YAML library decoded into its own tree, so no file may make it
+      # panic, and every key it reads has the line it was written on.
+      - name: Fuzz
+        run: go test ./internal/config/ -run '^$' -fuzz FuzzParseDocuments -fuzztime 60s
+
+      - name: Upload the failing input
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus-config
+          path: internal/config/testdata/fuzz/
+
   fuzz-progress:
     name: Fuzz the progress sanitiser
     runs-on: ubuntu-latest
