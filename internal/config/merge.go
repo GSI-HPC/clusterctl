@@ -150,16 +150,21 @@ func (t *Tree) mergeValue(layer string, from originFunc, srcPath string, dst []s
 		}
 		return
 	}
-	t.set(dst, value)
+	replaced := t.set(dst, value)
 	path := strings.Join(dst, ".")
 	o := from(srcPath)
 	o.Layer = layer
 	// A replaced subtree keeps no stale origins from earlier layers, and a
 	// value that replaced a whole section earlier no longer speaks for it.
-	for p, keys := range t.keys {
-		if isPrefix(dst, keys) || isPrefix(keys, dst) {
-			delete(t.origins, p)
-			delete(t.keys, p)
+	// Origins are kept for leaves alone, so only a value that replaced a
+	// section, or one under what was a leaf, leaves any to drop; looking
+	// for them at every leaf cost a pass over every origin for each.
+	if replaced {
+		for p, keys := range t.keys {
+			if isPrefix(dst, keys) || isPrefix(keys, dst) {
+				delete(t.origins, p)
+				delete(t.keys, p)
+			}
 		}
 	}
 	t.origins[path] = o
@@ -203,23 +208,34 @@ func (t *Tree) override(layer, path string, value any, at Origin, from originFun
 }
 
 // set writes value at a path, creating the mappings on the way.
-func (t *Tree) set(path []string, value any) {
+//
+// It reports whether it replaced a section or a leaf on the way to the
+// path: a value there that was not a mapping, or a mapping at the path
+// itself.
+func (t *Tree) set(path []string, value any) (replaced bool) {
 	if len(path) == 0 {
 		if m, ok := value.(map[string]any); ok {
 			t.data = m
 		}
-		return
+		return true
 	}
 	node := t.data
 	for _, p := range path[:len(path)-1] {
-		next, ok := node[p].(map[string]any)
+		existing, present := node[p]
+		next, ok := existing.(map[string]any)
 		if !ok {
+			replaced = replaced || present
 			next = map[string]any{}
 			node[p] = next
 		}
 		node = next
 	}
-	node[path[len(path)-1]] = value
+	last := path[len(path)-1]
+	if _, section := node[last].(map[string]any); section {
+		replaced = true
+	}
+	node[last] = value
+	return replaced
 }
 
 // splitPath splits a dotted path into its keys.
