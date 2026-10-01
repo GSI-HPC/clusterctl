@@ -855,3 +855,33 @@ func TestCountJobsOrdersEqualCountsByUserAccountAndPartition(t *testing.T) {
 		t.Errorf("CountJobs = %q, want %q", got, want)
 	}
 }
+
+// The summary read every field of every job, fourteen of them, to count
+// jobs by three. It asks squeue for those three, with the same filter, and
+// counts as CountJobs does.
+func TestJobCountsAskForWhatTheyCount(t *testing.T) {
+	t.Parallel()
+	rows := []slurm.Row{
+		{"u": "carol", "a": "x", "P": "main"},
+		{"u": "alice", "a": "x", "P": "main"},
+		{"u": "carol", "a": "x", "P": "main"},
+	}
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		return &transport.Result{Target: tg, Stdout: slurm.Render(req, rows...)}, nil
+	}}
+	c := &slurm.Client{Runner: rec, Target: transport.Target{Name: "login"}}
+	counts, total, err := c.JobCounts(context.Background(), slurm.JobFilter{States: []string{"PENDING"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || len(counts) != 2 || counts[0] != (slurm.JobCount{User: "carol", Account: "x", Partition: "main", Jobs: 2}) {
+		t.Errorf("JobCounts = %+v, %d jobs", counts, total)
+	}
+	req := rec.Calls()[0].Request
+	if got := slurm.Arg(req, "--states"); got != "PENDING" {
+		t.Errorf("--states %q, want PENDING", got)
+	}
+	if format := slurm.Arg(req, "--format"); strings.Count(format, "%") != 3 {
+		t.Errorf("squeue was asked for %q, want the user, the account and the partition", format)
+	}
+}
