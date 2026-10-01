@@ -15,6 +15,8 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -36,7 +38,11 @@ otherwise the name servers /etc/resolv.conf lists. /etc/hosts and the other
 sources of the system resolver are not consulted, because the question is
 what DNS says. Every answer is reported, so a name with several addresses,
 an address with several names or a chain of aliases is shown as it is rather
-than collapsed to the first answer.`,
+than collapsed to the first answer.
+
+The name servers are asked in turn until one answers. One that lets a query
+run out of time is asked after the others for the rest of the command, so a
+server that is down costs one timeout rather than one for every name.`,
 		newDNSLookupCommand(r),
 		newDNSAliasesCommand(r),
 	)
@@ -56,6 +62,14 @@ var errNoSuchHost = errors.New("no such host")
 type dnsClient struct {
 	servers []string
 	timeout time.Duration
+	// silent marks the servers that let a query run out of time. Every
+	// query asks the others first, so that a server that is down costs a
+	// command one timeout, and not one for each name and type it asks.
+	silent []atomic.Bool
+}
+
+func newDNSServers(servers []string, timeout time.Duration) *dnsClient {
+	return &dnsClient{servers: servers, timeout: timeout, silent: make([]atomic.Bool, len(servers))}
 }
 
 // newDNSClient builds the client from the configured server, or from the
@@ -67,14 +81,14 @@ func newDNSClient(a *app.App) (*dnsClient, error) {
 		if err != nil {
 			return nil, exitcode.Wrap(exitcode.Usage, err)
 		}
-		return &dnsClient{servers: []string{address}, timeout: timeout}, nil
+		return newDNSServers([]string{address}, timeout), nil
 	}
 	servers, err := resolvConfServers(resolvConf)
 	if err != nil || len(servers) == 0 {
 		return nil, exitcode.Errorf(exitcode.Usage,
 			"no name server is configured and %s lists none; set services.dns.server", resolvConf)
 	}
-	return &dnsClient{servers: servers, timeout: timeout}, nil
+	return newDNSServers(servers, timeout), nil
 }
 
 // dnsServerAddress turns a configured server into an address to dial. A
@@ -230,6 +244,10 @@ func reverseName(address string) (string, error) {
 
 // query asks the servers in turn and returns the answer section of the first
 // one that answers.
+//
+// A server that lets the query run out of time is asked last from then on,
+// until it answers again. A query the command interrupted, or whose own
+// deadline ran out, says nothing about the server.
 func (c *dnsClient) query(ctx context.Context, name string, qtype dnsmessage.Type) ([]dnsmessage.Resource, error) {
 	qname, err := dnsmessage.NewName(absolute(name))
 	if err != nil {
@@ -250,8 +268,15 @@ func (c *dnsClient) query(ctx context.Context, name string, qtype dnsmessage.Typ
 	}
 
 	var lastErr error
-	for _, server := range c.servers {
+	for _, i := range c.order() {
+		server := c.servers[i]
 		resp, err := c.exchange(ctx, "udp", server, packed, msg.ID, question)
+		var late *noAnswer
+		if errors.As(err, &late) && errors.Is(late, context.DeadlineExceeded) && ctx.Err() == nil {
+			c.silent[i].Store(true)
+		} else if err == nil {
+			c.silent[i].Store(false)
+		}
 		if err == nil && resp.Truncated {
 			resp, err = c.exchange(ctx, "tcp", server, packed, msg.ID, question)
 		}
@@ -272,6 +297,33 @@ func (c *dnsClient) query(ctx context.Context, name string, qtype dnsmessage.Typ
 	}
 	return nil, lastErr
 }
+
+// order returns the indexes of the servers in the order a query asks them:
+// as they are configured, those that let a query run out of time last.
+func (c *dnsClient) order() []int {
+	silent := make([]bool, len(c.servers))
+	for i := range silent {
+		silent[i] = c.silent[i].Load()
+	}
+	order := make([]int, 0, len(c.servers))
+	for _, last := range []bool{false, true} {
+		for i, s := range silent {
+			if s == last {
+				order = append(order, i)
+			}
+		}
+	}
+	return order
+}
+
+// udpBuffers holds the buffers a UDP answer is read into, each large enough
+// for any datagram, so that a lookup of many names does not allocate one for
+// each question. An answer is parsed into a message of its own before its
+// buffer is given back.
+var udpBuffers = sync.Pool{New: func() any {
+	buf := make([]byte, 65535)
+	return &buf
+}}
 
 // exchange sends one query to one server and waits for the answer to it.
 // It is reported as a call, which says what was asked of which server; an
@@ -320,7 +372,9 @@ func (c *dnsClient) exchange(ctx context.Context, network, server string, packed
 	if _, err := conn.Write(packed); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, 65535)
+	pooled := udpBuffers.Get().(*[]byte)
+	defer udpBuffers.Put(pooled)
+	buf := *pooled
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
