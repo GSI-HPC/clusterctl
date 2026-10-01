@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -166,17 +168,30 @@ exit 0`)
 // holding its standard error, as scp's own ssh does, which must not keep the
 // command waiting once the transfer is given up on.
 func TestCopyGivesUpOnAStalledTransfer(t *testing.T) {
-	binary, _ := fakeScp(t, "sleep 20 >&2 &\nexec sleep 30")
+	binary, dir := fakeScp(t, "sleep 20 >&2 &\necho $! > \"$(dirname \"$0\")/child\"\nexec sleep 30")
+	// The child outlives the command, which gives up on it; it is not left
+	// behind for the rest of the run.
+	t.Cleanup(func() {
+		if data, err := os.ReadFile(filepath.Join(dir, "child")); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
 
 	start := time.Now()
-	h, err := run(t, harnessOptions{}, "--set", "ssh.scpBinary="+binary, "-y", "-o", "json",
+	h, cmd := build(t, harnessOptions{}, "--set", "ssh.scpBinary="+binary, "-y", "-o", "json",
 		"copy", "-n", "exe1", "--timeout", "300ms", "/etc/hosts", "/etc/hosts")
+	// The transport's grace, five seconds, shortened so that the test does
+	// not wait it out.
+	h.root.killGrace = 500 * time.Millisecond
+	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("a stalled transfer should fail")
 	}
 	// scp is killed at the timeout, and its child is given up on after the
 	// transport's grace period.
-	if elapsed := time.Since(start); elapsed > 10*time.Second {
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("the stalled transfer held the command for %s", elapsed)
 	}
 	// A transfer given up on is a connection that did not finish, not a

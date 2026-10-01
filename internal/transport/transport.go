@@ -277,6 +277,7 @@ type Client struct {
 	defaultUser string
 	noTerminal  bool
 	ctx         context.Context
+	killGrace   time.Duration
 
 	once       sync.Once
 	configPath string
@@ -306,6 +307,11 @@ type Options struct {
 	// is context.Background(). A request runs under the context it is
 	// given.
 	Context context.Context
+	// KillGrace is how long ssh and scp have to stop once they are asked
+	// to, and the command its own after its timeout, before they are
+	// killed and their output given up on; zero is five seconds. A
+	// command is still sent with timeout(1)'s grace of five seconds.
+	KillGrace time.Duration
 }
 
 // New returns a client. The ssh configuration is written on first use.
@@ -318,6 +324,7 @@ func New(opts Options) *Client {
 		defaultUser: opts.DefaultUser,
 		noTerminal:  opts.NoTerminal,
 		ctx:         opts.Context,
+		killGrace:   cmp.Or(opts.KillGrace, killGrace),
 	}
 }
 
@@ -520,7 +527,7 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 
 	runCtx, over := ctx, time.Duration(0)
 	if req.Timeout > 0 {
-		over = killGrace + c.reach(target)
+		over = c.killGrace + c.reach(target)
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithTimeout(ctx, req.Timeout+over)
 		defer cancel()
@@ -619,7 +626,7 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 //
 // When ctx ends, the client is sent SIGTERM rather than killed, so that it
 // closes the session and puts the terminal back as it found it; it is killed
-// only if it has not gone killGrace later. Wait gives up on the output at the
+// only if it has not gone c.killGrace later. Wait gives up on the output at the
 // same point, since a process the client started, such as a ProxyCommand or
 // the ssh scp runs, can hold it open after the client has gone.
 //
@@ -629,7 +636,7 @@ func (c *Client) Interactive(ctx context.Context, target Target, req Request) er
 func (c *Client) command(ctx context.Context, args []string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = killGrace
+	cmd.WaitDelay = c.killGrace
 	if c.noTerminal {
 		// Without a controlling terminal, nothing ssh starts can open
 		// /dev/tty to prompt, whatever the configuration says.
