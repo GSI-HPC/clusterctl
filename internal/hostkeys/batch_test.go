@@ -135,7 +135,7 @@ func TestRemoveAllRemovesAsRemoveDoesOneAfterAnother(t *testing.T) {
 			counts = append(counts, n)
 		}
 		got := knownHosts(t)
-		if n := got.RemoveAll(hosts); !slices.Equal(n, counts) && !(len(n) == 0 && len(counts) == 0) {
+		if n := got.RemoveAll(hosts); !slices.Equal(n, counts) {
 			t.Errorf("RemoveAll(%v) counts %v, want %v", hosts, n, counts)
 		}
 		if g, w := string(got.Render()), string(want.Render()); g != w {
