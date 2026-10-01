@@ -345,6 +345,33 @@ func TestTheJumpHostsOnTheWayToAHost(t *testing.T) {
 	}
 }
 
+// Roles may share a host, as a login node may be the Slurm role's too: the
+// host is taken as the first of them in name order, whose options and jump
+// hosts its connections are bounded by. The roles are indexed by their
+// hosts once, rather than sorted for every target.
+func TestAHostSharedByRolesIsTakenAsTheFirstInNameOrder(t *testing.T) {
+	t.Parallel()
+	c := transport.New(transport.Options{Roles: map[string]v1alpha1.HostRole{
+		"slurm": {Host: "login.example.org"},
+		"login": {Host: "login.example.org"},
+		"zeta":  {Host: "z.example.org"},
+		"alpha": {Host: "z.example.org"},
+		"mgmt":  {Host: "mgmt.example.org"},
+		"local": {},
+	}})
+	for host, want := range map[string]string{
+		"login.example.org": "login",
+		"z.example.org":     "alpha",
+		"mgmt.example.org":  "mgmt",
+		"exe0001":           "",
+		"":                  "local",
+	} {
+		if got := transport.RoleByHost(c, host); got != want {
+			t.Errorf("%q is taken as the role %q, want %q", host, got, want)
+		}
+	}
+}
+
 // TestAStatusOfTimeoutCountsOnlyAfterTheTimeout checks that a command
 // ended by timeout(1) on the host, which exits 124, or 137 once it had to be
 // killed, is told apart from one that exited the same way by itself: a

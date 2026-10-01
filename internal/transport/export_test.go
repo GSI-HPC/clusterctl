@@ -10,3 +10,9 @@ import "time"
 func Reach(c *Client, target Target) time.Duration {
 	return c.reach(target)
 }
+
+// RoleByHost is the role a host is taken as: the first, in name order, whose
+// host it is.
+func RoleByHost(c *Client, host string) string {
+	return c.roleByHost(host)
+}
