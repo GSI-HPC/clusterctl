@@ -43,7 +43,21 @@ type System struct {
 
 // System reads the computer system resource.
 func (c *Client) System(ctx context.Context) (*System, error) {
-	body, err := c.Get(ctx, c.system())
+	out, err := c.BootOverride(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// The list is shown, not enforced, so a system whose ActionInfo cannot
+	// be read is still described; Reset refuses to act without it.
+	out.ResetTypes, _ = c.allowedResets(ctx)
+	return out, nil
+}
+
+// BootOverride reads the computer system resource as System does, but
+// without the reset types, which some firmware lists in a resource of its
+// own that takes another request to read.
+func (c *Client) BootOverride(ctx context.Context) (*System, error) {
+	body, err := c.readSystem(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -64,10 +78,41 @@ func (c *Client) System(ctx context.Context) (*System, error) {
 		out.BootEnabled = str(boot["BootSourceOverrideEnabled"])
 		out.BootTargets = strList(boot["BootSourceOverrideTarget@Redfish.AllowableValues"])
 	}
-	// The list is shown, not enforced, so a system whose ActionInfo cannot
-	// be read is still described; Reset refuses to act without it.
-	out.ResetTypes, _ = c.resetTypes(ctx, body)
 	return out, nil
+}
+
+// systemRead is a computer system resource as a client read it, and the
+// reset types it was found to accept once they were read. Neither the reset
+// action nor its types change while the firmware runs.
+type systemRead struct {
+	body       map[string]any
+	resetTypes []string
+	typesRead  bool
+}
+
+// readSystem reads the computer system resource, and keeps it for a reset
+// that follows.
+func (c *Client) readSystem(ctx context.Context) (map[string]any, error) {
+	body, err := c.Get(ctx, c.system())
+	if err != nil {
+		return nil, err
+	}
+	c.read = &systemRead{body: body}
+	return body, nil
+}
+
+// allowedResets returns the reset types the system the client last read
+// advertises, reading them the first time they are asked for.
+func (c *Client) allowedResets(ctx context.Context) ([]string, error) {
+	r := c.read
+	if !r.typesRead {
+		types, err := c.resetTypes(ctx, r.body)
+		if err != nil {
+			return nil, err
+		}
+		r.resetTypes, r.typesRead = types, true
+	}
+	return r.resetTypes, nil
 }
 
 // resetAction returns the reset action a system advertises, if any.
@@ -122,7 +167,7 @@ func (c *Client) resetTarget(body map[string]any) string {
 
 // PowerState reads the current power state.
 func (c *Client) PowerState(ctx context.Context) (string, error) {
-	body, err := c.Get(ctx, c.system())
+	body, err := c.readSystem(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -141,10 +186,15 @@ func (c *Client) PowerState(ctx context.Context) (string, error) {
 // implement is reported here rather than as an opaque rejection. The request
 // is sent exactly once: a reset that timed out may already have been carried
 // out, and sending it again would power cycle a running machine.
+//
+// The system resource, where the reset action is, is read unless the client
+// already read it: a reinstall sets the boot override, which reads it, and
+// then resets every machine.
 func (c *Client) Reset(ctx context.Context, resetType string) error {
-	body, err := c.Get(ctx, c.system())
-	if err != nil {
-		return err
+	if c.read == nil {
+		if _, err := c.readSystem(ctx); err != nil {
+			return err
+		}
 	}
 	if len(c.ResetTypes) > 0 {
 		if !contains(c.ResetTypes, resetType) {
@@ -152,7 +202,7 @@ func (c *Client) Reset(ctx context.Context, resetType string) error {
 				c.Host, resetType, sortedList(c.ResetTypes))
 		}
 	} else {
-		allowed, err := c.resetTypes(ctx, body)
+		allowed, err := c.allowedResets(ctx)
 		if err != nil {
 			return err
 		}
@@ -161,7 +211,7 @@ func (c *Client) Reset(ctx context.Context, resetType string) error {
 				c.Host, resetType, sortedList(allowed))
 		}
 	}
-	_, err = c.Post(ctx, c.resetTarget(body), map[string]any{"ResetType": resetType})
+	_, err := c.Post(ctx, c.resetTarget(c.read.body), map[string]any{"ResetType": resetType})
 	return err
 }
 
@@ -171,7 +221,7 @@ func (c *Client) Reset(ctx context.Context, resetType string) error {
 // ClusterShell era tooling defaulted to persistent and left machines
 // reinstalling in a loop, so the default here is once.
 func (c *Client) SetBootOverride(ctx context.Context, target string, persistent bool) error {
-	body, err := c.Get(ctx, c.system())
+	body, err := c.readSystem(ctx)
 	if err != nil {
 		return err
 	}

@@ -36,7 +36,7 @@ import (
 // DefaultSystemPath is where most firmware puts the computer system.
 const DefaultSystemPath = "/redfish/v1/Systems/1"
 
-// Client talks to one service processor.
+// Client talks to one service processor, for one goroutine at a time.
 type Client struct {
 	// Host is the name or address of the service processor.
 	Host string
@@ -67,6 +67,10 @@ type Client struct {
 	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 
 	client *http.Client
+	// read is the computer system resource as the client last read it, so
+	// that a reset after another request to the system does not read the
+	// system again.
+	read *systemRead
 }
 
 // Format prints the client without its password, whatever the verb, so that

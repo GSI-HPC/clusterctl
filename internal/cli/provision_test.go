@@ -570,7 +570,6 @@ command provision reinstall: ok
   step forgetting the host keys: ok
   step resetting the machines total=3 limit=8 [fold]: ok
     target exe[0001-0003]: ok
-      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
       call redfish host={} method=POST path=/redfish/v1/Systems/1/Actions/ComputerSystem.Reset http=200: ok
   step resolve [hidden]: ok
     call credential bmc source=env [hidden]: ok
@@ -619,10 +618,8 @@ command provision reinstall: failed (target): resetting the machines failed: exe
   step forgetting the host keys: ok
   step resetting the machines total=3 limit=8 [fold]: failed (target): 1 of 3 failed: exe0002
     target exe0002: failed (target): {}: 400 Bad Request: refused
-      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
       call redfish host={} method=POST path=/redfish/v1/Systems/1/Actions/ComputerSystem.Reset http=400: failed (target): {}: 400 Bad Request: refused
     target exe[0001,0003]: ok
-      call redfish host={} method=GET path=/redfish/v1/Systems/1 http=200: ok
       call redfish host={} method=POST path=/redfish/v1/Systems/1/Actions/ComputerSystem.Reset http=200: ok
   step resolve [hidden]: ok
     call credential bmc source=env [hidden]: ok
