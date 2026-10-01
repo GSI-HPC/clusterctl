@@ -573,15 +573,33 @@ only that port is read. The switch and port are named on standard error.`,
 			}
 			argv := []string{"ibqueryerrors", "-G", guids[0], "--data"}
 			if uplink {
+				// The links of the fabric are listed while the LID of the
+				// node's port is asked for, which they do not depend on:
+				// one after the other, the listing waited a round trip. It
+				// starts once the node's GUID is known, so that a node
+				// without one sweeps nothing, and the LID's failure ends
+				// it and is what is reported.
+				listCtx, stopListing := context.WithCancel(a.Context())
+				defer stopListing()
+				var (
+					links    *transport.Result
+					linksErr error
+					listing  sync.WaitGroup
+				)
+				listing.Go(func() {
+					links, linksErr = a.RunOnRole(listCtx, role, transport.Request{
+						Argv: []string{"iblinkinfo", "--line"},
+					})
+				})
 				lid, err := portLID(a.Context(), a, role, guids[0])
 				if err != nil {
+					stopListing()
+					listing.Wait()
 					return err
 				}
-				links, err := a.RunOnRole(a.Context(), role, transport.Request{
-					Argv: []string{"iblinkinfo", "--line"},
-				})
-				if err != nil {
-					return err
+				listing.Wait()
+				if linksErr != nil {
+					return linksErr
 				}
 				sw, err := findUplink(links.Stdout, lid)
 				if err != nil {
