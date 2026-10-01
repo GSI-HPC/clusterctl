@@ -17,6 +17,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -67,6 +68,24 @@ func cancelSoon(t *testing.T) context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	time.AfterFunc(200*time.Millisecond, cancel)
+	return ctx
+}
+
+// cancelWhenReady returns a context that is cancelled once the file ready
+// exists, which a fake creates when it is ready to be stopped, or after ten
+// seconds.
+func cancelWhenReady(t *testing.T, ready string) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		defer cancel()
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if _, err := os.Stat(ready); err == nil {
+				return
+			}
+		}
+	}()
 	return ctx
 }
 
@@ -456,10 +475,15 @@ func TestRunReturnsWhenADescendantHoldsTheOutput(t *testing.T) {
 // terminal. Only a process that is not killed runs its trap.
 func TestRunStopsSshGently(t *testing.T) {
 	t.Parallel()
+	// The command is stopped once the fake has its trap in place: stopped
+	// at a set time, on a busy machine it could be stopped before then,
+	// and die of the signal without a word.
+	ready := filepath.Join(t.TempDir(), "ready")
 	c := fakeClient(t, `trap 'kill $! 2>/dev/null; echo stopped gently >&2; exit 255' TERM HUP
+: > `+shellquote.Quote(ready)+`
 sleep 60 &
 wait`)
-	result, err := c.Run(cancelSoon(t), target, transport.Request{Argv: []string{"true"}})
+	result, err := c.Run(cancelWhenReady(t, ready), target, transport.Request{Argv: []string{"true"}})
 	if err != nil {
 		t.Fatal(err)
 	}
