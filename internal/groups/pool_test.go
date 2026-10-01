@@ -235,3 +235,27 @@ func TestTheGroupsOfANodeInAnAttributeSourceAreItsValue(t *testing.T) {
 		t.Errorf("@rack:r45 = %v (%v), want 400 nodes, n12345 among them", ns, err)
 	}
 }
+
+// An expression that names several groups looked them up one after the
+// other, each a round trip to the login node. They are looked up side by
+// side, as many at once as the host takes: each command is held until one
+// more than fanout.PerHost are under way, which never happens while the
+// bound is kept.
+func TestTheGroupsAnExpressionNamesAreLookedUpSideBySide(t *testing.T) {
+	t.Parallel()
+	calls := &fanouttest.InFlight{Hold: fanout.PerHost + 1}
+	r := groups.New(listedOptions(t, calls.Runner(runnerFunc(listed))))
+	ns, err := nodeset.ParseWith("@p01,@p02,@slurm:p03 @p04!@p02,@p05", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ns.String(), "exe[01,03-05]"; got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+	if peak := calls.Peak(); peak != fanout.PerHost {
+		t.Errorf("%d commands were under way at once, want %d", peak, fanout.PerHost)
+	}
+	if n := calls.Started(); n != 5 {
+		t.Errorf("%d commands were sent, want one for each group", n)
+	}
+}
