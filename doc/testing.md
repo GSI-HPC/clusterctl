@@ -32,7 +32,10 @@ terminal would act on and keeps to its bound. CI runs it for a minute too, and
 check `termtext`, the escaper under it: `FuzzEscape`, that neither escaper
 leaves a rune its policy names and that escaping twice changes nothing, and
 `FuzzTruncate`, that a cut row is a prefix that fits its columns. CI runs each
-for half a minute.
+for half a minute. `FuzzParseDocuments` checks that reading a configuration
+file never panics, whatever it holds, and that every key read has the line it
+was written on. CI runs it for a minute, and
+`go test ./internal/config/ -fuzz FuzzParseDocuments` runs it locally.
 
 **A fake BMC** serves the Redfish surface clusterctl uses, over TLS, from
 `httptest`. It is how the reset-type check, the once-only action and the boot
