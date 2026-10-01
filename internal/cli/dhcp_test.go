@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -502,5 +503,38 @@ host exe0005-eth1 {
 	}
 	if script := linkScripts(rec); !strings.Contains(script, " /srv/pxesrv/10.0.9.1\n") {
 		t.Errorf("boot set did not link the node's address:\n%s", script)
+	}
+}
+
+// dhcp hosts selected the nodes, which may ask a group source on another
+// host, and only then read the DHCP configuration. The two are read side
+// by side: each is held until a third is under way, which never comes, so
+// both are under way at once only when neither waits for the other. A
+// selection that fails is what is reported.
+func TestDHCPHostsReadsTheConfigurationWhileSelecting(t *testing.T) {
+	dhcpd := serveDHCP(map[string]string{dhcpdPath: "host exe0001 { hardware ethernet 00:11:22:33:44:55; }\n"})
+	sinfo := fakeSinfo(map[string]string{"main": "exe0001"})
+	calls := &fanouttest.InFlight{Hold: 3}
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		defer calls.Enter()()
+		if isSinfo(req) {
+			return sinfo(tg, req)
+		}
+		return dhcpd.Reply(tg, req)
+	}}
+	h, err := run(t, harnessOptions{recorder: rec}, "dhcp", "hosts", "-n", "@slurm:main")
+	if err != nil {
+		t.Fatalf("dhcp hosts failed: %v\n%s", err, h.errOut)
+	}
+	if got := calls.Peak(); got != 2 {
+		t.Errorf("%d reads were under way at once, want the group lookup and the configuration", got)
+	}
+	if !strings.Contains(h.out.String(), "00:11:22:33:44:55") {
+		t.Errorf("the declaration of exe0001 is missing:\n%s", h.out)
+	}
+
+	_, err = run(t, harnessOptions{recorder: rec}, "dhcp", "hosts", "-n", "@slurm:nope")
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Errorf("error = %v, want the selection's", err)
 	}
 }
