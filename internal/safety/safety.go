@@ -67,6 +67,8 @@ type Gate struct {
 	protectOnce  sync.Once
 	protected    *nodeset.NodeSet
 	protectedErr error
+	// shorts are the short names of the protected hosts.
+	shorts *nodeset.NodeSet
 }
 
 // NewGate builds a gate from the safety configuration of a site. resolve
@@ -118,6 +120,15 @@ func (g *Gate) Protected() (*nodeset.NodeSet, error) {
 			protected = protected.Union(ns)
 		}
 		g.protected = protected
+		// The short names of the protected hosts, which ProtectedIn holds
+		// every target against: built for each check, they cost a pass over
+		// the protected hosts every time.
+		g.shorts = nodeset.New()
+		for _, name := range protected.Expand() {
+			if !hostname.IsIP(name) {
+				_ = g.shorts.Add(strings.ToLower(naming.Short(name)))
+			}
+		}
 	})
 	return g.protected, g.protectedErr
 }
@@ -137,17 +148,13 @@ func (g *Gate) ProtectedIn(targets *nodeset.NodeSet) (*nodeset.NodeSet, error) {
 	if protected.IsEmpty() {
 		return hit, nil
 	}
-	shorts := nodeset.New()
-	for _, name := range protected.Expand() {
-		if !hostname.IsIP(name) {
-			_ = shorts.Add(strings.ToLower(naming.Short(name)))
-		}
-	}
-	for _, name := range targets.Expand() {
-		if hostname.IsIP(name) || hit.Contains(name) {
+	// Only the targets that are not protected hosts themselves are held
+	// against the short names, each looked up once.
+	for _, name := range targets.Difference(hit).Expand() {
+		if hostname.IsIP(name) {
 			continue
 		}
-		if shorts.Contains(strings.ToLower(naming.Short(name))) {
+		if g.shorts.Contains(strings.ToLower(naming.Short(name))) {
 			_ = hit.Add(name)
 		}
 	}
