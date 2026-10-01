@@ -101,6 +101,9 @@ type Server struct {
 	sdk     *mcp.Server
 	// calls holds a place for each tool call being worked on.
 	calls chan struct{}
+	// cache keeps the configuration the calls read while its files stay
+	// the files read.
+	cache *app.Cache
 }
 
 // New resolves the configuration once, pins the context it names and builds
@@ -126,7 +129,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		return nil, errors.New("mcpserver: no command tree was given")
 	}
 
-	s := &Server{opts: opts, calls: make(chan struct{}, maxCalls)}
+	s := &Server{opts: opts, calls: make(chan struct{}, maxCalls), cache: &app.Cache{}}
 	a, err := s.app(ctx)
 	if err != nil {
 		return nil, err
@@ -165,10 +168,12 @@ func (s *Server) Run(ctx context.Context, t mcp.Transport) error {
 func (s *Server) SDK() *mcp.Server { return s.sdk }
 
 // app resolves the command context for one call. Every call reads the
-// configuration afresh, so an edit to the inventory or the protected hosts
-// is seen without restarting, and every call gets its own streams, so that
-// nothing a command prints can reach the protocol on standard output.
+// configuration through the server's cache, which reads a file again once
+// it changed, so an edit to the inventory or the protected hosts is seen
+// without restarting, and every call gets its own streams, so that nothing
+// a command prints can reach the protocol on standard output.
 func (s *Server) app(ctx context.Context) (*app.App, error) {
+	ctx = app.WithCache(ctx, s.cache)
 	opts := s.opts.App
 	if s.context != "" {
 		opts.Context = s.context
