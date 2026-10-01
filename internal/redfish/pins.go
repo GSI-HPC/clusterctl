@@ -181,15 +181,14 @@ func (s *PinStore) Set(ctx context.Context, host, pin string) error {
 			return err
 		}
 		// What was read and what was appended is the file now; it is
-		// read again only if anyone else has written to it since. The
-		// map is only ever read under s.mu, so it takes the pin in place.
-		info, err := os.Stat(path)
-		if err != nil {
-			s.read = nil
-			return nil
+		// read again only if anyone else has written to it since, or
+		// when it cannot be looked at. The map is only ever read under
+		// s.mu, so it takes the pin in place.
+		s.read = nil
+		if info, err := os.Stat(path); err == nil {
+			pins[host] = pin
+			s.read = &pinFile{pins: pins, info: info, size: info.Size()}
 		}
-		pins[host] = pin
-		s.read = &pinFile{pins: pins, info: info, size: info.Size()}
 		return nil
 	})
 }
