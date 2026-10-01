@@ -19,6 +19,7 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
@@ -309,6 +310,75 @@ func TestIpmitoolKeepsToItsLimit(t *testing.T) {
 				if row["state"] != "on" || row["error"] != nil {
 					t.Errorf("%v = %v, want it on", row["node"], row)
 				}
+			}
+		})
+	}
+}
+
+// The runs of the IPMI backend, one per account, went one after the other,
+// each waiting for its slowest processor before the next account began.
+// They go side by side: each run is held until a third is under way, which
+// never comes, so both are under way at once only when neither waits for
+// the other. Together they ask no more processors at once than one run
+// would, shared out by the accounts' sizes, and with --fanout 1 they go
+// one after the other again.
+func TestBMCPowerRunsTheAccountsSideBySide(t *testing.T) {
+	t.Setenv("BMC_PASSWORD", "s3cret")
+	t.Setenv("V1_PASSWORD", "v1pass")
+	site := exampleWith(t, "site.yaml", func(s string) string {
+		s = strings.Replace(s, "  credentials:\n",
+			"  credentials:\n    bmc-v1:\n      username: admin1\n      password:\n        fromEnv: V1_PASSWORD\n", 1)
+		s = strings.Replace(s, "    vendors:\n", "    vendors:\n      vendor1:\n        credential: bmc-v1\n        order: [ipmi]\n", 1)
+		return strings.Replace(s, "backend: ipmipower", "backend: ipmitool", 1)
+	})
+	for _, tc := range []struct {
+		name   string
+		flags  []string
+		peak   int
+		shares []int
+	}{
+		{"side by side", nil, 2, []int{2, 6}},
+		{"--fanout 1", []string{"--fanout", "1"}, 1, []int{1, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runs := &fanouttest.InFlight{Hold: 3}
+			reply := ipmiOK().Reply
+			rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+				if strings.Contains(req.Script, "chassis power") {
+					defer runs.Enter()()
+				}
+				return reply(tg, req)
+			}}
+			args := slices.Concat(noSlurm, tc.flags, []string{"--set", "bmc.order=[ipmi]",
+				"-o", "json", "bmc", "power", "status", "-n", "dbm01,exe[0005-0007]"})
+			h, err := run(t, harnessOptions{config: []string{site}, recorder: rec}, args...)
+			if err != nil {
+				t.Fatalf("bmc power status failed: %v\n%s", err, h.errOut)
+			}
+			if got := runs.Peak(); got != tc.peak {
+				t.Errorf("%d runs were under way at once, want %d", got, tc.peak)
+			}
+			var shares []int
+			for _, c := range ipmiCalls(h) {
+				var share int
+				if _, err := fmt.Sscanf(c.Request.Script[strings.Index(c.Request.Script, "xargs"):], "xargs -0 -n 1 -P %d", &share); err != nil {
+					t.Fatalf("no bound in the run:\n%s", c.Request.Script)
+				}
+				shares = append(shares, share)
+			}
+			slices.Sort(shares)
+			if !slices.Equal(shares, tc.shares) {
+				t.Errorf("the runs were bounded by %v, want %v", shares, tc.shares)
+			}
+			var nodes []string
+			for _, row := range jsonRows(t, h) {
+				nodes = append(nodes, fmt.Sprint(row["node"]))
+				if row["state"] != "on" {
+					t.Errorf("%v = %v, want it on", row["node"], row)
+				}
+			}
+			if want := []string{"dbm01", "exe0005", "exe0006", "exe0007"}; !slices.Equal(nodes, want) {
+				t.Errorf("the rows are for %v, want %v", nodes, want)
 			}
 		})
 	}

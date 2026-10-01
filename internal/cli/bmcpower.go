@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -656,12 +657,20 @@ func (r *bmcRun) redfish(ctx context.Context, a *app.App, names []string, client
 
 // runIPMI carries out a power action over IPMI, one backend run per account,
 // which marks the targets of all its nodes running at once.
+//
+// The backends are resolved one after the other, since a credential may be
+// asked for at the terminal. The runs then go side by side, each a session
+// to the gateway: one after the other, each waited for its slowest
+// processor, some 20 seconds for one that is dead, before the next account
+// began. As many run at once as fanout.PerHost and the bound on the
+// processors asked at once allow, and that bound is shared out among them
+// by their sizes, so that together they ask no more processors at once
+// than one run would. The rows keep the order of the accounts.
 func (r *bmcRun) runIPMI(ctx context.Context, a *app.App, names []string) []bmcResult {
-	p, action := r.plan, r.action
+	p := r.plan
 	var (
 		accounts []string
 		groups   = map[string][]string{}
-		rows     []bmcResult
 	)
 	for _, node := range names {
 		credential := a.BMCCredentialName(node)
@@ -671,93 +680,159 @@ func (r *bmcRun) runIPMI(ctx context.Context, a *app.App, names []string) []bmcR
 		groups[credential] = append(groups[credential], node)
 	}
 
-	for _, credential := range accounts {
+	rows := make([][]bmcResult, len(accounts))
+	backends := make([]*ipmi.Backend, len(accounts))
+	var runnable []int
+	for i, credential := range accounts {
 		nodes := groups[credential]
-		fail := func(err error, outcome bmcOutcome, state string) {
-			for _, node := range nodes {
-				row := bmcResult{Node: node, BMC: p.bmc[node], Via: app.TransportIPMI, State: state, outcome: outcome}
-				row.fail(err)
-				rows = append(rows, row)
-			}
-		}
 		if ctx.Err() != nil {
-			fail(errNotSent(), outcomeNotSent, "not sent")
+			rows[i] = r.ipmiFailed(nodes, errNotSent(), outcomeNotSent, "not sent")
 			continue
 		}
 		backend, err := p.backend(ctx, a, nodes[0])
 		if err != nil {
-			fail(err, outcomeSent, "")
+			rows[i] = r.ipmiFailed(nodes, err, outcomeSent, "")
 			continue
 		}
-		bmcs := nodeset.New()
-		byBMC := map[string][]string{}
-		for _, node := range nodes {
-			_ = bmcs.Add(p.bmc[node])
-			byBMC[p.bmc[node]] = append(byBMC[p.bmc[node]], node)
+		backends[i] = backend
+		runnable = append(runnable, i)
+	}
+	if len(runnable) == 0 {
+		return slices.Concat(rows...)
+	}
+
+	sizes := make([]int, len(runnable))
+	for k, i := range runnable {
+		sizes[k] = len(groups[accounts[i]])
+	}
+	first := backends[runnable[0]]
+	bound := fanout.PerHost
+	var processors, fanouts []int
+	if first.Spec.Backend == ipmi.BackendIpmitool {
+		total := max(1, first.Spec.MaxConcurrent)
+		bound, processors = min(bound, total), shareOut(total, sizes)
+	}
+	if first.Fanout > 0 {
+		bound, fanouts = min(bound, first.Fanout), shareOut(first.Fanout, sizes)
+	}
+	started := make([]bool, len(runnable))
+	fanout.Each(ctx, len(runnable), bound, func(k int) {
+		i := runnable[k]
+		started[k] = true
+		live := *backends[i]
+		if processors != nil {
+			live.Spec.MaxConcurrent = processors[k]
 		}
-		for _, node := range nodes {
-			r.targets[node].span.Run()
+		if fanouts != nil {
+			live.Fanout = fanouts[k]
 		}
-		// A processor's nodes are counted done as its answer arrives,
-		// with the row the answer makes, rather than once the slowest
-		// processor has answered. The row is made once, when the answer
-		// arrives, and is the table's too: an interrupt that comes after
-		// it changes neither what the display showed nor the row.
-		var (
-			toldMu sync.Mutex
-			told   = map[string]bmcResult{}
-		)
-		row := func(node string, s ipmi.Status) bmcResult {
-			toldMu.Lock()
-			defer toldMu.Unlock()
-			if made, ok := told[node]; ok {
-				return made
-			}
-			made := ipmiRow(ctx, action, node, s)
-			told[node] = made
+		rows[i] = r.ipmiAccount(ctx, &live, groups[accounts[i]])
+	})
+	for k, i := range runnable {
+		if !started[k] {
+			rows[i] = r.ipmiFailed(groups[accounts[i]], errNotSent(), outcomeNotSent, "not sent")
+		}
+	}
+	return slices.Concat(rows...)
+}
+
+// shareOut divides total among runs of the given sizes in proportion to
+// them, at least one each.
+func shareOut(total int, sizes []int) []int {
+	sum := 0
+	for _, size := range sizes {
+		sum += size
+	}
+	out := make([]int, len(sizes))
+	for i, size := range sizes {
+		out[i] = max(1, total*size/sum)
+	}
+	return out
+}
+
+// ipmiFailed is the rows of nodes the IPMI backend never answered for, all
+// of them failed with err.
+func (r *bmcRun) ipmiFailed(nodes []string, err error, outcome bmcOutcome, state string) []bmcResult {
+	rows := make([]bmcResult, 0, len(nodes))
+	for _, node := range nodes {
+		row := bmcResult{Node: node, BMC: r.plan.bmc[node], Via: app.TransportIPMI, State: state, outcome: outcome}
+		row.fail(err)
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// ipmiAccount runs the backend of one account for its nodes.
+func (r *bmcRun) ipmiAccount(ctx context.Context, backend *ipmi.Backend, nodes []string) []bmcResult {
+	p, action := r.plan, r.action
+	bmcs := nodeset.New()
+	byBMC := map[string][]string{}
+	for _, node := range nodes {
+		_ = bmcs.Add(p.bmc[node])
+		byBMC[p.bmc[node]] = append(byBMC[p.bmc[node]], node)
+	}
+	for _, node := range nodes {
+		r.targets[node].span.Run()
+	}
+	// A processor's nodes are counted done as its answer arrives, with the
+	// row the answer makes, rather than once the slowest processor has
+	// answered. The row is made once, when the answer arrives, and is the
+	// table's too: an interrupt that comes after it changes neither what
+	// the display showed nor the row.
+	var (
+		toldMu sync.Mutex
+		told   = map[string]bmcResult{}
+	)
+	row := func(node string, s ipmi.Status) bmcResult {
+		toldMu.Lock()
+		defer toldMu.Unlock()
+		if made, ok := told[node]; ok {
 			return made
 		}
-		live := *backend
-		live.Answered = func(s ipmi.Status) {
-			for _, node := range byBMC[s.BMC] {
-				r.answered(ctx, app.TransportIPMI, node, row(node, s).err)
-			}
+		made := ipmiRow(ctx, action, node, s)
+		told[node] = made
+		return made
+	}
+	backend.Answered = func(s ipmi.Status) {
+		for _, node := range byBMC[s.BMC] {
+			r.answered(ctx, app.TransportIPMI, node, row(node, s).err)
 		}
-		statuses, err := live.Power(ctx, action, bmcs)
-		if err != nil {
-			err = bmcError(ctx, err, action != ipmi.ActionStatus)
-			state := ""
-			if exitcode.From(err) == exitcode.Interrupted {
-				state = interruptedState(action != ipmi.ActionStatus)
-			}
-			toldMu.Lock()
-			for _, node := range nodes {
-				if made, ok := told[node]; ok {
-					rows = append(rows, made)
-					continue
-				}
-				failed := bmcResult{Node: node, BMC: p.bmc[node], Via: app.TransportIPMI, State: state, outcome: outcomeSent}
-				failed.fail(err)
-				rows = append(rows, failed)
-			}
-			toldMu.Unlock()
-			continue
+	}
+	var rows []bmcResult
+	statuses, err := backend.Power(ctx, action, bmcs)
+	if err != nil {
+		err = bmcError(ctx, err, action != ipmi.ActionStatus)
+		state := ""
+		if exitcode.From(err) == exitcode.Interrupted {
+			state = interruptedState(action != ipmi.ActionStatus)
 		}
-		answered := map[string]bool{}
-		for _, s := range statuses {
-			answered[s.BMC] = true
-			for _, node := range byBMC[s.BMC] {
-				rows = append(rows, row(node, s))
-			}
-		}
-		// Every node gets a row, even one whose processor the backend
-		// answered for under another spelling.
+		toldMu.Lock()
+		defer toldMu.Unlock()
 		for _, node := range nodes {
-			if !answered[p.bmc[node]] {
-				row := bmcResult{Node: node, BMC: p.bmc[node], Via: app.TransportIPMI, State: "unknown"}
-				row.fail(fmt.Errorf("the IPMI backend returned no answer for %s", p.bmc[node]))
-				rows = append(rows, row)
+			if made, ok := told[node]; ok {
+				rows = append(rows, made)
+				continue
 			}
+			failed := bmcResult{Node: node, BMC: p.bmc[node], Via: app.TransportIPMI, State: state, outcome: outcomeSent}
+			failed.fail(err)
+			rows = append(rows, failed)
+		}
+		return rows
+	}
+	answered := map[string]bool{}
+	for _, s := range statuses {
+		answered[s.BMC] = true
+		for _, node := range byBMC[s.BMC] {
+			rows = append(rows, row(node, s))
+		}
+	}
+	// Every node gets a row, even one whose processor the backend answered
+	// for under another spelling.
+	for _, node := range nodes {
+		if !answered[p.bmc[node]] {
+			row := bmcResult{Node: node, BMC: p.bmc[node], Via: app.TransportIPMI, State: "unknown"}
+			row.fail(fmt.Errorf("the IPMI backend returned no answer for %s", p.bmc[node]))
+			rows = append(rows, row)
 		}
 	}
 	return rows
