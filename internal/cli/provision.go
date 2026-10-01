@@ -1142,21 +1142,38 @@ commands that remove it.
 			}); err != nil {
 				return err
 			}
+			// Slurm and the PXE host are asked side by side, since neither
+			// answer depends on the other: one after the other they cost
+			// a round trip before the question. A refusal of Slurm's is
+			// what is reported, as when it was asked first, and ends the
+			// check of the boot paths, which is waited for all the same.
+			paths, stopPaths := context.WithCancel(a.Context())
+			defer stopPaths()
+			var (
+				pathsErr error
+				checking sync.WaitGroup
+			)
+			checking.Go(func() {
+				pathsErr = inStep(paths, "check the boot paths", progress.Hidden, func(ctx context.Context) error {
+					return checkBootLinks(ctx, a, plan.role, plan.root, plan.links)
+				})
+			})
 			if !noReset {
 				if err := checkSlurmIdle(a.Context(), a, ns, ipmi.ActionReset, loseJobs); err != nil {
+					stopPaths()
+					checking.Wait()
 					return err
 				}
+			}
+			checking.Wait()
+			if pathsErr != nil {
+				return pathsErr
 			}
 			details := []string{"everything on these machines is lost", describeBootLinks(plan.links)}
 			if noReset {
 				details = append(details, "the machines are not reset: each one reinstalls at its next network boot")
 			} else {
 				details = append(details, "then each machine is set to boot from the network once and reset through Redfish")
-			}
-			if err := inStep(a.Context(), "check the boot paths", progress.Hidden, func(ctx context.Context) error {
-				return checkBootLinks(ctx, a, plan.role, plan.root, plan.links)
-			}); err != nil {
-				return err
 			}
 			action.Detail = strings.Join(details, "\n  ")
 			if err := a.Gate.Confirm(action); err != nil {
