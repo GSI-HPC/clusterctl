@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -568,5 +569,71 @@ func TestDNSLookupStopsWhenInterrupted(t *testing.T) {
 	}
 	if got := tree(); !strings.Contains(got, "was interrupted before it was answered") || strings.Contains(got, "did not answer within") {
 		t.Errorf("progress:\n%s\nwant the queries cut short to say they were interrupted", got)
+	}
+}
+
+// dns aliases read the reverse entry of each address behind an alias one
+// after the other, and again for every alias that led to the same pool.
+// The addresses are read side by side, each once: the server holds each
+// reverse query a while and counts those it holds at once.
+func TestDNSAliasesReadTheReverseEntriesSideBySide(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		held      int
+		most      int
+		reverse   = map[string]int{}
+		addresses = []string{"10.0.3.1", "10.0.3.2", "10.0.3.3", "10.0.3.4"}
+	)
+	zone := map[string][]dnsmessage.Resource{
+		"submit.hpc.example.org.": {cnameRR("submit.hpc.example.org.", "pool.hpc.example.org.")},
+		"login.hpc.example.org.":  {cnameRR("login.hpc.example.org.", "pool.hpc.example.org.")},
+	}
+	for i, address := range addresses {
+		zone["pool.hpc.example.org."] = append(zone["pool.hpc.example.org."], aRR("pool.hpc.example.org.", address))
+		ptr := fmt.Sprintf("%d.3.0.10.in-addr.arpa.", i+1)
+		zone[ptr] = []dnsmessage.Resource{ptrRR(ptr, fmt.Sprintf("sub%04d.hpc.example.org.", i+1))}
+	}
+	server := (&dnsServer{zone: zone, delay: func(name string) time.Duration {
+		if !strings.HasSuffix(name, ".in-addr.arpa.") {
+			return 0
+		}
+		mu.Lock()
+		held++
+		most = max(most, held)
+		reverse[name]++
+		mu.Unlock()
+		time.Sleep(100 * time.Millisecond)
+		mu.Lock()
+		held--
+		mu.Unlock()
+		return 0
+	}}).serve(t)
+	h, err := run(t, harnessOptions{}, "dns", "aliases", "-o", "json",
+		"--set", "services.dns.server="+server, "--set", `services.dns.aliases=["submit", "login"]`)
+	if err != nil {
+		t.Fatalf("dns aliases failed: %v\n%s", err, h.errOut)
+	}
+	mu.Lock()
+	if most != len(addresses) {
+		t.Errorf("%d reverse entries were read at once, want all %d", most, len(addresses))
+	}
+	for name, n := range reverse {
+		if n != 1 {
+			t.Errorf("%s was asked %d times, want once", name, n)
+		}
+	}
+	mu.Unlock()
+	var got map[string]aliasAnswer
+	if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, h.out)
+	}
+	for _, alias := range []string{"submit.hpc.example.org", "login.hpc.example.org"} {
+		var hosts []string
+		for _, a := range got[alias].Addresses {
+			hosts = append(hosts, a.Hosts...)
+		}
+		if want := "sub0001.hpc.example.org sub0002.hpc.example.org sub0003.hpc.example.org sub0004.hpc.example.org"; strings.Join(hosts, " ") != want {
+			t.Errorf("%s leads to %v, want %s", alias, hosts, want)
+		}
 	}
 }

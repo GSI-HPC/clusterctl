@@ -525,37 +525,82 @@ command, as an alias that does not resolve does.`,
 				return err
 			}
 			domain := a.Namer.Domain("hpc")
+			names := make([]string, len(aliases))
+			for i, alias := range aliases {
+				names[i] = alias
+				if !strings.Contains(alias, ".") && domain != "" {
+					names[i] += "." + domain
+				}
+			}
+
+			// The aliases are resolved side by side, and then the reverse
+			// entry of every address behind them, each address once
+			// however many aliases lead to it: one after the other, an
+			// alias of a login pool asked its every address in a row.
+			ctx := a.Context()
+			limit := a.Bound(a.Spec.Services.DNS.MaxConcurrent)
+			resolved := fanout.Map(ctx, names, fanout.Options[string]{
+				Step:     "resolve the aliases",
+				Limit:    limit,
+				Describe: func(name string) (node, host, role string) { return "", name, "" },
+				PanicLog: a.WorkerDiag,
+			}, func(ctx context.Context, name string) (dnsAnswer, error) {
+				chain, addresses, err := res.lookupHost(ctx, name)
+				return dnsAnswer{CNAMEs: chain, Addresses: addresses}, err
+			})
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			var addresses []string
+			seen := map[string]bool{}
+			for _, o := range resolved {
+				for _, address := range o.Value.Addresses {
+					if o.Err == nil && !seen[address] {
+						seen[address] = true
+						addresses = append(addresses, address)
+					}
+				}
+			}
+			// The reverse lookup turns an address back into the machines
+			// behind the alias, which is the answer that matters here. An
+			// address without a reverse entry is an answer, and no failure.
+			reversed := fanout.Map(ctx, addresses, fanout.Options[string]{
+				Step:     "read the reverse entries",
+				Limit:    limit,
+				Describe: func(address string) (node, host, role string) { return "", address, "" },
+				PanicLog: a.WorkerDiag,
+			}, func(ctx context.Context, address string) ([]string, error) {
+				hosts, err := res.lookupAddr(ctx, address)
+				if errors.Is(err, errNoSuchHost) {
+					err = nil
+				}
+				return hosts, err
+			})
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			reverse := make(map[string]*fanout.Outcome[[]string], len(addresses))
+			for i, address := range addresses {
+				reverse[address] = &reversed[i]
+			}
 
 			t := output.NewTable(output.Cols("ALIAS", "CNAME", "ADDRESS", "HOSTS")...)
 			object := map[string]aliasAnswer{}
 			failed, unread, addressCount := 0, 0, 0
-			for _, alias := range aliases {
-				name := alias
-				if !strings.Contains(name, ".") && domain != "" {
-					name += "." + domain
-				}
-				chain, addresses, err := res.lookupHost(a.Context(), name)
+			for i, name := range names {
+				chain, err := resolved[i].Value.CNAMEs, resolved[i].Err
 				if err != nil {
-					if ctxErr := a.Context().Err(); ctxErr != nil {
-						return ctxErr
-					}
 					t.Add(name, strings.Join(chain, " -> "), "no answer", err.Error())
 					failed++
 					continue
 				}
 				answer := aliasAnswer{CNAMEs: chain}
-				for _, address := range addresses {
-					// The reverse lookup turns an address back into the
-					// machines behind the alias, which is the answer that
-					// matters here.
-					hosts, err := res.lookupAddr(a.Context(), address)
-					entry := aliasAddress{Address: address, Hosts: hosts}
-					shown := strings.Join(hosts, ", ")
-					if err != nil && !errors.Is(err, errNoSuchHost) {
-						if ctxErr := a.Context().Err(); ctxErr != nil {
-							return ctxErr
-						}
-						entry.Error = err.Error()
+				for _, address := range resolved[i].Value.Addresses {
+					found := reverse[address]
+					entry := aliasAddress{Address: address, Hosts: found.Value}
+					shown := strings.Join(found.Value, ", ")
+					if found.Err != nil {
+						entry.Error = found.Err.Error()
 						shown = "no answer: " + entry.Error
 						unread++
 					}
