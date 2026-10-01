@@ -148,9 +148,18 @@ type treeSpan struct {
 	state  progress.State
 	fields progress.Fields
 	parent *treeSpan
-	// children are the open spans started under this one, in the order
-	// they started.
+	// children are the spans started under this one, in the order they
+	// started: the open ones, and those that ended since the list was
+	// last compacted, gone of them, which are left out of it once they
+	// are half. Taking each out as it ended cost a pass over the others,
+	// quadratic in the targets of a step.
 	children []*treeSpan
+	gone     int
+	// calls are the open calls among the children, which the row of a
+	// step looks for among its targets at every frame.
+	calls []*treeSpan
+	// over says the span has ended.
+	over bool
 	// started is when the span started, and ran when it started running.
 	started, ran time.Time
 	// line is the last line of output of the work below a target.
@@ -321,6 +330,9 @@ func (t *Tree) begin(e progress.Event) {
 	}
 	s.parent = p
 	p.children = append(p.children, s)
+	if e.Kind == progress.KindCall {
+		p.calls = append(p.calls, s)
+	}
 	s.underTarget = p.kind == progress.KindTarget || p.underTarget
 	if e.Kind != progress.KindCall && e.Flags&progress.Hidden == 0 {
 		p.drawsBelow = true
@@ -337,11 +349,19 @@ func (t *Tree) begin(e progress.Event) {
 func (t *Tree) end(e progress.Event, s *treeSpan, count progress.Count, counted bool) {
 	delete(t.spans, e.Span)
 	s.fields = e.Fields
+	s.over = true
 	p := s.parent
 	if p == nil {
 		t.roots = slices.DeleteFunc(t.roots, func(r *treeSpan) bool { return r == s })
 	} else {
-		p.children = slices.DeleteFunc(p.children, func(c *treeSpan) bool { return c == s })
+		p.gone++
+		if 2*p.gone > len(p.children) {
+			p.children = slices.DeleteFunc(p.children, func(c *treeSpan) bool { return c.over })
+			p.gone = 0
+		}
+		if s.kind == progress.KindCall {
+			p.calls = slices.DeleteFunc(p.calls, func(c *treeSpan) bool { return c == s })
+		}
 	}
 	switch s.kind {
 	case progress.KindTarget:
@@ -809,6 +829,9 @@ func (f *frame) below(s *treeSpan, depth int) {
 	}
 	var running []*treeSpan
 	for _, c := range s.children {
+		if c.over {
+			continue
+		}
 		if c.kind != progress.KindTarget {
 			f.span(c, depth)
 		} else if c.state == progress.StateRunning {
@@ -868,7 +891,7 @@ func (f *frame) innermost(s *treeSpan) *treeSpan {
 	for cur := s; ; {
 		var next *treeSpan
 		for _, c := range slices.Backward(cur.children) {
-			if c.state == progress.StateRunning && (c.flags&progress.Hidden == 0 || f.now.Sub(c.ran) >= revealAfter) {
+			if !c.over && c.state == progress.StateRunning && (c.flags&progress.Hidden == 0 || f.now.Sub(c.ran) >= revealAfter) {
 				next = c
 				break
 			}
@@ -883,8 +906,8 @@ func (f *frame) innermost(s *treeSpan) *treeSpan {
 // call returns the newest call made for s itself that is running and
 // drawn; nil for none.
 func (f *frame) call(s *treeSpan) *treeSpan {
-	for _, c := range slices.Backward(s.children) {
-		if c.kind == progress.KindCall && c.state == progress.StateRunning &&
+	for _, c := range slices.Backward(s.calls) {
+		if c.state == progress.StateRunning &&
 			(c.flags&progress.Hidden == 0 || f.now.Sub(c.ran) >= revealAfter) {
 			return c
 		}
