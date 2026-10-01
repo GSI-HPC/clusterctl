@@ -42,8 +42,8 @@ func dhcpServer(prefix string) func(transport.Target, transport.Request) (*trans
 		case len(req.Argv) > 0 && req.Argv[0] == "cat":
 			return &transport.Result{Target: tg,
 				Stdout: fmt.Sprintf(dhcpdConf, prefix+".7", prefix+".2")}, nil
-		case strings.Contains(req.Script, "bootlink 0"):
-			return &transport.Result{Target: tg, Stdout: "ok\t0\n"}, nil
+		case req.Script == bootLinkScript:
+			return &transport.Result{Target: tg, Stdout: reportLinks(req)}, nil
 		}
 		return &transport.Result{Target: tg}, nil
 	}

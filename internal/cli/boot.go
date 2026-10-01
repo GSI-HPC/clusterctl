@@ -4,10 +4,12 @@
 package cli
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"net/netip"
@@ -24,7 +26,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
-	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 	"github.com/GSI-HPC/clusterctl/nodeset"
 )
@@ -283,14 +284,13 @@ func checkBootLinks(ctx context.Context, a *app.App, role, root string, links []
 			paths = append(paths, l.Path)
 		}
 	}
-	var script strings.Builder
-	script.WriteString("for p in")
-	for _, p := range paths {
-		script.WriteString(" " + shellquote.Quote(p))
+	stdin, err := linkRecords(len(paths), func(i int) []string { return []string{paths[i]} })
+	if err != nil {
+		return err
 	}
-	script.WriteString("; do [ -f \"$p\" ] || printf '%s\\n' \"$p\"; done\n")
 	result, err := a.ReadOnRole(ctx, role, transport.Request{
-		Script: script.String(),
+		Script: bootPathCheckScript,
+		Stdin:  stdin,
 	})
 	if err != nil {
 		return err
@@ -349,11 +349,23 @@ func readBootLinks(ctx context.Context, a *app.App, role, root string) (map[stri
 	return links, nil
 }
 
+// The scripts that check boot paths and change links are the same for any
+// number of nodes: what they act on comes on standard input. A script is
+// one argument to ssh, which the kernel caps at 128 KiB, and one that
+// carried the nodes outgrew it at a couple of thousand of them, after the
+// confirmation, and a rollback outgrew it before the change it was to undo.
+//
+// Each record is a fixed number of fields, each ending in a NUL, which no
+// path can hold, so a field is read back exactly whatever else it holds.
 // The link scripts try every node and report each one on a line of its
 // own, rather than stopping at the first failure under set -e: a failing
 // line then neither leaves the rest of the set as it was nor goes
-// unreported.
+// unreported, and a record that never arrived leaves its node unreported.
 const (
+	bootPathCheckScript = `while IFS= read -r -d '' p; do
+	[ -f "$p" ] || printf '%s\n' "$p"
+done
+`
 	bootLinkScript = `set -u
 bootlink() {
 	if [ -d "$3" ] && [ ! -L "$3" ]; then
@@ -364,6 +376,9 @@ bootlink() {
 		printf 'fail\t%s\t%s\n' "$1" "$(printf %s "$out" | tr '\t\n' '  ')"
 	fi
 }
+while IFS= read -r -d '' i && IFS= read -r -d '' target && IFS= read -r -d '' link; do
+	bootlink "$i" "$target" "$link"
+done
 `
 	bootUnlinkScript = `set -u
 bootunlink() {
@@ -375,42 +390,70 @@ bootunlink() {
 		printf 'fail\t%s\t%s\n' "$i" "$(printf %s "$out" | tr '\t\n' '  ')"
 	fi
 }
+while IFS= read -r -d '' i && IFS= read -r -d '' once && IFS= read -r -d '' static; do
+	if [ -n "$static" ]; then
+		bootunlink "$i" "$once" "$static"
+	else
+		bootunlink "$i" "$once"
+	fi
+done
 `
 )
+
+// linkRecords renders n records for a link script's standard input, each
+// the fields fields returns for it. A field holding a NUL is refused before
+// anything is sent: it would end the field early and shift every one after
+// it onto the wrong node.
+func linkRecords(n int, fields func(int) []string) (io.Reader, error) {
+	var b bytes.Buffer
+	for i := range n {
+		for _, f := range fields(i) {
+			if strings.ContainsRune(f, 0) {
+				return nil, exitcode.Errorf(exitcode.Usage, "the path %q holds a NUL byte", f)
+			}
+			b.WriteString(f)
+			b.WriteByte(0)
+		}
+	}
+	return &b, nil
+}
 
 // writeBootLinks points the PXE service at each node's boot path and
 // records the outcome in each link.
 func writeBootLinks(ctx context.Context, a *app.App, role, root string, links []bootLink) error {
-	var script strings.Builder
-	script.WriteString(bootLinkScript)
-	for i, l := range links {
-		fmt.Fprintf(&script, "bootlink %d %s %s\n", i, shellquote.Quote(l.Path), shellquote.Quote(linkName(a, root, l)))
+	stdin, err := linkRecords(len(links), func(i int) []string {
+		return []string{strconv.Itoa(i), links[i].Path, linkName(a, root, links[i])}
+	})
+	if err != nil {
+		return err
 	}
-	return runLinkScript(ctx, a, role, script.String(), links, "set")
+	return runLinkScript(ctx, a, role, bootLinkScript, stdin, links, "set")
 }
 
 // removeBootLinks removes the one-shot and the persistent link of each node
 // and records the outcome in each link.
 func removeBootLinks(ctx context.Context, a *app.App, role, root string, links []bootLink) error {
 	suffix := a.Spec.Services.PXESrv.StaticSuffix
-	var script strings.Builder
-	script.WriteString(bootUnlinkScript)
-	for i, l := range links {
-		names := shellquote.Quote(root + "/" + l.Address)
+	stdin, err := linkRecords(len(links), func(i int) []string {
+		once, static := root+"/"+links[i].Address, ""
 		if suffix != "" {
-			names += " " + shellquote.Quote(root+"/"+l.Address+suffix)
+			static = once + suffix
 		}
-		fmt.Fprintf(&script, "bootunlink %d %s\n", i, names)
+		return []string{strconv.Itoa(i), once, static}
+	})
+	if err != nil {
+		return err
 	}
-	return runLinkScript(ctx, a, role, script.String(), links, "removed")
+	return runLinkScript(ctx, a, role, bootUnlinkScript, stdin, links, "removed")
 }
 
-func runLinkScript(ctx context.Context, a *app.App, role, script string, links []bootLink, done string) error {
+func runLinkScript(ctx context.Context, a *app.App, role, script string, stdin io.Reader, links []bootLink, done string) error {
 	for i := range links {
 		links[i].Result, links[i].Error = "unknown", "the PXE host did not report this link"
 	}
 	result, runErr := a.RunOnRole(ctx, role, transport.Request{
 		Script: script,
+		Stdin:  stdin,
 	})
 	if result != nil {
 		for _, line := range result.Lines() {

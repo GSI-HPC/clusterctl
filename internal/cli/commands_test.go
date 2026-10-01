@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -487,24 +488,21 @@ func TestBootStatusReadsTheLinksOnce(t *testing.T) {
 }
 
 func TestBootSetUsesTheClusterRules(t *testing.T) {
+	var links [][]string
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
-		if strings.Contains(req.Script, "bootlink 0") {
+		if req.Script == bootLinkScript {
+			links = linkRecordsOf(req, 3)
 			return &transport.Result{Target: tg, Stdout: "ok\t0\n"}, nil
 		}
 		return &transport.Result{Target: tg}, nil
 	}}
-	h, err := run(t, harnessOptions{recorder: rec, tty: true, stdin: "y\n"}, "boot", "set", "-n", "exe0001")
-	if err != nil {
+	if _, err := run(t, harnessOptions{recorder: rec, tty: true, stdin: "y\n"}, "boot", "set", "-n", "exe0001"); err != nil {
 		t.Fatalf("boot set failed: %v", err)
 	}
-	commands := h.recorder.Commands()
-	if len(commands) == 0 {
-		t.Fatal("nothing was sent")
-	}
 	// The boot path from the cluster rules, linked under the node address.
-	command := commands[len(commands)-1]
-	if want := "bootlink 0 /srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2 /srv/pxesrv/10.0.2.1"; !strings.Contains(command, want) {
-		t.Errorf("command = %q, want it to contain %q", command, want)
+	want := [][]string{{"0", "/srv/pxesrv/boot/cluster/1.0/exe/ipxe.net2", "/srv/pxesrv/10.0.2.1"}}
+	if !slices.EqualFunc(links, want, slices.Equal) {
+		t.Errorf("the links sent are %q, want %q", links, want)
 	}
 }
 
