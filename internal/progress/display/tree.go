@@ -113,13 +113,13 @@ type Tree struct {
 	start       time.Time
 	g           glyphs
 	interrupted <-chan struct{}
-	// counter is drawn in the tree's place on a terminal too small for
-	// it.
-	counter *Counter
 
-	mu    sync.Mutex
-	tally progress.Tally
-	spans map[progress.SpanID]*treeSpan
+	mu sync.Mutex
+	// counts are the tally of the events, which the rows of the steps
+	// read, and the line of a counter drawn from it in the tree's place
+	// on a terminal too small for it.
+	counts counting
+	spans  map[progress.SpanID]*treeSpan
 	// roots are the open spans started under none: the command.
 	roots []*treeSpan
 	// shown says the tree has been drawn, or would have been: the lines
@@ -193,7 +193,6 @@ func NewTree(term *Terminal, o TreeOptions) *Tree {
 	if t.now == nil {
 		t.now = time.Now
 	}
-	t.counter = NewCounter(term, CounterOptions{Now: t.now, ASCII: o.ASCII})
 	t.start = t.now()
 	term.mu.Lock()
 	term.held = t.take
@@ -235,7 +234,12 @@ func (t *Tree) Draw() {
 	t.mu.Unlock()
 	width, height := t.term.dims()
 	if width < treeColumns || height < treeRows {
-		t.counter.Draw()
+		line := func() string {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			return t.counts.line(now, t.start, t.g)
+		}()
+		t.term.draw([]string{line})
 		return
 	}
 	rows := func() []string {
@@ -291,10 +295,9 @@ func (t *Tree) take() string {
 
 // Handle keeps what e changes.
 func (t *Tree) Handle(e progress.Event) {
-	t.counter.Handle(e)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	count, counted := t.tally.Add(e)
+	count, counted := t.counts.add(e)
 	s := t.spans[e.Span]
 	switch e.Type {
 	case progress.TypeStart:
@@ -783,7 +786,7 @@ func (f *frame) span(s *treeSpan, depth int) {
 		if s.kind == progress.KindBatch {
 			text = "batch " + text
 		}
-		if count, ok := f.t.tally.Count(s.id); ok {
+		if count, ok := f.t.counts.tally.Count(s.id); ok {
 			text += "  " + standingOf(count, g)
 			if c := f.call(s); c != nil {
 				text += "  " + f.took(s, c) + "  " + describe(c, nil)
@@ -831,7 +834,7 @@ func (f *frame) header(s *treeSpan) string {
 	select {
 	case <-f.t.interrupted:
 		var running, queued int
-		for _, root := range f.t.tally.Roots() {
+		for _, root := range f.t.counts.tally.Roots() {
 			running += root.Running
 			queued += root.Queued
 		}
