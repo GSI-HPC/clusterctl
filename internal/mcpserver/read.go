@@ -494,11 +494,10 @@ func (s *Server) querySlurm(ctx context.Context, _ *mcp.CallToolRequest, in slur
 		items = partitions[:min(limit, count)]
 	case "summary":
 		state := cmp.Or(in.State, "PENDING")
-		jobs, err := c.Jobs(ctx, slurm.JobFilter{States: upper(state)})
+		rows, _, err := c.JobCounts(ctx, slurm.JobFilter{States: upper(state)})
 		if err != nil {
 			return nil, nil, callError(exitcode.Wrap(exitcode.Transport, err))
 		}
-		rows := slurm.CountJobs(jobs)
 		count = len(rows)
 		items = rows[:min(limit, count)]
 	default:

@@ -623,6 +623,29 @@ func CountJobs(jobs []Job) []JobCount {
 	return out
 }
 
+// JobCounts counts the jobs the filter selects per user, account and
+// partition, as CountJobs does, and returns how many jobs there were. Only
+// the three fields counted by are asked for: the fourteen of Jobs made the
+// summary of a long queue read five or six times as much, and reach the
+// bound on output some 55,000 jobs sooner.
+func (c *Client) JobCounts(ctx context.Context, f JobFilter) ([]JobCount, int, error) {
+	format := newFramed("%u", "%a", "%P")
+	argv := append([]string{"squeue", "--noheader", "--format", format.format()}, f.args()...)
+	result, err := c.read(ctx, argv)
+	if err != nil {
+		return nil, 0, err
+	}
+	records, err := format.records("squeue", result.Stdout)
+	if err != nil {
+		return nil, 0, err
+	}
+	jobs := make([]Job, 0, len(records))
+	for _, f := range records {
+		jobs = append(jobs, Job{User: f[0], Account: f[1], Partition: f[2]})
+	}
+	return CountJobs(jobs), len(jobs), nil
+}
+
 // JobFilter selects which jobs to list.
 type JobFilter struct {
 	States []string
@@ -630,12 +653,9 @@ type JobFilter struct {
 	Nodes  *nodeset.NodeSet
 }
 
-// Jobs lists the jobs in the queue.
-func (c *Client) Jobs(ctx context.Context, f JobFilter) ([]Job, error) {
-	// The working directory and the command line go last; any user writes
-	// them.
-	format := newFramed("%i", "%u", "%a", "%P", "%T", "%N", "%D", "%C", "%l", "%M", "%Q", "%r", "%Z", "%o")
-	argv := []string{"squeue", "--noheader", "--format", format.format()}
+// args are the arguments of squeue that select the jobs of f.
+func (f JobFilter) args() []string {
+	var argv []string
 	if len(f.States) > 0 {
 		argv = append(argv, "--states", strings.Join(f.States, ","))
 	}
@@ -645,6 +665,15 @@ func (c *Client) Jobs(ctx context.Context, f JobFilter) ([]Job, error) {
 	if f.Nodes != nil && !f.Nodes.IsEmpty() {
 		argv = append(argv, "--nodelist", f.Nodes.Hostlist())
 	}
+	return argv
+}
+
+// Jobs lists the jobs in the queue.
+func (c *Client) Jobs(ctx context.Context, f JobFilter) ([]Job, error) {
+	// The working directory and the command line go last; any user writes
+	// them.
+	format := newFramed("%i", "%u", "%a", "%P", "%T", "%N", "%D", "%C", "%l", "%M", "%Q", "%r", "%Z", "%o")
+	argv := append([]string{"squeue", "--noheader", "--format", format.format()}, f.args()...)
 	result, err := c.read(ctx, argv)
 	if err != nil {
 		return nil, err

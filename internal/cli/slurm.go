@@ -372,17 +372,16 @@ before deciding whose work is filling the queue.`,
 		cobra.NoArgs,
 		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, _ []string) error {
 			filter := slurm.JobFilter{States: strings.Split(strings.ToUpper(state), ",")}
-			jobs, err := c.Jobs(a.Context(), filter)
+			counts, total, err := c.JobCounts(a.Context(), filter)
 			if err != nil {
 				return err
 			}
 
-			counts := slurm.CountJobs(jobs)
 			t := output.NewTable(output.Cols("USER", "ACCOUNT", "PARTITION", "JOBS").Right("JOBS")...)
 			for _, n := range counts {
 				t.Add(n.User, n.Account, n.Partition, fmt.Sprint(n.Jobs))
 			}
-			t.Caption = fmt.Sprintf("%d jobs in state %s", len(jobs), state)
+			t.Caption = fmt.Sprintf("%d jobs in state %s", total, state)
 			return a.Print(output.Result{Table: t, Object: counts})
 		}))
 
