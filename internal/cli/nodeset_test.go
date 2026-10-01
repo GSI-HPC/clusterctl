@@ -18,6 +18,7 @@ import (
 // behind: "@rack:R02&$(clusterctl slurm node nodeset idle)" with no idle node
 // used to select the whole rack.
 func TestDanglingOperatorIsAUsageError(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"node", "select", "@rack:R02&", "--expand"},
 		{"node", "select", "exe[1-10]!,exe5"},
@@ -45,6 +46,7 @@ func TestDanglingOperatorIsAUsageError(t *testing.T) {
 // four digits wide, so exec targeted exe0011, a host the inventory does not
 // hold.
 func TestSelectionKeepsTheInventorySpelling(t *testing.T) {
+	t.Parallel()
 	src, err := os.ReadFile(filepath.Join(exampleDir, "inventory.yaml"))
 	if err != nil {
 		t.Fatal(err)

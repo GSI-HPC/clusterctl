@@ -211,6 +211,7 @@ func (c *slurmCluster) node(name string) slurm.Row {
 // 3.4: slurmctld reads ALL as every node and a NodeSet name as its members,
 // while clusterctl previewed each as one host nobody knew.
 func TestSlurmChangesRefuseNamesSlurmExpands(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -245,6 +246,7 @@ func TestSlurmChangesRefuseNamesSlurmExpands(t *testing.T) {
 // 3.4, 2.13: the check reads the cluster for real in a dry run, which still
 // changes nothing.
 func TestSlurmDrainDryRunChecksTheSetAndSendsNothing(t *testing.T) {
+	t.Parallel()
 	cluster := newSlurmCluster()
 	h, err := run(t, harnessOptions{recorder: cluster.recorder()},
 		"slurm", "node", "drain", "ticket 4711: failing DIMM", "-n", "exe[1-2]", "--dry-run")
@@ -270,6 +272,7 @@ func TestSlurmDrainDryRunChecksTheSetAndSendsNothing(t *testing.T) {
 
 // 10.4, 12.1, 2.14: the reason is checked before anything is shown or sent.
 func TestSlurmDrainRefusesBadReasonsBeforeTheGate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		reason string
@@ -313,6 +316,7 @@ func TestSlurmDrainRefusesBadReasonsBeforeTheGate(t *testing.T) {
 
 // 10.4: the reason is quoted in the preview.
 func TestSlurmDrainQuotesTheReason(t *testing.T) {
+	t.Parallel()
 	cluster := newSlurmCluster()
 	h, err := run(t, harnessOptions{tty: true, stdin: "y\n", recorder: cluster.recorder()},
 		"slurm", "node", "drain", `ticket 4711: "failing" DIMM`, "-n", "exe0001")
@@ -331,6 +335,7 @@ func TestSlurmDrainQuotesTheReason(t *testing.T) {
 // 2.15: a forgotten reason must not turn the node names into the reason,
 // and nodes named twice must not silently drop one of the two.
 func TestSlurmDrainRefusesAReasonThatNamesNodes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -366,6 +371,7 @@ func TestSlurmDrainRefusesAReasonThatNamesNodes(t *testing.T) {
 // with which node, could not be given. Only a reason that is nothing but
 // nodes reads as the node argument in the reason's place.
 func TestSlurmDrainKeepsAReasonThatMentionsANode(t *testing.T) {
+	t.Parallel()
 	for _, reason := range []string{
 		"ECC errors on exe0007, ticket 42",
 		"exe0007: failing DIMM",
@@ -388,6 +394,7 @@ func TestSlurmDrainKeepsAReasonThatMentionsANode(t *testing.T) {
 // 4.11: a state group means the state Slurm reports, not every node whose
 // base state or flags sinfo happens to match.
 func TestSlurmStateGroupsMatchTheReportedState(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		group string
 		want  string
@@ -415,6 +422,7 @@ func TestSlurmStateGroupsMatchTheReportedState(t *testing.T) {
 
 // 12.1: a drain reason with a line break must not become rows of its own.
 func TestSlurmOutputCannotBeForgedThroughAReason(t *testing.T) {
+	t.Parallel()
 	cluster := newSlurmCluster()
 	cluster.nodes[4]["E"] = "failing DIMM\nexe[0001-0064]|drained|main|128|0||||x|y\nwlm01|drained|main|128|0||||x|y"
 
@@ -440,6 +448,7 @@ func TestSlurmOutputCannotBeForgedThroughAReason(t *testing.T) {
 
 // 12.6: sinfo prints "none" for no reason, and a reason user with it.
 func TestSlurmNodeListShowsNoReasonForHealthyNodes(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{recorder: newSlurmCluster().recorder()}, "slurm", "node", "list")
 	if err != nil {
 		t.Fatalf("node list failed: %v", err)
@@ -458,6 +467,7 @@ func TestSlurmNodeListShowsNoReasonForHealthyNodes(t *testing.T) {
 // 11.6: Slurm's own message reaches the administrator, and exit codes say
 // who failed.
 func TestSlurmFailuresKeepSlurmsMessageAndTheRightCode(t *testing.T) {
+	t.Parallel()
 	t.Run("a refused update", func(t *testing.T) {
 		cluster := newSlurmCluster()
 		cluster.update = &transport.Result{ExitCode: 1,
@@ -547,6 +557,7 @@ func TestSlurmJobHistoryWindowIsRelative(t *testing.T) {
 
 // 2.13: the directory check reads the cluster for real in a dry run.
 func TestSlurmUserAddDryRunChecksTheDirectory(t *testing.T) {
+	t.Parallel()
 	cluster := newSlurmCluster()
 	h, err := run(t, harnessOptions{recorder: cluster.recorder()}, "slurm", "user", "add", "alice", "proj", "--dry-run")
 	if err != nil && !safety.IsDryRun(err) {
@@ -565,6 +576,7 @@ func TestSlurmUserAddDryRunChecksTheDirectory(t *testing.T) {
 
 // 12.5: the default account given for a user who exists already is set.
 func TestSlurmUserAddSetsTheDefaultAccountOfAnExistingUser(t *testing.T) {
+	t.Parallel()
 	cluster := newSlurmCluster()
 	cluster.associations = "alice|other|other|1\n"
 	h, err := run(t, harnessOptions{tty: true, stdin: "y\n", recorder: cluster.recorder()},
@@ -588,6 +600,7 @@ func TestSlurmUserAddSetsTheDefaultAccountOfAnExistingUser(t *testing.T) {
 // 12.9: the preview says what the defaults resolve to, and the extra
 // association a different default account creates.
 func TestSlurmUserAddPreviewResolvesTheDefaults(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args []string
 		want string
@@ -619,6 +632,7 @@ func TestSlurmUserAddPreviewResolvesTheDefaults(t *testing.T) {
 // 12.9: every accounting change names the cluster, so that it does not
 // reach every cluster the database serves.
 func TestSlurmAccountingChangesNameTheCluster(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args []string
 		sent string
@@ -652,6 +666,7 @@ func TestSlurmAccountingChangesNameTheCluster(t *testing.T) {
 // keeps those it has, while it said "coordinators of proj set", which
 // reads as if they had been replaced.
 func TestSlurmAccountCoordinatorSaysTheUsersWereAdded(t *testing.T) {
+	t.Parallel()
 	cluster := newSlurmCluster()
 	h, err := run(t, harnessOptions{recorder: cluster.recorder()}, "slurm", "account", "coordinator", "proj", "alice", "bob", "-y")
 	if err != nil {
@@ -669,6 +684,7 @@ func TestSlurmAccountCoordinatorSaysTheUsersWereAdded(t *testing.T) {
 // 12.9: sacctmgr expands lists and ranges in names, and getent resolves a
 // number as a UID.
 func TestSlurmAccountingRefusesNamesSacctmgrExpands(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"account", "add", "proj[1-100]"},
 		{"account", "add", "a,b"},

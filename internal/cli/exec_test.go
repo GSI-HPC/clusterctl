@@ -37,6 +37,7 @@ func wantCode(t *testing.T, err error, want int) {
 }
 
 func TestExecChecksProtectedHostsWithoutConfirm(t *testing.T) {
+	t.Parallel()
 	// Not asking is the default for exec, but the protected hosts are not
 	// optional: a plain run and a dry run have to make the same decision.
 	h, err := run(t, harnessOptions{}, "exec", "-n", "exe0001,wlm01", "--", "reboot")
@@ -56,6 +57,7 @@ func TestExecChecksProtectedHostsWithoutConfirm(t *testing.T) {
 }
 
 func TestExecStdinGoesThroughTheGate(t *testing.T) {
+	t.Parallel()
 	script := []string{"--script", "cat > /etc/motd"}
 
 	t.Run("a protected host is refused", func(t *testing.T) {
@@ -112,6 +114,7 @@ func TestExecStdinGoesThroughTheGate(t *testing.T) {
 }
 
 func TestExecNeedsDashBeforeTheCommand(t *testing.T) {
+	t.Parallel()
 	// Without --, the options of the remote command were read as
 	// clusterctl's own: -r became --root and -n replaced the node set.
 	for _, args := range [][]string{
@@ -199,6 +202,7 @@ func (r *failingReader) Read(p []byte) (int, error) {
 }
 
 func TestExecStdinRefusesAFailedRead(t *testing.T) {
+	t.Parallel()
 	script := []string{"exec", "--stdin", "-n", "exe[1-3]", "--script", "cat > /etc/motd"}
 
 	t.Run("an error part way through", func(t *testing.T) {
@@ -246,6 +250,7 @@ func exited(tg transport.Target, code int, stderr string) *transport.Result {
 }
 
 func TestExecExitCodeSaysWhatWentWrong(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		reply func(transport.Target) *transport.Result
@@ -306,6 +311,7 @@ func TestExecExitCodeSaysWhatWentWrong(t *testing.T) {
 }
 
 func TestExecShowsTheNodesOwnError(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		if tg.Name == "exe0003" {
 			return exited(tg, 3, "Unit slurmd.service could not be found.\n"), nil
@@ -322,6 +328,7 @@ func TestExecShowsTheNodesOwnError(t *testing.T) {
 }
 
 func TestResultsTableShowsTheNodesOwnError(t *testing.T) {
+	t.Parallel()
 	tg := transport.Target{Name: "exe0003", Host: "exe0003.hpc.example.org"}
 	table := resultsTable([]*transport.Result{
 		exited(tg, 3, "Unit slurmd.service could not be found.\n"),
@@ -343,6 +350,7 @@ func TestResultsTableShowsTheNodesOwnError(t *testing.T) {
 }
 
 func TestExecEscapesControlCharacters(t *testing.T) {
+	t.Parallel()
 	// A node controls its own output; with CR, cursor movement and OSC 52
 	// it could overwrite another node's line or write the clipboard.
 	const evil = "ok\r\x1b[1Aexe0001: \x1b]52;c;Zm9v\x07evil\x9b2J\u009b\n"
@@ -374,6 +382,7 @@ func TestExecEscapesControlCharacters(t *testing.T) {
 }
 
 func TestExecDedupShowsEachGroupsStatus(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		switch tg.Name {
 		case "exe0003":
@@ -427,6 +436,7 @@ func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 // drawn. They are written 64 KiB at a time, and all of them before a
 // failure is named on standard error.
 func TestExecWritesWhatTheNodesPrintedInFewWrites(t *testing.T) {
+	t.Parallel()
 	lines := strings.Repeat("a line of output\n", 10_000)
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		if tg.Name == "exe0002" {

@@ -37,6 +37,7 @@ func doctorChecks(t *testing.T, opts harnessOptions, args ...string) (map[string
 // was looked for whatever the back end, ipmitool never, and a configured
 // path was looked up by its name in PATH.
 func TestDoctorChecksTheConfiguredIPMIBackend(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	fakeTool(t, bin, "fping", "exit 0\n")
 	fakeTool(t, bin, "ipmipower", "exit 0\n")
@@ -55,6 +56,7 @@ func TestDoctorChecksTheConfiguredIPMIBackend(t *testing.T) {
 }
 
 func TestDoctorFindsTheBackendAtItsPath(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	fakeTool(t, bin, "fping", "exit 0\n")
 	fakeTool(t, bin, "ipmitool", "exit 0\n")
@@ -73,6 +75,7 @@ func TestDoctorFindsTheBackendAtItsPath(t *testing.T) {
 // itself, and it asks the fabric about several ports at once on the fabric
 // host.
 func TestDoctorLooksForXargsWhereItRuns(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, role string
 		args       []string
@@ -105,6 +108,7 @@ func TestDoctorLooksForXargsWhereItRuns(t *testing.T) {
 // for xargs once, and told how many programs it has without counting it
 // twice.
 func TestDoctorLooksForAToolOnceOnARoleThatServesTwice(t *testing.T) {
+	t.Parallel()
 	var (
 		mu     sync.Mutex
 		script string
@@ -128,6 +132,7 @@ func TestDoctorLooksForAToolOnceOnARoleThatServesTwice(t *testing.T) {
 // missing on the fabric host, whose script runs it with -P, and is named
 // with the options it lacks.
 func TestDoctorFindsAnXargsWithoutItsOptionsMissing(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	for _, tool := range []string{"ibportstate", "ibqueryerrors", "ibaddr", "iblinkinfo", "perfquery"} {
 		fakeTool(t, bin, tool, "exit 0\n")
@@ -145,6 +150,7 @@ func TestDoctorFindsAnXargsWithoutItsOptionsMissing(t *testing.T) {
 // dry run makes it for real: a role that answers is ok, and one that does
 // not fails as it would without --dry-run.
 func TestDoctorDryRunChecksTheRoles(t *testing.T) {
+	t.Parallel()
 	var (
 		mu   sync.Mutex
 		sent []transport.Request
@@ -189,6 +195,7 @@ func TestDoctorDryRunChecksTheRoles(t *testing.T) {
 // TestDoctorOpensTheIdentities is the report's 12.11: a directory passed the
 // stat the identity check made.
 func TestDoctorOpensTheIdentities(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	checks, _ := doctorChecks(t, harnessOptions{}, "--set", `workstation.identities=["`+dir+`"]`)
 	got := checks["age identities"]
@@ -200,6 +207,7 @@ func TestDoctorOpensTheIdentities(t *testing.T) {
 // TestDoctorHonoursTheOutputFormatWithoutAConfiguration is the report's
 // 12.11: doctor -o json printed a table when the configuration did not load.
 func TestDoctorHonoursTheOutputFormatWithoutAConfiguration(t *testing.T) {
+	t.Parallel()
 	checks, _ := doctorChecks(t, harnessOptions{bare: true, config: []string{t.TempDir()}})
 	if got := checks["configuration"]; got.Status != statusFail {
 		t.Errorf("configuration = %+v, want failed", got)
@@ -210,6 +218,7 @@ func TestDoctorHonoursTheOutputFormatWithoutAConfiguration(t *testing.T) {
 // misspelt option breaks every connection, and ssh names it only on a line
 // before the last.
 func TestDoctorReportsWhatSSHSaysAboutItsConfiguration(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	fakeTool(t, bin, "ssh", `
 case "$1" in
@@ -267,6 +276,7 @@ func doctorRemoteRows(t *testing.T, h *harness) string {
 // lacks a tool says which, and one whose checks ran out of time answered
 // but is warned about.
 func TestDoctorRemoteAsksEachRoleOnce(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	asked := map[string]int{}
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
@@ -318,6 +328,7 @@ role wlm | ok | wlm01.hpc.example.org
 // and one ssh was stopped for here fail as a role without tools would, and
 // only checks that ran out of time on the host read the role as answered.
 func TestDoctorRemoteFailsARoleWhoseToolsSessionDidNotRun(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		result func(tg transport.Target) *transport.Result
@@ -362,6 +373,7 @@ func TestDoctorRemoteFailsARoleWhoseToolsSessionDidNotRun(t *testing.T) {
 // them. Each session is held until one more than the bound are under way,
 // which never happens while the bound is kept.
 func TestDoctorRemoteKeepsToFourSessionsAHost(t *testing.T) {
+	t.Parallel()
 	site := exampleWith(t, "site.yaml", func(s string) string {
 		var roles strings.Builder
 		for _, r := range []string{"gwa", "gwb", "gwc", "gwd", "gwe", "gwf"} {
@@ -400,6 +412,7 @@ func TestDoctorRemoteKeepsToFourSessionsAHost(t *testing.T) {
 // Once doctor is interrupted no role is asked any more, and each role it
 // did not get to is listed as failed, with the interrupt as the reason.
 func TestDoctorRemoteAsksNothingOnceInterrupted(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {

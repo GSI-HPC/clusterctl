@@ -178,6 +178,7 @@ func ptrRR(name, target string) dnsmessage.Resource {
 // promised that a chain of aliases is shown as it is, and LookupHost returns
 // addresses only.
 func TestDNSLookupShowsTheChainOfAliases(t *testing.T) {
+	t.Parallel()
 	server := fakeDNS(t, map[string][]dnsmessage.Resource{
 		"exe0001.hpc.example.org.":    {cnameRR("exe0001.hpc.example.org.", "exe0001-ib.hpc.example.org.")},
 		"exe0001-ib.hpc.example.org.": {cnameRR("exe0001-ib.hpc.example.org.", "n1.ib.example.org.")},
@@ -205,6 +206,7 @@ func TestDNSLookupShowsTheChainOfAliases(t *testing.T) {
 // resolver answered from /etc/hosts before it asked the configured server,
 // and only the first name of a reverse entry was shown.
 func TestDNSAliasesAskTheServerAndNotTheHostsFile(t *testing.T) {
+	t.Parallel()
 	server := fakeDNS(t, map[string][]dnsmessage.Resource{
 		"submit.hpc.example.org.": {cnameRR("submit.hpc.example.org.", "pool.hpc.example.org.")},
 		"pool.hpc.example.org.": {
@@ -249,6 +251,7 @@ func TestDNSAliasesAskTheServerAndNotTheHostsFile(t *testing.T) {
 // server could not say which machines are in it read as an empty pool. An
 // address without a reverse entry is still not a failure.
 func TestDNSAliasesFailWhenAReverseLookupFails(t *testing.T) {
+	t.Parallel()
 	const failing = "2.3.0.10.in-addr.arpa."
 	for _, tc := range []struct {
 		name   string
@@ -295,6 +298,7 @@ func TestDNSAliasesFailWhenAReverseLookupFails(t *testing.T) {
 // TestDNSServerTakesAnIPv6Address is the report's 12.12: an IPv6 server
 // without brackets or port failed every lookup with "too many colons".
 func TestDNSServerTakesAnIPv6Address(t *testing.T) {
+	t.Parallel()
 	h, _ := run(t, harnessOptions{}, "dns", "lookup", "-n", "exe0001",
 		"--set", "services.dns.server=::1", "--set", "services.dns.timeout=200ms")
 	if strings.Contains(h.out.String()+h.errOut.String(), "too many colons") {
@@ -325,6 +329,7 @@ func TestDNSServerTakesAnIPv6Address(t *testing.T) {
 // with port 53, an IPv6 address in brackets. Comments, other keywords and a
 // nameserver line without an address name none.
 func TestResolvConfServersReadsTheNameserverLines(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		content string
@@ -363,6 +368,7 @@ options ndots:2 timeout:1
 }
 
 func TestReverseNames(t *testing.T) {
+	t.Parallel()
 	for address, want := range map[string]string{
 		"10.0.3.1":    "1.3.0.10.in-addr.arpa.",
 		"2001:db8::1": "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa.",
@@ -378,6 +384,7 @@ func TestReverseNames(t *testing.T) {
 // bmcAddress the bmc commands reach. An address is shown as it is, and
 // marked as not looked up, since no server was asked about it.
 func TestDNSLookupBMCTakesTheInventoryAddress(t *testing.T) {
+	t.Parallel()
 	server := fakeDNS(t, map[string][]dnsmessage.Resource{
 		"exe0004.mgmt.hpc.example.org.": {aRR("exe0004.mgmt.hpc.example.org.", "10.9.0.4")},
 	})
@@ -448,6 +455,7 @@ func TestDNSLookupKeepsToItsLimit(t *testing.T) {
 // answers came in, and a failure and an address that was not looked up keep
 // their place among them.
 func TestDNSLookupListsTheNodesInTheirOrder(t *testing.T) {
+	t.Parallel()
 	s := &dnsServer{
 		zone: map[string][]dnsmessage.Resource{
 			"exe0001.mgmt.hpc.example.org.": {aRR("exe0001.mgmt.hpc.example.org.", "10.9.0.1")},
@@ -489,6 +497,7 @@ exe0004  exe0004.mgmt.hpc.example.org         10.9.0.4
 // Every node's host is worked out before a name is looked up, so a node the
 // naming rules cannot name stops the command before any server is asked.
 func TestDNSLookupNamesEveryNodeBeforeItAsks(t *testing.T) {
+	t.Parallel()
 	s := &dnsServer{}
 	server := s.serve(t)
 	_, err := run(t, harnessOptions{}, "dns", "lookup", "--bmc", "-n", "exe0001,foo1",
@@ -507,6 +516,7 @@ func TestDNSLookupNamesEveryNodeBeforeItAsks(t *testing.T) {
 // call to the server: a name the server does not know is an answer, and
 // one it never answers runs out of time.
 func TestDNSLookupReportsEachName(t *testing.T) {
+	t.Parallel()
 	s := &dnsServer{
 		zone:   map[string][]dnsmessage.Resource{"exe0001.hpc.example.org.": {aRR("exe0001.hpc.example.org.", "10.0.2.1")}},
 		silent: map[string]bool{"exe0003.hpc.example.org.": true},
@@ -577,6 +587,7 @@ func TestDNSLookupStopsWhenInterrupted(t *testing.T) {
 // The addresses are read side by side, each once: the server holds each
 // reverse query a while and counts those it holds at once.
 func TestDNSAliasesReadTheReverseEntriesSideBySide(t *testing.T) {
+	t.Parallel()
 	var (
 		mu        sync.Mutex
 		held      int

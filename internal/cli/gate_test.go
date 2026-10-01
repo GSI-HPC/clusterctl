@@ -48,6 +48,7 @@ func exampleCopy(t *testing.T, replace ...string) string {
 // version of the gate: wlm01 was refused, and its host name, its service
 // processor, its address and WLM01 all reached it.
 func TestProtectedHostIsRefusedUnderEverySpelling(t *testing.T) {
+	t.Parallel()
 	spellings := []string{
 		"wlm01",
 		"wlm01.hpc.example.org",
@@ -88,6 +89,7 @@ func TestProtectedHostIsRefusedUnderEverySpelling(t *testing.T) {
 }
 
 func TestProtectedHostIsNotReachedUnderAnotherSpelling(t *testing.T) {
+	t.Parallel()
 	tests := [][]string{
 		{"bmc", "power", "off", "--ipmi", "-y", "-n", "wlm01.hpc.example.org"},
 		{"exec", "--confirm", "-y", "-n", "wlm01.hpc.example.org", "--", "systemctl", "poweroff"},
@@ -118,6 +120,7 @@ func TestProtectedHostIsNotReachedUnderAnotherSpelling(t *testing.T) {
 // of the same document use host names, and nothing said the other form
 // protected nothing.
 func TestProtectedHostsEntryProtectsTheMachineHoweverItIsWritten(t *testing.T) {
+	t.Parallel()
 	for _, entry := range []string{"wlm01.hpc.example.org", "WLM01", "wlm01.", "wlm1", "10.0.1.1", "wlm01.mgmt.hpc.example.org"} {
 		t.Run(entry, func(t *testing.T) {
 			dir := exampleCopy(t, "      - wlm01\n", "      - "+entry+"\n")
@@ -134,6 +137,7 @@ func TestProtectedHostsEntryProtectsTheMachineHoweverItIsWritten(t *testing.T) {
 }
 
 func TestProtectedHostsEntryThatNamesNoKnownNodeIsRefused(t *testing.T) {
+	t.Parallel()
 	for _, entry := range []string{"wlm02", "wlm01.other.example.org", "wlm0[1-2]"} {
 		t.Run(entry, func(t *testing.T) {
 			dir := exampleCopy(t, "      - wlm01\n", "      - "+entry+"\n")
@@ -159,6 +163,7 @@ func TestProtectedHostsEntryThatNamesNoKnownNodeIsRefused(t *testing.T) {
 // config validate included, failed because the gate parsed it without the
 // group sources.
 func TestProtectedHostsEntryMayBeAGroup(t *testing.T) {
+	t.Parallel()
 	dir := exampleCopy(t, "      - wlm01\n", "      - \"@inventory:wlm\"\n")
 	if _, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "validate"); err != nil {
 		t.Fatalf("config validate refused a group entry: %v", err)
@@ -174,6 +179,7 @@ func TestProtectedHostsEntryMayBeAGroup(t *testing.T) {
 }
 
 func TestProtectedHostsGroupThatCannotBeResolvedRefusesChanges(t *testing.T) {
+	t.Parallel()
 	dir := exampleCopy(t, "      - wlm01\n", "      - \"@inventory:nosuchgroup\"\n")
 	if _, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "validate"); err == nil {
 		t.Error("config validate accepted a protected group that cannot be resolved")
@@ -192,6 +198,7 @@ func TestProtectedHostsGroupThatCannotBeResolvedRefusesChanges(t *testing.T) {
 // A name the inventory does not know may be another spelling of a machine
 // the gate should have recognised, so a change to it has to be forced.
 func TestChangeToANodeTheInventoryDoesNotKnowNeedsForce(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "exec", "--confirm", "-y", "-n", "ghost1", "--", "true")
 	if err == nil {
 		t.Fatal("a change to ghost1, which the inventory does not know, was let through")
@@ -247,6 +254,7 @@ func TestOneMachineNamedTwiceIsOneTarget(t *testing.T) {
 // safety.confirmAbove: 0 read as "always type the count" everywhere but in a
 // Go comment, and did the opposite.
 func TestConfirmAboveZeroAlwaysAsksForTheCount(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{tty: true, stdin: "y\n"},
 		"--set", "safety.confirmAbove=0", "exec", "-n", "exe[0001-0002]", "--confirm", "--", "systemctl", "poweroff")
 	if err == nil {
@@ -267,6 +275,7 @@ func TestConfirmAboveZeroAlwaysAsksForTheCount(t *testing.T) {
 }
 
 func TestSafetyLimitsOutOfRangeAreRefused(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ from, to string }{
 		{"confirmAbove: 8", "confirmAbove: -5"},
 		{"powerOnBatch: 8", "powerOnBatch: 0"},
@@ -294,6 +303,7 @@ func TestSafetyLimitsOutOfRangeAreRefused(t *testing.T) {
 // A change to the accounting database names no node, so the inventory has
 // nothing to say about it.
 func TestAccountingChangeIsNotANodeTheInventoryLacks(t *testing.T) {
+	t.Parallel()
 	rec := (&slurmCluster{}).recorder()
 	h, err := run(t, harnessOptions{recorder: rec}, "slurm", "account", "add", "physics", "-y")
 	if err != nil {
@@ -312,6 +322,7 @@ func TestAccountingChangeIsNotANodeTheInventoryLacks(t *testing.T) {
 // connecting; the schema says so before then, so that config validate
 // reports it.
 func TestHostRoleMustBeAHostAndAUserName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		from, to string
 		valid    bool
@@ -386,6 +397,7 @@ func TestForcedRunNamesTheProtectedHostItLetsThrough(t *testing.T) {
 // exec asks nothing without --confirm, so it has no preview to name the
 // hosts --force lets through in; it names them all the same.
 func TestForcedExecNamesWhatItLetsThrough(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "exec", "--force", "-n", "exe0001,wlm01,ghost1", "--", "true")
 	if err != nil {
 		t.Fatalf("exec --force failed: %v", err)

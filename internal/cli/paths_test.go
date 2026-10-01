@@ -20,6 +20,7 @@ import (
 // could create first with mode 0777, and login printed an ssh -F pointing
 // into it while doctor called it ok. A command now refuses to run.
 func TestAStateDirectoryOthersCanWriteIsRefused(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"state", "cache"} {
 		t.Run(name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "clusterctl")
@@ -137,6 +138,7 @@ func copyExampleWithModes(t *testing.T, mode, fileMode os.FileMode) string {
 // configuration names programs clusterctl runs, and it was read from files
 // and directories anyone could write.
 func TestConfigurationOthersCanWriteIsRefused(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name           string
 		mode, fileMode os.FileMode
@@ -175,6 +177,7 @@ func TestConfigurationOthersCanWriteIsRefused(t *testing.T) {
 // root read a document another user had added, and doctor ran the program it
 // named as ssh.binary.
 func TestAnotherUsersConfigurationIsRefused(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() != 0 {
 		t.Skip("only root can give a file to another user")
 	}
@@ -207,6 +210,7 @@ func TestAnotherUsersConfigurationIsRefused(t *testing.T) {
 // config init wrote into an empty directory another user had created with
 // mode 0777, and told root to export CLUSTERCTL_CONFIG pointing at it.
 func TestConfigInitRefusesADirectoryOthersCanWrite(t *testing.T) {
+	t.Parallel()
 	open := filepath.Join(t.TempDir(), "open")
 	if err := os.Mkdir(open, 0o700); err != nil {
 		t.Fatal(err)
@@ -243,6 +247,7 @@ func TestConfigInitRefusesADirectoryOthersCanWrite(t *testing.T) {
 }
 
 func TestConfigInitRefusesAnotherUsersDirectory(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() != 0 {
 		t.Skip("only root can give a directory to another user")
 	}

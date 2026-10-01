@@ -18,6 +18,7 @@ import (
 // the host key against the site's file and goes through the role's jump
 // hosts, and with the context's account, like every other connection.
 func TestTunnelStartUsesTheGeneratedSSHConfiguration(t *testing.T) {
+	t.Parallel()
 	state := filepath.Join(t.TempDir(), "state dir")
 	h, err := run(t, harnessOptions{stateDir: state}, "tunnel", "start", "ipmi", "--dry-run")
 	if err != nil {
@@ -159,6 +160,7 @@ func TestTunnelStopRefusesAnUnknownName(t *testing.T) {
 // empty. Dropping the exclude would route this machine's own address into the
 // tunnel, so the profile is refused instead.
 func TestTunnelStartRefusesAnExcludeThatExpandsToNothing(t *testing.T) {
+	t.Parallel()
 	extra := t.TempDir()
 	workstation := "apiVersion: clusterctl/v1alpha1\nkind: Workstation\nspec:\n  sopsKeyTypes: [age]\n"
 	if err := os.WriteFile(filepath.Join(extra, "workstation.yaml"), []byte(workstation), 0o600); err != nil {

@@ -24,6 +24,7 @@ var inventoryPositions = regexp.MustCompile(`inventory\.yaml:\d+`)
 // else it said were silently ignored. It names the same host as exe0001, and which of the
 // two the author meant cannot be told, so the inventory is refused.
 func TestInventoryRefusesTwoSpellingsOfOneHost(t *testing.T) {
+	t.Parallel()
 	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
 		return s + "    - nodes: exe1\n      attributes: {class: spare}\n" +
 			"    - nodes: exe2\n      address: 10.0.2.2\n"
@@ -46,6 +47,7 @@ func TestInventoryRefusesTwoSpellingsOfOneHost(t *testing.T) {
 // Report 4.6: one unpadded name next to a padded range made node list
 // dereference a nil node.
 func TestNodeListWithMixedWidths(t *testing.T) {
+	t.Parallel()
 	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
 		return s + "    - nodes: exe11\n      attributes: {class: exe}\n      rack: R02\n"
 	})
@@ -105,6 +107,7 @@ func TestNodeListKeepsToTheSelectionInEveryFormat(t *testing.T) {
 // Report 4.14: an address copied from exe0001 onto exe0002 made a reinstall of
 // exe0002 point exe0001's PXE link at another boot image.
 func TestInventoryRefusesACopiedAddress(t *testing.T) {
+	t.Parallel()
 	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
 		return s + "    - nodes: exe0002\n      address: 10.0.2.1\n"
 	})
@@ -129,6 +132,7 @@ func TestInventoryRefusesACopiedAddress(t *testing.T) {
 // An address that is not an IP address went straight into the name of a
 // link on the PXE server.
 func TestInventoryRefusesAnAddressThatIsNotAnIPAddress(t *testing.T) {
+	t.Parallel()
 	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
 		return strings.Replace(s, "address: 10.0.2.1", "address: ../../etc/x", 1)
 	})
@@ -145,6 +149,7 @@ func TestInventoryRefusesAnAddressThatIsNotAnIPAddress(t *testing.T) {
 // reverted to the rack it inherited, so a power action on the old rack still
 // reached it.
 func TestRackAttributeIsNotOverwritten(t *testing.T) {
+	t.Parallel()
 	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
 		return s + "    - nodes: exe0001\n      attributes: {rack: R05}\n"
 	})
@@ -167,6 +172,7 @@ func TestRackAttributeIsNotOverwritten(t *testing.T) {
 // Report 4.17: node describe exe1 found exe0001 but showed host and service
 // processor names built from exe1, names no acting command uses.
 func TestNodeDescribeUsesTheInventoryName(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "node", "describe", "exe1", "-o", "json")
 	if err != nil {
 		t.Fatalf("node describe failed: %v", err)
@@ -193,6 +199,7 @@ func TestNodeDescribeUsesTheInventoryName(t *testing.T) {
 // node's host name, reported it not in the inventory and showed nothing the
 // inventory says, while node groups found exe0001 from either.
 func TestNodeDescribeFindsEverySpellingOfANode(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"EXE0001", "exe0001.hpc.example.org", "exe0001.mgmt.hpc.example.org", "10.0.2.1"} {
 		t.Run(name, func(t *testing.T) {
 			h, err := run(t, harnessOptions{}, "node", "describe", name, "-o", "json")
@@ -220,6 +227,7 @@ func TestNodeDescribeFindsEverySpellingOfANode(t *testing.T) {
 // Report 12.8: node hw called every failed node unreachable and left it out of
 // -o json altogether, so a script saw fewer nodes and no failure.
 func TestNodeHardwareReportsEveryFailedNode(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		switch tg.Name {
 		case "exe0002":

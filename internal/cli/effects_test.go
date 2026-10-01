@@ -17,6 +17,7 @@ import (
 // step: a new command cannot be added without saying what it does, and an
 // entry cannot outlive its command.
 func TestEveryCommandHasAnEffect(t *testing.T) {
+	t.Parallel()
 	cmd, _ := newRoot(context.Background(), app.Streams{})
 
 	seen := map[string]bool{}
@@ -50,6 +51,7 @@ func TestEveryCommandHasAnEffect(t *testing.T) {
 // TestNothingThatWritesIsMarkedRead spot-checks the commands whose names
 // sound harmless but are not.
 func TestNothingThatWritesIsMarkedRead(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{
 		"bmc power", "hca config set", "slurm account shares", "hostkey refresh",
 		"bmc forget", "exec", "copy", "tunnel start", "login", "mcp serve",

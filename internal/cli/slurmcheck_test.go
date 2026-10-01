@@ -84,6 +84,7 @@ func powerOffIPMI(t *testing.T, rec *transport.Recorder, extra ...string) (*harn
 // Section 3.1 of the September 2026 review: the check was off on every site
 // written by config init, because only the example set safety.slurmAware.
 func TestSlurmCheckIsOnForAFreshConfiguration(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "site-config")
 	if _, err := run(t, harnessOptions{bare: true, config: []string{dir}},
 		"config", "init", dir, "--site", "lab", "--cluster", "alpha", "--domain", "hpc.lab.example"); err != nil {
@@ -320,6 +321,7 @@ func TestSlurmCheckRunsInADryRun(t *testing.T) {
 // Section 3.5: a Redfish reset sent by hand powers a node off as surely as
 // bmc power does.
 func TestRedfishPostResetChecksSlurm(t *testing.T) {
+	t.Parallel()
 	rec := sinfoAnswers("exe0007 allocated\n", 0)
 	_, err := run(t, harnessOptions{recorder: rec}, "bmc", "redfish", "post",
 		"/redfish/v1/Systems/1/Actions/ComputerSystem.Reset", `{"ResetType":"ForceOff"}`, "-n", "exe7", "-y")
@@ -337,6 +339,7 @@ func TestRedfishPostResetChecksSlurm(t *testing.T) {
 // Section 3.6: a set whose host list is longer than one argument may be is
 // still checked, instead of the oversized sinfo call switching the check off.
 func TestSlurmCheckCoversLongHostLists(t *testing.T) {
+	t.Parallel()
 	// Every other node of each rack: no two numbers are adjacent, so even the
 	// folded host list is longer than the 128 KiB one argument may be.
 	odd := make([]string, 0, 1000)

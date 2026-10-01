@@ -21,6 +21,7 @@ import (
 // error, and a dry run is marked as one, with what it only recorded
 // skipped.
 func TestEveryCommandIsTheRootOfItsProgress(t *testing.T) {
+	t.Parallel()
 	hw := &transport.Recorder{ByTarget: map[string]*transport.Result{
 		"exe0001": {Stdout: "Vendor: Example\n"},
 	}}
@@ -72,6 +73,7 @@ command exec [dry-run]: ok
 // failed with says, as report tells it, and so does a step whose targets
 // the interrupt ended.
 func TestAnInterruptedCommandEndsCanceled(t *testing.T) {
+	t.Parallel()
 	watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	ctx, cancel := context.WithCancel(watched)
 	defer cancel()
@@ -96,6 +98,7 @@ func TestAnInterruptedCommandEndsCanceled(t *testing.T) {
 // An interactive command hands the terminal to another program, so it
 // reports nothing, not even itself.
 func TestAnInteractiveCommandReportsNothing(t *testing.T) {
+	t.Parallel()
 	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	if _, err := run(t, harnessOptions{ctx: ctx}, "login", "--dry-run", "install", "--", "uptime"); err != nil {
 		t.Fatalf("login --dry-run failed: %v", err)
@@ -109,6 +112,7 @@ func TestAnInteractiveCommandReportsNothing(t *testing.T) {
 // interactive one; a command that only holds others runs in none, since
 // it only prints its help.
 func TestEveryLeafButAnInteractiveOneRunsInASpan(t *testing.T) {
+	t.Parallel()
 	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
 	r := &root{ctx: ctx}
 	ran := map[string]bool{}

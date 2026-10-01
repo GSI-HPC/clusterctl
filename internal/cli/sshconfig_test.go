@@ -109,6 +109,7 @@ func TestSSHChecksHostKeysAgainstTheSiteFileAlone(t *testing.T) {
 // 6.2: the state directory is per user. Another context, --config tree or
 // --set must never rewrite the file a running process connects with.
 func TestEachConfigurationGetsItsOwnSSHConfig(t *testing.T) {
+	t.Parallel()
 	state := t.TempDir()
 	first := generatedSSHConfig(t, harnessOptions{stateDir: state}, "--context", "cluster1")
 	before, err := os.ReadFile(first)
@@ -145,6 +146,7 @@ func TestAMultiLineRoleDescriptionKeepsSSHWorking(t *testing.T) {
 }
 
 func TestALineBreakInAnSSHValueIsAUsageError(t *testing.T) {
+	t.Parallel()
 	for _, set := range []string{
 		`hosts.wlm.user="root\nStrictHostKeyChecking no"`,
 		`hosts.wlm.host="wlm01.hpc.example.org\nUser root"`,
@@ -202,6 +204,7 @@ func TestTheUsersOwnSSHConfigIsInEffect(t *testing.T) {
 // 6.7: ADR 0017 puts the configuration under ~/Library/Application Support
 // on macOS. ssh splits an unquoted value on the space.
 func TestAHostKeyFileWithASpaceIsWrittenAsOnePath(t *testing.T) {
+	t.Parallel()
 	known := filepath.Join(t.TempDir(), "Application Support", "clusterctl", "ssh-known-hosts")
 	config := generatedSSHConfig(t, harnessOptions{}, "--set", `ssh.knownHostsFile="`+known+`"`)
 	data, err := os.ReadFile(config)
@@ -259,6 +262,7 @@ func TestANodeNamedLikeARoleDoesNotLogInWithTheRoleAccount(t *testing.T) {
 // 6.9: ssh follows a jump cycle by starting hops without end. It is a
 // configuration error, found before anything is started.
 func TestAProxyJumpCycleIsAUsageError(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"--set", "hosts.mgmt.proxyJump=dhcp", "config", "validate"},
 		{"--set", "hosts.mgmt.proxyJump=dhcp", "login", "-T", "mgmt", "--", "true"},
@@ -281,6 +285,7 @@ func TestAProxyJumpCycleIsAUsageError(t *testing.T) {
 // 6.12: an include is a configured path like any other, resolved against
 // the Site directory; a pattern is left for ssh.
 func TestSSHIncludesAreResolvedAgainstTheSiteDirectory(t *testing.T) {
+	t.Parallel()
 	config := generatedSSHConfig(t, harnessOptions{}, "--set", `ssh.include=["ssh_config.d/*.conf"]`)
 	data, err := os.ReadFile(config)
 	if err != nil {
@@ -296,6 +301,7 @@ func TestSSHIncludesAreResolvedAgainstTheSiteDirectory(t *testing.T) {
 }
 
 func TestSSHOptionsThatWouldBeIgnoredAreRefused(t *testing.T) {
+	t.Parallel()
 	for _, set := range []string{
 		`hosts.login.options={StrictHostKeyChecking: "no"}`,
 		`hosts.login.options={Match: all}`,

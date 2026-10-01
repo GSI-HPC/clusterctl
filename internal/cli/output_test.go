@@ -25,6 +25,7 @@ import (
 // expression was compiled only when the result was printed, after the
 // command had run on the nodes.
 func TestBadQueryIsRejectedBeforeTheCommandRuns(t *testing.T) {
+	t.Parallel()
 	for _, spec := range []string{"jq=.[", "jsonpath={.[*].target.name}"} {
 		rec := &transport.Recorder{}
 		_, err := run(t, harnessOptions{recorder: rec}, "exec", "-n", "exe0001", "-o", spec, "--", "touch", "/tmp/flag")
@@ -44,6 +45,7 @@ func TestBadQueryIsRejectedBeforeTheCommandRuns(t *testing.T) {
 // TestExecJQSelectsFailingTargets covers review finding 12.3 with the idiom
 // the manual documents.
 func TestExecJQSelectsFailingTargets(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		if tg.Name == "exe0002" {
 			return &transport.Result{Target: tg, ExitCode: 1}, nil
@@ -67,6 +69,7 @@ func TestExecJQSelectsFailingTargets(t *testing.T) {
 // server met it: read_command runs version with the call's context, and a
 // jq program that never ends kept running after the client gave up.
 func TestJQStopsWithTheCommand(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"version", "-o", "jq=last(repeat(1))"},
 		{"config", "init", "--dry-run", "-o", "jq=last(repeat(1))", "--site", "lab"},
@@ -104,6 +107,7 @@ func TestJQStopsWithTheCommand(t *testing.T) {
 // vendor[1-2] and slurm job list the ids of the jobs, with exit 0, and a
 // command that printed no table printed nothing and succeeded.
 func TestNodeFormatsRefuseAnOutputThatListsNoNodes(t *testing.T) {
+	t.Parallel()
 	jobs := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, Stdout: slurm.Render(req,
 			slurm.Row{"i": "4711", "u": "alice", "T": "RUNNING", "N": "exe0001"})}, nil
@@ -146,6 +150,7 @@ func TestNodeFormatsRefuseAnOutputThatListsNoNodes(t *testing.T) {
 // no nodes refuses -o nodeset and -o name before it acts, as it refuses a jq
 // program that does not compile.
 func TestNodeFormatsAreRefusedBeforeAChange(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"nodeset", "name"} {
 		for _, dryRun := range []bool{true, false} {
 			t.Run(fmt.Sprintf("config init -o %s, dry run %t", format, dryRun), func(t *testing.T) {

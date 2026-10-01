@@ -12,6 +12,7 @@ import (
 // bmc.ipmi.passwordTransport, which nothing read, is no setting any more,
 // and bmc.order accepted any word, which then meant Redfish.
 func TestBMCSettingsTheCodeDoesNotKeepAreRefused(t *testing.T) {
+	t.Parallel()
 	for _, edit := range []func(string) string{
 		func(s string) string {
 			return strings.Replace(s, "driver: LAN_2_0", "driver: LAN_2_0\n      passwordTransport: file", 1)

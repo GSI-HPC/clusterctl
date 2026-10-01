@@ -133,6 +133,7 @@ spec:
 // Report 4.2: a cached exec source answered one cluster's lookups from the
 // other cluster's cache, with no remote call.
 func TestGroupCacheIsKeptPerCluster(t *testing.T) {
+	t.Parallel()
 	cache := t.TempDir()
 	site := siteWithCluster2(t, cluster2WithSlurm)
 
@@ -177,6 +178,7 @@ func TestGroupCacheIsKeptPerCluster(t *testing.T) {
 // Report 4.9: a bare @group fell through to another source when the default
 // one could not be asked, and printed that source's nodes with exit 0.
 func TestBareGroupDoesNotFallThroughOnAFailure(t *testing.T) {
+	t.Parallel()
 	answering := &transport.Recorder{Reply: fakeSinfo(map[string]string{
 		"main": "exe[0001-0010]", "compute": "exe[0001-0002]",
 	})}
@@ -205,6 +207,7 @@ func TestBareGroupDoesNotFallThroughOnAFailure(t *testing.T) {
 // A source that answers that it does not have a group still lets the search
 // go on, which is what a bare @group is for.
 func TestBareGroupFallsThroughWhenASourceHasNoSuchGroup(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: fakeSinfo(map[string]string{"main": "exe[0001-0010]"})}
 	h, err := run(t, harnessOptions{recorder: rec}, "node", "select", "@infra")
 	if err != nil {
@@ -227,6 +230,7 @@ func TestBareGroupFallsThroughWhenASourceHasNoSuchGroup(t *testing.T) {
 // Report 11.5: an unreachable group source host exited 2, as if the command
 // line were wrong.
 func TestUnreachableGroupSourceExitsAsATransportFailure(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"exec", "-n", "@slurm:main", "--", "uptime"},
 		{"bmc", "power", "off", "-n", "@slurm:main", "--dry-run"},
@@ -245,6 +249,7 @@ func TestUnreachableGroupSourceExitsAsATransportFailure(t *testing.T) {
 // A group source whose command fails on a host that answered is a failure
 // on that host, not a mistake on the command line.
 func TestFailingGroupCommandKeepsItsMessage(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{
 			Target: tg, ExitCode: 1,
@@ -265,6 +270,7 @@ func TestFailingGroupCommandKeepsItsMessage(t *testing.T) {
 // Report 4.10: one unreachable exec source hid the memberships every other
 // source had found, and node describe exited 0.
 func TestNodeGroupsKeepsWhatTheOtherSourcesFound(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args []string
 		want []string
@@ -297,6 +303,7 @@ func TestNodeGroupsKeepsWhatTheOtherSourcesFound(t *testing.T) {
 // Report 4.19: the help used @idle and @drained, which no source provides.
 // Every group an example names has to resolve against the example site.
 func TestHelpExamplesNameGroupsThatExist(t *testing.T) {
+	t.Parallel()
 	cmd := NewRootCommand(context.Background(), app.Streams{})
 	var texts []string
 	var walk func(*cobra.Command)
@@ -339,6 +346,7 @@ func TestHelpExamplesNameGroupsThatExist(t *testing.T) {
 // Report 4.16: an exec source without a role was documented to run on the
 // workstation, which nothing does. The configuration now says so.
 func TestExecGroupSourceRequiresARole(t *testing.T) {
+	t.Parallel()
 	site := siteWithCluster2(t, strings.Replace(cluster2WithSlurm, "          role: login\n", "", 1))
 	_, err := run(t, harnessOptions{bare: true, config: []string{site}}, "config", "validate")
 	if err == nil {
@@ -353,6 +361,7 @@ func TestExecGroupSourceRequiresARole(t *testing.T) {
 // node groups looked the name up as typed, so another spelling of the node
 // missed the memberships its inventory name has.
 func TestNodeGroupsFindsTheMachineOfAnySpelling(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "node", "groups", "exe0001", "-o", "json")
 	if err != nil {
 		t.Fatalf("node groups exe0001 failed: %v", err)
@@ -377,6 +386,7 @@ func TestNodeGroupsFindsTheMachineOfAnySpelling(t *testing.T) {
 // NODE is one node, and a name that is not a host name is refused before
 // any source is asked about it.
 func TestNodeGroupsRefusesWhatIsNotOneNode(t *testing.T) {
+	t.Parallel()
 	for _, arg := range []string{"exe[0001-0002]", "-exe0001", "exe0001;id", " "} {
 		h, err := run(t, harnessOptions{}, "node", "groups", "--", arg)
 		if err == nil {
@@ -399,6 +409,7 @@ func TestNodeGroupsRefusesWhatIsNotOneNode(t *testing.T) {
 // way, which never happens while the bound is kept. The rows keep the
 // order of the listing.
 func TestNodeGroupsLooksUpTheGroupsSideBySide(t *testing.T) {
+	t.Parallel()
 	partitions := map[string]string{}
 	var want []string
 	for i := range 8 {

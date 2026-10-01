@@ -104,6 +104,7 @@ func TestTheEnvironmentAppliesWithoutNodesFlag(t *testing.T) {
 
 // A repeated -n is refused rather than all but the last being dropped.
 func TestTheNodesFlagIsGivenOnce(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"bmc", "power", "off", "-n", "exe0001", "-n", "exe0002", "--dry-run"},
 		{"bmc", "power", "off", "-n", "exe0001", "-n", "", "--dry-run"},
@@ -124,6 +125,7 @@ func TestTheNodesFlagIsGivenOnce(t *testing.T) {
 // A node set given both as an argument and with -n is refused rather than
 // the argument silently replacing -n.
 func TestANodeSetArgumentAndTheNodesFlagContradict(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"bmc", "power", "off", "-n", "exe0001", "exe0002", "--dry-run"},
 		{"bmc", "power", "off", "-n", "exe0001", "exe0002", "-y"},

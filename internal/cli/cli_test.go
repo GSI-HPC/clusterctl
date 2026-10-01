@@ -95,7 +95,7 @@ func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.
 		// command reports.
 		ctx, _ = progresstest.Checked(ctx, t, byExitCode)
 	}
-	cmd := NewRootCommand(ctx, streams)
+	cmd, root := newRoot(ctx, streams)
 	cmd.SetOut(h.out)
 	cmd.SetErr(h.errOut)
 	var args0 []string
@@ -110,7 +110,7 @@ func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.
 	cmd.SetArgs(append(args0, args...))
 
 	// The root holds the flags; reach it to install the fake transport.
-	h.root = builtRoots[cmd]
+	h.root = root
 	h.root.runner = h.recorder
 	h.streams = streams
 
@@ -180,6 +180,7 @@ type harnessOptions struct {
 // rootOf digs the root state out of a built command tree.
 
 func TestVersionPrintsProvenance(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "version")
 	if err != nil {
 		t.Fatalf("version failed: %v", err)
@@ -190,6 +191,7 @@ func TestVersionPrintsProvenance(t *testing.T) {
 }
 
 func TestConfigValidateAcceptsTheExample(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "config", "validate")
 	if err != nil {
 		t.Fatalf("config validate failed: %v", err)
@@ -200,6 +202,7 @@ func TestConfigValidateAcceptsTheExample(t *testing.T) {
 }
 
 func TestConfigExplainNamesTheLayerAndLine(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "config", "explain", "fanout.max")
 	if err != nil {
 		t.Fatalf("config explain failed: %v", err)
@@ -219,6 +222,7 @@ func TestConfigExplainNamesTheLayerAndLine(t *testing.T) {
 }
 
 func TestNodeSelectEvaluatesGroupsAndOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args []string
 		want string
@@ -245,6 +249,7 @@ func TestNodeSelectEvaluatesGroupsAndOperators(t *testing.T) {
 }
 
 func TestNodeFQDNAppliesTheNamingRules(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "node", "fqdn", "-n", "exe[1-3]")
 	if err != nil {
 		t.Fatalf("node fqdn failed: %v", err)
@@ -263,6 +268,7 @@ func TestNodeFQDNAppliesTheNamingRules(t *testing.T) {
 }
 
 func TestExecSendsTheArgumentVectorUnchanged(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "exec", "-n", "exe[1-2]", "--", "echo", "*.log", "it's")
 	if err != nil {
 		t.Fatalf("exec failed: %v", err)
@@ -282,6 +288,7 @@ func TestExecSendsTheArgumentVectorUnchanged(t *testing.T) {
 }
 
 func TestExecReportsFailingNodes(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		if tg.Name == "exe0002" {
 			return &transport.Result{Target: tg, ExitCode: 3, Stderr: "no such file\n"}, nil
@@ -299,6 +306,7 @@ func TestExecReportsFailingNodes(t *testing.T) {
 }
 
 func TestExecDedupCollapsesIdenticalAnswers(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		out := "5.14.0\n"
 		if tg.Name == "exe0004" {
@@ -320,6 +328,7 @@ func TestExecDedupCollapsesIdenticalAnswers(t *testing.T) {
 }
 
 func TestExecRequiresACommand(t *testing.T) {
+	t.Parallel()
 	_, err := run(t, harnessOptions{}, "exec", "-n", "exe1")
 	if err == nil {
 		t.Fatal("exec with nothing to run should be refused")
@@ -328,6 +337,7 @@ func TestExecRequiresACommand(t *testing.T) {
 }
 
 func TestSelectionIsRequired(t *testing.T) {
+	t.Parallel()
 	_, err := run(t, harnessOptions{}, "exec", "--", "true")
 	if err == nil {
 		t.Fatal("exec without a node set should be refused")
@@ -338,6 +348,7 @@ func TestSelectionIsRequired(t *testing.T) {
 }
 
 func TestDestructiveCommandRefusesWithoutATerminal(t *testing.T) {
+	t.Parallel()
 	// A power action in a script must not go ahead unasked, even on a node
 	// Slurm reports idle.
 	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "exe0001 idle\n"}}}
@@ -351,6 +362,7 @@ func TestDestructiveCommandRefusesWithoutATerminal(t *testing.T) {
 }
 
 func TestDestructiveCommandRefusesProtectedHosts(t *testing.T) {
+	t.Parallel()
 	_, err := run(t, harnessOptions{tty: true, stdin: "y\n"}, "bmc", "power", "off", "-n", "wlm01", "-y")
 	if err == nil {
 		t.Fatal("a protected host should be refused")
@@ -390,6 +402,7 @@ func TestDryRunChangesNothing(t *testing.T) {
 }
 
 func TestSlurmNodeListParsesTheClientOutput(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, Stdout: slurm.Render(req,
 			slurm.Row{"N": "exe0001", "T": "idle", "R": "main", "c": "128", "E": "none", "u": "Unknown"},
@@ -410,6 +423,7 @@ func TestSlurmNodeListParsesTheClientOutput(t *testing.T) {
 }
 
 func TestSlurmDrainNeedsAReasonAndConfirmation(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{tty: true, stdin: "y\n", recorder: newSlurmCluster().recorder()},
 		"slurm", "node", "drain", "ticket 4711: failing DIMM", "-n", "exe0007")
 	if err != nil {
@@ -439,6 +453,7 @@ func TestSlurmDrainNeedsAReasonAndConfirmation(t *testing.T) {
 }
 
 func TestOutputFormats(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"json", "yaml", "nodeset", "name"} {
 		t.Run(format, func(t *testing.T) {
 			h, err := run(t, harnessOptions{}, "node", "list", "-o", format, "exe[1-2]")
@@ -459,6 +474,7 @@ func TestOutputFormats(t *testing.T) {
 }
 
 func TestUnknownContextIsReported(t *testing.T) {
+	t.Parallel()
 	_, err := run(t, harnessOptions{}, "--context", "nope", "config", "view")
 	if err == nil {
 		t.Fatal("an unknown context should be reported")
@@ -469,6 +485,7 @@ func TestUnknownContextIsReported(t *testing.T) {
 }
 
 func TestSetOverridesConfiguration(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "--set", "fanout.max=3", "config", "explain", "fanout.max")
 	if err != nil {
 		t.Fatalf("config explain failed: %v", err)
@@ -485,6 +502,7 @@ func TestSetOverridesConfiguration(t *testing.T) {
 }
 
 func TestHostkeyListReadsTheConfiguredFile(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "hostkey", "list")
 	if err != nil {
 		t.Fatalf("hostkey list failed: %v", err)
@@ -495,6 +513,7 @@ func TestHostkeyListReadsTheConfiguredFile(t *testing.T) {
 }
 
 func TestTunnelStartDryRunShowsTheCommand(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "tunnel", "start", "ipmi", "--dry-run")
 	if err != nil {
 		t.Fatalf("tunnel start --dry-run failed: %v", err)
@@ -508,6 +527,7 @@ func TestTunnelStartDryRunShowsTheCommand(t *testing.T) {
 }
 
 func TestDHCPHostsUsesTheParsedConfiguration(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Responses: []*transport.Result{{
 		Stdout: "host exe0001 {\n  hardware ethernet aa:bb:cc:11:22:33;\n  fixed-address 10.0.1.1;\n" +
 			"  filename \"/srv/pxesrv/boot/exe/ipxe.net2\";\n}\n",
@@ -525,6 +545,7 @@ func TestDHCPHostsUsesTheParsedConfiguration(t *testing.T) {
 }
 
 func TestDoctorReportsWhatItChecked(t *testing.T) {
+	t.Parallel()
 	h, _ := run(t, harnessOptions{}, "doctor")
 	out := h.out.String()
 	for _, want := range []string{"configuration", "ssh client", "checks"} {
@@ -535,6 +556,7 @@ func TestDoctorReportsWhatItChecked(t *testing.T) {
 }
 
 func TestHelpForEveryCommand(t *testing.T) {
+	t.Parallel()
 	// Every command has to describe itself, because the help text is the
 	// only documentation at the terminal.
 	cmd := NewRootCommand(context.Background(), app.Streams{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})

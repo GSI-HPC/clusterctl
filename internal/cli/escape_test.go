@@ -33,6 +33,7 @@ func wantNoRaw(t *testing.T, name, stream string) {
 // controls or the line separator, so a node could still show its answer in
 // another order than it has, or start what looks like a line of its own.
 func TestExecEscapesBidiControlsAndLineSeparators(t *testing.T) {
+	t.Parallel()
 	const evil = "ok\u202eevil\u2028exe0001: fine\u2066\n"
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		if tg.Name == "exe0002" {
@@ -59,6 +60,7 @@ func TestExecEscapesBidiControlsAndLineSeparators(t *testing.T) {
 // bidirectional controls, the line separator and bytes that are not UTF-8 as
 // they were.
 func TestFailingGroupCommandEscapesItsMessage(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{
 			Target: tg, ExitCode: 1,
@@ -79,6 +81,7 @@ func TestFailingGroupCommandEscapesItsMessage(t *testing.T) {
 // Follow-up #79: report printed every error with %v, so text an error quoted
 // from a node, a BMC or a group source reached the terminal as it was.
 func TestReportEscapesTheError(t *testing.T) {
+	t.Parallel()
 	const osc52 = "\x1b]52;c;Zm9v\x07"
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return nil, exitcode.Errorf(exitcode.Transport, "%s: ssh: %s\u202e\r", tg, osc52)
@@ -97,6 +100,7 @@ func TestReportEscapesTheError(t *testing.T) {
 // list of problems of a configuration file, and keeps the exit code, also
 // when the command was interrupted.
 func TestReportKeepsLinesAndExitCode(t *testing.T) {
+	t.Parallel()
 	err := exitcode.Wrap(exitcode.Usage,
 		errors.New("site.yaml is not valid:\n  first \x1b[2J\n  second\u2028"))
 	var out strings.Builder
@@ -126,6 +130,7 @@ func TestReportKeepsLinesAndExitCode(t *testing.T) {
 // nodes asked for, and a node's root sets the description the fabric tools
 // print.
 func TestInfrastructureOutputIsEscaped(t *testing.T) {
+	t.Parallel()
 	const evil = "first \x1b]52;c;Zm9v\x07\u202e\nsecond\r\u2028\n"
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		out := evil
@@ -160,6 +165,7 @@ func TestInfrastructureOutputIsEscaped(t *testing.T) {
 // Follow-up #79: the default account sacctmgr reports for a user reached the
 // preview of slurm user add as it was.
 func TestSlurmUserAddPreviewEscapesWhatSlurmSaid(t *testing.T) {
+	t.Parallel()
 	cluster := newSlurmCluster()
 	cluster.associations = "alice|other|oth\x1b[2J\u202eer|1\n"
 	h, _ := run(t, harnessOptions{recorder: cluster.recorder()},

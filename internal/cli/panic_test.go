@@ -23,6 +23,7 @@ import (
 // command does not exit 0. The stack goes to the command's diagnostics,
 // which are its standard error unless the front end says otherwise.
 func TestAPanicOnOneNodeFailsOnlyThatNode(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		if tg.Name == "exe0002" {
 			panic("index out of range [3] with length 3")
@@ -80,6 +81,7 @@ func TestAPanicInAHostKeyScanFailsOnlyThatHost(t *testing.T) {
 // to answer, and the other node is written. The push exits 1, and the
 // stack goes to standard error.
 func TestAPanicWritingTheSecretsOfANodeFailsOnlyThatNode(t *testing.T) {
+	t.Parallel()
 	dir, _ := secretSite{values: bmcSecret, identities: true, secrets: twoSecretFiles}.write(t)
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if tg.Name == "exe0002" {

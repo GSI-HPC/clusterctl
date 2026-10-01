@@ -38,6 +38,7 @@ func wantProtected(t *testing.T, opts harnessOptions, args ...string) {
 // Review 9.1: an override in the nested form merges key by key, like every
 // other mapping, instead of replacing the whole section.
 func TestOverrideMappingMergesKeyByKey(t *testing.T) {
+	t.Parallel()
 	dir := configtest.WriteFiles(t, map[string]string{
 		"override.yaml": contextOverride("      safety: {confirmAbove: 4}\n"),
 	})
@@ -77,6 +78,7 @@ func TestOverrideMappingMergesKeyByKey(t *testing.T) {
 // Review 9.1: an override value is checked against the schema before it is
 // applied, so a null cannot erase a section.
 func TestOverrideValueIsValidated(t *testing.T) {
+	t.Parallel()
 	for name, body := range map[string]string{
 		"null section":  "      safety: null\n",
 		"wrong type":    "      safety.confirmAbove: many\n",
@@ -101,6 +103,7 @@ func TestOverrideValueIsValidated(t *testing.T) {
 // Review 9.2: an override key that differs from a field only in case is
 // refused, not matched without regard to case or dropped.
 func TestOverrideKeysAreCaseSensitive(t *testing.T) {
+	t.Parallel()
 	dir := configtest.WriteFiles(t, map[string]string{
 		"override.yaml": contextOverride("      safety.protectedhosts: []\n      fanout.Max: 2\n"),
 	})
@@ -138,6 +141,7 @@ func TestOverrideKeysAreCaseSensitive(t *testing.T) {
 // Review 9.3: a second document of the same kind and name is an error that
 // names both, rather than replacing the first.
 func TestDuplicateDocumentsAreRefused(t *testing.T) {
+	t.Parallel()
 	dir := configtest.CopyDir(t, exampleDir)
 	site, err := os.ReadFile(filepath.Join(dir, "site.yaml"))
 	if err != nil {
@@ -164,6 +168,7 @@ func TestDuplicateDocumentsAreRefused(t *testing.T) {
 // Review 9.3: only a later Config document may redefine a context; one
 // document that names a context twice is a mistake.
 func TestContextNamedTwiceInOneDocumentIsRefused(t *testing.T) {
+	t.Parallel()
 	dir := configtest.WriteFiles(t, map[string]string{"extra.yaml": "apiVersion: clusterctl/v1alpha1\nkind: Config\ncontexts:\n" +
 		"  - name: lab\n    cluster: cluster1\n  - name: lab\n    cluster: cluster2\n"})
 	_, err := run(t, harnessOptions{config: []string{dir}}, "config", "validate")
@@ -175,6 +180,7 @@ func TestContextNamedTwiceInOneDocumentIsRefused(t *testing.T) {
 // Review 9.6: a cluster written by config init takes the nodes of its own
 // site only, also when another site is loaded with it.
 func TestConfigInitPinsTheInventory(t *testing.T) {
+	t.Parallel()
 	a := filepath.Join(t.TempDir(), "a")
 	b := filepath.Join(t.TempDir(), "b")
 	if _, err := run(t, harnessOptions{bare: true, config: []string{a}},
@@ -244,6 +250,7 @@ func TestConfigInitRefusesToShadowTheSearchPath(t *testing.T) {
 // Review 9.10: config explain reports the value the commands use and the
 // line a context wrote it on.
 func TestConfigExplainCoversFlagsAndContexts(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "--fanout", "4", "config", "explain", "fanout.max")
 	if err != nil {
 		t.Fatalf("config explain failed: %v", err)
@@ -270,6 +277,7 @@ func TestConfigExplainCoversFlagsAndContexts(t *testing.T) {
 // Review 9.11: a key with a dot in it, such as a static group rack.R01,
 // stays one key when the layers are merged.
 func TestDottedKeysStayOneKey(t *testing.T) {
+	t.Parallel()
 	dir := configtest.CopyDir(t, exampleDir)
 	cluster := filepath.Join(dir, "cluster.yaml")
 	data, err := os.ReadFile(cluster)
@@ -295,6 +303,7 @@ func TestDottedKeysStayOneKey(t *testing.T) {
 
 // Review 9.11: use-context prints lines that can be pasted as they are.
 func TestConfigUseContextQuotesTheName(t *testing.T) {
+	t.Parallel()
 	dir := configtest.WriteFiles(t, map[string]string{"extra.yaml": "apiVersion: clusterctl/v1alpha1\nkind: Config\n" +
 		"contexts:\n  - name: \"it's; yes\"\n    cluster: cluster1\n"})
 	h, err := run(t, harnessOptions{config: []string{dir}}, "config", "use-context", "it's; yes")
@@ -315,6 +324,7 @@ func TestConfigUseContextQuotesTheName(t *testing.T) {
 // Review 9.11: config init reports a directory it cannot use as a usage
 // error, not as a failed target.
 func TestConfigInitFailsWithUsageLocally(t *testing.T) {
+	t.Parallel()
 	file := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -329,6 +339,7 @@ func TestConfigInitFailsWithUsageLocally(t *testing.T) {
 // Review 9.12: a field that no code reads is not accepted, so that setting
 // it is not mistaken for having an effect.
 func TestFieldsNothingReadsAreRefused(t *testing.T) {
+	t.Parallel()
 	for _, set := range []string{"safety.requireReason=false", "slurm.json=true", "slurm.partitions=[main]"} {
 		_, err := run(t, harnessOptions{}, "--set", set, "config", "validate")
 		if err == nil || !strings.Contains(err.Error(), "unknown field") {
@@ -342,6 +353,7 @@ func TestFieldsNothingReadsAreRefused(t *testing.T) {
 // resolved its nodes through its own naming rules. With two sites loaded it
 // is refused instead, by the commands and by config validate.
 func TestClusterNamingNoInventoryNeverReadsAnotherSite(t *testing.T) {
+	t.Parallel()
 	a := filepath.Join(t.TempDir(), "a")
 	b := filepath.Join(t.TempDir(), "b")
 	if _, err := run(t, harnessOptions{bare: true, config: []string{a}},
@@ -417,6 +429,7 @@ func TestClusterNamingNoInventoryNeverReadsAnotherSite(t *testing.T) {
 // used to read it as an empty value, which the key's type check refused
 // as null, or not at all for a key that takes null.
 func TestSetWithoutAValueIsRefused(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"--set", "ssh.binary", "config", "view"},
 		{"--set", "ssh.binary", "mcp", "serve"},
@@ -434,6 +447,7 @@ func TestSetWithoutAValueIsRefused(t *testing.T) {
 // --fanout 0, which every other command refuses, and read it as no --fanout
 // at all.
 func TestFanoutBelowOneIsRefusedByMCPServe(t *testing.T) {
+	t.Parallel()
 	for _, value := range []string{"0", "-1"} {
 		for _, args := range [][]string{
 			{"--fanout", value, "config", "view"},
@@ -453,6 +467,7 @@ func TestFanoutBelowOneIsRefusedByMCPServe(t *testing.T) {
 // defaults.yaml gives these values, and the commands use them as they are,
 // so an empty one or a zero is refused rather than read as "the default".
 func TestValuesDefaultsGiveCannotBeEmptied(t *testing.T) {
+	t.Parallel()
 	for _, set := range []string{
 		`services.dhcp.configPath=""`,
 		`services.cinc.binary=""`,

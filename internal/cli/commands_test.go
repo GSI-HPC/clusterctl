@@ -22,6 +22,7 @@ import (
 )
 
 func TestConfigContextsMarksTheCurrentOne(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "config", "contexts")
 	if err != nil {
 		t.Fatalf("config contexts failed: %v", err)
@@ -33,6 +34,7 @@ func TestConfigContextsMarksTheCurrentOne(t *testing.T) {
 }
 
 func TestConfigUseContextExplainsWhatToChange(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "config", "use-context", "cluster2")
 	if err != nil {
 		t.Fatalf("config use-context failed: %v", err)
@@ -50,6 +52,7 @@ func TestConfigUseContextExplainsWhatToChange(t *testing.T) {
 }
 
 func TestConfigSchemaIsUsableByAnEditor(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "config", "schema", "Site")
 	if err != nil {
 		t.Fatalf("config schema failed: %v", err)
@@ -71,6 +74,7 @@ func TestConfigSchemaIsUsableByAnEditor(t *testing.T) {
 // "// Kind" line, which no JSON reader takes, so config schema | jq .Site
 // failed.
 func TestConfigSchemaOfEveryKindIsOneJSONObject(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "config", "schema")
 	if err != nil {
 		t.Fatalf("config schema failed: %v", err)
@@ -90,6 +94,7 @@ func TestConfigSchemaOfEveryKindIsOneJSONObject(t *testing.T) {
 }
 
 func TestConfigViewPrintsTheMergedConfiguration(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "config", "view", "-o", "yaml")
 	if err != nil {
 		t.Fatalf("config view failed: %v", err)
@@ -114,6 +119,7 @@ func TestConfigViewPrintsTheMergedConfiguration(t *testing.T) {
 // administrator runs: init, then the commands the next steps name, against
 // nothing but what init wrote.
 func TestConfigInitWritesAConfigurationThatResolves(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "site-config")
 	h, err := run(t, harnessOptions{bare: true, config: []string{dir}},
 		"config", "init", dir,
@@ -216,6 +222,7 @@ func TestConfigInitDefaultsToTheUserConfigDirectory(t *testing.T) {
 }
 
 func TestConfigInitSaysHowToReadAnotherDirectory(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "elsewhere")
 	h, err := run(t, harnessOptions{}, "config", "init", dir)
 	if err != nil {
@@ -287,6 +294,7 @@ func TestConfigInitRefusesSeveralPlaces(t *testing.T) {
 // TestConfigInitRefusesADirectoryThatIsNotEmpty keeps init from writing next
 // to anything it did not write, and from writing over it.
 func TestConfigInitRefusesADirectoryThatIsNotEmpty(t *testing.T) {
+	t.Parallel()
 	const content = "# already here\n"
 	for _, name := range []string{"mine.yaml", "README.md", ".sops.yaml", ".git"} {
 		t.Run(name, func(t *testing.T) {
@@ -337,6 +345,7 @@ func TestConfigInitRefusesADirectoryThatIsNotEmpty(t *testing.T) {
 }
 
 func TestConfigInitDryRunWritesNothing(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "site-config")
 	h, err := run(t, harnessOptions{}, "config", "init", dir, "--dry-run")
 	if err != nil {
@@ -351,6 +360,7 @@ func TestConfigInitDryRunWritesNothing(t *testing.T) {
 }
 
 func TestConfigInitRejectsWhatCannotBeWritten(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "site-config")
 	for _, args := range [][]string{
 		{"--domain", "hpc example.org"},
@@ -380,6 +390,7 @@ func TestConfigInitRejectsWhatCannotBeWritten(t *testing.T) {
 }
 
 func TestNodeDescribeShowsNamesAndGroups(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "node", "describe", "exe0001")
 	if err != nil {
 		t.Fatalf("node describe failed: %v", err)
@@ -396,6 +407,7 @@ func TestNodeDescribeShowsNamesAndGroups(t *testing.T) {
 }
 
 func TestNodeAttrsAndRack(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "node", "attrs")
 	if err != nil {
 		t.Fatalf("node attrs failed: %v", err)
@@ -429,6 +441,7 @@ func TestNodeAttrsAndRack(t *testing.T) {
 }
 
 func TestNodeGroupsListsTheSources(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "node", "groups")
 	if err != nil {
 		t.Fatalf("node groups failed: %v", err)
@@ -450,6 +463,7 @@ func TestNodeGroupsListsTheSources(t *testing.T) {
 }
 
 func TestNodeHardwareParsesWhatTheNodesReport(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg,
 			Stdout: "Vendor|Model X|Board Co|B1|BIOS Co|2.1|2026-01-01|MT4123 [ConnectX-6]"}, nil
@@ -471,6 +485,7 @@ func TestNodeHardwareParsesWhatTheNodesReport(t *testing.T) {
 }
 
 func TestBootStatusReadsTheLinksOnce(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, Stdout: "10.0.2.1\t/srv/pxesrv/boot/exe/ipxe.net2\n"}, nil
 	}}
@@ -488,6 +503,7 @@ func TestBootStatusReadsTheLinksOnce(t *testing.T) {
 }
 
 func TestBootSetUsesTheClusterRules(t *testing.T) {
+	t.Parallel()
 	var links [][]string
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if req.Script == bootLinkScript {
@@ -507,6 +523,7 @@ func TestBootSetUsesTheClusterRules(t *testing.T) {
 }
 
 func TestBootGrubShowsTheHexadecimalName(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "boot", "grub", "show", "exe0001")
 	if err != nil {
 		t.Fatalf("boot grub show failed: %v", err)
@@ -518,6 +535,7 @@ func TestBootGrubShowsTheHexadecimalName(t *testing.T) {
 }
 
 func TestFabricGUIDDerivesFromTheHardwareAddress(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "fabric", "guid", "-n", "exe0001")
 	if err != nil {
 		t.Fatalf("fabric guid failed: %v", err)
@@ -529,6 +547,7 @@ func TestFabricGUIDDerivesFromTheHardwareAddress(t *testing.T) {
 }
 
 func TestHCALinkParsesTheAdapterState(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, Stdout: "mlx5_0|Active|LinkUp|200 Gb/sec (4X HDR)\n"}, nil
 	}}
@@ -544,6 +563,7 @@ func TestHCALinkParsesTheAdapterState(t *testing.T) {
 }
 
 func TestSecretsListShowsWhereEachFileLands(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "secrets", "list")
 	if err != nil {
 		t.Fatalf("secrets list failed: %v", err)
@@ -557,6 +577,7 @@ func TestSecretsListShowsWhereEachFileLands(t *testing.T) {
 }
 
 func TestCincShowReadsTheNodeConfiguration(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg,
 			Stdout: "CHEF_RECIPE_URL=http://installer/cinc/latest.tgz\nCHEF_RUN_LIST=role[exe]\n"}, nil
@@ -573,6 +594,7 @@ func TestCincShowReadsTheNodeConfiguration(t *testing.T) {
 }
 
 func TestCincConfigSendsTheFileOverStdin(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{tty: true, stdin: "y\n"},
 		"cinc", "config", "http://installer/cinc/latest.tgz", "-n", "exe0001", "--run-list", "role[exe]")
 	if err != nil {
@@ -592,6 +614,7 @@ func TestCincConfigSendsTheFileOverStdin(t *testing.T) {
 }
 
 func TestSlurmPartitionAndAccounts(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg,
 			Stdout: "main|up|all|10|1-00:00:00|01:00:00|515000|128|0/128/0/128|exe[0001-0010]\n"}, nil
@@ -621,6 +644,7 @@ func TestSlurmPartitionAndAccounts(t *testing.T) {
 // and that which partition is the default is still said: as a field of its
 // own in JSON, and as a column in the table.
 func TestSlurmPartitionNamesTheDefaultApart(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, Stdout: "" +
 			"main*|up|all|10|1-00:00:00|01:00:00|515000|128|0/128/0/128|exe[0001-0010]\n" +
@@ -651,6 +675,7 @@ func TestSlurmPartitionNamesTheDefaultApart(t *testing.T) {
 }
 
 func TestSlurmJobSummaryCountsPerUser(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, Stdout: slurm.Render(req,
 			slurm.Row{"i": "1", "u": "alice", "a": "proj", "P": "main", "T": "PENDING"},
@@ -670,6 +695,7 @@ func TestSlurmJobSummaryCountsPerUser(t *testing.T) {
 }
 
 func TestSlurmUserAddChecksTheDirectoryFirst(t *testing.T) {
+	t.Parallel()
 	// getent answering nothing means the cluster does not know the account.
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, ExitCode: 2}, nil
@@ -683,6 +709,7 @@ func TestSlurmUserAddChecksTheDirectoryFirst(t *testing.T) {
 }
 
 func TestPDUListDerivesTheNames(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "pdu", "list")
 	if err != nil {
 		t.Fatalf("pdu list failed: %v", err)
@@ -693,6 +720,7 @@ func TestPDUListDerivesTheNames(t *testing.T) {
 }
 
 func TestCopyRequiresADirectoryWhenDownloadingFromMany(t *testing.T) {
+	t.Parallel()
 	_, err := run(t, harnessOptions{tty: true, stdin: "y\n"},
 		"copy", "-n", "exe[1-4]", "--download", "/var/log/messages", "./here")
 	if err == nil {
@@ -704,6 +732,7 @@ func TestCopyRequiresADirectoryWhenDownloadingFromMany(t *testing.T) {
 }
 
 func TestExecScriptAndCommandContradict(t *testing.T) {
+	t.Parallel()
 	_, err := run(t, harnessOptions{}, "exec", "-n", "exe1", "--script", "true", "--", "false")
 	if err == nil {
 		t.Fatal("a script and a command at once should be refused")
@@ -711,6 +740,7 @@ func TestExecScriptAndCommandContradict(t *testing.T) {
 }
 
 func TestLoginRejectsTheJumpFlag(t *testing.T) {
+	t.Parallel()
 	// A jump host is configuration, not a flag: a role that needs one says
 	// so in the site document, and every command then uses it.
 	_, err := run(t, harnessOptions{}, "login", "mgmt", "-J", "other")
@@ -723,6 +753,7 @@ func TestLoginRejectsTheJumpFlag(t *testing.T) {
 }
 
 func TestBMCWebPrintsTheURL(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "bmc", "web", "exe0001")
 	if err != nil {
 		t.Fatalf("bmc web failed: %v", err)
@@ -733,6 +764,7 @@ func TestBMCWebPrintsTheURL(t *testing.T) {
 }
 
 func TestBMCForgetRemovesAPin(t *testing.T) {
+	t.Parallel()
 	_, set := pinFile(t, "exe0001.mgmt.hpc.example.org")
 	h, err := run(t, harnessOptions{}, append(set, "bmc", "forget", "-y", "exe0001")...)
 	if err != nil {
@@ -744,6 +776,7 @@ func TestBMCForgetRemovesAPin(t *testing.T) {
 }
 
 func TestSecretsCheckReadsTheSecretsWithoutAKey(t *testing.T) {
+	t.Parallel()
 	h, err := run(t, harnessOptions{}, "secrets", "check")
 	if err != nil {
 		t.Fatalf("secrets check failed: %v", err)
@@ -794,6 +827,7 @@ func decryptableSecret(t *testing.T) string {
 }
 
 func TestSecretsPushStreamsASecretRef(t *testing.T) {
+	t.Parallel()
 	dir := decryptableSecret(t)
 
 	h, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "secrets", "check", "--decrypt")
@@ -845,6 +879,7 @@ contexts:
 // A table names its wide and right-aligned columns, and a name that is not
 // one of its columns panics. These are the tables no other test renders.
 func TestTablesThatNameTheirColumnsRender(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		rec  *transport.Recorder
 		args []string
@@ -867,6 +902,7 @@ func TestTablesThatNameTheirColumnsRender(t *testing.T) {
 // script asking for JSON got the raw text. They now give the lines as a
 // list in the machine formats.
 func TestRawOutputFollowsTheFormat(t *testing.T) {
+	t.Parallel()
 	rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
 		return &transport.Result{Target: tg, Stdout: "first\nsecond \x1b[2J\n"}, nil
 	}}

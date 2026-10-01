@@ -353,6 +353,7 @@ func TestAnEventLogTheVariableNamesFailsNothing(t *testing.T) {
 // command ends as it would without it, and one line says the log stops
 // short.
 func TestAnEventLogThatCannotBeWrittenFailsNothing(t *testing.T) {
+	t.Parallel()
 	const full = "/dev/full"
 	if _, err := os.Stat(full); err != nil {
 		t.Skipf("no %s to fill: %v", full, err)
