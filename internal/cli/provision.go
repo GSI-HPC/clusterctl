@@ -1258,11 +1258,11 @@ func (p *reinstallPlan) run(ctx context.Context, a *app.App, noReset bool) error
 		const forgetting = "forgetting the host keys"
 		err := inStep(ctx, forgetting, 0, func(ctx context.Context) error {
 			return hostkeys.Modify(ctx, p.knownHosts, func(f *hostkeys.File) error {
+				var names []string
 				for _, n := range p.nodes {
-					for _, name := range n.hostNames {
-						f.Remove(name)
-					}
+					names = append(names, n.hostNames...)
 				}
+				f.RemoveAll(names)
 				return nil
 			})
 		})

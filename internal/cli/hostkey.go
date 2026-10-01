@@ -278,10 +278,11 @@ for this command to decide which.`,
 
 			t := output.NewTable(output.Cols("HOST", "STATUS", "DETAIL")...)
 			changed, missing, revoked := 0, 0, 0
+			index := file.Index()
 			for _, host := range slices.Sorted(maps.Keys(found)) {
-				known := file.Find(host)
+				known := index.Find(host)
 				switch {
-				case anyRevoked(file, host, found[host]):
+				case anyRevoked(index, host, found[host]):
 					// ssh refuses a revoked key whatever else the file
 					// says, so a match beside it is no match.
 					revoked++
@@ -358,16 +359,21 @@ changed without a reinstall is worth understanding before it is trusted.`,
 			written := 0
 			refused := map[string]bool{}
 			err = hostkeys.Modify(a.Context(), path, func(f *hostkeys.File) error {
+				// Replacing host keys leaves the revocations as they are,
+				// so one index of the file answers for every host.
+				index := f.Index()
+				var replace []string
 				for _, host := range slices.Sorted(maps.Keys(found)) {
 					// A revoked key is never written back as trusted, and
 					// the entry already there stays as it is.
-					if anyRevoked(f, host, found[host]) {
+					if anyRevoked(index, host, found[host]) {
 						refused[host] = true
 						continue
 					}
-					f.Replace(host, found[host])
+					replace = append(replace, host)
 					written += len(found[host])
 				}
+				f.ReplaceAll(replace, func(host string) []hostkeys.Entry { return found[host] })
 				return nil
 			})
 			if err != nil {
@@ -433,6 +439,12 @@ its service processor's.`,
 			removed := 0
 			t := output.NewTable(output.Cols("HOST", "REMOVED")...)
 			err = hostkeys.Modify(a.Context(), path, func(f *hostkeys.File) error {
+				// Each node's names, the host name and then the short one,
+				// go in one pass over the file.
+				var (
+					names  []string
+					shorts []int
+				)
 				for _, node := range ns.Expand() {
 					var name string
 					if bmc {
@@ -443,12 +455,24 @@ its service processor's.`,
 					if err != nil {
 						return err
 					}
-					n := f.Remove(name)
+					names = append(names, name)
 					// A short name may have been written before the naming
 					// rules were in place. It is the node's own name, so
 					// its key is the node's, whatever --bmc says.
+					shorts = append(shorts, -1)
 					if !bmc {
-						n += f.Remove(node)
+						names = append(names, node)
+						shorts[len(shorts)-1] = len(names) - 1
+					}
+				}
+				counts := f.RemoveAll(names)
+				i := 0
+				for _, short := range shorts {
+					name, n := names[i], counts[i]
+					i++
+					if short >= 0 {
+						n += counts[short]
+						i++
 					}
 					removed += n
 					t.Add(name, fmt.Sprint(n))
@@ -489,8 +513,14 @@ key of its host but one ssh refuses from it.`,
 		}))
 }
 
+// revocations is a host key file, or an index of one, that can say whether
+// it revokes a key.
+type revocations interface {
+	Revoked(host string, key hostkeys.Entry) bool
+}
+
 // anyRevoked reports whether the file revokes a key a host offers.
-func anyRevoked(f *hostkeys.File, host string, found []hostkeys.Entry) bool {
+func anyRevoked(f revocations, host string, found []hostkeys.Entry) bool {
 	for _, e := range found {
 		if f.Revoked(host, e) {
 			return true

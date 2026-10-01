@@ -22,6 +22,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -303,42 +304,99 @@ func (f *File) Revoked(host string, key Entry) bool {
 // wildcard also covers other hosts, and a revocation or a certificate
 // authority is a decision someone made on purpose, so neither is touched.
 func (f *File) Remove(host string) int {
-	n, _ := f.remove(host)
-	return n
+	return f.RemoveAll([]string{host})[0]
 }
 
-// remove drops the host keys naming a host and returns the notes of the lines
-// that went entirely.
-func (f *File) remove(host string) (int, []string) {
+// RemoveAll drops the host keys naming each of the hosts, as Remove would one
+// host after another, in one pass over the file, and reports how many went
+// for each. A line naming two of them counts for both.
+func (f *File) RemoveAll(hosts []string) []int {
+	counts, _ := f.removeAll(hosts)
+	return counts
+}
+
+// removeAll drops the host keys naming any of the hosts, in one pass over
+// the file. For each host it returns how many lines it changed and the notes
+// of the lines that went entirely because of it, which are the notes of a
+// line that went once the last of its hosts in the order given had: what
+// removing them one after another in that order would have returned. A host
+// given again, in another case or not, changes nothing the second time.
+func (f *File) removeAll(hosts []string) ([]int, [][]string) {
+	counts := make([]int, len(hosts))
+	notes := make([][]string, len(hosts))
+	first := make(map[string]int, len(hosts))
+	var hashedHosts []string
+	for i, h := range hosts {
+		lower := strings.ToLower(h)
+		if _, ok := first[lower]; !ok {
+			first[lower] = i
+			hashedHosts = append(hashedHosts, lower)
+		}
+	}
+	// named returns the host of the list a pattern names, by its first
+	// place in the list.
+	named := func(pattern string) (int, bool) {
+		if strings.HasPrefix(pattern, "!") || strings.ContainsAny(pattern, "*?") {
+			return 0, false
+		}
+		if strings.HasPrefix(pattern, hashPrefix) {
+			for _, h := range hashedHosts {
+				if matchHashed(pattern, h) {
+					return first[h], true
+				}
+			}
+			return 0, false
+		}
+		i, ok := first[strings.ToLower(pattern)]
+		return i, ok
+	}
+
 	kept := f.Entries[:0]
-	removed := 0
-	var notes []string
 	for _, e := range f.Entries {
 		if !e.IsHostKey() {
 			kept = append(kept, e)
 			continue
 		}
-		var rest []string
-		for _, h := range e.Hosts {
-			if !names(h, host) {
-				rest = append(rest, h)
+		var (
+			rest []string
+			hit  []int
+		)
+		for j, pattern := range e.Hosts {
+			i, ok := named(pattern)
+			if !ok {
+				if hit != nil {
+					rest = append(rest, pattern)
+				}
+				continue
+			}
+			if hit == nil {
+				// Only a line that names one of the hosts is copied.
+				rest = append([]string(nil), e.Hosts[:j]...)
+			}
+			if !slices.Contains(hit, i) {
+				hit = append(hit, i)
 			}
 		}
-		switch {
-		case len(rest) == len(e.Hosts):
+		if hit == nil {
 			kept = append(kept, e)
-		case len(rest) == 0:
-			notes = append(notes, e.Notes...)
-			removed++
-		default:
-			// A line covering several hosts keeps the others.
-			e.Hosts = rest
-			kept = append(kept, e)
-			removed++
+			continue
 		}
+		for _, i := range hit {
+			counts[i]++
+		}
+		if len(rest) == 0 {
+			last := slices.Max(hit)
+			notes[last] = append(notes[last], e.Notes...)
+			continue
+		}
+		// A line covering several hosts keeps the others.
+		e.Hosts = rest
+		kept = append(kept, e)
 	}
+	// What was cut off the end is cleared, so that it holds on to nothing.
+	clear(f.Entries[len(kept):])
 	f.Entries = kept
-	return removed, notes
+	return counts, notes
 }
 
 // Add puts a host key in, replacing one of the same host and type and keeping
@@ -360,13 +418,137 @@ func (f *File) Add(e Entry) {
 // Replace puts a host's current keys in place of the ones the file holds for
 // it, and carries the notes written above the old keys over to the new ones.
 func (f *File) Replace(host string, entries []Entry) {
-	_, notes := f.remove(host)
-	for i, e := range entries {
-		if i == 0 && len(e.Notes) == 0 {
-			e.Notes = notes
-		}
-		f.Add(e)
+	f.ReplaceAll([]string{host}, func(string) []Entry { return entries })
+}
+
+// ReplaceAll puts the current keys of each host, which keys returns, in place
+// of the ones the file holds for it, as Replace would one host after another
+// in the order given, with one pass over the file.
+func (f *File) ReplaceAll(hosts []string, keys func(host string) []Entry) {
+	_, notes := f.removeAll(hosts)
+	// Of a host given twice, the keys given last are the ones that stay,
+	// with what the first removal found above the old ones.
+	last := make(map[string]int, len(hosts))
+	for i, h := range hosts {
+		last[strings.ToLower(h)] = i
 	}
+	for i, h := range hosts {
+		lower := strings.ToLower(h)
+		if j := last[lower]; j != i {
+			notes[j] = append(notes[i], notes[j]...)
+		}
+	}
+	// No host key the file held before names a host of the list any more,
+	// so a key of one of them replaces only a key added here.
+	added := map[[2]string]int{}
+	for i, h := range hosts {
+		if last[strings.ToLower(h)] != i {
+			continue
+		}
+		for j, e := range keys(h) {
+			if j == 0 && len(e.Notes) == 0 {
+				e.Notes = notes[i]
+			}
+			if len(e.Hosts) == 0 {
+				f.Entries = append(f.Entries, e)
+				continue
+			}
+			name := strings.ToLower(e.Hosts[0])
+			if _, listed := last[name]; !listed {
+				f.Add(e)
+				continue
+			}
+			key := [2]string{name, e.Type}
+			if k, ok := added[key]; ok {
+				if len(e.Notes) == 0 {
+					e.Notes = f.Entries[k].Notes
+				}
+				f.Entries[k] = e
+				continue
+			}
+			added[key] = len(f.Entries)
+			f.Entries = append(f.Entries, e)
+		}
+	}
+}
+
+// Index finds the entries of a file that cover a host without reading every
+// one, for a command that asks about many hosts. It holds what the file held
+// when it was made, and a change to the file after is not in it.
+type Index struct {
+	entries []Entry
+	// literal maps a host name, in lower case, to the entries a pattern of
+	// which is that name, plain.
+	literal map[string][]int
+	// other holds the entries with a pattern that is hashed, a wildcard or
+	// negated, which are read for every host.
+	other []int
+}
+
+// Index makes an index of the file as it is.
+func (f *File) Index() *Index {
+	x := &Index{entries: slices.Clone(f.Entries), literal: map[string][]int{}}
+	for i, e := range x.entries {
+		plain := true
+		for _, pattern := range e.Hosts {
+			if strings.HasPrefix(pattern, "!") || strings.HasPrefix(pattern, hashPrefix) || strings.ContainsAny(pattern, "*?") {
+				plain = false
+				continue
+			}
+			name := strings.ToLower(pattern)
+			if seen := x.literal[name]; len(seen) == 0 || seen[len(seen)-1] != i {
+				x.literal[name] = append(seen, i)
+			}
+		}
+		if !plain {
+			x.other = append(x.other, i)
+		}
+	}
+	return x
+}
+
+// candidates returns, in the file's order, the entries that may cover a host:
+// those naming it plainly and those whose patterns have to be matched.
+func (x *Index) candidates(host string) []int {
+	named := x.literal[strings.ToLower(host)]
+	out := make([]int, 0, len(named)+len(x.other))
+	i, j := 0, 0
+	for i < len(named) || j < len(x.other) {
+		switch {
+		case j == len(x.other) || (i < len(named) && named[i] < x.other[j]):
+			out = append(out, named[i])
+			i++
+		case i == len(named) || x.other[j] < named[i]:
+			out = append(out, x.other[j])
+			j++
+		default:
+			out = append(out, named[i])
+			i++
+			j++
+		}
+	}
+	return out
+}
+
+// Find is File.Find.
+func (x *Index) Find(host string) []Entry {
+	var out []Entry
+	for _, i := range x.candidates(host) {
+		if e := x.entries[i]; e.IsHostKey() && e.Matches(host) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// Revoked is File.Revoked.
+func (x *Index) Revoked(host string, key Entry) bool {
+	for _, i := range x.candidates(host) {
+		if e := x.entries[i]; e.Marker == MarkerRevoked && e.Key == key.Key && e.Matches(host) {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads a known_hosts file, treating a missing file as empty.
