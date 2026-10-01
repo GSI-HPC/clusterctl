@@ -132,3 +132,68 @@ func TestFramesDoNotFoldALargeSetEachTime(t *testing.T) {
 			large, large/max(small, 1))
 	}
 }
+
+// The tree found the row of a failure by comparing its text with that of
+// every row before it, so a fan-out whose targets each failed their own way
+// cost time quadratic in them. Thirty times as many such failures have to
+// cost about thirty times as much.
+func TestFailuresOfTheirOwnCostWhatTheyNumber(t *testing.T) {
+	if raceDetector {
+		t.Skip("the costs are measured without the race detector")
+	}
+	own := func(i int) error { return fmt.Errorf("checksum %d does not match", i) }
+	small, large := fanOutCost(t, 1000, 0, own), fanOutCost(t, 30000, 0, own)
+	if large > 90*small {
+		t.Errorf("30,000 failures took %v, %d times what 1,000 took; it should be about 30", large, large/max(small, 1))
+	}
+}
+
+// Each batch that ended folded its targets into its step's with a union,
+// which copies the step's set: a power on of 30,000 nodes in batches of a
+// hundred copied it 300 times. Thirty times as many nodes, in batches of
+// the same size, have to cost about thirty times as much.
+func TestBatchesThatEndCostWhatTheirTargetsNumber(t *testing.T) {
+	if raceDetector {
+		t.Skip("the costs are measured without the race detector")
+	}
+	const size = 100
+	cost := func(n int) time.Duration {
+		best := time.Duration(1 << 62)
+		for range 5 {
+			screen := &progresstest.Screen{Width: 100}
+			term := display.NewTerminal(screen, func() (int, int, error) { return 100, 30, nil })
+			c := &clock{now: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)}
+			tree := display.NewTree(term, display.TreeOptions{Now: c.Now})
+			bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{tree}, Now: c.Now})
+			runtime.GC()
+			start := time.Now()
+			ctx, command := progress.Start(progress.WithBus(context.Background(), bus), progress.KindCommand, "bmc power on")
+			ctx, step := progress.Start(ctx, progress.KindStep, "power on", progress.WithFlags(progress.Fold), progress.Total(n))
+			for b := 0; b < n/size; b++ {
+				batchCtx, batch := progress.Start(ctx, progress.KindBatch, fmt.Sprintf("%d/%d", b+1, n/size),
+					progress.Total(size))
+				spans := make([]*progress.Span, size)
+				for i := range spans {
+					name := fmt.Sprintf("exe%05d", b*size+i+1)
+					_, spans[i] = progress.Start(batchCtx, progress.KindTarget, name, progress.Queued(), progress.Node(name))
+				}
+				for _, span := range spans {
+					span.Run()
+					span.End(nil)
+				}
+				batch.End(nil)
+			}
+			step.End(nil)
+			command.End(nil)
+			best = min(best, time.Since(start))
+			bus.Close()
+			tree.Close()
+		}
+		return best
+	}
+	small, large := cost(1000), cost(30000)
+	if large > 90*small {
+		t.Errorf("30,000 targets in batches took %v, %d times what 1,000 took; it should be about 30",
+			large, large/max(small, 1))
+	}
+}
