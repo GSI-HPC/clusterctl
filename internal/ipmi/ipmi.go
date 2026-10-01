@@ -278,8 +278,9 @@ const ipmitoolLine = 400
 // is not 0 and the last line ipmitool printed, is printed with one printf
 // once ipmitool has returned, so that one processor that hangs neither
 // stops the others nor passes for an answer, and a line is never cut into
-// by another.
-const ipmitoolRun = `out=$(timeout -k %d %d "$1" -I lanplus -R 1 -U "$2" -f "$3" -H "$4" chassis power %s 2>&1) && rc=0 || rc=$?
+// by another. ipmitool reads nothing, so that the names xargs is still to
+// hand out are left to it.
+const ipmitoolRun = `out=$(timeout -k %d %d "$1" -I lanplus -R 1 -U "$2" -f "$3" -H "$4" chassis power %s 2>&1 </dev/null) && rc=0 || rc=$?
 last=$(printf "%%s\n" "$out" | tail -n1)
 if [ "$rc" -eq 0 ]; then line="$4: $last"; else line="$4: exit $rc: $last"; fi
 printf "%%.%ds\n" "$line"`
@@ -295,15 +296,21 @@ func (b *Backend) runIpmitool(ctx context.Context, action string, bmcs *nodeset.
 	// ipmitool takes one host per invocation, so xargs runs it on the
 	// gateway, for bmc.ipmi.maxConcurrent processors at a time, rather
 	// than clusterctl opening one ssh connection per processor. The
-	// processors are handed to it as arguments, one to a run, each ended
-	// by a NUL, which no name can hold.
+	// processors are handed to it one to a run, read from standard input
+	// after the password's line, each ended by a NUL, which no name can
+	// hold. In the script, some 4,000 processors outgrew the one argument
+	// ssh sends and were refused.
 	run := fmt.Sprintf(ipmitoolRun, int(ipmitoolKillAfter/time.Second), int(ipmitoolHostTimeout/time.Second),
 		sub, ipmitoolLine)
-	var script strings.Builder
-	fmt.Fprintf(&script, "printf '%%s\\0' %s |\n", shellquote.Join(bmcs.Expand()))
-	fmt.Fprintf(&script, "  xargs -0 -n 1 -P %d sh -c %s sh %s %s %s\n",
+	script := fmt.Sprintf("xargs -0 -n 1 -P %d sh -c %s sh %s %s %s\n",
 		parallel, shellquote.Quote(run), shellquote.Quote(binary), shellquote.Quote(b.Username),
 		passwordFilePlaceholder)
+	var payload strings.Builder
+	payload.WriteString(b.Password + "\n")
+	for _, name := range bmcs.Expand() {
+		payload.WriteString(name)
+		payload.WriteByte(0)
+	}
 
 	// The runs may each take their whole bound, as many rounds of them as
 	// the set needs at that many at a time, and the configured timeout on
@@ -321,7 +328,7 @@ func (b *Backend) runIpmitool(ctx context.Context, action string, bmcs *nodeset.
 		inner := onLine
 		onLine = func(stream progress.Stream, line string) { inner(stream, uncut(line)) }
 	}
-	result, err := b.runScript(ctx, script.String(), b.Password+"\n", timeout, onLine)
+	result, err := b.runScript(ctx, firstLineWrapper, script, payload.String(), timeout, onLine)
 	if err != nil {
 		return nil, err
 	}
@@ -477,21 +484,36 @@ cat > "$secret"
 %s
 `
 
+// firstLineWrapper is wrapper for a command that reads standard input
+// itself: the secret is its first line alone, which the shell's read takes
+// without a byte past it, and the rest is left to the command. printf is
+// the shell's own, so the secret is in no argument vector.
+const firstLineWrapper = `
+set -eu
+umask 077
+secret=$(mktemp "${TMPDIR:-/tmp}/clusterctl.XXXXXXXX")
+trap 'rm -f "$secret"' EXIT INT TERM
+IFS= read -r line
+printf '%%s\n' "$line" > "$secret"
+unset line
+%s
+`
+
 // run sends a command to the backend host with the secret on stdin.
 func (b *Backend) run(ctx context.Context, argv []string, payload string, timeout time.Duration, onLine func(progress.Stream, string)) (*transport.Result, error) {
 	command := shellquote.Join(argv)
 	command = strings.ReplaceAll(command, shellquote.Quote(passwordFilePlaceholder), `"$secret"`)
 	command = strings.ReplaceAll(command, passwordFilePlaceholder, `"$secret"`)
-	return b.runScript(ctx, command, payload, timeout, onLine)
+	return b.runScript(ctx, wrapper, command, payload, timeout, onLine)
 }
 
-// runScript sends a script to the backend host with the secret on stdin,
-// and hands each line the backend prints to onLine as it arrives. It fails
-// only when the script could not be sent at all; what the backend said,
-// and how it exited, is for the caller to read.
-func (b *Backend) runScript(ctx context.Context, body, payload string, timeout time.Duration, onLine func(progress.Stream, string)) (*transport.Result, error) {
+// runScript sends a script to the backend host, inside wrap, with the
+// secret on stdin, and hands each line the backend prints to onLine as it
+// arrives. It fails only when the script could not be sent at all; what
+// the backend said, and how it exited, is for the caller to read.
+func (b *Backend) runScript(ctx context.Context, wrap, body, payload string, timeout time.Duration, onLine func(progress.Stream, string)) (*transport.Result, error) {
 	body = strings.ReplaceAll(body, passwordFilePlaceholder, `"$secret"`)
-	script := fmt.Sprintf(wrapper, body)
+	script := fmt.Sprintf(wrap, body)
 
 	return b.Runner.Run(ctx, b.Target, transport.Request{
 		Script:  script,

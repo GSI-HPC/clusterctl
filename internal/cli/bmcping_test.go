@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -25,8 +26,14 @@ func TestBMCPingReadsTheSweepCarefully(t *testing.T) {
 	if got := exitcode.From(err); got != exitcode.TargetFailed {
 		t.Errorf("one processor down: exit code %d, want %d (%v)", got, exitcode.TargetFailed, err)
 	}
-	if command := h.recorder.Commands()[0]; !strings.Contains(command, " -- ") {
-		t.Errorf("the host list is not separated from the options: %s", command)
+	// The processors travel on standard input, a line each, where none is
+	// read as an option, and none is in the command.
+	call := h.recorder.Calls()[0]
+	if strings.Contains(call.Command, "exe0001") {
+		t.Errorf("the command names a processor: %s", call.Command)
+	}
+	if got, want := pingedNames(call.Request), "exe0001.mgmt.hpc.example.org\nexe0002.mgmt.hpc.example.org\n"; got != want {
+		t.Errorf("fping read %q, want %q", got, want)
 	}
 
 	for _, r := range []*transport.Result{
@@ -73,5 +80,41 @@ func TestBMCPingReportsTheSweepAsAStep(t *testing.T) {
 `
 	if got := tree(); got != want {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// pingedNames is what a sweep handed fping on standard input: a recorded
+// call's has been read, and is read again from its start.
+func pingedNames(req transport.Request) string {
+	stdin, ok := req.Stdin.(io.ReadSeeker)
+	if !ok {
+		return ""
+	}
+	if _, err := stdin.Seek(0, io.SeekStart); err != nil {
+		return ""
+	}
+	data, _ := io.ReadAll(stdin)
+	return string(data)
+}
+
+// The processors were named in fping's argument vector, which ssh sends as
+// one argument of at most 128 KiB, so a sweep of some 4,000 was refused.
+// They travel on standard input, so the command is the same for any number.
+func TestBMCPingSweepsAnyNumberOfProcessors(t *testing.T) {
+	inventory := exampleWith(t, "inventory.yaml", func(s string) string {
+		return s + "    - nodes: big[0001-5000]\n"
+	})
+	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "big0001.mgmt.example.org\n", ExitCode: 1}}}
+	h, err := run(t, harnessOptions{config: []string{inventory}, recorder: rec}, "bmc", "ping", "-n", "big[0001-5000]")
+	wantCode(t, err, exitcode.TargetFailed)
+	if !strings.Contains(h.out.String(), "1 of 5000 answered") {
+		t.Errorf("the sweep is not reported:\n%s", h.out)
+	}
+	call := rec.Calls()[0]
+	if len(call.Command) > 256 {
+		t.Errorf("the command is %d bytes: %s", len(call.Command), call.Command)
+	}
+	if n := strings.Count(pingedNames(call.Request), "\n"); n != 5000 {
+		t.Errorf("fping read %d names, want 5000", n)
 	}
 }

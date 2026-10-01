@@ -621,15 +621,22 @@ so --dry-run sweeps too.`,
 			}
 
 			// fping answers for a whole list in one run and prints the hosts
-			// that answered. The list follows --, so no name is read as an
-			// option. It prints them once the sweep is over, so the step
+			// that answered. Given no host on its command line it reads them
+			// from standard input, a line each, where no name is read as an
+			// option and no count of them outgrows the one argument ssh
+			// sends: in the argument vector some 4,000 processors were
+			// refused. It prints them once the sweep is over, so the step
 			// knows how many processors it asks, but not which answered
 			// until it ends. The sweep only reads, so it goes through
 			// ReadRunner: a dry run sweeps too, rather than reading
 			// every processor as silent.
 			ctx, step := progress.Start(a.Context(), progress.KindStep, "ping", progress.Total(bmcs.Len()))
-			argv := append([]string{"fping", "-a", "-q", "-r", "1", "--"}, bmcs.Expand()...)
-			result, err := a.ReadRunner.Run(ctx, target, a.Collect(transport.Request{Argv: argv, Timeout: 2 * time.Minute}))
+			names := strings.Join(bmcs.Expand(), "\n") + "\n"
+			result, err := a.ReadRunner.Run(ctx, target, a.Collect(transport.Request{
+				Argv:    []string{"fping", "-a", "-q", "-r", "1"},
+				Stdin:   strings.NewReader(names),
+				Timeout: 2 * time.Minute,
+			}))
 			if err != nil {
 				err = bmcError(a.Context(), exitcode.Wrap(exitcode.Transport, err), false)
 				step.End(err)

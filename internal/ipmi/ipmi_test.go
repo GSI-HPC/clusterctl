@@ -137,8 +137,11 @@ func TestIpmitoolRunsOnTheGatewaySeveralAtOnce(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Power failed: %v", err)
 			}
-			if !strings.Contains(runner.script, "printf '%s\\0' bmc1 bmc2 |") {
-				t.Errorf("the processors are not handed to xargs:\n%s", runner.script)
+			if want := "hunter2\nbmc1\x00bmc2\x00"; runner.payload != want {
+				t.Errorf("standard input is %q, want the password's line and then the processors", runner.payload)
+			}
+			if strings.Contains(runner.script, "bmc1") {
+				t.Errorf("the script names a processor:\n%s", runner.script)
 			}
 			if !strings.Contains(runner.script, tc.want) {
 				t.Errorf("the runs are not bounded by %d:\n%s", tc.limit, runner.script)
@@ -569,5 +572,26 @@ func TestABackendDoesNotPrintItsPassword(t *testing.T) {
 				t.Errorf("Sprintf(%q) = %q, want the account and no password", verb, got)
 			}
 		}
+	}
+}
+
+// The processors were named in the script, which ssh sends as one argument
+// of at most 128 KiB, so some 4,000 of them were refused for one account.
+// They travel on standard input, so the script is the same for any number.
+func TestIpmitoolTakesAnyNumberOfProcessors(t *testing.T) {
+	t.Parallel()
+	rec := &transport.Recorder{}
+	b := &ipmi.Backend{
+		Runner:   rec,
+		Target:   transport.Target{Name: "mgmt", Host: "mgmt-gw.example.org", Role: "mgmt"},
+		Spec:     v1alpha1.IPMISpec{Backend: ipmi.BackendIpmitool, MaxConcurrent: 8},
+		Username: "admin",
+		Password: "hunter2",
+	}
+	if _, err := b.Power(context.Background(), ipmi.ActionStatus, nodeset.MustParse("exe[00001-10000].mgmt.hpc.example.org")); err != nil {
+		t.Fatalf("Power over 10,000 processors failed: %v", err)
+	}
+	if calls := rec.Calls(); len(calls) != 1 || len(calls[0].Command) > 4096 {
+		t.Errorf("%d runs, the first of %d bytes; want one of a constant size", len(calls), len(calls[0].Command))
 	}
 }
