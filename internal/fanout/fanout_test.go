@@ -356,3 +356,35 @@ func TestStatusOfWhatSaysNothingMore(t *testing.T) {
 		t.Errorf("Status(%+v) = %q, want failed", r, got)
 	}
 }
+
+// The groups come largest first, and groups of one size in the order of
+// their nodes, which is what the grouping compared in every step of its
+// sort; it now works out each group's size and nodes once.
+func TestGroupByOutputOrdersTheGroups(t *testing.T) {
+	t.Parallel()
+	var results []*transport.Result
+	for i := range 3000 {
+		// A few large groups, and many of one node each.
+		out := fmt.Sprintf("unique %d\n", i)
+		switch {
+		case i%100 == 0:
+			out = "hundredth\n"
+		case i%7 == 0:
+			out = "seventh\n"
+		}
+		results = append(results, &transport.Result{Target: transport.Target{Name: fmt.Sprintf("exe%04d", 3000-i)}, Stdout: out})
+	}
+	groups, err := fanout.GroupByOutput(results)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if groups[0].Output != "seventh\n" || groups[1].Output != "hundredth\n" {
+		t.Errorf("the largest groups come %q, %q", groups[0].Output, groups[1].Output)
+	}
+	for i := 1; i < len(groups); i++ {
+		a, b := groups[i-1].Nodes, groups[i].Nodes
+		if a.Len() < b.Len() || a.Len() == b.Len() && a.String() >= b.String() {
+			t.Fatalf("group %d, %s, comes before %s", i-1, a, b)
+		}
+	}
+}
