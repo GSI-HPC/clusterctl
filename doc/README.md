@@ -31,14 +31,13 @@ counterpart in this design.
 | --- | --- |
 | [architecture.md](architecture.md) | The packages, what each owns, and how a command flows through them |
 | [configuration.md](configuration.md) | The six document kinds, the merge layers and where a value came from |
-| [nodeset.md](nodeset.md) | The node set language and the semantics chosen for it, as the `nodeset` package implements it |
+| [nodeset.md](nodeset.md) | What clusterctl adds to the node set language of go-nodeset, whose reference describes the language |
 | [selection.md](selection.md) | How an expression becomes nodes: group sources, the host name check and the inventory's names |
 | [transport.md](transport.md) | How a command reaches a host and why it is quoted the way it is |
 | [safety.md](safety.md) | What a destructive command has to pass before it runs |
 | [mcp.md](mcp.md) | The MCP server: its tools, plan and apply, and who answers the gate |
 | [requirements.md](requirements.md) | What the program has to do, and where each requirement is met |
 | [testing.md](testing.md) | What is tested, how, and what cannot be |
-| [nodeset-testing.md](nodeset-testing.md) | How the node set engine is tested: fuzzing, the ClusterShell corpus, size and cost |
 | [release.md](release.md) | Versioning, the release workflow, the documentation site and dependency updates |
 | [migration.md](migration.md) | Moving a site from the shell toolkit to clusterctl |
 | [adr/](adr/) | The decisions, each with its context and consequences |
@@ -48,8 +47,12 @@ counterpart in this design.
 - Every source file carries `SPDX-License-Identifier: LGPL-3.0-or-later`,
   with an `SPDX-FileCopyrightText` line naming the copyright holder above it
   ([0016](adr/0016-copyright-holder.md)).
-- Packages under `internal/` are implementation; `nodeset/` at the module root
-  is the one package offered to other programs.
+- Every package is under `internal/`: clusterctl offers none to other
+  programs. The node set engine, and the runtime that reports progress and
+  runs the pools, are the modules
+  [go-nodeset](https://github.com/GSI-HPC/go-nodeset) and
+  [go-clikit](https://github.com/GSI-HPC/go-clikit), which clusterctl shares
+  with other tools ([0026](adr/0026-go-nodeset-and-go-clikit.md)).
 - A package comment says what the package owns and why it exists, not what its
   functions are called.
 - A comment explains a decision or a hazard. Code that needs a comment to say

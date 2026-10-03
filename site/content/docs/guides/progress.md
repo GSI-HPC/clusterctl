@@ -233,18 +233,18 @@ $ jq -c 'select(.type == "end" and .kind == "target") | [.name, .status, .class]
 ```
 
 A command's first line, of `type` `trace`, names its run, the trace its
-events belong to and the version of clusterctl that wrote it, and every line
-after it is one event:
+events belong to, and the program and the version that wrote it, `clusterctl`
+and its release, and every line after it is one event:
 
 ```json
-{"v":1,"type":"trace","run":"5d0c9e7b2a41f386","trace":"8d5ef2a0c3a64b7e9f0d1c2b3a495867","version":"v0.4.0"}
+{"v":1,"type":"trace","run":"5d0c9e7b2a41f386","trace":"8d5ef2a0c3a64b7e9f0d1c2b3a495867","program":"clusterctl","version":"v0.4.0"}
 {"v":1,"run":"5d0c9e7b2a41f386","trace":"8d5ef2a0c3a64b7e9f0d1c2b3a495867","seq":13,"time":"2026-09-26T12:00:05.012345678Z","type":"end","span":"b7e3a1c09d2f4e10","parent":"b7e3a1c09d2f4e0e","kind":"target","name":"exe0002","flags":["show-lines"],"state":"ended","node":"exe0002","host":"exe0002.hpc.example.org","status":"failed","class":"target","err":"exe0002 (exe0002.hpc.example.org): command exited 1"}
 ```
 
-The first line holds `v`, `type`, `run`, `trace` and `version`, and, when the
-command continues a trace another program began, `parent`, the span of that
-program's it runs under, `traceFlags` and `traceState`, as they were given.
-An event holds these keys:
+The first line holds `v`, `type`, `run`, `trace`, `program` and `version`,
+and, when the command continues a trace another program began, `parent`, the
+span of that program's it runs under, `traceFlags` and `traceState`, as they
+were given. An event holds these keys:
 
 | Key | Holds |
 | --- | --- |
@@ -270,8 +270,11 @@ the names` or `read /etc/dhcp/dhcpd.conf`, not names to match: they may change
 from one release to the next. The other values are the ones the table lists.
 The version changes only when what a key or a value means does: keys and
 values may be added under version 1, so a reader leaves out those it does not
-know rather than failing on them. `internal/progress/testdata/log-v1.jsonl` is
-version 1, line for line, with every value of every key the table lists.
+know rather than failing on them. go-clikit's
+[`progress/testdata/log-v1.jsonl`](https://github.com/GSI-HPC/go-clikit/blob/v0.1.0/progress/testdata/log-v1.jsonl)
+is version 1, line for line, with every value of every key the table lists,
+and its [event log reference](https://github.com/GSI-HPC/go-clikit/blob/v0.1.0/doc/event-log.md)
+describes the format for programs.
 
 A key with nothing to say is left out. A span can say only what the table
 lists, so the argument vector, a script, standard input, the environment and
@@ -315,7 +318,7 @@ trace: its events carry the trace's id, and its first line also names the
 span it runs under, the trace flags and `TRACESTATE`, as they were given:
 
 ```json
-{"v":1,"type":"trace","run":"5d0c9e7b2a41f386","trace":"4bf92f3577b34da6a3ce929d0e0e4736","parent":"00f067aa0ba902b7","traceFlags":"01","traceState":"ci=build-42","version":"v0.4.0"}
+{"v":1,"type":"trace","run":"5d0c9e7b2a41f386","trace":"4bf92f3577b34da6a3ce929d0e0e4736","parent":"00f067aa0ba902b7","traceFlags":"01","traceState":"ci=build-42","program":"clusterctl","version":"v0.4.0"}
 ```
 
 Commands that continue one trace share its id and never a span's or a run's.

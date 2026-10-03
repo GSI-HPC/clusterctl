@@ -9,35 +9,41 @@ under the race detector, and `make lint` vets and checks formatting.
 
 ## What is tested where
 
-**Unit tests** cover the packages that hold the logic: node set parsing and
-folding, configuration merging and validation, naming, the inventory, quoting,
-output formatting, the DHCP parser, the host key store and the safety gate.
-The node set engine has a document of its own,
-[nodeset-testing.md](nodeset-testing.md): its fuzz target, the ClusterShell
-corpus and the tests of size.
+**Unit tests** cover the packages that hold the logic: configuration merging
+and validation, naming, the inventory, quoting, output formatting, the DHCP
+parser, the host key store and the safety gate. The node set engine, the
+progress runtime and its displays, the escaper and the pools are go-nodeset's
+and go-clikit's, and are tested there, as their
+[testing.md](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/testing.md)
+and [testing.md](https://github.com/GSI-HPC/go-clikit/blob/v0.1.0/doc/testing.md)
+describe: their fuzz targets, the ClusterShell corpus and the comparison with
+ClusterShell itself among them. clusterctl tests what it adds to them: the
+refusal of a range without its last bound and of a group reference without a
+name, in the expressions of every place that reads one, its group sources, and
+what each command reports.
 
 **A real shell** checks the quoting. `shellquote` is the one place where being
 subtly wrong is invisible until it eats a production command, so every vector
 in the test is quoted, run through `sh -c 'printf %s\n ...'`, and compared with
 what went in.
 
-**Fuzz targets** check what must hold for any input. The node set parser's is
-described with the engine. Another checks that the DHCP parser never panics on
-any input. CI runs it on every change, for about a minute's worth of
-executions, and
-`go test ./internal/dhcp/ -fuzz FuzzParse` runs it locally. A third checks
-`progress.Sanitize`, which every remote line and error passes through before a
-display may draw it: whatever the input, what comes out holds nothing a
-terminal would act on and keeps to its bound. CI runs it for about a minute
-too, and
-`go test ./internal/progress/ -fuzz FuzzSanitize` runs it locally. Two more
-check `termtext`, the escaper under it: `FuzzEscape`, that neither escaper
-leaves a rune its policy names and that escaping twice changes nothing, and
-`FuzzTruncate`, that a cut row is a prefix that fits its columns. CI runs each
-for about half a minute. `FuzzParseDocuments` checks that reading a configuration
-file never panics, whatever it holds, and that every key read has the line it
-was written on. CI runs it for about a minute, and
-`go test ./internal/config/ -fuzz FuzzParseDocuments` runs it locally.
+**Fuzz targets** check what must hold for any input. `FuzzParse` in
+`internal/nodeexpr` holds the check in front of go-nodeset to go-nodeset:
+whatever the expression, it names the hosts go-nodeset names, and refuses
+what go-nodeset refuses and, besides, only a range without its last bound.
+CI runs it on every change, and
+`go test ./internal/nodeexpr/ -fuzz FuzzParse` runs it locally. Another checks
+that the DHCP parser never panics on any input. CI runs it for about a
+minute's worth of executions, and
+`go test ./internal/dhcp/ -fuzz FuzzParse` runs it locally.
+`FuzzParseDocuments` checks that reading a configuration file never panics,
+whatever it holds, and that every key read has the line it was written on. CI
+runs it for about a minute, and
+`go test ./internal/config/ -fuzz FuzzParseDocuments` runs it locally. The
+fuzz targets of the node set parser, `FuzzParseFold`, of the sanitiser every
+remote line passes through before a display draws it, `FuzzSanitize`, and of
+the escaper under it, `FuzzEscape` and `FuzzTruncate`, run in the CI of
+go-nodeset and go-clikit.
 
 CI bounds each run by a number of executions rather than a time, with
 `-fuzztime` written as a count such as `2500000x`. When `-fuzztime` is a
@@ -91,69 +97,59 @@ answers at once rarely has two calls under way together, so each call is held
 until one more than the limit are, which a fan-out that keeps to its limit
 never allows: the test sees exactly the limit in flight, and one call too many
 when the limit is broken. The executor, the Redfish fan-out and the host key
-scans are tested this way. `Map` in `internal/clikit/fanout`, which cannot
-import it, is held to its limit on the fake clock of `testing/synctest`
-instead: every call waits a second, which passes only once every call that can
-start has.
+scans are tested this way. `Map` itself is go-clikit's, and is held to its
+limit there, on the fake clock of `testing/synctest`.
 
-**Progress events.** `progress/progresstest` holds a command to what it
-reports. `Capture` is a sink that keeps the events of a Bus, and `Check` tests
-them against every promise the progress package makes to a display: each span
-starts and ends once, under a parent that is still open; the targets of a step
-are announced, queued, before the first of them runs, and add up to its total
-however the step ended, an interrupt included; no more run at once than its
-limit; every suspension of the display is resumed; and no text holds anything
-a terminal would act on. `Checked` gives a test a Bus with a capture whose
-events are checked once the test is over, and `Watch` one whose events are
-checked, and drawn as a tree, when the test asks; both check the events before
-the Bus is closed, which would end a span left open and hide it. The command
-test harness gives every command it runs a Bus from `Checked`, so each
-command test is also a test of what the command reports. `Tree` draws the
-spans as an indented tree that does not depend on how concurrent work was
-scheduled: the targets that read the same are folded into one line naming
-them as a node set, and siblings are sorted. The tests of a reinstall, the
-power batches, secrets push, provision status, `dns lookup`, `doctor --remote`,
-`fabric state`, the host key scans and a dry run that looks up a group compare
-trees; a test that does takes its own Bus with `Watch`. Both take
-`progresstest.Classify(exitcode.Class)`, so that the events carry the classes
-a command's Bus gives them. One test runs a set of
-commands with a Bus and without one and compares their standard output,
-standard error and exit status byte for byte, since progress must never reach
-either stream.
+**Progress events.** go-clikit's `progress/progresstest` holds a command to
+what it reports. `Capture` is a sink that keeps the events of a Bus, and
+`Check` tests them against every promise the progress package makes to a
+display: each span starts and ends once, under a parent that is still open;
+the targets of a step are announced, queued, before the first of them runs,
+and add up to its total however the step ended, an interrupt included; no
+more run at once than its limit; every suspension of the display is resumed;
+and no text holds anything a terminal would act on. `Watch` gives a test a
+Bus whose events are checked before it is closed, which would end a span left
+open and hide it: when the test calls `Finish`, which also draws them as a
+tree, or else once the test is over. The command test harness gives every
+command it runs a Bus from `Watch`, so each command test is also a test of
+what the command reports. `Tree` draws the spans as an indented tree that does
+not depend on how concurrent work was scheduled: the targets that read the
+same are folded into one line naming them as a node set, and siblings are
+sorted. The tests of a reinstall, the power batches, secrets push, provision
+status, `dns lookup`, `doctor --remote`, `fabric state`, the host key scans
+and a dry run that looks up a group compare trees, each on a Bus of its own
+from `Watch`. Every `Watch` takes `progresstest.Classify(exitcode.Class)`, so
+that the events carry the classes a command's Bus gives them. One test runs a
+set of commands with a Bus and without one and compares their standard
+output, standard error and exit status byte for byte, since progress must
+never reach either stream.
 
-**The displays** are tested on a terminal that is a buffer and a clock the
-test moves: `display.Tree.Draw` and `display.Counter.Draw` draw one frame,
-`display.Plain.Draw` writes the lines held and the heartbeats due, and the
-command tests replace `startDisplay` with `fakeDisplays`, whose displays are
-drawn only when the test says, from a fake transport's answer or a pause
-between batches, on a clock the displays' Bus reads too. So a frame or a plain
-line shows the same counts and times on every run, and no test waits for the
-display's second, a heartbeat's ten or their ticks. `progresstest.Screen` is
-the terminal the tree is drawn on: it applies the carriage returns, the rows
-moved up to and erased and the rest of the screen cleared the way a terminal
-does, keeps what scrolled off, and wraps a row at its width, so a test
-compares what a person would see, frame by frame, and a row drawn too wide
-shows as the two it would be. The frames of a wide fan-out, failures grouped,
-a hidden lookup that turns slow, a step that fails at once, a power-on in
-batches, two steps side by side, a terminal too small for the tree, the ASCII
-marks, an interrupt, a question and a write in the middle of a frame are
-compared whole, and so are the plain lines of a fan-out, a power-on in
-batches and a reinstall that fails, the summary among them.
-The Terminal's `Lines` is tested around a question, an open line, a frame and
-the display's end, and against its bound; a stress test has four goroutines
-write 200 lines each through it, half of them in two writes, while the command
-writes its own lines, asks questions and the counter draws, and checks on the
-`Screen` that every line arrived whole, on a row of its own, in its writer's
-order, and none inside a question. A command test has one node's worker panic
-while another's asks for a password, and checks that the stack comes after
-the answer.
+**The displays** are go-clikit's, and are tested there, each frame on a
+terminal that is a buffer and a clock the test moves. The command tests here
+replace `startDisplay` with `fakeDisplays`, whose displays are drawn only when
+the test says, from a fake transport's answer or a pause between batches, on a
+clock the displays' Bus reads too. So a frame or a plain line shows the same
+counts and times on every run, and no test waits for the display's second, a
+heartbeat's ten or their ticks. `progresstest.Screen` is the terminal the tree
+is drawn on: it applies the carriage returns, the rows moved up to and erased
+and the rest of the screen cleared the way a terminal does, keeps what
+scrolled off, and wraps a row at its width, so a test compares what a person
+would see, frame by frame. The tree of a command by default, the counter of a
+power-on in batches, the line it takes from scp's meter, the ASCII marks, and
+the tree and the counter around a question, typed input and the command's own
+writes are compared whole, and so are the plain lines of a fan-out, a power-on
+in batches and a failure, the summary among them. A command test has one
+node's worker panic while another's asks for a password, and checks that the
+stack comes after the answer.
 
-**The event log** is compared line for line, with the span ids, which each
-Bus draws at random, replaced by their order, and a clock the test moves: the
-lines of hand-made spans in `progress`, and those of `exec` under a
-`TRACEPARENT` in `cli`. A test sets every part of an event and fails when one
-is neither logged nor left out on purpose, so a part added to `Event` or
-`Fields` is not logged, or kept out, without a decision.
+**The event log** is go-clikit's, which compares it line for line with a
+golden file and fails when a part of an event is neither logged nor left out
+on purpose. Here the lines of `exec` under a `TRACEPARENT` are compared, with
+the span ids, which each Bus draws at random, replaced by their order, and a
+clock the test moves; other tests check that the programs clusterctl runs are
+handed no trace context, and which logs `--progress-log` and
+`CLUSTERCTL_PROGRESS_LOG` refuse, append to, write with every display, or
+give up on without failing the command.
 
 **Command tests** drive the real command tree end to end and assert on what
 would be sent, not on whether the code compiles: that a glob and an apostrophe
@@ -217,16 +213,17 @@ That boundary is honest, not convenient. The alternative is mocking a fabric
 diagnostic tool's output and testing the mock.
 
 If this is ever taken further, the review that preceded the rewrite names the
-other backends worth standing up: the DMTF Redfish mockup server,
-sushy-tools, OpenIPMI's `ipmi_sim`, and ClusterShell itself as the reference
-for node set output.
+other backends worth standing up: the DMTF Redfish mockup server, sushy-tools
+and OpenIPMI's `ipmi_sim`. The fourth it named, ClusterShell itself as the
+reference for node set output, is what go-nodeset's CI compares the engine
+with.
 
 ## Coverage
 
 Coverage is reported per package and is not a target in itself. The packages
-that hold the logic sit between 70 and 96 per cent, and the node set engine
-is covered completely; the command tree is lower because much of it is the
-last step before a remote host.
+that hold the logic sit between 70 and 96 per cent; the command tree is lower
+because much of it is the last step before a remote host. go-nodeset and
+go-clikit hold every file of theirs to all of its statements.
 
 Two rules keep the number meaningful:
 

@@ -3,7 +3,7 @@
 
 # 0022 — Bounded pools, and power actions in batches
 
-Status: accepted
+Status: superseded in part by [0026](0026-go-nodeset-and-go-clikit.md)
 
 ## Context
 

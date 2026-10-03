@@ -3,7 +3,7 @@
 
 # 0002 — Port the node set engine rather than depend on one
 
-Status: accepted
+Status: superseded in part by [0026](0026-go-nodeset-and-go-clikit.md)
 
 ## Context
 
