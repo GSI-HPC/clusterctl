@@ -99,19 +99,21 @@ configured contexts.
 
 ## Using the node set engine
 
-The node set implementation is offered as a library, because the Go ecosystem
+clusterctl's node set engine is a library of its own,
+[go-nodeset](https://github.com/GSI-HPC/go-nodeset), because the Go ecosystem
 had none:
 
 ```go
-import "github.com/GSI-HPC/clusterctl/nodeset"
+import "github.com/GSI-HPC/go-nodeset"
 
 ns, err := nodeset.Parse("exe[0001-0010]!exe0003")
 fmt.Println(ns)          // exe[0001-0002,0004-0010]
 fmt.Println(ns.Len())    // 9
 ```
 
-[`doc/nodeset.md`](doc/nodeset.md) describes the language and the rules chosen
-where it differs from ClusterShell.
+Its [language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md)
+describes the language and the rules chosen where it differs from ClusterShell;
+[`doc/nodeset.md`](doc/nodeset.md) says what clusterctl adds to it.
 
 ## Contributing
 

@@ -38,7 +38,7 @@ subsystems it drives and calls them itself, with what `app` built.
 
 | Package | Owns |
 | --- | --- |
-| `nodeset` | The node set language ([nodeset.md](nodeset.md)): parsing, folding, expansion, set operations, and group references through a resolver the caller supplies. The only package outside `internal/`. |
+| `internal/nodeexpr` | Reading the node set expressions clusterctl is given ([nodeset.md](nodeset.md)): go-nodeset parses them, once this package has refused a range without its last bound and a group reference without a name, and the groups an expression names are looked up side by side through a `Batch`. |
 | `internal/apis/v1alpha1` | The configuration document kinds and the effective configuration they merge into. |
 | `internal/config` | Finding, validating, merging and resolving configuration, and remembering where every value came from. |
 | `internal/inventory` | What is known about the nodes: attributes, racks, addresses, boot paths. |
@@ -52,9 +52,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | --- | --- |
 | `internal/transport` | Driving the OpenSSH client, and generating the configuration it runs with. |
 | `internal/shellquote` | Rendering an argument vector so a remote shell reproduces it exactly. |
-| `internal/fanout` | Working on many targets at once: the executor, the status and grouping of results, the bound on each host, and the exit code a fan-out that failed somewhere asks for, on the pools of `internal/clikit/fanout`. |
-| `internal/clikit/fanout` | The pools: working on many items at once, bounded and in order, or in batches with a pause between them, and reporting the work as it goes. It knows no program: the program's name, its rule for the class of an error and the error a step ends with are options, and it imports nothing of clusterctl's but `progress` and `nodeset`, so that it can move into a module of its own by a change of path. |
-| `internal/progress` | Reporting the work under way: its steps, targets and calls as spans carried in the context, and every change to one as an event for a display, an agent or the event log. |
+| `internal/fanout` | Working on many targets at once: the executor, the status and grouping of results, the bound on each host, and the exit code a fan-out that failed somewhere asks for, on the pools of go-clikit's `fanout`. |
 | `internal/safety` | Deciding whether a destructive action may proceed. |
 | `internal/fileutil` | Writing files atomically and under a lock, and the cache on disk. |
 
@@ -83,10 +81,22 @@ subsystems it drives and calls them itself, with what `app` built.
 
 | Package | Owns |
 | --- | --- |
-| `internal/output` | Table, JSON, YAML, node set, name and jq rendering, with forwarders to `termtext` for the commands that escape text. The node set and name formats print a result's `Nodes`, or the first column of its table when that column is headed `NODE`, `HOST` or `BMC`, and refuse any other result with exit code 2; `Format.Check` lets a command that changes something refuse before it acts. |
-| `internal/termtext` | Escaping untrusted text for a terminal (`EscapeText`, `EscapeCell`), and the columns text takes there (`Width`, `Truncate`). It needs nothing but the standard library and `golang.org/x/text`. |
-| `internal/progress/display` | Showing the progress of a command on its standard error, as the live tree or the counter on a terminal or as plain lines, the summary left once it has ended, and the writers that keep the command's own output clear of them. |
+| `internal/output` | Table, JSON, YAML, node set, name and jq rendering, with forwarders to go-clikit's `termtext` for the commands that escape text. The node set and name formats print a result's `Nodes`, or the first column of its table when that column is headed `NODE`, `HOST` or `BMC`, and refuse any other result with exit code 2; `Format.Check` lets a command that changes something refuse before it acts. |
 | `internal/version` | The build provenance, which comes from the signed tag or the VCS stamps. |
+
+### From other modules
+
+| Package | Owns |
+| --- | --- |
+| `github.com/GSI-HPC/go-nodeset` | The node set language ([its reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md)): parsing, folding, expansion, set operations, and group references through a resolver the caller supplies, `internal/groups` here. |
+| `github.com/GSI-HPC/go-clikit/progress` | Reporting the work under way: its steps, targets and calls as spans carried in the context, and every change to one as an event for a display, an agent or the event log. |
+| `github.com/GSI-HPC/go-clikit/progress/display` | Showing the progress of a command on its standard error, as the live tree or the counter on a terminal or as plain lines, the summary left once it has ended, and the writers that keep the command's own output clear of them. |
+| `github.com/GSI-HPC/go-clikit/fanout` | The pools: working on many items at once, bounded and in order, or in batches with a pause between them, and reporting the work as it goes. It knows no program: the program's name, its rule for the class of an error and the error a step ends with come from its options or from the Bus. |
+| `github.com/GSI-HPC/go-clikit/termtext` | Escaping untrusted text for a terminal (`EscapeLines`, `Escape`), and the columns text takes there (`Width`, `Truncate`). |
+
+Both modules are GSI-HPC's, taken at the releases `go.mod` requires
+([ADR 0026](adr/0026-go-nodeset-and-go-clikit.md)). The text below names their
+packages without the module path.
 
 ## Dependency direction
 
@@ -98,23 +108,24 @@ subsystem imports `config`: `app` hands each the typed `v1alpha1` values it
 needs. And none imports `cli` or `app`, so a subsystem can be exercised in a
 test without a command tree.
 
-`progress` is a leaf that every layer may report through. It depends on
-nothing of clusterctl's but `termtext`, for escaping, so `fanout`,
-`transport`, `redfish`, `credentials`, `secrets`, `safety` and `app` can each
-start and end the spans of their work, and lend the terminal to a question,
-without a cycle ([ADR 0021](adr/0021-progress-as-our-own-events.md)).
-`progress/display` depends on `progress` and on `nodeset`, which folds the
-targets of the tree, and only `cli` uses it.
+`progress` is a leaf that every layer may report through. It is go-clikit's
+and imports nothing of clusterctl's, so `fanout`, `transport`, `redfish`,
+`credentials`, `secrets`, `safety` and `app` can each start and end the spans
+of their work, and lend the terminal to a question, without a cycle
+([ADR 0021](adr/0021-progress-as-our-own-events.md)). `progress/display`
+depends on `progress` and on go-nodeset, which folds the targets of the tree,
+and only `cli` uses it.
 
 `progress` knows no exit codes and no program. An error that says no class of
 its own, and is neither canceled nor a timeout, takes the class the Bus's
-`Options.Classify` gives it: on every Bus clusterctl makes that is
+`BusOptions.Classify` gives it: on every Bus clusterctl makes that is
 `exitcode.Class`, the class of the exit code the error asks for, so
-`exitcode` imports `progress` and not the other way round. `Options.Program`
-names clusterctl in the line that says a display panicked.
+`exitcode` imports `progress` and not the other way round.
+`BusOptions.Program` names clusterctl in the line that says a sink or a
+display panicked, and on the first line of the event log.
 
 Text that came from a node, a BMC, Slurm, a group source or an agent is
-escaped with `termtext.EscapeText`, or `termtext.EscapeCell` where it has to
+escaped with `termtext.EscapeLines`, or `termtext.Escape` where it has to
 stay on one line, before it reaches a terminal; `output` forwards both, and a
 table measures its cells with `termtext.Width`. There is no other escaper: a
 package that quotes such text in an error, as the group resolver does, uses
@@ -122,7 +133,7 @@ the same helper, and `cli` escapes every error it prints once more on the way
 out, which changes nothing in text that is already escaped. Every line of
 output and every error a progress display may draw goes through
 `progress.Sanitize`, which applies carriage returns the way a terminal would
-and then escapes what is left with `EscapeCell`.
+and then escapes what is left with `Escape`.
 
 The transport is reached through the `transport.Runner` interface everywhere
 except in the commands that open an interactive session. That is what lets a
@@ -253,9 +264,9 @@ such as `describe_nodes`, holds its sessions to one host to the same four.
 Every such pool is one loop, `fanout.Each`, which starts nothing once the
 command is interrupted, and `fanout.Map` runs any kind of work on it, the
 executor's among them, an item that needs a place on a host as well waiting
-for it queued. Both are those of `internal/clikit/fanout`, which
-`internal/fanout` gives clusterctl's name, the class of an error by its exit
-code and `fanout.Summarize`, the error a step ends with, which asks for the
+for it queued. Both are go-clikit's `fanout`, to which `internal/fanout`
+gives clusterctl's name, the class of an error by its exit code and
+`fanout.Summarize`, the error a step ends with, which asks for the
 exit code `exitcode.Worst` gives its items' errors and names them as a node
 set, or as a list where a name is not one host name. Each kind of work has a
 bound of its own, which
@@ -264,7 +275,7 @@ lowers, through `App.Bound`
 ([ADR 0022](adr/0022-bounded-pools-and-power-batches.md)). A power-on and a
 power cycle are sent in batches by `fanout.Batches`, the set split evenly, one
 batch after the other with a pause between, and a batch with a failure stops
-the run. A pool on `Map` reports its work as the spans of `internal/progress`:
+the run. A pool on `Map` reports its work as the spans of go-clikit's `progress`:
 a step, with every target queued before the first one runs and each ended
 before it gives its place to the next, so that a display never counts more
 running than the bound, and has counted every target, those an interrupt left

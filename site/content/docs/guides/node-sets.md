@@ -53,6 +53,14 @@ $ clusterctl node select 'exe[1-]'
 clusterctl: in "exe[1-]": the range "1-" has no last bound
 ```
 
+A group needs its name for the same reason: `-n "@rack:$RACK"` with `RACK`
+empty becomes `@rack:`, which is an error rather than every node in a rack:
+
+```console
+$ clusterctl node select '@rack:'
+clusterctl: empty group name in @rack:
+```
+
 ## Folding and expanding
 
 ```console
@@ -76,6 +84,9 @@ identifies. Every host keeps the name the inventory gave it, so a stray `exe11`
 next to `exe[0001-0010]` prints as `exe[0001-0010,11]`, never as `exe0011`.
 ClusterShell would treat `exe1` and `exe0001` as two hosts.
 {{< /callout >}}
+
+Names with several numbers fold as ClusterShell folds them:
+`rack[1-2]node[01-04],rack3node01` prints as it is.
 
 ## What a name may contain
 
@@ -195,6 +206,12 @@ An `exec` source is given an argument vector, and `$GROUP` and `$NODE` are
 substituted as whole arguments. A group name is never interpreted by a shell.
 The commands run on the host role the source names, which is required, and are
 bounded by `fanout.commandTimeout` like every remote command.
+
+A group may refer to other groups. A bare `@group` in a group of a named
+source is looked up in that source, as ClusterShell does: with
+`compute: "@exe"` in `static`, `@static:compute` asks `static` for `exe`.
+Name the source, as `compute: "@inventory:exe"` does above, and the group
+reads the same however it is reached.
 
 `@source:*`, or `@*` for the default source, is every node of a source: what
 its `all` command prints, or else what its groups name together, as

@@ -29,9 +29,9 @@ hardware, and **deferred** when it is deliberately not done.
 
 | | Requirement | Where | State |
 | --- | --- | --- | --- |
-| R10 | Parse ClusterShell node set syntax | `nodeset` | met |
-| R11 | Fold and expand idempotently | `nodeset/fold.go` | met |
-| R12 | Set operations evaluated left to right | `nodeset/parse.go` | met |
+| R10 | Parse ClusterShell node set syntax | go-nodeset `Parse`, through `nodeexpr` | met |
+| R11 | Fold and expand idempotently | go-nodeset `String`, `Expand` | met |
+| R12 | Set operations evaluated left to right | go-nodeset `Parse` | met |
 | R13 | Groups from node attributes, tables and commands | `groups` | met |
 | R14 | Cache group lookups that cost a round trip | `groups` | met |
 | R15 | Run one command on many nodes in parallel, bounded | `fanout` | met |

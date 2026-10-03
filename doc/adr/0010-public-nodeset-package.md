@@ -3,7 +3,7 @@
 
 # 0010 — Publish `nodeset`, keep the rest internal
 
-Status: accepted
+Status: superseded by [0026](0026-go-nodeset-and-go-clikit.md)
 
 ## Context
 

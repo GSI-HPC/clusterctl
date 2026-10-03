@@ -12,7 +12,7 @@ A decision is superseded by a later record, never edited.
 | | Decision | Status |
 | --- | --- | --- |
 | [0001](0001-go.md) | Go as the implementation language | superseded in part by [0025](0025-yaml-v3.md) |
-| [0002](0002-own-nodeset-engine.md) | Port the node set engine rather than depend on one | accepted |
+| [0002](0002-own-nodeset-engine.md) | Port the node set engine rather than depend on one | superseded in part by [0026](0026-go-nodeset-and-go-clikit.md) |
 | [0003](0003-layered-yaml-configuration.md) | Layered YAML documents with provenance | accepted |
 | [0004](0004-drive-openssh.md) | Drive OpenSSH rather than speak SSH | accepted |
 | [0005](0005-own-redfish-client.md) | Write the Redfish client rather than take gofish | accepted |
@@ -20,7 +20,7 @@ A decision is superseded by a later record, never edited.
 | [0007](0007-version-from-signed-tags.md) | The version lives only in a signed tag | superseded in part by [0023](0023-ssh-or-openpgp-release-tags.md) |
 | [0008](0008-lgpl.md) | LGPL-3.0-or-later | accepted |
 | [0009](0009-hugo-for-the-manual.md) | Hugo and Hextra for the manual | accepted |
-| [0010](0010-public-nodeset-package.md) | Publish `nodeset`, keep the rest internal | accepted |
+| [0010](0010-public-nodeset-package.md) | Publish `nodeset`, keep the rest internal | superseded by [0026](0026-go-nodeset-and-go-clikit.md) |
 | [0011](0011-installable-from-release-assets.md) | Release assets are consumable by a version manager | accepted |
 | [0012](0012-dependabot.md) | Dependabot proposes the dependency updates | accepted |
 | [0013](0013-sops-secret-documents.md) | Secrets live in sops encrypted Secret documents | superseded in part by [0019](0019-decrypt-with-the-sops-command.md) |
@@ -31,8 +31,9 @@ A decision is superseded by a later record, never edited.
 | [0018](0018-a-manual-for-every-release.md) | A manual for every release, the latest at the root | accepted |
 | [0019](0019-decrypt-with-the-sops-command.md) | Decrypt Secret documents with the sops command | accepted |
 | [0020](0020-one-exit-code-rule-for-many-hosts.md) | One exit code rule for a command on many hosts | accepted |
-| [0021](0021-progress-as-our-own-events.md) | Report progress as our own span-shaped events | accepted |
-| [0022](0022-bounded-pools-and-power-batches.md) | Bounded pools, and power actions in batches | accepted |
+| [0021](0021-progress-as-our-own-events.md) | Report progress as our own span-shaped events | superseded in part by [0026](0026-go-nodeset-and-go-clikit.md) |
+| [0022](0022-bounded-pools-and-power-batches.md) | Bounded pools, and power actions in batches | superseded in part by [0026](0026-go-nodeset-and-go-clikit.md) |
 | [0023](0023-ssh-or-openpgp-release-tags.md) | A release tag is signed with an SSH or an OpenPGP key | accepted |
 | [0024](0024-end-to-end-tests-on-sind.md) | End-to-end tests against a sind cluster | accepted |
 | [0025](0025-yaml-v3.md) | Read YAML with yaml.v3 | accepted |
+| [0026](0026-go-nodeset-and-go-clikit.md) | Node sets from go-nodeset, progress and pools from go-clikit | accepted |

@@ -5,8 +5,11 @@
 
 Every command that takes `-n`, and every MCP tool that takes a node set, turns
 an expression into nodes the same way. The expression is written in the node
-set language, which [nodeset.md](nodeset.md) describes, and parsed by the
-`nodeset` package. This document covers what clusterctl adds around it: the
+set language of [go-nodeset](https://github.com/GSI-HPC/go-nodeset), which its
+[language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md)
+describes, and parsed by that module's `nodeset` package;
+[nodeset.md](nodeset.md) lists what clusterctl refuses beyond it. This
+document covers what clusterctl adds around it: the
 sources a `@group` is resolved from, and how `App.Select` turns the names an
 expression resolves to into the machines of the inventory.
 
@@ -79,7 +82,16 @@ An `exec` source is given an **argument vector**, not a command line, and
 semicolon stays a group name.
 
 Groups may refer to groups, and a cycle is reported rather than looping;
-[nodeset.md](nodeset.md#groups) says how deep.
+go-nodeset's [language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md#groups)
+says how deep. A bare `@group` inside a group of a named source is looked up
+in that source, as ClusterShell does: with `compute: "@exe"` in the source
+`static`, `@static:compute` asks `static` for `exe`, and fails when it has
+none, while `@compute`, which a search found in `static`, searches for `@exe`
+as well. A table that names its sources, as `compute: "@inventory:exe"` does,
+reads the same however it is reached. What a source answers is held to what
+the expression naming it is held to ([nodeset.md](nodeset.md)), so a group
+`bad` whose value is `exe[1-]` is refused as the expression `exe[1-]` is:
+`group @bad: in "exe[1-]": the range "1-" has no last bound`.
 
 `@source:*` of a source without an `all` command is the union of its groups,
 each evaluated on its own as `@a,@b` evaluates them. The resolver hands the
@@ -88,6 +100,12 @@ holds `!`, `&` or `^` goes into it as the reference `@source:group` rather
 than as its value, where the operator would apply to every group before it.
 A name that would not read back as that one reference, one holding a space,
 a comma, an operator or a bracket, is refused.
+
+A reference without a group name, `@` or `@rack:`, is refused before any
+source is asked: `empty group name in @rack:`. A source that reads a node
+attribute would answer it with every node that carries the attribute, so
+`-n "@rack:$RACK"` with `RACK` empty would otherwise select every node in a
+rack, and an `exec` source would run its command with an empty `$GROUP`.
 
 ## Names are host names
 
@@ -129,7 +147,7 @@ host name.
 ## One machine, one spelling
 
 In the node set language padding is not part of a host's identity
-([nodeset.md](nodeset.md#padding-is-not-part-of-a-hosts-identity)): `exe1` and
+([go-nodeset](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md#padding-is-not-part-of-a-hosts-identity)): `exe1` and
 `exe0001` are one host. This is what lets an administrator type `exe1` and
 reach the machine an inventory wrote as `exe0001`, and see it under the name
 the site gave it, because a selection is canonicalised against the inventory.

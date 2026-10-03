@@ -3,7 +3,7 @@
 
 # 0021 — Report progress as our own span-shaped events
 
-Status: accepted
+Status: superseded in part by [0026](0026-go-nodeset-and-go-clikit.md)
 
 ## Context
 
