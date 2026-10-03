@@ -206,6 +206,35 @@ func TestUnreachableRoleIsUnreachable(t *testing.T) {
 	}
 }
 
+// TestUnreachableSaysWhyThroughAJumpHost checks that why ssh could not make
+// a connection is shown, for a node of exec and for a role. Through a jump
+// host the reason comes first and ssh ends with notices that the connection
+// closed, the last of which was all either showed.
+func TestUnreachableSaysWhyThroughAJumpHost(t *testing.T) {
+	t.Parallel()
+	const said = "channel 0: open failed: connect failed: No route to host\n" +
+		"stdio forwarding failed\n" +
+		"Connection closed by UNKNOWN port 65535\n"
+	const want = "channel 0: open failed: connect failed: No route to host"
+	for _, args := range [][]string{
+		{"exec", "-n", "exe0001", "--", "uptime"},
+		{"fabric", "counters", "exe0001"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			rec := &transport.Recorder{Reply: func(tg transport.Target, _ transport.Request) (*transport.Result, error) {
+				return transport.ExitResult(tg, 255, "", said), nil
+			}}
+			h, code := exitCodeOf(t, harnessOptions{recorder: rec}, args...)
+			if code != exitcode.Transport {
+				t.Errorf("exit code = %d, want %d; stderr:\n%s", code, exitcode.Transport, h.errOut)
+			}
+			if !strings.Contains(h.errOut.String(), want) {
+				t.Errorf("stderr does not say why ssh failed (%q):\n%s", want, h.errOut)
+			}
+		})
+	}
+}
+
 // TestInterruptedCommandExits130 checks that a command which fails after the
 // process was interrupted exits 130, however the failure was worded. Paths
 // that flatten an error to its text, or a request that failed because the

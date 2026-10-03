@@ -153,10 +153,15 @@ func resultsTable(results []*transport.Result) *output.Table {
 // failureDetail is what a failed target said about its failure: the last
 // line of its standard error, or the error of the transport when it said
 // nothing. A command that exited non-zero without a word is described by its
-// status alone.
+// status alone. A connection ssh could not make is described by everything
+// ssh said, since through a jump host its last line only says that the
+// connection closed.
 func failureDetail(r *transport.Result) string {
 	if !r.Failed() {
 		return ""
+	}
+	if why := r.ConnectionFailure(); why != "" {
+		return why
 	}
 	if line := strings.TrimSpace(lastNonEmpty(r.Stderr)); line != "" {
 		return line

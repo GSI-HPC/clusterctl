@@ -220,6 +220,10 @@ Each node that failed gets a line on standard error with how it ended and the
 last line it wrote to standard error, for example
 `exe0005: exit 5: Unit slurmd.service could not be found.` or
 `exe0006: unreachable: ssh: connect to host exe0006 port 22: Connection refused`.
+Through a jump host ssh ends with notices that the connection closed, such as
+`Connection closed by UNKNOWN port 65535`; those are passed over for the line
+before them that says why, such as `channel 0: open failed: connect failed: No
+route to host`.
 
 Exit code 1 means clusterctl worked and a target failed. Exit code 3 means a
 host could not be reached at all, 2 that the configuration lacks something a
