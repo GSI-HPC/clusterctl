@@ -31,9 +31,16 @@ sections below describe before go-nodeset reads it. That covers:
 - the `nodes` of `NodeInventory` documents and of `bootPath` rules;
 - the expression every group source answers, the groups it names in turn and
   each group of `@source:*` included;
+- the first column that `-o nodeset` and `-o name` read, such as the host
+  patterns of the known hosts file that `hostkey list` prints;
+- a node name with brackets that the inventory is asked for, as by
+  `node rack`;
 - and the node names read from Slurm, a drain reason or a node list of
   `squeue`, from the naming templates and the host templates of the service
   processors, and from the output of a remote command.
+
+A node name that `sinfo --Node` prints, checked first to be a single host
+name without brackets, is added to a set as it is.
 
 An error in what a group source answered names the group, as in
 `group @bad: in "exe[1-]": the range "1-" has no last bound`.

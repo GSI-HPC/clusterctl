@@ -19,8 +19,11 @@ and [testing.md](https://github.com/GSI-HPC/go-clikit/blob/v0.1.0/doc/testing.md
 describe: their fuzz targets, the ClusterShell corpus and the comparison with
 ClusterShell itself among them. clusterctl tests what it adds to them: the
 refusal of a range without its last bound and of a group reference without a
-name, in the expressions of every place that reads one, its group sources, and
-what each command reports.
+name, in the node set a command selects, from `-n`, its arguments or an MCP
+tool, in `safety.protectedHosts`, in the nodes of the inventory and of its
+`bootPath` rules, in what a group source answers, in a node name the
+inventory is asked for and in the first column `-o nodeset` and `-o name`
+read; its group sources; and what each command reports.
 
 **A real shell** checks the quoting. `shellquote` is the one place where being
 subtly wrong is invisible until it eats a production command, so every vector
@@ -221,8 +224,8 @@ with.
 ## Coverage
 
 Coverage is reported per package and is not a target in itself. The packages
-that hold the logic sit between 70 and 96 per cent; the command tree is lower
-because much of it is the last step before a remote host. go-nodeset and
+that hold the logic sit between about 74 and 100 per cent; the lowest, such as
+`internal/app`, are mostly the last step before a remote host. go-nodeset and
 go-clikit hold every file of theirs to all of its statements.
 
 Two rules keep the number meaningful:

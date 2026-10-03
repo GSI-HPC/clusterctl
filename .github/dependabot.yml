@@ -23,10 +23,13 @@ updates:
       prefix: build
       include: scope
     # CI runs the whole suite on every pull request, so minor and patch
-    # releases can travel together.
+    # releases can travel together. go-nodeset and go-clikit come on their
+    # own: the docs link their release, and a minor release of go-clikit
+    # (v0) may change its API (doc/adr/0026-go-nodeset-and-go-clikit.md).
     groups:
       go-modules:
         update-types: [minor, patch]
+        exclude-patterns: ["github.com/GSI-HPC/go-*"]
 
   # The actions the workflows use, one pull request each: the release and
   # Pages workflows do not run on pull requests, so a new major version of one

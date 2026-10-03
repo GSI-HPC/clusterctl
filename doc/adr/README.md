@@ -22,7 +22,7 @@ A decision is superseded by a later record, never edited.
 | [0009](0009-hugo-for-the-manual.md) | Hugo and Hextra for the manual | accepted |
 | [0010](0010-public-nodeset-package.md) | Publish `nodeset`, keep the rest internal | superseded by [0026](0026-go-nodeset-and-go-clikit.md) |
 | [0011](0011-installable-from-release-assets.md) | Release assets are consumable by a version manager | accepted |
-| [0012](0012-dependabot.md) | Dependabot proposes the dependency updates | accepted |
+| [0012](0012-dependabot.md) | Dependabot proposes the dependency updates | superseded in part by [0026](0026-go-nodeset-and-go-clikit.md) |
 | [0013](0013-sops-secret-documents.md) | Secrets live in sops encrypted Secret documents | superseded in part by [0019](0019-decrypt-with-the-sops-command.md) |
 | [0014](0014-mcp-plan-and-apply.md) | An MCP server of curated tools, where a person answers the gate | accepted |
 | [0015](0015-release-notes-in-the-tag.md) | Release notes are written in the signed tag | accepted |
