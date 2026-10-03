@@ -59,6 +59,12 @@ func (c *Client) CopyArgs(target Target, req CopyRequest) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	// scp reads the host up to the first colon, so an IPv6 address, the
+	// only host destination lets through with one, goes in brackets: bare,
+	// 2001:db8::7 would reach the host 2001.
+	if strings.Contains(target.Host, ":") {
+		host = strings.TrimSuffix(host, target.Host) + "[" + target.Host + "]"
+	}
 	// A path holding a colon would be read as a host, and one starting with
 	// a dash as an option, so both are made unambiguous.
 	remote := func(path string) string { return fmt.Sprintf("%s:%s", host, path) }
