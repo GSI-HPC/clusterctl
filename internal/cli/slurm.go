@@ -12,14 +12,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GSI-HPC/go-nodeset"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func newSlurmCommand(r *root) *cobra.Command {
@@ -213,7 +214,7 @@ func reasonNamesNodes(a *app.App, reason string) bool {
 	if a.Inventory == nil {
 		return false
 	}
-	ns, err := nodeset.Parse(strings.Join(names, " "))
+	ns, err := nodeexpr.Parse(strings.Join(names, " "))
 	if err != nil {
 		return false
 	}

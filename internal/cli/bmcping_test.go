@@ -9,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -73,7 +74,7 @@ func TestBMCPingSweepsInADryRun(t *testing.T) {
 // done, so there is no target for each.
 func TestBMCPingReportsTheSweepAsAStep(t *testing.T) {
 	t.Parallel()
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "exe0001.mgmt.hpc.example.org\n", ExitCode: 1}}}
 	_, err := run(t, harnessOptions{ctx: ctx, recorder: rec}, "bmc", "ping", "-n", "exe[0001-0002]")
 	wantCode(t, err, exitcode.TargetFailed)
@@ -81,7 +82,7 @@ func TestBMCPingReportsTheSweepAsAStep(t *testing.T) {
   step ping total=2: failed (target): 1 service processors did not answer
     call ssh node=mgmt host=mgmt-gw.example.org role=mgmt timeout=2m0s exit=1: failed (target): mgmt (mgmt-gw.example.org): command exited 1
 `
-	if got := tree(); got != want {
+	if got := watcher.Finish(); got != want {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want)
 	}
 }

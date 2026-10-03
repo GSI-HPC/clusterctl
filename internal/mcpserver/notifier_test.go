@@ -10,9 +10,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // lockedBuffer is a buffer the notifier's goroutine and the test share.
@@ -43,7 +42,7 @@ func TestANotifierThatPanicsStopsAndSaysWhy(t *testing.T) {
 		sent++
 		panic("the session is gone")
 	}, &log)
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{n}})
+	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{n}})
 	n.start()
 	ctx := progress.WithBus(context.Background(), bus)
 	stepCtx, step := progress.Start(ctx, progress.KindStep, "read the groups", progress.WithFlags(progress.Fold), progress.Total(2))

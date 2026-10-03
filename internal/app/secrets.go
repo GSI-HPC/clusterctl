@@ -11,11 +11,11 @@ import (
 	"sync"
 
 	"filippo.io/age"
+	"github.com/GSI-HPC/go-clikit/progress"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/secrets"
 )
 

@@ -23,14 +23,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // Placeholders an exec source's argument vector may carry. They are
@@ -66,8 +68,10 @@ func notDefined(format string, args ...any) error {
 	return &sentinelError{sentinel: ErrNotDefined, msg: fmt.Sprintf(format, args...)}
 }
 
-// Resolver implements nodeset.Resolver over the configured group sources, and
-// nodeset.Lister for the commands that list groups or complete their names.
+// Resolver implements nodeset.Resolver over the configured group sources,
+// nodeset.Lister for the commands that list groups or complete their names,
+// and nodeexpr.BatchResolver, so that the groups an expression names are
+// looked up side by side.
 type Resolver struct {
 	sources   map[string]v1alpha1.GroupSource
 	def       string
@@ -91,8 +95,9 @@ type Resolver struct {
 }
 
 var (
-	_ nodeset.Resolver = (*Resolver)(nil)
-	_ nodeset.Lister   = (*Resolver)(nil)
+	_ nodeset.Resolver       = (*Resolver)(nil)
+	_ nodeset.Lister         = (*Resolver)(nil)
+	_ nodeexpr.BatchResolver = (*Resolver)(nil)
 )
 
 // flight is one lookup under way.
@@ -196,7 +201,18 @@ func (r *Resolver) Sources() []string {
 // The search moves on only when a source answers that it has no such group.
 // A source that cannot be asked stops it: the group may well be that
 // source's, and another source's group of the same name is not an answer.
+//
+// A group without a name is refused before any source is asked.
 func (r *Resolver) Resolve(source, group string) (string, error) {
+	// go-nodeset hands on every reference, @ and @rack: included. Asked for
+	// a group without a name, an attribute source would answer with every
+	// node that carries the attribute, and a source that runs a command
+	// would run it with an empty $GROUP. nodeexpr refuses such a reference
+	// before it gets here; a caller that parses with go-nodeset alone is
+	// refused here.
+	if group == "" {
+		return "", errors.New("the group name is empty")
+	}
 	if source != "" {
 		return r.resolveIn(r.ctx, source, group)
 	}
@@ -223,13 +239,13 @@ func (r *Resolver) Resolve(source, group string) (string, error) {
 	return "", notDefined("no group source defines %q (sources: %s)", group, strings.Join(r.Sources(), ", "))
 }
 
-// ResolveAll implements nodeset.BatchResolver: it looks up the groups side
+// ResolveAll implements nodeexpr.BatchResolver: it looks up the groups side
 // by side, fanout.PerHost at a time, each as Resolve does, so that an
 // expression that names several groups of a source that runs commands
 // waits for about one round trip rather than one for each. A group not
 // looked up, once the command is interrupted, is left to Resolve.
-func (r *Resolver) ResolveAll(refs []nodeset.GroupRef) []nodeset.GroupAnswer {
-	answers := make([]nodeset.GroupAnswer, len(refs))
+func (r *Resolver) ResolveAll(refs []nodeexpr.GroupRef) []nodeexpr.GroupAnswer {
+	answers := make([]nodeexpr.GroupAnswer, len(refs))
 	looked := make([]bool, len(refs))
 	fanout.Each(r.ctx, len(refs), fanout.PerHost, func(i int) {
 		answers[i].Expr, answers[i].Err = r.Resolve(refs[i].Source, refs[i].Group)
@@ -525,7 +541,7 @@ func (r *Resolver) groupsIn(ctx context.Context, name, node string) ([]string, e
 			errs = append(errs, err)
 			continue
 		}
-		ns, err := nodeset.ParseWith(expr, r)
+		ns, err := nodeexpr.ParseWith(expr, r)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("source %q, group %q: %w", name, group, err))
 			continue

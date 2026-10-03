@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -72,7 +73,7 @@ type describedGroups struct {
 func TestDescribeNodesReadsItsFacetsAtOnceWithinTheHostsBound(t *testing.T) {
 	calls := &fanouttest.InFlight{Hold: fanout.PerHost + 1}
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 	f := start(t, setup{
 		ctx: progress.WithBus(context.Background(), bus),
 		runner: func(next transport.Runner) transport.Runner {

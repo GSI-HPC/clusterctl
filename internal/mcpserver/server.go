@@ -31,13 +31,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // ConfirmMode says who answers the confirmation gate before a plan is

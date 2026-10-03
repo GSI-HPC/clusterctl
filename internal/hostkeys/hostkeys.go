@@ -28,11 +28,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/termtext"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
-	"github.com/GSI-HPC/clusterctl/internal/termtext"
 )
 
 // DefaultAlgorithms are the host key algorithms collected for a host, best
@@ -822,5 +822,5 @@ func said(s string) string {
 			lines = append(lines, line)
 		}
 	}
-	return termtext.EscapeCell(strings.Join(lines, "; "))
+	return termtext.Escape(strings.Join(lines, "; "))
 }

@@ -12,15 +12,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GSI-HPC/go-nodeset"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 const (
@@ -255,10 +256,10 @@ func (s *Server) describeNodes(ctx context.Context, _ *mcp.CallToolRequest, in d
 // Holding them for a node's every lookup left the Slurm reads on the same
 // host waiting for the groups of four nodes.
 func readGroups(r *reads, names []string) ([]map[string][]string, error) {
-	outcomes := fanout.Map(r.ctx, names, fanout.Options[string]{
+	outcomes, _ := fanout.Map(r.ctx, names, fanout.MapOptions[string]{
 		Step:     "read the groups",
 		Limit:    fanout.PerHost,
-		Describe: func(name string) (node, host, role string) { return name, "", "" },
+		Describe: func(name string) fanout.Item { return fanout.Item{Node: name} },
 		PanicLog: r.a.WorkerDiag,
 	}, func(ctx context.Context, name string) (map[string][]string, error) {
 		return r.a.Groups.GroupsOfContext(ctx, name)
@@ -326,7 +327,7 @@ func (sl slurmReads) merge(ns *nodeset.NodeSet, byName map[string]*nodeView, err
 			errs["jobs"] = sl.jobs.err.Error()
 		}
 		for _, j := range sl.jobs.value {
-			on, err := nodeset.Parse(j.Nodes)
+			on, err := nodeexpr.Parse(j.Nodes)
 			if err != nil {
 				continue
 			}

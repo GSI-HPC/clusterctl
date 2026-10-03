@@ -10,11 +10,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // slurmCluster fakes the Slurm clients on the login node closely enough

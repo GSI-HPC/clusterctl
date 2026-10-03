@@ -16,17 +16,19 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+	"github.com/GSI-HPC/go-nodeset"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // noSlurm turns the Slurm job check off, which these tests are not about.
@@ -646,10 +648,10 @@ command bmc power: failed (target): 1 of 3 service processors failed
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+			ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 			_, err := run(t, harnessOptions{ctx: ctx, recorder: tc.recorder}, append(noSlurm, tc.args...)...)
 			wantCode(t, err, exitcode.TargetFailed)
-			if got := tree(); got != tc.want[1:] {
+			if got := watcher.Finish(); got != tc.want[1:] {
 				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
 			}
 		})
@@ -667,7 +669,7 @@ func TestBMCPowerEndsEachNodeAsItsProcessorAnswers(t *testing.T) {
 		return answer(req, http.StatusOK, system), nil
 	})
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 	_, err := run(t, harnessOptions{ctx: progress.WithBus(context.Background(), bus), recorder: ipmiOK()},
 		append(noSlurm, "--set", "bmc.redfish.maxConcurrent=2", "bmc", "power", "off", "-y", "-n", "exe[0001-0006]")...)
 	if err != nil {
@@ -696,20 +698,17 @@ func TestBMCPowerEndsEachNodeAsItsProcessorAnswers(t *testing.T) {
 	}
 }
 
-// fakeStagger replaces the pause between two batches for the rest of the
-// test: pause is called with its length instead of waiting it out, and
-// the pause ends at once unless pause says to wait for the context.
-func fakeStagger(t *testing.T, pause func(time.Duration) (wait bool)) {
-	t.Helper()
-	previous := staggerAfter
-	t.Cleanup(func() { staggerAfter = previous })
-	staggerAfter = func(d time.Duration) <-chan time.Time {
-		over := make(chan time.Time, 1)
-		if !pause(d) {
-			over <- time.Time{}
-		}
-		return over
-	}
+// inPause has during called, on a goroutine of its own, a second into the
+// first pause between two batches of a power command the test runs in a
+// synctest bubble. The command waits for the bubble's clock nowhere else,
+// so the work before the pause takes no time there, and the pause, the 5s
+// of safety.powerOnStagger, is a second under way when during is called:
+// an interrupt it makes ends the pause.
+func inPause(during func()) {
+	go func() {
+		time.Sleep(time.Second)
+		during()
+	}()
 }
 
 // A power-on in batches is one step over the whole set, with every batch
@@ -717,19 +716,21 @@ func fakeStagger(t *testing.T, pause func(time.Duration) (wait bool)) {
 // its own: a counter reaches its total whether a batch failed, which
 // leaves the later ones not tried, or an interrupt came in a pause, which
 // leaves them not sent. The notes on standard error and the rows are what
-// they were.
+// they were. The command waits out the one pause, or until the interrupt
+// a second into it, and for nothing else.
 func TestBMCPowerReportsItsBatches(t *testing.T) {
 	t.Setenv("BMC_PASSWORD", "s3cret")
 	for _, tc := range []struct {
 		name      string
 		nodes     string
 		interrupt bool
+		took      time.Duration
 		code      int
 		notes     []string
 		rows      map[string]string
 		want      string
 	}{
-		{"a batch fails", "exe[1-10]", false, exitcode.TargetFailed,
+		{"a batch fails", "exe[1-10]", false, 5 * time.Second, exitcode.TargetFailed,
 			[]string{
 				"powering on exe[0001-0003] (1 of 4)\nwaiting 5s before the next batch\npowering on exe[0004-0006] (2 of 4)\n",
 			},
@@ -749,7 +750,7 @@ command bmc power: failed (target): 1 of 10 service processors failed, 4 not tri
     wait stagger timeout=5s: ok
   wait confirm message=power on 10 hosts: ok
 `},
-		{"an interrupt in a pause", "exe[1-6]", true, exitcode.Interrupted,
+		{"an interrupt in a pause", "exe[1-6]", true, time.Second, exitcode.Interrupted,
 			[]string{"powering on exe[0001-0003] (1 of 2)\nwaiting 5s before the next batch\n"},
 			map[string]string{"exe0003": "ok", "exe0004": "not sent", "exe0006": "not sent"}, `
 command bmc power: canceled (canceled): interrupted, 3 not sent: exe[0004-0006]
@@ -764,50 +765,48 @@ command bmc power: canceled (canceled): interrupted, 3 not sent: exe[0004-0006]
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
-			ctx, cancel := context.WithCancel(watched)
-			defer cancel()
-			var pauses []time.Duration
-			fakeStagger(t, func(d time.Duration) bool {
-				pauses = append(pauses, d)
+			synctest.Test(t, func(t *testing.T) {
+				watched, watcher := progresstest.Watch(context.Background(), t, byExitCode)
+				ctx, cancel := context.WithCancel(watched)
+				defer cancel()
 				if tc.interrupt {
-					cancel()
+					inPause(cancel)
 				}
-				return tc.interrupt
-			})
-			recorder := &transport.Recorder{Reply: ipmiAnswer(func(bmc string) string {
-				if strings.HasPrefix(bmc, "exe0005.") {
-					return "connection timeout"
-				}
-				return "ok"
-			})}
+				recorder := &transport.Recorder{Reply: ipmiAnswer(func(bmc string) string {
+					if strings.HasPrefix(bmc, "exe0005.") {
+						return "connection timeout"
+					}
+					return "ok"
+				})}
 
-			h, err := run(t, harnessOptions{ctx: ctx, recorder: recorder},
-				append(noSlurm, "-o", "json", "bmc", "power", "on", "--ipmi", "--batch", "3", "-y", "-n", tc.nodes)...)
-			wantCode(t, err, tc.code)
-			if len(pauses) != 1 || pauses[0] != 5*time.Second {
-				t.Errorf("paused %v, want once for safety.powerOnStagger, 5s", pauses)
-			}
-			for _, note := range tc.notes {
-				if !strings.Contains(h.errOut.String(), note) {
-					t.Errorf("standard error does not say %q:\n%s", note, h.errOut)
+				start := time.Now()
+				h, err := run(t, harnessOptions{ctx: ctx, recorder: recorder},
+					append(noSlurm, "-o", "json", "bmc", "power", "on", "--ipmi", "--batch", "3", "-y", "-n", tc.nodes)...)
+				wantCode(t, err, tc.code)
+				if took := time.Since(start); took != tc.took {
+					t.Errorf("the command waited %v, want %v of the 5s pause of safety.powerOnStagger", took, tc.took)
 				}
-			}
-			states := map[string]string{}
-			for _, row := range jsonRows(t, h) {
-				states[row["node"].(string)], _ = row["state"].(string)
-			}
-			if want, _ := nodeset.Parse(tc.nodes); len(states) != want.Len() {
-				t.Errorf("%d rows, want one for each of the %d nodes:\n%s", len(states), want.Len(), h.out)
-			}
-			for node, want := range tc.rows {
-				if states[node] != want {
-					t.Errorf("%s: state %q, want %q", node, states[node], want)
+				for _, note := range tc.notes {
+					if !strings.Contains(h.errOut.String(), note) {
+						t.Errorf("standard error does not say %q:\n%s", note, h.errOut)
+					}
 				}
-			}
-			if got := tree(); got != tc.want[1:] {
-				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
-			}
+				states := map[string]string{}
+				for _, row := range jsonRows(t, h) {
+					states[row["node"].(string)], _ = row["state"].(string)
+				}
+				if want, _ := nodeset.Parse(tc.nodes); len(states) != want.Len() {
+					t.Errorf("%d rows, want one for each of the %d nodes:\n%s", len(states), want.Len(), h.out)
+				}
+				for node, want := range tc.rows {
+					if states[node] != want {
+						t.Errorf("%s: state %q, want %q", node, states[node], want)
+					}
+				}
+				if got := watcher.Finish(); got != tc.want[1:] {
+					t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
+				}
+			})
 		})
 	}
 }
@@ -833,7 +832,7 @@ func TestBMCPowerKeepsTheAnswersThatCameBeforeAnInterrupt(t *testing.T) {
 		cancel()
 		return &transport.Result{Target: tg, ExitCode: 255, Err: exitcode.Wrap(exitcode.Interrupted, context.Canceled)}, nil
 	}}
-	watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	watched, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	ctx2, cancel2 := context.WithCancel(watched)
 	defer cancel2()
 	go func() { <-ctx.Done(); cancel2() }()
@@ -847,7 +846,7 @@ func TestBMCPowerKeepsTheAnswersThatCameBeforeAnInterrupt(t *testing.T) {
 		rows[2]["state"] != "outcome unknown" {
 		t.Errorf("rows = %v, want exe0001 ok, exe0002 its failure and exe0003's outcome unknown", rows)
 	}
-	if got := tree(); !strings.Contains(got, "target exe0002: failed (target)") {
+	if got := watcher.Finish(); !strings.Contains(got, "target exe0002: failed (target)") {
 		t.Errorf("progress:\n%s\nwant exe0002 failed as its row says", got)
 	}
 }

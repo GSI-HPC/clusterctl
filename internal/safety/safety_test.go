@@ -13,10 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func gate(t *testing.T, answer string) (*safety.Gate, *bytes.Buffer) {
@@ -190,6 +191,26 @@ func TestBadProtectedHostsRefuseEveryAction(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "could not be worked out") {
 		t.Errorf("--force went ahead without saying so:\n%s", out)
+	}
+}
+
+// A range without its last bound is what exe[1-$N] leaves behind when N is
+// empty. go-nodeset reads exe[0001-] as exe0001, which would protect one
+// host where the entry meant many, so the entry is refused.
+func TestAProtectedHostsEntryWithoutItsLastBoundIsRefused(t *testing.T) {
+	t.Parallel()
+
+	g, err := safety.NewGate(v1alpha1.SafetySpec{ProtectedHosts: []string{"wlm01", "exe[0001-]"}, PowerOnBatch: 8}, nil)
+	if err != nil {
+		t.Fatalf("NewGate failed: %v", err)
+	}
+	want := `safety.protectedHosts[1] "exe[0001-]": in "exe[0001-]": the range "0001-" has no last bound`
+	if _, err := g.Protected(); err == nil || err.Error() != want {
+		t.Errorf("Protected() = %v, want %q", err, want)
+	}
+	g.AssumeYes = true
+	if err := g.Confirm(action("power off", "exe0002")); err == nil {
+		t.Error("an action went ahead although a protected hosts entry was refused")
 	}
 }
 

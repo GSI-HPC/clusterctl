@@ -30,11 +30,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/output"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 )
 

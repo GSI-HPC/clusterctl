@@ -19,9 +19,9 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"github.com/GSI-HPC/go-clikit/progress"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/secrets"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 )
@@ -750,7 +750,7 @@ func TestSopsHasTheTerminalToItselfOnlyWhenItLooksForKeys(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			display := &suspending{}
-			bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{display}})
+			bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{display}})
 			defer bus.Close()
 			s, _ := fakeSops(t, "3.13.3", `cat >/dev/null; echo '{"data":{}}'`)
 			ctx := progress.WithBus(context.Background(), bus)

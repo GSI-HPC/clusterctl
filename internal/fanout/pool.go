@@ -9,26 +9,36 @@ import (
 	"errors"
 	"io"
 
-	pool "github.com/GSI-HPC/clusterctl/internal/clikit/fanout"
+	pool "github.com/GSI-HPC/go-clikit/fanout"
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // program is the name the pools give clusterctl, in the line that says the
 // work panicked and in the error it becomes.
 const program = "clusterctl"
 
-// DefaultMax is used when nothing configures the fan-out.
-const DefaultMax = pool.DefaultMax
+// DefaultLimit is used when nothing configures the fan-out.
+const DefaultLimit = pool.DefaultLimit
 
-// Options say how Map works on its items and how it reports them, as
-// internal/clikit/fanout has them.
-type Options[T any] = pool.Options[T]
+// MapOptions say how Map works on its items and how it reports them, as
+// go-clikit's fanout has them.
+type MapOptions[T any] = pool.MapOptions[T]
+
+// Item is what MapOptions.Describe says of an item.
+type Item = pool.Item
 
 // Outcome is what the work for one item came to.
 type Outcome[R any] = pool.Outcome[R]
+
+// Summary is what the items of a fan-out came to, as Summarize is given it.
+type Summary = pool.Summary
+
+// Failed is one item that failed, as Summary lists it.
+type Failed = pool.Failed
 
 // BatchOptions say how Batches splits a node set and reports its work.
 type BatchOptions = pool.BatchOptions
@@ -41,73 +51,68 @@ type Batch = pool.Batch
 var ErrNotTried = pool.ErrNotTried
 
 // Each calls work with every index below n, at most limit at a time, as
-// internal/clikit/fanout's Each does.
+// go-clikit's fanout.Each does.
 func Each(ctx context.Context, n, limit int, work func(i int)) {
 	pool.Each(ctx, n, limit, work)
 }
 
-// Map is internal/clikit/fanout's Map as clusterctl runs it: a panic is
+// Map is go-clikit's fanout.Map as clusterctl runs it: a panic is
 // clusterctl's, and the error it becomes asks for the exit code of a target
 // that failed, as Recovered's does; the class of an error that says none of
 // its own is that of its exit code; and the step ends with Summarize's
-// error, which asks for the exit code the worst of the items' errors does.
-// An Options that sets the program, the class or the summary keeps it.
-func Map[T, R any](ctx context.Context, items []T, o Options[T], fn func(ctx context.Context, item T) (R, error)) []Outcome[R] {
+// error, which names the items by o.Noun and asks for the exit code the
+// worst of the items' errors does, and which Map returns as well. A
+// MapOptions that sets the program, the class or the summary keeps it.
+func Map[T, R any](ctx context.Context, items []T, o MapOptions[T], fn func(ctx context.Context, item T) (R, error)) ([]Outcome[R], error) {
 	o.Program = cmp.Or(o.Program, program)
 	if o.Classify == nil {
 		o.Classify = exitcode.Class
 	}
 	if o.Summarize == nil {
-		o.Summarize = func(n int, names []string, errs []error, interrupted bool) error {
-			return Summarize("", n, names, errs, interrupted)
-		}
+		noun := o.Noun
+		o.Summarize = func(s Summary) error { return Summarize(noun, s) }
 	}
-	out := pool.Map(ctx, items, o, fn)
+	out, err := pool.Map(ctx, items, o, fn)
 	for i := range out {
 		var p *pool.PanicError
 		if errors.As(out[i].Err, &p) {
 			out[i].Err = exitcode.Default(exitcode.TargetFailed, out[i].Err)
 		}
 	}
-	return out
+	return out, err
 }
 
-// Batches runs a node set in batches, as internal/clikit/fanout's Batches
-// does.
+// Batches runs a node set in batches, as go-clikit's fanout.Batches does.
 func Batches(ctx context.Context, nodes *nodeset.NodeSet, o BatchOptions, run func(ctx context.Context, batch *nodeset.NodeSet) error) []Batch {
 	return pool.Batches(ctx, nodes, o, run)
 }
 
-// Skip returns the error of work that leaves its item out on purpose, as
-// internal/clikit/fanout's Skip does.
-func Skip(reason string) error { return pool.Skip(reason) }
-
-// IsSkipped reports whether err says that an item was left out on purpose.
-func IsSkipped(err error) bool { return pool.IsSkipped(err) }
-
 // Recovered turns a panic in the work for one target into that target's
-// error, as internal/clikit/fanout's Recovered does for clusterctl, with the
-// exit code of a target that failed.
+// error, as go-clikit's fanout.Recovered does for clusterctl, with the exit
+// code of a target that failed.
 func Recovered(log io.Writer, target string, v any) error {
 	return exitcode.Wrap(exitcode.TargetFailed, pool.Recovered(log, program, target, v))
 }
 
-// Summarize is the error a fan-out of n that did not succeed everywhere
-// exits with: internal/clikit/fanout's Failure, "k of n <noun> failed:
-// <node set>", with the code exitcode.Worst gives the items' errors, or
-// TargetFailed when none of them says, since a command that exited non-zero
-// is a target that failed. Its progress class is that of the code, not of
-// whichever of the items' errors says a class first, or canceled when
-// interrupted says that the interrupt ended the items. It is nil when none
-// failed.
-func Summarize(noun string, n int, names []string, errs []error, interrupted bool) error {
-	err := pool.Failure(noun, n, names, errs, interrupted)
+// Summarize is the error a fan-out that did not succeed everywhere exits
+// with: go-clikit's fanout.Failure, "k of n <noun> failed: <node set>", with
+// the code exitcode.Worst gives the items' errors, or TargetFailed when none
+// of them says, since a command that exited non-zero is a target that
+// failed. Its progress class is that of the code, not of whichever of the
+// items' errors says a class first, or canceled when s.Canceled says that
+// every item that failed ended canceled. It is nil when none failed.
+func Summarize(noun string, s Summary) error {
+	err := pool.Failure(noun, s)
 	if err == nil {
 		return nil
 	}
+	errs := make([]error, len(s.Failed))
+	for i, f := range s.Failed {
+		errs[i] = f.Err
+	}
 	code := cmp.Or(exitcode.Worst(errs...), exitcode.TargetFailed)
 	class := exitcode.CodeClass(code)
-	if interrupted {
+	if s.Canceled {
 		class = progress.ClassCanceled
 	}
 	return &exitcode.Error{Code: code, Err: classed{err, class}}
@@ -130,10 +135,9 @@ func (c classed) ProgressClass() progress.Class { return c.class }
 // still tell a cancellation from a failure. It is nil when every target
 // succeeded.
 func FailureError(results []*transport.Result) error {
-	var names []string
-	var errs []error
+	s := Summary{Total: len(results)}
 	for _, r := range Failures(results) {
-		names, errs = append(names, r.Target.Name), append(errs, r.Err)
+		s.Failed = append(s.Failed, Failed{Name: r.Target.Name, Err: r.Err})
 	}
-	return Summarize("hosts", len(results), names, errs, false)
+	return Summarize("hosts", s)
 }

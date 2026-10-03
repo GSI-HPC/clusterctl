@@ -13,12 +13,12 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )

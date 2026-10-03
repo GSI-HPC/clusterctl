@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
 
 // Each host is bounded on its own: work on one host waits for a place
@@ -122,11 +123,11 @@ func TestHostsGiveBackWhatTheyTookWhenTheContextEnds(t *testing.T) {
 func TestMapWaitsQueuedForWhatAnItemNeeds(t *testing.T) {
 	t.Parallel()
 
-	ctx, c := progresstest.Checked(context.Background(), t, byExitCode)
+	ctx, c := progresstest.Watch(context.Background(), t, byExitCode)
 	hosts := &fanout.Hosts{}
 	calls := &fanouttest.InFlight{Hold: fanout.PerHost + 1}
 	refused := errors.New("no place for exe2")
-	outcomes := fanout.Map(ctx, nodes(8), fanout.Options[string]{
+	outcomes, _ := fanout.Map(ctx, nodes(8), fanout.MapOptions[string]{
 		Step:  "check",
 		Limit: 8,
 		Acquire: func(ctx context.Context, node string) (func(), error) {

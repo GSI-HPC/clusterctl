@@ -21,8 +21,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+
 	"github.com/GSI-HPC/clusterctl/internal/output"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // MinSopsVersion is the oldest sops clusterctl decrypts with: 3.10.0 is the

@@ -11,12 +11,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // nodes names n nodes, exe1 to exeN.
@@ -38,8 +39,8 @@ var byExitCode = progresstest.Classify(exitcode.Class)
 func TestMapStepSaysTheClassOfItsExitCode(t *testing.T) {
 	t.Parallel()
 
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
-	fanout.Map(ctx, nodes(3), fanout.Options[string]{Step: "copy", Limit: 1},
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
+	fanout.Map(ctx, nodes(3), fanout.MapOptions[string]{Step: "copy", Limit: 1},
 		func(_ context.Context, node string) (struct{}, error) {
 			switch node {
 			case "exe1":
@@ -54,7 +55,7 @@ func TestMapStepSaysTheClassOfItsExitCode(t *testing.T) {
   target exe2: failed (transport): {}: connection refused
   target exe3: ok
 `
-	if got := tree(); got != want {
+	if got := watcher.Finish(); got != want {
 		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
 	}
 }
@@ -65,7 +66,7 @@ func TestMapStepSaysTheClassOfItsExitCode(t *testing.T) {
 func TestExecutorReportsItsTargets(t *testing.T) {
 	t.Parallel()
 
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	rec := &transport.Recorder{ByTarget: map[string]*transport.Result{"exe2": {ExitCode: 1}}}
 	e := &fanout.Executor{Runner: rec, Max: 2, Flags: progress.ShowLines}
 	results := e.Run(ctx, targets("exe1", "exe2", "exe3"), transport.Request{Argv: []string{"uptime"}})
@@ -76,7 +77,7 @@ func TestExecutorReportsItsTargets(t *testing.T) {
   target exe2 [show-lines]: failed (target): {}: command exited 1
   target exe[1,3] [show-lines]: ok
 `
-	if got := tree(); got != want {
+	if got := watcher.Finish(); got != want {
 		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
 	}
 }
@@ -133,14 +134,15 @@ func TestFailureError(t *testing.T) {
 	}
 }
 
-// The pools clusterctl runs are internal/clikit/fanout's, named as
+// The pools clusterctl runs are go-clikit's fanout's, named as
 // clusterctl's: a panic is clusterctl's, and asks for the exit code of a
-// target that failed, whether it came in Map or a worker of its own.
+// target that failed, whether it came in the work or the Acquire of Map,
+// or in a worker of its own.
 func TestThePoolsAreClusterctls(t *testing.T) {
 	t.Parallel()
 
 	var log strings.Builder
-	outcomes := fanout.Map(context.Background(), nodes(1), fanout.Options[string]{PanicLog: &log},
+	outcomes, _ := fanout.Map(context.Background(), nodes(1), fanout.MapOptions[string]{PanicLog: &log},
 		func(context.Context, string) (struct{}, error) { panic("boom") })
 	err := outcomes[0].Err
 	if exitcode.From(err) != exitcode.TargetFailed || !exitcode.Has(err) ||
@@ -149,6 +151,17 @@ func TestThePoolsAreClusterctls(t *testing.T) {
 	}
 	if !strings.HasPrefix(log.String(), `clusterctl: panic while working on exe1: "boom"`) {
 		t.Errorf("the log reads %q", log.String())
+	}
+
+	// go-clikit recovers a panic in Acquire as well, and it is
+	// clusterctl's all the same.
+	outcomes, _ = fanout.Map(context.Background(), nodes(1), fanout.MapOptions[string]{
+		PanicLog: io.Discard,
+		Acquire:  func(context.Context, string) (func(), error) { panic("boom") },
+	}, func(context.Context, string) (struct{}, error) { return struct{}{}, nil })
+	if err := outcomes[0].Err; exitcode.From(err) != exitcode.TargetFailed || !exitcode.Has(err) ||
+		err.Error() != `clusterctl panicked; this is a bug, please report it: "boom"` {
+		t.Errorf("the panic in Acquire became %v, want clusterctl's, exiting 1", err)
 	}
 
 	err = fanout.Recovered(io.Discard, "exe2", "boom")
@@ -165,8 +178,67 @@ func TestThePoolsAreClusterctls(t *testing.T) {
 		t.Errorf("Each ran %v, want every index", ran)
 	}
 	batches := fanout.Batches(context.Background(), nodeset.MustParse("exe[1-2]"), fanout.BatchOptions{Step: "power on"},
-		func(context.Context, *nodeset.NodeSet) error { return fanout.Skip("dry run") })
-	if len(batches) != 1 || !fanout.IsSkipped(batches[0].Err) {
+		func(context.Context, *nodeset.NodeSet) error { return progress.Skip("dry run") })
+	if len(batches) != 1 || !errors.Is(batches[0].Err, progress.ErrSkipped) {
 		t.Errorf("Batches = %+v, want one batch left out on purpose", batches)
+	}
+}
+
+// An interrupt ends the step of Map canceled, with the exit code of an
+// interrupt, which is the worst there is: the items it cut short and those
+// it left out end canceled, and an item that failed before it, of its own
+// accord, ends failed but does not change the step's code. The error Map
+// returns is the step's, and names the items by the noun it is given.
+func TestMapEndsCanceledWhenInterrupted(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		failed  bool
+		summary string
+		want    string
+	}{
+		{"only the interrupt", false, "2 of 3 hosts failed: exe[2-3]", `step copy total=3 limit=1 [fold]: canceled (canceled): 2 of 3 hosts failed: exe[2-3]
+  target exe1: ok
+  target exe[2-3]: canceled (canceled): context canceled
+`},
+		{"a failure before it", true, "3 of 3 hosts failed: exe[1-3]", `step copy total=3 limit=1 [fold]: canceled (canceled): 3 of 3 hosts failed: exe[1-3]
+  target exe1: failed (transport): {}: connection refused
+  target exe[2-3]: canceled (canceled): context canceled
+`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			watched, watcher := progresstest.Watch(context.Background(), t, byExitCode)
+			ctx, cancel := context.WithCancel(watched)
+			defer cancel()
+			outcomes, err := fanout.Map(ctx, nodes(3), fanout.MapOptions[string]{Step: "copy", Limit: 1, Noun: "hosts"},
+				func(ctx context.Context, node string) (struct{}, error) {
+					switch node {
+					case "exe1":
+						if tc.failed {
+							return struct{}{}, exitcode.Errorf(exitcode.Transport, "exe1: connection refused")
+						}
+						return struct{}{}, nil
+					}
+					cancel()
+					return struct{}{}, ctx.Err()
+				})
+			if got := watcher.Finish(); got != tc.want {
+				t.Errorf("tree:\n%s\nwant:\n%s", got, tc.want)
+			}
+			if outcomes[2].Started || !errors.Is(outcomes[2].Err, context.Canceled) {
+				t.Errorf("exe3: %+v, want never started, with the context's error", outcomes[2])
+			}
+			if fmt.Sprint(err) != tc.summary {
+				t.Errorf("Map returned %v, want the step's error, %s", err, tc.summary)
+			}
+			if got := exitcode.From(err); got != exitcode.Interrupted {
+				t.Errorf("exit code %d, want %d", got, exitcode.Interrupted)
+			}
+			if got := progress.Classify(err, exitcode.Class); got != progress.ClassCanceled {
+				t.Errorf("class %s, want %s", got, progress.ClassCanceled)
+			}
+		})
 	}
 }

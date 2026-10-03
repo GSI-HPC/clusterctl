@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GSI-HPC/go-nodeset"
 	"golang.org/x/term"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -36,11 +37,11 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // Streams are the input and output a command talks to. Tests replace them
@@ -226,7 +227,7 @@ type App struct {
 	// groups they name, looked up side by side when the gate first resolves
 	// one: an exec source's groups are each a round trip to its host.
 	protectedOnce   sync.Once
-	protectedGroups *nodeset.Batch
+	protectedGroups *nodeexpr.Batch
 	pinsOnce        sync.Once
 	pins            *redfish.PinStore
 }
@@ -329,7 +330,7 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	// --set, the environment and the overrides tables, which it does not
 	// see. Only a value nothing set at all falls back to the default.
 	if o, set := resolved.Tree.Origin("fanout.max"); !set && a.Spec.Fanout.Max == 0 {
-		a.Spec.Fanout.Max = fanout.DefaultMax
+		a.Spec.Fanout.Max = fanout.DefaultLimit
 	} else if a.Spec.Fanout.Max < 1 {
 		return nil, exitcode.Errorf(exitcode.Usage, "%s: fanout.max is %d; it must be at least 1",
 			o, a.Spec.Fanout.Max)
@@ -671,7 +672,7 @@ func (a *App) Select(expr string) (*nodeset.NodeSet, error) {
 		return nil, exitcode.Errorf(exitcode.Usage,
 			"no nodes were selected; pass -n or set %s", config.EnvNodes)
 	}
-	ns, err := nodeset.ParseWith(expr, a.Groups)
+	ns, err := nodeexpr.ParseWith(expr, a.Groups)
 	if err != nil {
 		// A group source that could not be asked has already said so with
 		// an exit code of its own; only what carries none is the

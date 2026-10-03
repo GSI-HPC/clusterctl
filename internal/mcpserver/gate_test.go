@@ -57,3 +57,26 @@ func TestPlanIsNeverForced(t *testing.T) {
 		t.Errorf("sent %v", sent)
 	}
 }
+
+// "@rack:" + rack with rack empty leaves @rack:, which a group source would
+// answer with every node that has a rack, and exe[1-] is what a range left
+// without its last bound reads as: exe1 alone. The tools refuse both, before
+// anything is sent.
+func TestASelectionWithoutALastBoundOrAGroupNameIsRefused(t *testing.T) {
+	f := start(t, setup{})
+	for expr, want := range map[string]string{
+		"exe[1-]": `in "exe[1-]": the range "1-" has no last bound`,
+		"@rack:":  "empty group name in @rack:",
+	} {
+		if msg := f.refused(t, "select_nodes", map[string]any{"expression": expr}); !strings.Contains(msg, want) {
+			t.Errorf("select_nodes %s: message = %q, want %q", expr, msg, want)
+		}
+		msg := f.refused(t, "plan_change", map[string]any{"action": "drain", "nodes": expr, "reason": "x"})
+		if !strings.Contains(msg, want) {
+			t.Errorf("plan_change %s: message = %q, want %q", expr, msg, want)
+		}
+	}
+	if sent := f.cluster.sent(); len(sent) != 0 {
+		t.Errorf("sent %v", sent)
+	}
+}

@@ -21,10 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -653,10 +654,10 @@ command provision reinstall: failed (target): configuring the network boot faile
 		t.Run(tc.name, func(t *testing.T) {
 			h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
 			tc.setup(h)
-			ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+			ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 			_, err := h.run(t, harnessOptions{ctx: ctx}, "provision", "reinstall", "-n", "exe[0001-0003]", "-y")
 			wantCode(t, err, tc.code)
-			if got := tree(); got != tc.want[1:] {
+			if got := watcher.Finish(); got != tc.want[1:] {
 				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
 			}
 		})

@@ -12,9 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // exampleWith writes a copy of an example document, changed by edit, into a

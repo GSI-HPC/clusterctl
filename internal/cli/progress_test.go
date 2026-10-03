@@ -7,10 +7,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -59,10 +59,10 @@ command exec [dry-run]: ok
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+			ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 			_, err := run(t, harnessOptions{ctx: ctx, recorder: tc.recorder}, tc.args...)
 			wantCode(t, err, tc.code)
-			if got := tree(); got != tc.want[1:] {
+			if got := watcher.Finish(); got != tc.want[1:] {
 				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
 			}
 		})
@@ -74,7 +74,7 @@ command exec [dry-run]: ok
 // the interrupt ended.
 func TestAnInterruptedCommandEndsCanceled(t *testing.T) {
 	t.Parallel()
-	watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	watched, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	ctx, cancel := context.WithCancel(watched)
 	defer cancel()
 	rec := &transport.Recorder{Reply: func(t transport.Target, _ transport.Request) (*transport.Result, error) {
@@ -90,7 +90,7 @@ func TestAnInterruptedCommandEndsCanceled(t *testing.T) {
     target exe0001: canceled (canceled): context canceled
       call ssh node={} host={} timeout=10m0s exit=255: failed (transport): {} ({}): Connection closed
 `
-	if got := tree(); got != want {
+	if got := watcher.Finish(); got != want {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want)
 	}
 }
@@ -99,11 +99,11 @@ func TestAnInterruptedCommandEndsCanceled(t *testing.T) {
 // reports nothing, not even itself.
 func TestAnInteractiveCommandReportsNothing(t *testing.T) {
 	t.Parallel()
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	if _, err := run(t, harnessOptions{ctx: ctx}, "login", "--dry-run", "install", "--", "uptime"); err != nil {
 		t.Fatalf("login --dry-run failed: %v", err)
 	}
-	if got := tree(); got != "" {
+	if got := watcher.Finish(); got != "" {
 		t.Errorf("login reported:\n%s", got)
 	}
 }
@@ -113,7 +113,7 @@ func TestAnInteractiveCommandReportsNothing(t *testing.T) {
 // it only prints its help.
 func TestEveryLeafButAnInteractiveOneRunsInASpan(t *testing.T) {
 	t.Parallel()
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	r := &root{ctx: ctx}
 	ran := map[string]bool{}
 	note := func(c *cobra.Command, _ []string) error {
@@ -142,7 +142,7 @@ func TestEveryLeafButAnInteractiveOneRunsInASpan(t *testing.T) {
 	want := `command group withrun: ok
 command group withrune: ok
 `
-	if got := tree(); got != want {
+	if got := watcher.Finish(); got != want {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want)
 	}
 }

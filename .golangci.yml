@@ -29,14 +29,14 @@ linters:
   settings:
     depguard:
       rules:
-        # Progress is reported through internal/progress, whose events map
+        # Progress is reported through go-clikit/progress, whose events map
         # onto a trace; an exporter, if one is ever wanted, converts them
         # in a module of its own. OpenTelemetry in this module would bring
         # its global providers, and a release for each of its updates.
         opentelemetry:
           deny:
             - pkg: go.opentelemetry.io
-              desc: report progress through internal/progress
+              desc: report progress through github.com/GSI-HPC/go-clikit/progress
     errcheck:
       # A deliberate discard is written as _ = f(), which reads as a decision
       # rather than an oversight.

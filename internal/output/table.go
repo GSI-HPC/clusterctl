@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/GSI-HPC/clusterctl/internal/termtext"
+	"github.com/GSI-HPC/go-clikit/termtext"
 )
 
 // Column is one column of a table.

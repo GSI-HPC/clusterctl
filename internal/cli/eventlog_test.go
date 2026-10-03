@@ -123,7 +123,7 @@ func TestTheEventLogOfACommand(t *testing.T) {
 		t.Errorf("the event log was created with mode %v, want 0600", info.Mode().Perm())
 	}
 	got := normalised(readLog(t, path))
-	want := `{"v":1,"type":"trace","run":"#run","trace":"4bf92f3577b34da6a3ce929d0e0e4736","parent":"00f067aa0ba902b7","traceFlags":"01","traceState":"ci=build-42","version":"VERSION"}
+	want := `{"v":1,"type":"trace","run":"#run","trace":"4bf92f3577b34da6a3ce929d0e0e4736","parent":"00f067aa0ba902b7","traceFlags":"01","traceState":"ci=build-42","program":"clusterctl","version":"VERSION"}
 {"v":1,"run":"#run","trace":"4bf92f3577b34da6a3ce929d0e0e4736","seq":1,"time":"2026-09-26T12:00:00.000000000Z","type":"start","span":"#1","kind":"command","name":"exec","state":"running"}
 {"v":1,"run":"#run","trace":"4bf92f3577b34da6a3ce929d0e0e4736","seq":2,"time":"2026-09-26T12:00:00.000000000Z","type":"start","span":"#2","parent":"#1","kind":"step","name":"run","flags":["fold","show-lines"],"state":"running","total":3,"limit":1}
 {"v":1,"run":"#run","trace":"4bf92f3577b34da6a3ce929d0e0e4736","seq":3,"time":"2026-09-26T12:00:00.000000000Z","type":"start","span":"#3","parent":"#2","kind":"target","name":"exe0001","flags":["show-lines"],"state":"queued","node":"exe0001","host":"exe0001.hpc.example.org"}
@@ -224,9 +224,9 @@ func TestTheEventLogIsWrittenWithEveryDisplay(t *testing.T) {
 }
 
 // Each command appends to the log, CLUSTERCTL_PROGRESS_LOG's when no flag
-// names one, after a line of its own that names its run, the version that
-// wrote it and its trace: a trace of its own, unless TRACEPARENT is valid,
-// when it continues that one. Every line carries its run, which tells two
+// names one, after a line of its own that names its run, the program and
+// version that wrote it and its trace: a trace of its own, unless
+// TRACEPARENT is valid, when it continues that one. Every line carries its run, which tells two
 // runs apart when they continue one trace. An empty --progress-log writes
 // no log, whatever the variable says.
 func TestTheEventLogIsAppendedTo(t *testing.T) {
@@ -263,7 +263,7 @@ func TestTheEventLogIsAppendedTo(t *testing.T) {
 		}
 		delete(under, "run")
 		delete(under, "version")
-		want := map[string]any{"v": 1.0, "type": "trace", "trace": "4bf92f3577b34da6a3ce929d0e0e4736", "parent": "00f067aa0ba902b7", "traceFlags": "01"}
+		want := map[string]any{"v": 1.0, "type": "trace", "trace": "4bf92f3577b34da6a3ce929d0e0e4736", "parent": "00f067aa0ba902b7", "traceFlags": "01", "program": "clusterctl"}
 		if fmt.Sprint(under) != fmt.Sprint(want) {
 			t.Errorf("the run under TRACEPARENT: %v, want %v", under, want)
 		}

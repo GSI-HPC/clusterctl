@@ -14,8 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
 
 // fakeScp writes a script standing in for scp. Each run records its
@@ -237,7 +238,7 @@ func TestCopyReportsEachTransferAsACall(t *testing.T) {
 *exe0002*) echo "scp: /etc/hosts: Permission denied" >&2; exit 1 ;;
 *exe0003*) exec sleep 30 ;;
 esac`)
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := run(t, harnessOptions{ctx: ctx}, "--set", "ssh.scpBinary="+binary, "-y",
 		"copy", "-n", "exe[1-3]", "--timeout", "1s", "/etc/hosts", "/etc/hosts")
 	wantCode(t, err, exitcode.Transport)
@@ -255,7 +256,7 @@ esac`)
       call scp node={} host={} timeout=1s: failed (timeout): {} ({}): the transfer did not finish within 1s: context deadline exceeded
   wait confirm message=copy files to 3 hosts: ok
 `
-	if got := tree(); got != want {
+	if got := watcher.Finish(); got != want {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want)
 	}
 }

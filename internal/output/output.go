@@ -20,8 +20,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // The output formats -o accepts.

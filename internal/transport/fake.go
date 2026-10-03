@@ -11,8 +11,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/nodeset"
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-nodeset"
 )
 
 // Call is one request a Recorder was asked to run.

@@ -10,9 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 )
 
@@ -62,7 +63,7 @@ func TestEveryRequestIsReportedAsACall(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &progresstest.Capture{}
-			bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
+			bus := progress.NewBus(progress.BusOptions{Classify: exitcode.Class, Sinks: []progress.Sink{c}})
 			ctx, cancel := context.WithCancel(progress.WithBus(context.Background(), bus))
 			defer cancel()
 			if tc.cancel {

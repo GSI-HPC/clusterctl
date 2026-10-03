@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // notifyEvery is how often a call's progress is sent at most, but as a
@@ -47,7 +47,7 @@ func (s *Server) watch(ctx context.Context, req *mcp.CallToolRequest) (context.C
 			sinks = append(sinks, n)
 		}
 	}
-	bus := progress.NewBus(progress.Options{Sinks: sinks, PanicLog: s.opts.Log, Program: "clusterctl", Classify: exitcode.Class})
+	bus := progress.NewBus(progress.BusOptions{Sinks: sinks, PanicLog: s.opts.Log, Program: "clusterctl", Classify: exitcode.Class})
 	if n != nil {
 		n.start()
 	}

@@ -18,8 +18,8 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/groups"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 type runnerFunc func(context.Context, transport.Target, transport.Request) (*transport.Result, error)
@@ -76,7 +76,7 @@ func TestTheGroupsOfASourceAreLookedUpSideBySide(t *testing.T) {
 			if err != nil {
 				return "", err
 			}
-			ns, err := nodeset.ParseWith(all, r)
+			ns, err := nodeexpr.ParseWith(all, r)
 			return ns.String(), err
 		},
 		"the groups of exe07": func(r *groups.Resolver) (string, error) {
@@ -230,7 +230,7 @@ func TestTheGroupsOfANodeInAnAttributeSourceAreItsValue(t *testing.T) {
 		t.Errorf("the groups of three nodes took %v", elapsed)
 	}
 	// What the groups say when expanded agrees with the node's value.
-	ns, err := nodeset.ParseWith("@rack:r45", r)
+	ns, err := nodeexpr.ParseWith("@rack:r45", r)
 	if err != nil || !ns.Contains("n12345") || ns.Len() != 400 {
 		t.Errorf("@rack:r45 = %v (%v), want 400 nodes, n12345 among them", ns, err)
 	}
@@ -245,7 +245,7 @@ func TestTheGroupsAnExpressionNamesAreLookedUpSideBySide(t *testing.T) {
 	t.Parallel()
 	calls := &fanouttest.InFlight{Hold: fanout.PerHost + 1}
 	r := groups.New(listedOptions(t, calls.Runner(runnerFunc(listed))))
-	ns, err := nodeset.ParseWith("@p01,@p02,@slurm:p03 @p04!@p02,@p05", r)
+	ns, err := nodeexpr.ParseWith("@p01,@p02,@slurm:p03 @p04!@p02,@p05", r)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,12 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/groups"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func testInventory(t *testing.T) *inventory.Inventory {
@@ -77,7 +79,7 @@ func TestAttributeSource(t *testing.T) {
 	// The inventory replaces the genders file: one group per attribute
 	// value, reachable with or without the source prefix.
 	for _, expr := range []string{"@exe", "@inventory:exe"} {
-		ns, err := nodeset.ParseWith(expr, r)
+		ns, err := nodeexpr.ParseWith(expr, r)
 		if err != nil {
 			t.Fatalf("ParseWith(%q) failed: %v", expr, err)
 		}
@@ -86,7 +88,7 @@ func TestAttributeSource(t *testing.T) {
 		}
 	}
 
-	ns, err := nodeset.ParseWith("@rack:R01", r)
+	ns, err := nodeexpr.ParseWith("@rack:R01", r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +101,7 @@ func TestStaticSourceAndNesting(t *testing.T) {
 	t.Parallel()
 	r := testResolver(t, &transport.Recorder{}, "")
 
-	ns, err := nodeset.ParseWith("@static:all", r)
+	ns, err := nodeexpr.ParseWith("@static:all", r)
 	if err != nil {
 		t.Fatalf("ParseWith failed: %v", err)
 	}
@@ -114,7 +116,7 @@ func TestExecSourceSubstitutesArgumentsNotShellWords(t *testing.T) {
 	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "exe1 exe2 exe3\n"}}}
 	r := testResolver(t, rec, "")
 
-	ns, err := nodeset.ParseWith("@slurm:main", r)
+	ns, err := nodeexpr.ParseWith("@slurm:main", r)
 	if err != nil {
 		t.Fatalf("ParseWith failed: %v", err)
 	}
@@ -146,7 +148,7 @@ func TestExecSourceQuotesHostileGroupNames(t *testing.T) {
 	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "\n"}}}
 	r := testResolver(t, rec, "")
 
-	_, err := nodeset.ParseWith("@slurm:x", r)
+	_, err := nodeexpr.ParseWith("@slurm:x", r)
 	if err == nil {
 		t.Skip("an empty answer is reported, which this case does not exercise")
 	}
@@ -195,7 +197,7 @@ func TestListAndAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ns, err := nodeset.ParseWith(all, r)
+	ns, err := nodeexpr.ParseWith(all, r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +234,7 @@ func TestAllEvaluatesEachGroupOnItsOwn(t *testing.T) {
 		"@a,@b,@c,@d": "exe[1-4],sub1",
 		"@*!exe3":     "exe[1-2,4],sub1",
 	} {
-		ns, err := nodeset.ParseWith(expr, r)
+		ns, err := nodeexpr.ParseWith(expr, r)
 		if err != nil {
 			t.Errorf("ParseWith(%q) failed: %v", expr, err)
 			continue
@@ -246,7 +248,7 @@ func TestAllEvaluatesEachGroupOnItsOwn(t *testing.T) {
 	// name, so a name that does not read back as one reference is refused
 	// rather than evaluated with its neighbours.
 	opts.Spec.Sources["odd"] = v1alpha1.GroupSource{Static: map[string]string{"a": "exe1", "b c": "exe[1-3]!exe2"}}
-	if ns, err := nodeset.ParseWith("@odd:*", groups.New(opts)); err == nil {
+	if ns, err := nodeexpr.ParseWith("@odd:*", groups.New(opts)); err == nil {
 		t.Errorf("ParseWith(\"@odd:*\") = %q, want the group \"b c\" refused", ns)
 	}
 }
@@ -271,12 +273,73 @@ func TestUnknownGroupIsReported(t *testing.T) {
 	t.Parallel()
 	r := testResolver(t, &transport.Recorder{}, "")
 
-	_, err := nodeset.ParseWith("@nope", r)
+	_, err := nodeexpr.ParseWith("@nope", r)
 	if err == nil {
 		t.Fatal("an unknown group should be reported")
 	}
 	if !strings.Contains(err.Error(), "sources:") {
 		t.Errorf("error = %v, want it to list the sources that were searched", err)
+	}
+}
+
+// A group without a name is what @rack:$R leaves behind when R is empty.
+// An attribute source would answer it with every node that carries the
+// attribute, and a source that runs a command would run it with an empty
+// group, so the resolver refuses it before it asks any source, also when
+// the expression was parsed by go-nodeset alone. Through nodeexpr, the
+// reference is refused before the resolver is asked.
+func TestAGroupWithoutANameIsRefused(t *testing.T) {
+	t.Parallel()
+	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "exe1\n"}}}
+	r := testResolver(t, rec, "")
+
+	for _, source := range []string{"", "inventory", "rack", "static", "slurm"} {
+		if expr, err := r.Resolve(source, ""); err == nil || err.Error() != "the group name is empty" {
+			t.Errorf("Resolve(%q, \"\") = %q, %v; want the empty name refused", source, expr, err)
+		}
+	}
+	for expr, want := range map[string]string{
+		"@":       "group @: the group name is empty",
+		"@rack:":  "group @rack:: the group name is empty",
+		"@slurm:": "group @slurm:: the group name is empty",
+	} {
+		if ns, err := nodeset.ParseWith(expr, r); err == nil || err.Error() != want {
+			t.Errorf("nodeset.ParseWith(%q) = %v, %v; want the error %q", expr, ns, err, want)
+		}
+	}
+	for expr, want := range map[string]string{
+		"@":           "empty group name in @",
+		"@rack:":      "empty group name in @rack:",
+		"@inventory:": "empty group name in @inventory:",
+		"@slurm:":     "empty group name in @slurm:",
+		"exe1,@rack:": "empty group name in @rack:",
+	} {
+		if ns, err := nodeexpr.ParseWith(expr, r); err == nil || err.Error() != want {
+			t.Errorf("nodeexpr.ParseWith(%q) = %v, %v; want the error %q", expr, ns, err, want)
+		}
+	}
+	if calls := rec.Commands(); len(calls) > 0 {
+		t.Errorf("a source ran %q", calls)
+	}
+}
+
+// A group whose expression has a range without its last bound is refused,
+// at whatever level it is named, rather than read as its first node.
+func TestAGroupsRangeWithoutItsLastBoundIsRefused(t *testing.T) {
+	t.Parallel()
+	opts := testOptions(t, &transport.Recorder{}, "")
+	opts.Spec.Sources["static"] = v1alpha1.GroupSource{Static: map[string]string{
+		"open": "exe[1-]", "outer": "wlm01,@open",
+	}}
+	r := groups.New(opts)
+	for expr, want := range map[string]string{
+		"@static:open":  `group @static:open: in "exe[1-]": the range "1-" has no last bound`,
+		"@static:outer": `group @open: in "exe[1-]": the range "1-" has no last bound`,
+		"@open":         `group @open: in "exe[1-]": the range "1-" has no last bound`,
+	} {
+		if ns, err := nodeexpr.ParseWith(expr, r); err == nil || err.Error() != want {
+			t.Errorf("ParseWith(%q) = %v, %v; want the error %q", expr, ns, err, want)
+		}
 	}
 }
 

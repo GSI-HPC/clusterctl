@@ -13,9 +13,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/GSI-HPC/go-clikit/termtext"
 	"golang.org/x/sys/unix"
-
-	"github.com/GSI-HPC/clusterctl/internal/termtext"
 )
 
 // lockHolder names the process that holds the lock on the lock file name,
@@ -57,7 +56,7 @@ func describeProcess(pid string) string {
 	var about []string
 	if comm, err := os.ReadFile("/proc/" + pid + "/comm"); err == nil {
 		// A process chooses its own name, and it may be another user's.
-		about = append(about, termtext.EscapeCell(strings.TrimSpace(string(comm))))
+		about = append(about, termtext.Escape(strings.TrimSpace(string(comm))))
 	}
 	if info, err := os.Stat("/proc/" + pid); err == nil {
 		if uid, _, ok := owner(info); ok {

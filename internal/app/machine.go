@@ -7,10 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
-	"github.com/GSI-HPC/clusterctl/nodeset"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 )
 
 // machines maps every name a site gives a machine to the name its inventory
@@ -186,10 +188,10 @@ func (a *App) spelling(n, typed string) (string, error) {
 // refused: it most likely protects nothing.
 func (a *App) protectedHosts(expr string) (*nodeset.NodeSet, error) {
 	a.protectedOnce.Do(func() {
-		a.protectedGroups = nodeset.NewBatch(a.Groups)
+		a.protectedGroups = nodeexpr.NewBatch(a.Groups)
 		a.protectedGroups.Prefetch(a.Spec.Safety.ProtectedHosts...)
 	})
-	ns, err := nodeset.ParseWith(expr, a.protectedGroups)
+	ns, err := nodeexpr.ParseWith(expr, a.protectedGroups)
 	if err != nil {
 		return nil, err
 	}

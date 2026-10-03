@@ -12,9 +12,11 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/tmpl"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // Namer applies the naming rules of a site.
@@ -188,7 +190,7 @@ func (n *Namer) mapSet(ns *nodeset.NodeSet, f func(string) (string, error)) (*no
 		if err != nil {
 			return nil, err
 		}
-		if err := out.Add(name); err != nil {
+		if err := nodeexpr.Add(out, name); err != nil {
 			return nil, fmt.Errorf("the name %q of node %q is not a valid host name: %w", name, node, err)
 		}
 	}

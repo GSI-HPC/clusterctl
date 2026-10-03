@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -152,7 +152,7 @@ func probing(pause time.Duration) func(context.Context, app.Streams) *cobra.Comm
 		for i := range nodes {
 			nodes[i] = fmt.Sprintf("exe%d", i+1)
 		}
-		fanout.Map(cmd.Context(), nodes, fanout.Options[string]{Step: "probe the nodes", Limit: 1},
+		fanout.Map(cmd.Context(), nodes, fanout.MapOptions[string]{Step: "probe the nodes", Limit: 1},
 			func(context.Context, string) (struct{}, error) {
 				time.Sleep(pause)
 				return struct{}{}, nil
@@ -263,7 +263,7 @@ func TestProgressOfStepsInTurnOnlyGrows(t *testing.T) {
 	w := &wire{}
 	f := start(t, setup{wire: w, command: tree(func(cmd *cobra.Command) error {
 		for _, name := range []string{"read the power state", "read the uptime"} {
-			fanout.Map(cmd.Context(), []string{"exe1", "exe2"}, fanout.Options[string]{Step: name, Limit: 1},
+			fanout.Map(cmd.Context(), []string{"exe1", "exe2"}, fanout.MapOptions[string]{Step: name, Limit: 1},
 				func(context.Context, string) (struct{}, error) { return struct{}{}, nil })
 		}
 		return nil
@@ -378,7 +378,7 @@ func TestTheAuditLogNamesTheTraceOfEachCall(t *testing.T) {
 	// A Bus the calls are given, as a test's, is the one whose trace they
 	// record.
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 	watched := start(t, setup{ctx: progress.WithBus(context.Background(), bus)})
 	watched.plan(t, map[string]any{"action": "resume", "nodes": "exe1"})
 	bus.Close()
@@ -397,7 +397,7 @@ func TestTheAuditLogNamesTheTraceOfEachCall(t *testing.T) {
 func TestACallWaitingForAPlaceReportsTheWait(t *testing.T) {
 	entered, release := make(chan struct{}, 2), make(chan struct{})
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 	f := start(t, setup{ctx: progress.WithBus(context.Background(), bus), command: tree(func(*cobra.Command) error {
 		entered <- struct{}{}
 		<-release

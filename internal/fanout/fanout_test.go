@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -336,9 +337,9 @@ func TestRunMakesAResultOfWhatTheRunnerGave(t *testing.T) {
 		}
 	}
 
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	(&fanout.Executor{Runner: rec, Max: 3, Answers: true}).Run(ctx, targets("exe3", "exe4"), transport.Request{})
-	if got, want := tree(), "step run total=2 limit=3 [fold]: ok\n  target exe[3-4]: ok\n"; got != want {
+	if got, want := watcher.Finish(), "step run total=2 limit=3 [fold]: ok\n  target exe[3-4]: ok\n"; got != want {
 		t.Errorf("tree:\n%s\nwant:\n%s", got, want)
 	}
 }

@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/display"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/output"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/display"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/version"
 )
@@ -242,6 +242,15 @@ type renderer interface {
 	Close()
 }
 
+// hostCount says how many targets a step expects in the plain lines, as
+// clusterctl names them: "1 host" and "480 hosts".
+func hostCount(n int) string {
+	if n == 1 {
+		return "1 host"
+	}
+	return fmt.Sprintf("%d hosts", n)
+}
+
 // startDisplay makes the display a command's progress is shown by in mode,
 // on term, and starts it; interrupted is closed once the command has been
 // interrupted, which the tree says. The tests replace it to draw the frames
@@ -250,7 +259,7 @@ var startDisplay = func(mode string, term *display.Terminal, interrupted <-chan 
 	ascii := !utf8Locale(os.Getenv)
 	switch mode {
 	case progressPlain:
-		plain := display.NewPlain(term, display.PlainOptions{Now: displayClock, ASCII: ascii})
+		plain := display.NewPlain(term, display.PlainOptions{Now: displayClock, ASCII: ascii, Noun: hostCount})
 		plain.Start()
 		return plain
 	case progressTTY:
@@ -362,8 +371,9 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 	var summary *display.Summary
 	var restore func()
 	if mode != progressNone {
-		term := display.NewTerminal(r.streams.Err, r.streams.Size)
-		term.PanicLog, term.Foreground, term.Program = panicLog, r.streams.Foreground, "clusterctl"
+		term := display.NewTerminal(r.streams.Err, display.TerminalOptions{
+			Size: r.streams.Size, Foreground: r.streams.Foreground, PanicLog: panicLog, Program: "clusterctl",
+		})
 		shown = startDisplay(mode, term, r.context().Done())
 		summary = &display.Summary{}
 		sinks = append(sinks, shown, summary)
@@ -395,9 +405,9 @@ func (r *root) display(cmd *cobra.Command) (*progress.Bus, func(), error) {
 	}
 
 	tc, _ := progress.ParseTraceContext(r.traceparent, r.tracestate)
-	bus := progress.NewBus(progress.Options{
+	bus := progress.NewBus(progress.BusOptions{
 		Sinks: sinks, Now: displayClock, PanicLog: panicLog, Program: "clusterctl", Classify: exitcode.Class,
-		Trace: tc.Trace, Parent: tc.Parent, TraceFlags: tc.Flags, TraceState: tc.State,
+		Trace: tc,
 	})
 	return bus, func() {
 		if shown != nil {

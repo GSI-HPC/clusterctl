@@ -3,12 +3,12 @@
 
 package exitcode
 
-import "github.com/GSI-HPC/clusterctl/internal/progress"
+import "github.com/GSI-HPC/go-clikit/progress"
 
 // Class is the class of progress an error that fits none of the first
 // rules of progress.Classify gets, the class of the exit code it asks
 // for, as CodeClass tells. It is the fallback every Bus of clusterctl's
-// is made with, progress.Options.Classify, so that a span ends as the
+// is made with, progress.BusOptions.Classify, so that a span ends as the
 // command would exit.
 func Class(err error) progress.Class {
 	return CodeClass(From(err))

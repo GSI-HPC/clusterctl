@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GSI-HPC/go-nodeset"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -23,7 +24,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func newHostkeyCommand(r *root) *cobra.Command {
@@ -89,10 +89,10 @@ func scanTargets(ctx context.Context, a *app.App, ns *nodeset.NodeSet, bmc bool,
 		return cmp.Compare(boolRank(x.err == nil), boolRank(y.err == nil))
 	})
 
-	outcomes := fanout.Map(ctx, scans, fanout.Options[scan]{
+	outcomes, _ := fanout.Map(ctx, scans, fanout.MapOptions[scan]{
 		Step:     "scan the host keys",
 		Limit:    a.Spec.Fanout.Max,
-		Describe: func(s scan) (node, host, role string) { return s.node, s.host, "" },
+		Describe: func(s scan) fanout.Item { return fanout.Item{Node: s.node, Host: s.host} },
 		PanicLog: a.WorkerDiag,
 	}, func(ctx context.Context, s scan) ([]hostkeys.Entry, error) {
 		if s.err != nil {

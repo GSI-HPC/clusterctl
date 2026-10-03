@@ -9,13 +9,15 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/GSI-HPC/go-clikit/progress/display"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress/display"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -41,7 +43,7 @@ func fakeDisplays(t *testing.T) *displays {
 		}
 		switch mode {
 		case progressPlain:
-			shown = display.NewPlain(term, display.PlainOptions{Now: c.now})
+			shown = display.NewPlain(term, display.PlainOptions{Now: c.now, Noun: hostCount})
 		case progressTTY:
 			shown = display.NewTree(term, display.TreeOptions{Now: c.now, Interrupted: interrupted})
 		default:
@@ -397,25 +399,23 @@ clusterctl: 1 of 3 hosts failed: exe0002
 // the counter off, and it comes back below them.
 func TestTheCounterOfAPowerOnInBatches(t *testing.T) {
 	t.Setenv("BMC_PASSWORD", "s3cret")
-	c := fakeDisplays(t)
-	fakeStagger(t, func(time.Duration) bool {
-		c.draw()
-		return false
-	})
-	answer := ipmiAnswer(func(bmc string) string {
-		if strings.HasPrefix(bmc, "exe0004.") {
-			return "connection timeout"
-		}
-		return "ok"
-	})
-	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
-		c.draw()
-		return answer(tg, req)
-	}}
-	tty, err := runOnTerminal(t, harnessOptions{recorder: rec},
-		append(noSlurm, "--progress", "counter", "-o", "name", "bmc", "power", "on", "--ipmi", "--batch", "2", "-y", "-n", "exe[1-4]")...)
-	wantCode(t, err, exitcode.TargetFailed)
-	want := `powering on exe[0001-0002] (1 of 2)
+	synctest.Test(t, func(t *testing.T) {
+		c := fakeDisplays(t)
+		inPause(c.draw)
+		answer := ipmiAnswer(func(bmc string) string {
+			if strings.HasPrefix(bmc, "exe0004.") {
+				return "connection timeout"
+			}
+			return "ok"
+		})
+		rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+			c.draw()
+			return answer(tg, req)
+		}}
+		tty, err := runOnTerminal(t, harnessOptions{recorder: rec},
+			append(noSlurm, "--progress", "counter", "-o", "name", "bmc", "power", "on", "--ipmi", "--batch", "2", "-y", "-n", "exe[1-4]")...)
+		wantCode(t, err, exitcode.TargetFailed)
+		want := `powering on exe[0001-0002] (1 of 2)
 
 <erase>power on · batch 1/2 · 0/4 · 2 running · 2 queued · 0:01
 <erase>waiting 5s before the next batch
@@ -431,9 +431,10 @@ exe0004
 clusterctl: bmc power: failed in 3.0s: 3 ok, 1 failed
 clusterctl: 1 of 4 service processors failed
 `
-	if got := tty.String(); got != want {
-		t.Errorf("terminal:\n%s\nwant:\n%s", got, want)
-	}
+		if got := tty.String(); got != want {
+			t.Errorf("terminal:\n%s\nwant:\n%s", got, want)
+		}
+	})
 }
 
 // The confirmation is never drawn over: the counter leaves the terminal
@@ -689,29 +690,46 @@ clusterctl: 1 of 3 hosts failed: exe0002
 	}
 }
 
+// The plain lines a command draws itself count the targets of a step as
+// hosts, the word clusterctl has for them, one or more: go-clikit's Plain
+// says "targets" unless it is given a noun.
+func TestPlainLinesCountHosts(t *testing.T) {
+	t.Setenv("LC_ALL", "C.UTF-8")
+	for _, tc := range []struct{ nodes, want string }{
+		{"exe1", "] exec › run: start, 1 host\n"},
+		{"exe[1-3]", "] exec › run: start, 3 hosts\n"},
+	} {
+		h, err := runPlain(t, harnessOptions{}, "exec", "-n", tc.nodes, "-y", "--", "uptime")
+		if err != nil {
+			t.Fatalf("exec -n %s: %v", tc.nodes, err)
+		}
+		if !strings.Contains(h.errOut.String(), tc.want) {
+			t.Errorf("the plain lines of exec -n %s do not say %q:\n%s", tc.nodes, tc.want, h.errOut)
+		}
+	}
+}
+
 // A power-on in batches says when each batch starts and ends, and the
 // pause between two, around the notes the command writes itself.
 func TestPlainLinesOfAPowerOnInBatches(t *testing.T) {
 	t.Setenv("BMC_PASSWORD", "s3cret")
-	c := fakeDisplays(t)
-	fakeStagger(t, func(time.Duration) bool {
-		c.draw()
-		return false
-	})
-	answer := ipmiAnswer(func(bmc string) string {
-		if strings.HasPrefix(bmc, "exe0004.") {
-			return "connection timeout"
-		}
-		return "ok"
-	})
-	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
-		c.draw()
-		return answer(tg, req)
-	}}
-	h, err := runPlain(t, harnessOptions{recorder: rec},
-		append(noSlurm, "-o", "name", "bmc", "power", "on", "--ipmi", "--batch", "2", "-y", "-n", "exe[1-4]")...)
-	wantCode(t, err, exitcode.TargetFailed)
-	want := `[0:00] bmc power › power on: start, 4 hosts
+	synctest.Test(t, func(t *testing.T) {
+		c := fakeDisplays(t)
+		inPause(c.draw)
+		answer := ipmiAnswer(func(bmc string) string {
+			if strings.HasPrefix(bmc, "exe0004.") {
+				return "connection timeout"
+			}
+			return "ok"
+		})
+		rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+			c.draw()
+			return answer(tg, req)
+		}}
+		h, err := runPlain(t, harnessOptions{recorder: rec},
+			append(noSlurm, "-o", "name", "bmc", "power", "on", "--ipmi", "--batch", "2", "-y", "-n", "exe[1-4]")...)
+		wantCode(t, err, exitcode.TargetFailed)
+		want := `[0:00] bmc power › power on: start, 4 hosts
 powering on exe[0001-0002] (1 of 2)
 [0:00] bmc power › power on › batch 1/2: start, 2 hosts
 [0:01] bmc power › power on › batch 1/2: done in 1.0s: 2 ok
@@ -725,9 +743,10 @@ powering on exe[0003-0004] (2 of 2)
 clusterctl: bmc power: failed in 3.0s: 3 ok, 1 failed
 clusterctl: 1 of 4 service processors failed
 `
-	if got := h.errOut.String(); got != want {
-		t.Errorf("standard error:\n%s\nwant:\n%s", got, want)
-	}
+		if got := h.errOut.String(); got != want {
+			t.Errorf("standard error:\n%s\nwant:\n%s", got, want)
+		}
+	})
 }
 
 // A reinstall that fails: the steps that count nothing say only how they
