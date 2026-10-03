@@ -641,7 +641,7 @@ List users and their accounts, and change what their jobs are charged to.`,
 func newSlurmPartitionCommand(r *root) *cobra.Command {
 	return leaf("partition [NAME]", "List the partitions and their resources", `
 List the partitions with their node counts, run-time limits and the resources
-they offer.`,
+they offer. Hidden partitions are listed too, as node list shows their nodes.`,
 		cobra.MaximumNArgs(1),
 		r.runSlurm(func(a *app.App, c *slurm.Client, cmd *cobra.Command, args []string) error {
 			partitions, err := c.Partitions(a.Context(), first(args))
