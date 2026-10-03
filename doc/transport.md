@@ -56,8 +56,10 @@ host has to be a host name (letters, digits, hyphens and dots, no label
 beginning or ending with a hyphen) or an IP address, and the account has to be
 spelled in the portable user name alphabet, letters, digits, `.`, `_` and `-`,
 not beginning with `-`. Anything else is refused with exit code 2 before ssh
-or scp runs; scp would read `x:y@exe0001:/tmp/` as the host `x`. Node names are
-checked earlier still, when they are selected; see
+or scp runs; scp would read `x:y@exe0001:/tmp/` as the host `x`. For the same
+reason scp is given an IPv6 address in brackets, `alice@[2001:db8::7]:/tmp/`,
+which ssh takes bare. Node names are checked earlier still, when they are
+selected; see
 [selecting nodes](selection.md#names-are-host-names).
 
 ## The generated ssh configuration
