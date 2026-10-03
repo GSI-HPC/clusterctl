@@ -167,10 +167,13 @@ minimum means changing `go.mod`.
 ## Keeping dependencies current
 
 Dependabot opens the pull requests, weekly, as `.github/dependabot.yml`
-configures and [ADR 0012](adr/0012-dependabot.md) explains:
+configures and [ADR 0012](adr/0012-dependabot.md) and
+[ADR 0026](adr/0026-go-nodeset-and-go-clikit.md) explain:
 
 - `build(deps)` for the requirements in `go.mod`, with the minor and patch
   releases grouped into one pull request;
+- `build(deps)` for go-nodeset and go-clikit, one pull request each, outside
+  the group;
 - `ci(deps)` for each action the workflows use.
 
 It proposes a release once it has been out for a week, and a security update at
@@ -187,6 +190,7 @@ The rest is updated by hand:
 | The Go release line | `go` in `mise.toml` | As described under [the Go toolchain](#the-go-toolchain). |
 | sops for the tests | `sops` in `mise.toml` | Change it to the new release; CI builds it from its tag. The sops that reads a site's secrets is the workstation's own ([ADR 0019](adr/0019-decrypt-with-the-sops-command.md)), updated by the distribution or the version manager that installed it. |
 | The oldest sops supported | `SOPS_MIN_VERSION` in `ci.yml`, `MinSopsVersion` in `internal/secrets` | Raise both together, with a line in the release notes, when clusterctl comes to need a newer sops. |
+| The links to go-nodeset and go-clikit | `blob/vX.Y.Z` in `README.md`, `doc/nodeset.md`, `doc/selection.md`, `doc/architecture.md`, `doc/testing.md` and `site/content/docs/guides/progress.md` | In the Dependabot pull request that moves the module: read the release notes (`git cat-file -p <tag>`), adapt the code for a minor release of go-clikit, and move every link to the new tag (`git grep -n -e GSI-HPC/go-nodeset/blob/ -e GSI-HPC/go-clikit/blob/`). ADR 0026's link stays: it names the release the decision was taken on. |
 | sind for the end-to-end tests | `github:GSI-HPC/sind` in `mise.toml` | Change it to the new release; CI installs it with sind-action, whose own version Dependabot proposes. Read sind's release notes for a change to the node images or the ssh configuration it exports ([ADR 0024](adr/0024-end-to-end-tests-on-sind.md)). |
 
 golangci-lint and govulncheck need nothing, and neither does GoReleaser within

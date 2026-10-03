@@ -5,13 +5,15 @@
 
 Status: accepted
 
-It supersedes [0010](0010-public-nodeset-package.md), and part of three
+It supersedes [0010](0010-public-nodeset-package.md), and part of four
 others: of [0002](0002-own-nodeset-engine.md), the decision that the engine
 lives in `nodeset/` at the module root and the costs of keeping it and its
-corpus here; of [0021](0021-progress-as-our-own-events.md), that progress is
-reported in `internal/progress`, and the cost that the event model, the
-displays, the sanitiser and its fuzz target are clusterctl's to maintain; and
-of [0022](0022-bounded-pools-and-power-batches.md), that the pools live in
+corpus here; of [0012](0012-dependabot.md), that every minor and patch
+release of a module in `go.mod` comes in the one grouped pull request; of
+[0021](0021-progress-as-our-own-events.md), that progress is reported in
+`internal/progress`, and the cost that the event model, the displays, the
+sanitiser and its fuzz target are clusterctl's to maintain; and of
+[0022](0022-bounded-pools-and-power-batches.md), that the pools live in
 `internal/clikit/fanout`.
 
 ## Context
@@ -84,9 +86,12 @@ keeps no copy of either.
   is asked to select, from `-n`, its arguments, `CLUSTERCTL_NODES` or an MCP
   tool; `safety.protectedHosts`; the nodes of `NodeInventory` documents and
   of `bootPath` rules; the expression every group source answers, the groups
-  it names and each group of `@source:*` included; and the node names read
-  from Slurm, from the naming and service processor host templates and from
-  a remote command's output.
+  it names and each group of `@source:*` included; the first column that
+  `-o nodeset` and `-o name` read; a node name with brackets that the
+  inventory is asked for; and the node names read from Slurm, from the
+  naming and service processor host templates and from a remote command's
+  output. A name that `sinfo --Node` prints, checked first to be a single
+  host name without brackets, is added to a set as it is.
 - **A range without its last bound stays refused.** `exe[1-]`, `exe[1-,5]`
   and `exe[1-/2]` are refused as they were, with
   `in "exe[1-]": the range "1-" has no last bound`.
@@ -107,6 +112,12 @@ keeps no copy of either.
   go-clikit. clusterctl fuzzes its own check, `nodeexpr.FuzzParse`, against
   go-nodeset, and its tests hold every command's events to
   `progresstest.Check`, as before.
+- **Dependabot proposes each of the two modules in a pull request of its
+  own**, outside the group of the other modules. A release of either can
+  change what clusterctl prints, a minor release of go-clikit, at v0, can
+  change its API, and the documents link the release `go.mod` requires, so
+  each update is read against its notes and moves those links
+  ([release.md](../release.md)).
 
 ## Why
 
@@ -156,19 +167,27 @@ keeps no copy of either.
   out once; a time from 9.95 s reads `10s`; a pool that a deadline ends
   reports its items canceled, as an interrupt does; `Width` counts an emoji
   with U+FE0F, the soft hyphen and characters made wide after Unicode 15.0 as
-  terminals draw them, so a table holding them is laid out wider; and the
-  event log's first line names `"program":"clusterctl"`, a key version 1
-  allows.
+  terminals draw them, so a table holding them is laid out wider;
+  `dns aliases` names the targets of its steps "resolve the aliases" and
+  "read the reverse entries" by the alias and the address, which it left
+  unnamed before (`target : ok`, `1 of 2 failed: `), because go-clikit names
+  a target whose `Describe` gives no node as `fmt.Sprint` prints the item, a
+  change its notes do not list; and the event log's first line names
+  `"program":"clusterctl"`, a key version 1 allows.
 - **The live tree is slower on large steps.** The five changes that cut the
   tree's cost are not in go-clikit v0.1.0. Measured on one machine, best of
-  three runs, its tree costs about four to five times what clusterctl's did
-  at 16,000 targets and five to nine times at 30,000: ending 16,000 targets
-  takes 422 ms rather than 93 ms, and a run that draws a frame every 100
-  events 1.4 s rather than 0.3 s at 16,000 targets and 5.0 s rather than
-  1.0 s at 30,000. All of it is spent under the Bus's lock, which every
-  worker that reports an event waits on. The counter, the plain lines and the
-  event log are unaffected. A patch that carries the five changes to
-  go-clikit has been prepared, and has yet to be proposed there.
+  three runs, the events of a fan-out cost its tree about four to five times
+  what they cost clusterctl's at 16,000 targets and five to nine times at
+  30,000: ending 16,000 targets takes 422 ms rather than 93 ms, and a run
+  that draws a frame every 100 events 1.4 s rather than 0.3 s at 16,000
+  targets and 5.0 s rather than 1.0 s at 30,000. Each frame costs more as
+  well: about 5 ms rather than 0.6 ms while 16,000 targets run, and about
+  3.7 ms rather than 0.01 ms once a step of 16,000 targets has ended, for
+  every frame the run draws after it. All of it is spent under the Bus's
+  lock, which every worker that reports an event waits on. The counter, the
+  plain lines and the event log are unaffected. A patch that carries the
+  five changes to go-clikit has been prepared, and has yet to be proposed
+  there.
 - **Two fixes are clusterctl's until go-nodeset has them.** go-nodeset v1.0.0
   reads `exe[1-]` as `exe1`, which ClusterShell refuses and its list of
   differences does not name, and its `MapResolver.All` joins the groups of a
@@ -196,4 +215,5 @@ keeps no copy of either.
   `internal/nodeexpr` goes;
 - go-nodeset looks up the groups of an expression side by side: then
   `nodeexpr.Batch` goes;
-- or go-clikit carries the tree's work for large steps.
+- go-clikit carries the tree's work for large steps;
+- or go-clikit reaches v1, and its updates can travel with the others.
