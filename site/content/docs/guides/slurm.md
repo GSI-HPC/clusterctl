@@ -133,7 +133,8 @@ $ clusterctl slurm partition main -o wide
 
 The name is the one Slurm takes, without the `*` sinfo appends to the default
 partition; which partition is the default is its own column, and `default` in
-JSON and YAML.
+JSON and YAML. A partition `slurm.conf` marks `Hidden=YES` is listed too, as
+the nodes in it are by `slurm node list`.
 
 ## Accounts
 

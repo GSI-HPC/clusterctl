@@ -738,6 +738,34 @@ func TestPartitionsTellTheDefaultFromTheName(t *testing.T) {
 	}
 }
 
+// TestPartitionsIncludeHiddenPartitions checks that a partition slurm.conf
+// marks Hidden=YES is listed: sinfo leaves it out unless it is asked with
+// --all, as Nodes asks it, so slurm partition named the nodes of such a
+// partition nowhere while node list showed them in it.
+func TestPartitionsIncludeHiddenPartitions(t *testing.T) {
+	t.Parallel()
+
+	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
+		out := "main*|up|all|8|1-00:00:00|01:00:00|515000|128|0/1024/0/1024|exe[0001-0008]\n"
+		if slices.Contains(req.Argv, "--all") {
+			out += "maint|up|admin|2|infinite|n/a|515000|128|0/0/256/256|exe[0098-0099]\n"
+		}
+		return &transport.Result{Target: tg, Stdout: out}, nil
+	}}
+	c := &slurm.Client{Runner: rec, Target: transport.Target{Name: "login"}}
+	partitions, err := c.Partitions(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, p := range partitions {
+		names = append(names, p.Name)
+	}
+	if want := []string{"main", "maint"}; !slices.Equal(names, want) {
+		t.Errorf("partitions = %q, want %q", names, want)
+	}
+}
+
 func TestErrorsFromTheClientAreReported(t *testing.T) {
 	t.Parallel()
 

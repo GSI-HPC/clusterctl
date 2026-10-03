@@ -548,9 +548,11 @@ type Partition struct {
 	CPUState    string `json:"cpuState,omitempty" yaml:"cpuState,omitempty"`
 }
 
-// Partitions lists the partitions.
+// Partitions lists the partitions, the hidden ones too: sinfo leaves a
+// partition slurm.conf marks Hidden=YES out unless it is asked with --all,
+// and Nodes lists the nodes of such a partition in it.
 func (c *Client) Partitions(ctx context.Context, name string) ([]Partition, error) {
-	argv := []string{"sinfo", "--noheader", "--format", "%P|%a|%g|%D|%l|%L|%m|%c|%C|%N"}
+	argv := []string{"sinfo", "--all", "--noheader", "--format", "%P|%a|%g|%D|%l|%L|%m|%c|%C|%N"}
 	if name != "" {
 		argv = append(argv, "--partition", name)
 	}
