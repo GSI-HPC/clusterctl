@@ -169,6 +169,29 @@ func TestLookupIgnoresPadding(t *testing.T) {
 	}
 }
 
+// A one-host range names its node; a range without its last bound names
+// none, though go-nodeset reads exe[1-] as exe1.
+func TestLookupRefusesARangeWithoutItsLastBound(t *testing.T) {
+	t.Parallel()
+
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe[0001-0004]"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"exe[0001]", "exe[2]"} {
+		if _, ok := inv.Lookup(name); !ok {
+			t.Errorf("Lookup(%s) found no node", name)
+		}
+	}
+	for _, name := range []string{"exe[1-]", "exe[2-]", "exe[01-]"} {
+		if node, ok := inv.Lookup(name); ok {
+			t.Errorf("Lookup(%s) = %s, want no node", name, node.Name)
+		}
+	}
+}
+
 func TestSelectReportsUnknownNodes(t *testing.T) {
 	t.Parallel()
 	inv := exampleInventory(t)

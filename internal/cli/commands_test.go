@@ -438,6 +438,11 @@ func TestNodeAttrsAndRack(t *testing.T) {
 	if _, err := run(t, harnessOptions{}, "node", "rack", "R99"); err == nil {
 		t.Error("an unknown rack should be reported")
 	}
+	// go-nodeset reads a range without its last bound as its first host;
+	// node rack refuses it, as it did before go-nodeset.
+	if _, err := run(t, harnessOptions{}, "node", "rack", "exe[1-]"); err == nil || !strings.Contains(err.Error(), "no rack or node named") {
+		t.Errorf("node rack exe[1-] = %v, want the refusal", err)
+	}
 }
 
 func TestNodeGroupsListsTheSources(t *testing.T) {

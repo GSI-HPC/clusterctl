@@ -113,6 +113,23 @@ func TestTheGroupsOfAGroupOfANamedSourceAreLookedUpInIt(t *testing.T) {
 	}
 }
 
+// The groups that a source's every group, @source:*, names are looked up
+// together, in that source, as those of a group are.
+func TestTheGroupsOfAllOfASourceAreLookedUpTogether(t *testing.T) {
+	t.Parallel()
+	res := newBatchResolver()
+	ns, err := nodeexpr.ParseWith("@rack:*", res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ns.String(), "n[1-4]"; got != want {
+		t.Errorf("set = %s, want %s", got, want)
+	}
+	if want := []string{"all rack:d rack:r1 site:c"}; !slices.Equal(res.asked, want) {
+		t.Errorf("the resolver was asked %q, want %q", res.asked, want)
+	}
+}
+
 // An expression that names one group has nothing to look up side by side,
 // and asks for it as before.
 func TestASingleGroupIsResolvedAsBefore(t *testing.T) {

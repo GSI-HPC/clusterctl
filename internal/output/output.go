@@ -23,6 +23,7 @@ import (
 	"github.com/GSI-HPC/go-nodeset"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 )
 
 // The output formats -o accepts.
@@ -274,7 +275,7 @@ func (r Result) nodes() (*nodeset.NodeSet, error) {
 		if len(row) == 0 || row[0] == "" {
 			continue
 		}
-		if err := ns.Add(row[0]); err != nil {
+		if err := nodeexpr.Add(ns, row[0]); err != nil {
 			return nil, fmt.Errorf("the %s column does not hold host names: %w", r.Table.Columns[0].Name, err)
 		}
 	}
