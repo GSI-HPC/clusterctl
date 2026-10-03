@@ -244,14 +244,19 @@ jobs:
       # it always reads afresh.
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-  # Each fuzz job runs a set number of executions, about what a minute,
-  # or half a minute for termtext, did on a runner, rather than a set
-  # time. With a duration, the fuzzing coordinator in Go's testing package
-  # races its own deadline: when -fuzztime runs out it can report the
-  # deadline as the failure, "context deadline exceeded" with no input,
-  # as it did on a change that touched none of the parsers. A count has no
-  # deadline. timeout-minutes bounds a target that has become slow, which
-  # is a failure of its own.
+  # Each fuzz job runs a set number of executions, about a minute's worth,
+  # or half a minute's for termtext, rather than a set time. With a
+  # duration, the fuzzing coordinator in Go's testing package races its own
+  # deadline: when -fuzztime runs out it can report the deadline as the
+  # failure, "context deadline exceeded" with no input, as it did on a
+  # change that touched none of the parsers. A count has no deadline.
+  #
+  # -fuzzminimizetime caps how long each input found is minimized. CI keeps
+  # no corpus, so every run starts cold and finds many, and with all four
+  # workers minimizing, fuzzing stopped for half a minute at a time, which
+  # a count makes the run wait out. A failing input is still written, if
+  # less minimized; a local run minimizes it fully. timeout-minutes bounds
+  # a target that has become slow, which is a failure of its own.
   fuzz:
     name: Fuzz the node set parser
     runs-on: ubuntu-latest
@@ -264,7 +269,7 @@ jobs:
       # back into the same set. A short run on every change catches a
       # regression; the corpus is where the long runs live.
       - name: Fuzz
-        run: go test ./nodeset/ -run '^$' -fuzz FuzzParseFold -fuzztime 4000000x
+        run: go test ./nodeset/ -run '^$' -fuzz FuzzParseFold -fuzztime 4000000x -fuzzminimizetime 1000x
 
       - name: Upload the failing input
         if: failure()
@@ -284,7 +289,7 @@ jobs:
       # The parser reads a file another host serves, so it must never
       # panic, whatever that file holds.
       - name: Fuzz
-        run: go test ./internal/dhcp/ -run '^$' -fuzz FuzzParse -fuzztime 2500000x
+        run: go test ./internal/dhcp/ -run '^$' -fuzz FuzzParse -fuzztime 2500000x -fuzzminimizetime 1000x
 
       - name: Upload the failing input
         if: failure()
@@ -305,7 +310,7 @@ jobs:
       # the YAML library decoded into its own tree, so no file may make it
       # panic, and every key it reads has the line it was written on.
       - name: Fuzz
-        run: go test ./internal/config/ -run '^$' -fuzz FuzzParseDocuments -fuzztime 250000x
+        run: go test ./internal/config/ -run '^$' -fuzz FuzzParseDocuments -fuzztime 1000000x -fuzzminimizetime 1000x
 
       - name: Upload the failing input
         if: failure()
@@ -326,7 +331,7 @@ jobs:
       # through Sanitize, so no input may leave anything in what it returns
       # that a terminal would act on, or make it longer than its bound.
       - name: Fuzz
-        run: go test ./internal/progress/ -run '^$' -fuzz FuzzSanitize -fuzztime 1500000x
+        run: go test ./internal/progress/ -run '^$' -fuzz FuzzSanitize -fuzztime 2000000x -fuzzminimizetime 1000x
 
       - name: Upload the failing input
         if: failure()
@@ -347,9 +352,9 @@ jobs:
       # sees it, so no input may leave a rune the escape policy names in
       # what it returns, and Truncate must never reach past its columns.
       - name: Fuzz the escapers
-        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzEscape -fuzztime 100000x
+        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzEscape -fuzztime 800000x -fuzzminimizetime 1000x
       - name: Fuzz Truncate
-        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzTruncate -fuzztime 500000x
+        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzTruncate -fuzztime 2000000x -fuzzminimizetime 1000x
 
       - name: Upload the failing input
         if: failure()

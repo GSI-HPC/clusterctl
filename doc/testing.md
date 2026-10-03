@@ -44,7 +44,11 @@ CI bounds each run by a number of executions rather than a time, with
 duration, the fuzzing coordinator in Go's testing package can report its own
 deadline as the run's failure, `context deadline exceeded` with no failing
 input. A local run with a duration can fail that way too, rarely; it found
-nothing, and running it again is the answer.
+nothing, and running it again is the answer. CI also caps the minimizing of
+each input found at a thousand executions, `-fuzzminimizetime 1000x`: it
+keeps no corpus, so every run starts cold, and minimizing would otherwise
+hold up the count for half a minute at a time. A failing input it writes may
+be less minimized than a local run would leave it.
 
 **A fake BMC** serves the Redfish surface clusterctl uses, over TLS, from
 `httptest`. It is how the reset-type check, the once-only action and the boot
