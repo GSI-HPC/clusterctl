@@ -323,6 +323,40 @@ func TestCopyArgs(t *testing.T) {
 	}
 }
 
+// TestCopyArgsBracketAnIPv6Host checks that a host given as an IPv6
+// address reaches scp in brackets. scp reads the host up to the first colon,
+// so alice@2001:db8::7:/tmp/x connected to the host 2001, as OpenSSH 9.6
+// shows when -S names a program that prints what it is given.
+func TestCopyArgsBracketAnIPv6Host(t *testing.T) {
+	t.Parallel()
+	c := testClient(t)
+	tests := []struct {
+		host string
+		want string
+	}{
+		{"2001:db8::7", "alice_adm@[2001:db8::7]:"},
+		{"10.0.0.7", "alice_adm@10.0.0.7:"},
+		{"login.hpc.example.org", "alice_adm@login.hpc.example.org:"},
+	}
+	for _, tc := range tests {
+		target := transport.Target{Name: "login", Host: tc.host, Role: "login"}
+		up, err := c.CopyArgs(target, transport.CopyRequest{Sources: []string{"a"}, Destination: "/tmp/x", Upload: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := up[len(up)-1], tc.want+"/tmp/x"; got != want {
+			t.Errorf("%s: upload to %q, want %q", tc.host, got, want)
+		}
+		down, err := c.CopyArgs(target, transport.CopyRequest{Sources: []string{"/etc/hosts"}, Destination: "d"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := down[len(down)-2], tc.want+"/etc/hosts"; got != want {
+			t.Errorf("%s: download from %q, want %q", tc.host, got, want)
+		}
+	}
+}
+
 func TestRecorder(t *testing.T) {
 	t.Parallel()
 
