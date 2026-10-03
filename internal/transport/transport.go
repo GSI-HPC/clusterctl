@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -727,8 +728,7 @@ func exited(target Target, code int, stderr string) error {
 	case 0:
 		return nil
 	case sshConnectionFailed:
-		detail := strings.TrimSpace(lastLine(stderr))
-		detail = cmp.Or(detail, "ssh reported a connection failure")
+		detail := cmp.Or(connectionFailure(stderr), "ssh reported a connection failure")
 		return exitcode.Wrap(exitcode.Transport, fmt.Errorf("%s: %s", target, detail))
 	default:
 		return fmt.Errorf("%s: command exited %d", target, code)
@@ -748,7 +748,35 @@ func ExitResult(target Target, code int, stdout, stderr string) *Result {
 	}
 }
 
-func lastLine(s string) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	return lines[len(lines)-1]
+// ConnectionFailure is what ssh said when it could not reach or
+// authenticate with the host, "" when the command ran or ssh said nothing.
+// See connectionFailure.
+func (r *Result) ConnectionFailure() string {
+	if r == nil || r.ExitCode != sshConnectionFailed {
+		return ""
+	}
+	return connectionFailure(r.Stderr)
+}
+
+// closedNotice matches the lines ssh ends with once a connection through a
+// jump host has failed: they say that it closed, never why.
+var closedNotice = regexp.MustCompile(`^(stdio forwarding failed|kex_exchange_identification: Connection closed by remote host|Connection closed by .* port [0-9]+)$`)
+
+// connectionFailure is the last line ssh wrote on standard error that says
+// why, escaped, since a jump host or the host's banner may have written it.
+// Through a jump host the reason, such as "channel 0: open failed: connect
+// failed: No route to host" or "ssh: connect to host gw port 22: Connection
+// timed out", comes before notices that the connection closed, so those are
+// passed over. A banner comes before the reason, so it is not taken either.
+// A notice that is all ssh said is kept.
+func connectionFailure(stderr string) string {
+	said := lines(stderr)
+	end := len(said)
+	for end > 1 && closedNotice.MatchString(said[end-1]) {
+		end--
+	}
+	if end == 0 {
+		return ""
+	}
+	return output.EscapeCell(said[end-1])
 }

@@ -483,6 +483,60 @@ func TestRunClassifiesTheExitStatus(t *testing.T) {
 	}
 }
 
+// TestAConnectionFailureSaysWhy checks that the reason ssh gives for its own
+// exit 255 is the one shown. Through a jump host the reason comes first and
+// ssh ends with notices that the connection closed, so its last line said
+// only that. The jump host wrote the reason, so it is escaped.
+func TestAConnectionFailureSaysWhy(t *testing.T) {
+	const script = `printf 'channel 0: open failed: connect failed: No route to host\033[2J\n\nstdio forwarding failed\nkex_exchange_identification: Connection closed by remote host\nConnection closed by UNKNOWN port 65535\n' >&2; exit 255`
+	const want = `channel 0: open failed: connect failed: No route to host\x1b[2J`
+
+	result, err := fakeClient(t, script).Run(context.Background(), target, transport.Request{Argv: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.ConnectionFailure(); got != want {
+		t.Errorf("ConnectionFailure() = %q, want %q", got, want)
+	}
+	if result.Err == nil || !strings.HasSuffix(result.Err.Error(), ": "+want) {
+		t.Errorf("error = %v, want it to end in %q", result.Err, want)
+	}
+	if got := exitcode.From(result.Err); got != exitcode.Transport {
+		t.Errorf("exit code = %d, want %d", got, exitcode.Transport)
+	}
+	fake := transport.ExitResult(target, result.ExitCode, result.Stdout, result.Stderr)
+	if fake.Err == nil || fake.Err.Error() != result.Err.Error() {
+		t.Errorf("ExitResult error = %v, Run error = %v", fake.Err, result.Err)
+	}
+
+	for _, tc := range []struct{ said, want string }{
+		// The first hop could not be reached.
+		{"ssh: connect to host gw.example.org port 22: Connection timed out\nConnection closed by UNKNOWN port 65535\n",
+			"ssh: connect to host gw.example.org port 22: Connection timed out"},
+		// A notice that is all ssh said is all there is to show.
+		{"Connection closed by 10.0.0.7 port 22\n", "Connection closed by 10.0.0.7 port 22"},
+		// The banner the host printed before refusing the account is not
+		// the reason.
+		{"Authorized uses only.\nexe0001: Permission denied (publickey).\n", "exe0001: Permission denied (publickey)."},
+	} {
+		if got := transport.ExitResult(target, 255, "", tc.said).ConnectionFailure(); got != tc.want {
+			t.Errorf("ssh said %q: ConnectionFailure() = %q, want %q", tc.said, got, tc.want)
+		}
+	}
+
+	// A command that ran says nothing about the connection, whatever its
+	// status, and neither does ssh when it printed nothing.
+	for _, r := range []*transport.Result{
+		transport.ExitResult(target, 1, "", "ibwarn: cannot open UMAD port\n"),
+		transport.ExitResult(target, 0, "ok\n", ""),
+		transport.ExitResult(target, 255, "", ""),
+	} {
+		if got := r.ConnectionFailure(); got != "" {
+			t.Errorf("exit %d: ConnectionFailure() = %q, want nothing", r.ExitCode, got)
+		}
+	}
+}
+
 // TestRunReturnsWhenADescendantHoldsTheOutput checks that an interrupt ends
 // Run even when something ssh started, such as a ProxyCommand, keeps the
 // output pipe open. Wait used to block until that process exited.
