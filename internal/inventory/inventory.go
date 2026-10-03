@@ -466,7 +466,14 @@ func (inv *Inventory) Lookup(name string) (*Node, bool) {
 	if n, ok := inv.nodes[name]; ok {
 		return n, true
 	}
-	// The name may have been written with different padding.
+	// The name may have been written with different padding, or as a
+	// one-host range such as exe[0001]. go-nodeset reads exe[1-] as exe1,
+	// so a bracketed name is checked the way every other expression is.
+	if strings.ContainsAny(name, "[]") {
+		if _, err := nodeexpr.Parse(name); err != nil {
+			return nil, false
+		}
+	}
 	canonical, ok := inv.all.Canonical(name)
 	if !ok {
 		return nil, false

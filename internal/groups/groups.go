@@ -401,9 +401,14 @@ func (r *Resolver) list(ctx context.Context, source string) ([]string, error) {
 	switch {
 	case src.Static != nil:
 		// Not slices.Sorted, which returns nil for no groups: node groups
-		// prints a source that has none as [], not null.
+		// prints a source that has none as [], not null. A group keyed ""
+		// cannot be named (Resolve refuses an empty name), so it is not
+		// listed, as exec and attribute sources drop empty names.
 		out := make([]string, 0, len(src.Static))
 		for name := range src.Static {
+			if name == "" {
+				continue
+			}
 			out = append(out, name)
 		}
 		sort.Strings(out)

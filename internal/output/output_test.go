@@ -158,6 +158,35 @@ func TestNodesetAndName(t *testing.T) {
 	}
 }
 
+// A host column is text from outside in hostkey list, which prints the host
+// patterns of the known_hosts file; go-nodeset reads exe[1-] as exe1, so
+// -o nodeset and -o name refuse it rather than print a node nobody wrote.
+func TestNodesetAndNameRefuseARangeWithoutItsLastBound(t *testing.T) {
+	t.Parallel()
+
+	tb := output.NewTable(output.Cols("HOST", "MARKER")...)
+	tb.Add("exe[1-]", "x")
+	tb.Add("exe7", "y")
+	r := output.Result{Table: tb}
+	for _, spec := range []string{"nodeset", "name"} {
+		f, err := output.ParseFormat(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		err = f.Write(&buf, r)
+		if err == nil || !strings.Contains(err.Error(), `the range "1-" has no last bound`) {
+			t.Errorf("-o %s: err = %v, want the refusal", spec, err)
+		}
+		if buf.Len() != 0 {
+			t.Errorf("-o %s printed %q", spec, buf.String())
+		}
+		if check := f.Check(r); check == nil || !strings.Contains(check.Error(), `the range "1-" has no last bound`) {
+			t.Errorf("Check(-o %s) = %v, want the refusal", spec, check)
+		}
+	}
+}
+
 // TestNodesetAndNameReadOnlyAColumnOfNames: the fallback read the first
 // column whatever its heading, so a table of attribute values, files or job
 // ids printed them as host names, and a result with no table printed

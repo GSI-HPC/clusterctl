@@ -323,6 +323,37 @@ func TestAGroupWithoutANameIsRefused(t *testing.T) {
 	}
 }
 
+// A static group keyed "" cannot be named, so it is not listed and @source:*
+// leaves it out; node groups resolved every listed group and failed on it.
+func TestAStaticGroupWithoutANameIsNotListed(t *testing.T) {
+	t.Parallel()
+	opts := testOptions(t, &transport.Recorder{}, "")
+	opts.Spec.Sources["s"] = v1alpha1.GroupSource{Static: map[string]string{"": "exe1", "a": "exe2"}}
+	r := groups.New(opts)
+
+	got, err := r.List("s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "a"; strings.Join(got, ",") != want {
+		t.Errorf("List = %q, want %q", got, want)
+	}
+	all, err := r.All("s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ns, err := nodeexpr.ParseWith(all, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ns.String(), "exe2"; got != want {
+		t.Errorf("@s:* = %s, want %s", got, want)
+	}
+	if expr, err := r.Resolve("s", ""); err == nil {
+		t.Errorf("Resolve(s, \"\") = %q, want the empty name refused", expr)
+	}
+}
+
 // A group whose expression has a range without its last bound is refused,
 // at whatever level it is named, rather than read as its first node.
 func TestAGroupsRangeWithoutItsLastBoundIsRefused(t *testing.T) {
