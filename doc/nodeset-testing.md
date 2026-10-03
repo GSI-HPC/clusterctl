@@ -23,8 +23,10 @@ check would not. It also checks that `Hostlist` names the same hosts. It is
 how the adjacent-numeric-parts ambiguity was found. A fuzzing worker gives up
 on any input that runs for ten seconds, so the target lowers the expansion
 limits to 2¹² and skips inputs longer than a kilobyte: every input stays
-cheap, and the time goes into variety. CI runs it for a bounded time on every
-change; locally, run it from the package's directory:
+cheap, and the time goes into variety. CI runs it on every change for a set
+number of executions, about a minute's worth, as
+[testing.md](testing.md) explains; locally, run it from the package's
+directory:
 
 ```console
 $ go test -run '^$' -fuzz FuzzParseFold -fuzztime 60s .

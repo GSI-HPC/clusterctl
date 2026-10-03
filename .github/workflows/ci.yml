@@ -244,9 +244,18 @@ jobs:
       # it always reads afresh.
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+  # Each fuzz job runs a set number of executions, about what a minute,
+  # or half a minute for termtext, did on a runner, rather than a set
+  # time. With a duration, the fuzzing coordinator in Go's testing package
+  # races its own deadline: when -fuzztime runs out it can report the
+  # deadline as the failure, "context deadline exceeded" with no input,
+  # as it did on a change that touched none of the parsers. A count has no
+  # deadline. timeout-minutes bounds a target that has become slow, which
+  # is a failure of its own.
   fuzz:
     name: Fuzz the node set parser
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
@@ -255,7 +264,7 @@ jobs:
       # back into the same set. A short run on every change catches a
       # regression; the corpus is where the long runs live.
       - name: Fuzz
-        run: go test ./nodeset/ -run '^$' -fuzz FuzzParseFold -fuzztime 60s
+        run: go test ./nodeset/ -run '^$' -fuzz FuzzParseFold -fuzztime 4000000x
 
       - name: Upload the failing input
         if: failure()
@@ -267,6 +276,7 @@ jobs:
   fuzz-dhcp:
     name: Fuzz the DHCP parser
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
@@ -274,7 +284,7 @@ jobs:
       # The parser reads a file another host serves, so it must never
       # panic, whatever that file holds.
       - name: Fuzz
-        run: go test ./internal/dhcp/ -run '^$' -fuzz FuzzParse -fuzztime 60s
+        run: go test ./internal/dhcp/ -run '^$' -fuzz FuzzParse -fuzztime 2500000x
 
       - name: Upload the failing input
         if: failure()
@@ -286,6 +296,7 @@ jobs:
   fuzz-config:
     name: Fuzz the configuration parser
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
@@ -294,7 +305,7 @@ jobs:
       # the YAML library decoded into its own tree, so no file may make it
       # panic, and every key it reads has the line it was written on.
       - name: Fuzz
-        run: go test ./internal/config/ -run '^$' -fuzz FuzzParseDocuments -fuzztime 60s
+        run: go test ./internal/config/ -run '^$' -fuzz FuzzParseDocuments -fuzztime 250000x
 
       - name: Upload the failing input
         if: failure()
@@ -306,6 +317,7 @@ jobs:
   fuzz-progress:
     name: Fuzz the progress sanitiser
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
@@ -314,7 +326,7 @@ jobs:
       # through Sanitize, so no input may leave anything in what it returns
       # that a terminal would act on, or make it longer than its bound.
       - name: Fuzz
-        run: go test ./internal/progress/ -run '^$' -fuzz FuzzSanitize -fuzztime 60s
+        run: go test ./internal/progress/ -run '^$' -fuzz FuzzSanitize -fuzztime 1500000x
 
       - name: Upload the failing input
         if: failure()
@@ -326,6 +338,7 @@ jobs:
   fuzz-termtext:
     name: Fuzz the terminal escaper
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
@@ -334,9 +347,9 @@ jobs:
       # sees it, so no input may leave a rune the escape policy names in
       # what it returns, and Truncate must never reach past its columns.
       - name: Fuzz the escapers
-        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzEscape -fuzztime 30s
+        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzEscape -fuzztime 100000x
       - name: Fuzz Truncate
-        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzTruncate -fuzztime 30s
+        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzTruncate -fuzztime 500000x
 
       - name: Upload the failing input
         if: failure()
