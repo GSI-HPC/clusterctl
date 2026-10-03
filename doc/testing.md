@@ -23,19 +23,28 @@ what went in.
 
 **Fuzz targets** check what must hold for any input. The node set parser's is
 described with the engine. Another checks that the DHCP parser never panics on
-any input. CI runs it for a minute on every change, and
+any input. CI runs it on every change, for about a minute's worth of
+executions, and
 `go test ./internal/dhcp/ -fuzz FuzzParse` runs it locally. A third checks
 `progress.Sanitize`, which every remote line and error passes through before a
 display may draw it: whatever the input, what comes out holds nothing a
-terminal would act on and keeps to its bound. CI runs it for a minute too, and
+terminal would act on and keeps to its bound. CI runs it for about a minute
+too, and
 `go test ./internal/progress/ -fuzz FuzzSanitize` runs it locally. Two more
 check `termtext`, the escaper under it: `FuzzEscape`, that neither escaper
 leaves a rune its policy names and that escaping twice changes nothing, and
 `FuzzTruncate`, that a cut row is a prefix that fits its columns. CI runs each
-for half a minute. `FuzzParseDocuments` checks that reading a configuration
+for about half a minute. `FuzzParseDocuments` checks that reading a configuration
 file never panics, whatever it holds, and that every key read has the line it
-was written on. CI runs it for a minute, and
+was written on. CI runs it for about a minute, and
 `go test ./internal/config/ -fuzz FuzzParseDocuments` runs it locally.
+
+CI bounds each run by a number of executions rather than a time, with
+`-fuzztime` written as a count such as `2500000x`. When `-fuzztime` is a
+duration, the fuzzing coordinator in Go's testing package can report its own
+deadline as the run's failure, `context deadline exceeded` with no failing
+input. A local run with a duration can fail that way too, rarely; it found
+nothing, and running it again is the answer.
 
 **A fake BMC** serves the Redfish surface clusterctl uses, over TLS, from
 `httptest`. It is how the reset-type check, the once-only action and the boot
