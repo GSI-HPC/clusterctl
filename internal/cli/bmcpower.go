@@ -16,14 +16,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/output"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // bmcOutcome says how far the request to one service processor got.
@@ -118,11 +120,11 @@ func redfishEach[T any](ctx context.Context, a *app.App, step string, names []st
 			sendable = append(sendable, i)
 		}
 	}
-	outcomes := fanout.Map(ctx, sendable, fanout.Options[int]{
+	outcomes, _ := fanout.Map(ctx, sendable, fanout.MapOptions[int]{
 		Step:  step,
 		Limit: redfishLimit(a),
-		Describe: func(i int) (node, host, role string) {
-			return calls[i].node, calls[i].client.Host, ""
+		Describe: func(i int) fanout.Item {
+			return fanout.Item{Node: calls[i].node, Host: calls[i].client.Host}
 		},
 		PanicLog: a.WorkerDiag,
 	}, func(ctx context.Context, i int) (struct{}, error) {
@@ -814,7 +816,10 @@ func (r *bmcRun) ipmiAccount(ctx context.Context, backend *ipmi.Backend, nodes [
 	bmcs := nodeset.New()
 	byBMC := map[string][]string{}
 	for _, node := range nodes {
-		_ = bmcs.Add(p.bmc[node])
+		// bmcSet has refused a name the check refuses; one that got here
+		// would be left out, its nodes reported as never answered, rather
+		// than read as another host.
+		_ = nodeexpr.Add(bmcs, p.bmc[node])
 		byBMC[p.bmc[node]] = append(byBMC[p.bmc[node]], node)
 	}
 	for _, node := range nodes {
@@ -909,10 +914,6 @@ func batched(action string) bool {
 	return action == ipmi.ActionOn || action == ipmi.ActionCycle
 }
 
-// staggerAfter waits out the pause between two batches; the tests replace
-// it.
-var staggerAfter = time.After
-
 // runPower carries out a power action on the whole plan, in batches with a
 // pause between them where the action powers machines on.
 //
@@ -938,7 +939,6 @@ func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch 
 		Step:  "power " + action,
 		Size:  batch,
 		Pause: stagger,
-		After: staggerAfter,
 		BeforePause: func(pause time.Duration) {
 			a.Printf("waiting %s before the next batch\n", pause)
 		},
@@ -951,7 +951,7 @@ func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch 
 		return bmcExit(rows)
 	})
 	for _, b := range batches {
-		if b.Ran {
+		if b.Started {
 			continue
 		}
 		outcome, state, err := outcomeNotSent, "not sent", errNotSent()

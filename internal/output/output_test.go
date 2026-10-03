@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/output"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func sampleTable() *output.Table {

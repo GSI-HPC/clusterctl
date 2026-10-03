@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
 
 // fakeHost is an SSH server that presents one Ed25519 host key.
@@ -488,7 +488,7 @@ command hostkey scan: canceled (canceled): 2 of 2 hosts did not answer
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
+			watched, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 			ctx, cancel := context.WithCancel(watched)
 			defer cancel()
 			scanDial = func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -508,7 +508,7 @@ command hostkey scan: canceled (canceled): 2 of 2 hosts did not answer
 			if err == nil {
 				t.Fatal("the scan succeeded")
 			}
-			if got := tree(); got != tc.want[1:] {
+			if got := watcher.Finish(); got != tc.want[1:] {
 				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want[1:])
 			}
 		})

@@ -16,14 +16,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GSI-HPC/go-nodeset"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // confirmKey names the one question apply_plan asks.
@@ -645,7 +646,7 @@ func answerText(p safety.Preview, content map[string]any) string {
 func nodesWithJobs(jobs []slurm.Job, ns *nodeset.NodeSet) *nodeset.NodeSet {
 	out := nodeset.New()
 	for _, j := range jobs {
-		on, err := nodeset.Parse(j.Nodes)
+		on, err := nodeexpr.Parse(j.Nodes)
 		if err != nil {
 			continue
 		}

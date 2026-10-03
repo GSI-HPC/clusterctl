@@ -10,8 +10,9 @@ import (
 	"net"
 	"testing"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // classified is an error that says its own class, as a pin mismatch or a

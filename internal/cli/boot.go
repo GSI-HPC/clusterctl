@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GSI-HPC/go-nodeset"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -28,7 +29,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func newBootCommand(r *root) *cobra.Command {

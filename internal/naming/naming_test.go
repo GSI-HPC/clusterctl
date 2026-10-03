@@ -6,9 +6,10 @@ package naming_test
 import (
 	"testing"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func exampleNamer(t *testing.T) *naming.Namer {

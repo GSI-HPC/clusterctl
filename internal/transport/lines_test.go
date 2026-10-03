@@ -10,8 +10,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -78,7 +79,7 @@ func TestRunHandsAParserTheLinesThatEnded(t *testing.T) {
 func TestRunShowsTheLastLineBeforeItsCallEnds(t *testing.T) {
 	t.Parallel()
 	c := &progresstest.Capture{Lines: true}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 	ctx, step := progress.Start(progress.WithBus(context.Background(), bus), progress.KindStep, "exec",
 		progress.WithFlags(progress.ShowLines))
 	runner := transport.Traced(fakeClient(t, `printf 'one\n'; printf '\033]52;c;aGk=\007partial'`), false)

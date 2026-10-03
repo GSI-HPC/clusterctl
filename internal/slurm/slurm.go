@@ -25,11 +25,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/GSI-HPC/go-clikit/termtext"
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/termtext"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // separator is what --parsable2 puts between fields.
@@ -132,7 +133,7 @@ func fields(program, line string, n int) ([]string, error) {
 	if len(out) > n {
 		return nil, exitcode.Errorf(exitcode.TargetFailed,
 			"%s printed %d fields where %d were asked for, because a value holds the separator %s: %s",
-			program, len(out), n, separator, termtext.EscapeCell(line))
+			program, len(out), n, separator, termtext.Escape(line))
 	}
 	for len(out) < n {
 		out = append(out, "")

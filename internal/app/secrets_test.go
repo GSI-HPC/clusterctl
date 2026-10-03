@@ -11,12 +11,12 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config/configtest"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/secrets/sopstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -172,7 +172,7 @@ func TestSecretValueSaysWhatWasTried(t *testing.T) {
 // values are asked for, and never what it read.
 func TestADecryptionIsReportedOnce(t *testing.T) {
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 	a, keyFile := withSecretUnder(t, progress.WithBus(context.Background(), bus), nil, true)
 	id, err := os.ReadFile(keyFile)
 	if err != nil {

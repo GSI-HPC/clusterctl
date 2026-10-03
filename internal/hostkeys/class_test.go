@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // A host whose key could not be collected did not answer, which is what

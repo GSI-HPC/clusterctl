@@ -15,12 +15,12 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 	"github.com/spf13/cobra"
 )
 
@@ -93,7 +93,7 @@ func build(t *testing.T, opts harnessOptions, args ...string) (*harness, *cobra.
 		// checked once the test is over, unless the test watches them
 		// itself, so that a command test is also a test of what the
 		// command reports.
-		ctx, _ = progresstest.Checked(ctx, t, byExitCode)
+		ctx, _ = progresstest.Watch(ctx, t, byExitCode)
 	}
 	cmd, root := newRoot(ctx, streams)
 	cmd.SetOut(h.out)

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-nodeset"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -19,13 +21,12 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/output"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func newBMCCommand(r *root) *cobra.Command {
@@ -662,7 +663,7 @@ so --dry-run sweeps too.`,
 				if len(fields) == 0 {
 					continue
 				}
-				_ = alive.Add(fields[0])
+				_ = nodeexpr.Add(alive, fields[0])
 			}
 			alive = alive.Intersection(bmcs)
 			t := output.NewTable(output.Cols("BMC", "STATE")...)
@@ -774,7 +775,7 @@ func pinsToForget(a *app.App, pins map[string]string, args []string) ([]pinToFor
 			}
 		}
 		drops = append(drops, pinToForget{host: host, fingerprint: fingerprint})
-		return targets.Add(node)
+		return nodeexpr.Add(targets, node)
 	}
 	for _, arg := range args {
 		host, ok := recordedPin(pins, arg)

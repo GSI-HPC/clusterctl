@@ -491,3 +491,63 @@ func TestFanoutBelowOneIsRefused(t *testing.T) {
 		t.Errorf("--fanout 3: %v\n%s", err, h.out)
 	}
 }
+
+// exe[1-$N] with N empty leaves exe[1-], and @rack:$R with R empty leaves
+// @rack:. go-nodeset reads the first as exe1 and hands the second to the
+// group source, which would answer with every node that has a rack. Each is
+// refused as a usage error, with the message clusterctl's own parser gave,
+// before any host or group source is asked.
+func TestASelectionWithoutALastBoundOrAGroupNameIsRefused(t *testing.T) {
+	t.Parallel()
+	for expr, want := range map[string]string{
+		"exe[1-]":          `in "exe[1-]": the range "1-" has no last bound`,
+		"exe[1-,5]":        `in "exe[1-,5]": the range "1-" has no last bound`,
+		"wlm01,exe[0001-]": `in "exe[0001-]": the range "0001-" has no last bound`,
+		"@":                "empty group name in @",
+		"@rack:":           "empty group name in @rack:",
+		"@inventory:":      "empty group name in @inventory:",
+		"@slurm:":          "empty group name in @slurm:",
+	} {
+		t.Run(expr, func(t *testing.T) {
+			t.Parallel()
+			for _, args := range [][]string{
+				{"node", "select", expr},
+				{"exec", "--confirm", "-y", "-n", expr, "--", "true"},
+			} {
+				h, code := exitCodeOf(t, harnessOptions{}, args...)
+				if code != exitcode.Usage {
+					t.Errorf("%q: exit code = %d, want %d", args, code, exitcode.Usage)
+				}
+				if got := h.errOut.String(); got != "clusterctl: "+want+"\n" {
+					t.Errorf("%q: stderr = %q, want %q", args, got, "clusterctl: "+want+"\n")
+				}
+				wantNoCalls(t, h)
+			}
+		})
+	}
+}
+
+// A protected hosts entry is held to the same rules: exe[1-] would protect
+// exe1 alone, and @rack: every node that has a rack.
+func TestProtectedHostsEntryWithoutALastBoundOrAGroupNameIsRefused(t *testing.T) {
+	t.Parallel()
+	for entry, want := range map[string]string{
+		"exe[0001-]": `in "exe[0001-]": the range "0001-" has no last bound`,
+		"\"@rack:\"": "empty group name in @rack:",
+	} {
+		t.Run(entry, func(t *testing.T) {
+			t.Parallel()
+			dir := exampleCopy(t, "      - wlm01\n", "      - "+entry+"\n")
+			_, err := run(t, harnessOptions{bare: true, config: []string{dir}}, "config", "validate")
+			if err == nil || !strings.Contains(err.Error(), "safety.protectedHosts") || !strings.Contains(err.Error(), want) {
+				t.Errorf("config validate: error = %v, want the entry refused with %q", err, want)
+			}
+			h, err := run(t, harnessOptions{bare: true, config: []string{dir}},
+				"exec", "--confirm", "-y", "-n", "exe0002", "--", "true")
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("exec: error = %v, want the entry refused with %q", err, want)
+			}
+			wantNoCalls(t, h)
+		})
+	}
+}

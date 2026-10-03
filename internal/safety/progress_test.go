@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 )
 
@@ -81,7 +82,7 @@ func TestTheGateIsReportedAsAWait(t *testing.T) {
 			t.Parallel()
 			term := &terminal{}
 			c := &progresstest.Capture{}
-			bus := progress.NewBus(progress.Options{Classify: exitcode.Class, Sinks: []progress.Sink{c, term}})
+			bus := progress.NewBus(progress.BusOptions{Classify: exitcode.Class, Sinks: []progress.Sink{c, term}})
 			ctx, cancel := context.WithCancel(progress.WithBus(context.Background(), bus))
 			defer cancel()
 

@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -56,7 +57,7 @@ func TestTracedReportsEveryCall(t *testing.T) {
 			"call ssh node=exe1 host=exe1.example.org role=compute timeout=10s [dry-run]: skipped: dry run: not sent\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, tree := progresstest.Watch(context.Background(), t, progresstest.Classify(exitcode.Class))
+			ctx, watcher := progresstest.Watch(context.Background(), t, progresstest.Classify(exitcode.Class))
 			var inner *progress.Span
 			runner := transport.Traced(runnerFunc(func(ctx context.Context, _ transport.Target, _ transport.Request) (*transport.Result, error) {
 				inner = progress.SpanFrom(ctx)
@@ -69,7 +70,7 @@ func TestTracedReportsEveryCall(t *testing.T) {
 			if inner == nil {
 				t.Error("the runner was not given the call's context")
 			}
-			if got := tree(); got != tc.want {
+			if got := watcher.Finish(); got != tc.want {
 				t.Errorf("progress:\n%s\nwant:\n%s", got, tc.want)
 			}
 		})

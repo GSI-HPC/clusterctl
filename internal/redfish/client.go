@@ -28,9 +28,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // DefaultSystemPath is where most firmware puts the computer system.

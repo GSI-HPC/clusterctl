@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
-package nodeset_test
+package nodeexpr_test
 
 import (
 	"errors"
@@ -11,7 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/GSI-HPC/clusterctl/nodeset"
+	"github.com/GSI-HPC/go-nodeset"
+
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 )
 
 // batchResolver is a MapResolver that can look up several groups at once,
@@ -44,9 +46,9 @@ func (r *batchResolver) Resolve(source, group string) (string, error) {
 	return r.lookup(source, group)
 }
 
-func (r *batchResolver) ResolveAll(refs []nodeset.GroupRef) []nodeset.GroupAnswer {
+func (r *batchResolver) ResolveAll(refs []nodeexpr.GroupRef) []nodeexpr.GroupAnswer {
 	names := make([]string, len(refs))
-	answers := make([]nodeset.GroupAnswer, len(refs))
+	answers := make([]nodeexpr.GroupAnswer, len(refs))
 	for i, ref := range refs {
 		names[i] = ref.Source + ":" + ref.Group
 		answers[i].Expr, answers[i].Err = r.lookup(ref.Source, ref.Group)
@@ -59,7 +61,7 @@ func newBatchResolver() *batchResolver {
 	return &batchResolver{
 		MapResolver: &nodeset.MapResolver{Default: "site", Groups: map[string]map[string]string{
 			"site": {"a": "n[1-2]", "b": "@c,@rack:d", "c": "n3", "e": "n[1-5]!@a", "lost": "@gone,n9", "gone": "n8"},
-			"rack": {"d": "n4", "r1": "n[1-4]"},
+			"rack": {"d": "n4", "r1": "n[1-4]", "r2": "@d,@r1", "r3": "@:d,@site:c"},
 		}},
 		failing: map[string]bool{"gone": true},
 	}
@@ -73,7 +75,7 @@ func newBatchResolver() *batchResolver {
 func TestTheGroupsOfALevelAreLookedUpTogether(t *testing.T) {
 	t.Parallel()
 	res := newBatchResolver()
-	ns, err := nodeset.ParseWith("@a,@b!n1 @rack:r1&@e", res)
+	ns, err := nodeexpr.ParseWith("@a,@b!n1 @rack:r1&@e", res)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,12 +88,37 @@ func TestTheGroupsOfALevelAreLookedUpTogether(t *testing.T) {
 	}
 }
 
+// go-nodeset resolves a bare reference inside a group of a named source in
+// that source, so that is where the groups of that level are looked up.
+func TestTheGroupsOfAGroupOfANamedSourceAreLookedUpInIt(t *testing.T) {
+	t.Parallel()
+	for expr, want := range map[string]struct {
+		set   string
+		asked []string
+	}{
+		"@rack:r2": {"n[1-4]", []string{"resolve rack:r2", "all rack:d rack:r1"}},
+		"@rack:r3": {"n[3-4]", []string{"resolve rack:r3", "all rack:d site:c"}},
+	} {
+		res := newBatchResolver()
+		ns, err := nodeexpr.ParseWith(expr, res)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ns.String(); got != want.set {
+			t.Errorf("%s = %s, want %s", expr, got, want.set)
+		}
+		if !slices.Equal(res.asked, want.asked) {
+			t.Errorf("%s: the resolver was asked %q, want %q", expr, res.asked, want.asked)
+		}
+	}
+}
+
 // An expression that names one group has nothing to look up side by side,
 // and asks for it as before.
 func TestASingleGroupIsResolvedAsBefore(t *testing.T) {
 	t.Parallel()
 	res := newBatchResolver()
-	if _, err := nodeset.ParseWith("@a,n7", res); err != nil {
+	if _, err := nodeexpr.ParseWith("@a,n7", res); err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"resolve :a"}; !slices.Equal(res.asked, want) {
@@ -105,11 +132,27 @@ func TestASingleGroupIsResolvedAsBefore(t *testing.T) {
 func TestAFailedLookupIsTheEvaluationsAnswer(t *testing.T) {
 	t.Parallel()
 	res := newBatchResolver()
-	_, err := nodeset.ParseWith("@a,@gone", res)
+	_, err := nodeexpr.ParseWith("@a,@gone", res)
 	if err == nil || !strings.Contains(err.Error(), "group @gone: the source did not answer") {
 		t.Fatalf("error = %v, want the lookup's failure", err)
 	}
 	if want := []string{"all :a :gone"}; !slices.Equal(res.asked, want) {
+		t.Errorf("the resolver was asked %q, want %q", res.asked, want)
+	}
+}
+
+// One Batch kept across expressions looks each group up once, the
+// protected hosts entries' groups together.
+func TestABatchKeptAcrossExpressionsLooksEachGroupUpOnce(t *testing.T) {
+	t.Parallel()
+	res := newBatchResolver()
+	b := nodeexpr.NewBatch(res)
+	entries := []string{"@a", "@c", "@gone"}
+	b.Prefetch(entries...)
+	for _, expr := range entries {
+		_, _ = nodeexpr.ParseWith(expr, b)
+	}
+	if want := []string{"all :a :c :gone"}; !slices.Equal(res.asked, want) {
 		t.Errorf("the resolver was asked %q, want %q", res.asked, want)
 	}
 }
@@ -121,10 +164,10 @@ func TestBatchedGroupsEvaluateAsResolvedOnes(t *testing.T) {
 	for _, expr := range []string{
 		"@a", "@a,@b", "@b!@a", "@e&@rack:r1", "@rack:*", "@*", "@a,@lost", "@lost,@a",
 		"@gone,@nope", "@nope,@gone", "@a@b", "@", "@site:", "n[1-3],@a ^ @rack:d", "@a,[", "@b]",
-		"@a,@a,@a", "x[1-2]&@rack:r1,@c", "@a,@b:c,@:a",
+		"@a,@a,@a", "x[1-2]&@rack:r1,@c", "@a,@b:c,@:a", "@rack:r2,@rack:r3",
 	} {
-		plain, plainErr := nodeset.ParseWith(expr, onlyResolver{newBatchResolver()})
-		batched, batchedErr := nodeset.ParseWith(expr, newBatchResolver())
+		plain, plainErr := nodeexpr.ParseWith(expr, onlyResolver{newBatchResolver()})
+		batched, batchedErr := nodeexpr.ParseWith(expr, newBatchResolver())
 		if fmt.Sprint(plainErr) != fmt.Sprint(batchedErr) {
 			t.Errorf("%q: error %v, want %v", expr, batchedErr, plainErr)
 			continue
@@ -137,3 +180,24 @@ func TestBatchedGroupsEvaluateAsResolvedOnes(t *testing.T) {
 
 // onlyResolver hides that a resolver can look up several groups at once.
 type onlyResolver struct{ nodeset.Resolver }
+
+// groupRefs reads references the way go-nodeset reads them.
+func TestGroupRefsReadsReferencesAsGoNodesetDoes(t *testing.T) {
+	t.Parallel()
+	for expr, want := range map[string]string{
+		"@a,@b!n1 @rack:r1&@e":   ":a :b rack:r1 :e",
+		"@a[1,2],@b":             ":a[1,2] :b",
+		" @a\t@b\n@c\r@d^@e":     ":a :b :c :d :e",
+		"@*,@rack:*,@,@rack:,@x": ":x",
+		"@:a,@s:g:h":             ":a s:g:h",
+		"x@a,@b":                 ":b",
+	} {
+		var got []string
+		for _, ref := range nodeexpr.GroupRefs(expr) {
+			got = append(got, ref.Source+":"+ref.Group)
+		}
+		if strings.Join(got, " ") != want {
+			t.Errorf("groupRefs(%q) = %q, want %q", expr, strings.Join(got, " "), want)
+		}
+	}
+}

@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func backend(t *testing.T, spec v1alpha1.IPMISpec, out string) (*ipmi.Backend, *capturingRunner) {

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/GSI-HPC/go-nodeset"
 	"golang.org/x/term"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -19,8 +20,8 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // Credentials returns the credential resolver of the site. It is safe for
@@ -143,7 +144,7 @@ func (a *App) BMCHosts(nodes *nodeset.NodeSet) (*nodeset.NodeSet, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := out.Add(host); err != nil {
+		if err := nodeexpr.Add(out, host); err != nil {
 			return nil, exitcode.Errorf(exitcode.Usage,
 				"the service processor %q of node %q is not a valid host name: %w", host, node, err)
 		}

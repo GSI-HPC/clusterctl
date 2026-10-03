@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-nodeset"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
@@ -23,7 +24,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/mcpserver"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // exampleDir is the configuration shipped with the documentation. Its

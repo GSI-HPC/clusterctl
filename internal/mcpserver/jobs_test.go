@@ -8,8 +8,9 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // TestNodesWithJobs checks which nodes of a set a queue keeps busy: those a

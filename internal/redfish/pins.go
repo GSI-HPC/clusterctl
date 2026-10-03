@@ -18,8 +18,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 )
 
 // PinStore records the certificate a service processor presented, so that a

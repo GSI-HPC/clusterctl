@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/GSI-HPC/clusterctl/internal/progress"
+	"github.com/GSI-HPC/go-clikit/progress"
 )
 
 // Traced returns a Runner that reports every request next runs as a call,

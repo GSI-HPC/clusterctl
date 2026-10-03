@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func exampleSpec() v1alpha1.NodeInventorySpec {
@@ -178,6 +179,30 @@ func TestSelectReportsUnknownNodes(t *testing.T) {
 	}
 	if got, want := strings.Join(unknown, ","), "ghost1"; got != want {
 		t.Errorf("unknown = %q, want %q", got, want)
+	}
+}
+
+// A range without its last bound is what exe[1-$N] leaves behind when N is
+// empty. go-nodeset reads exe[1-] as exe1, so an entry or a boot path rule
+// that holds one is refused rather than taken to name one node.
+func TestARangeWithoutItsLastBoundIsRefused(t *testing.T) {
+	t.Parallel()
+
+	const want = `in "exe[1-]": the range "1-" has no last bound`
+	_, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{
+		{Nodes: "exe[1-]", Attributes: map[string]string{"class": "exe"}},
+	}})
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("New = %v, want the entry refused with %q", err, want)
+	}
+
+	inv, err := inventory.New(v1alpha1.NodeInventorySpec{Nodes: []v1alpha1.NodeEntry{{Nodes: "exe[1-4]"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := inventory.NewBootPaths(inv, []v1alpha1.BootPathRule{{Nodes: "exe[1-]", Path: "/srv/pxesrv/boot/exe"}})
+	if _, _, err := paths.Of("exe1"); err == nil || !strings.Contains(err.Error(), "boot path rule 1: "+want) {
+		t.Errorf("Of(exe1) = %v, want rule 1 refused with %q", err, want)
 	}
 }
 

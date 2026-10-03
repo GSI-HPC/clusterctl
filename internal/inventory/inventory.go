@@ -18,9 +18,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
-	"github.com/GSI-HPC/clusterctl/nodeset"
+	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 )
 
 // Node is everything the inventory knows about one machine.
@@ -133,7 +135,7 @@ func FromDocuments(docs ...Document) (*Inventory, error) {
 	for d, doc := range docs {
 		for i, entry := range doc.Spec.Nodes {
 			label := entryRef{docs, d, i}
-			ns, err := nodeset.Parse(entry.Nodes)
+			ns, err := nodeexpr.Parse(entry.Nodes)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", label, err)
 			}
@@ -613,7 +615,7 @@ func (b *BootPaths) Of(node string) (string, bool, error) {
 	b.once.Do(func() {
 		b.sets = make([]*nodeset.NodeSet, len(b.rules))
 		for i, rule := range b.rules {
-			ns, err := nodeset.Parse(rule.Nodes)
+			ns, err := nodeexpr.Parse(rule.Nodes)
 			if err != nil {
 				b.err = fmt.Errorf("boot path rule %d: %w", i+1, err)
 				return

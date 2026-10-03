@@ -14,13 +14,12 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"filippo.io/age"
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -47,7 +46,7 @@ func TestSecretsPushReportsItsDecryptionsAndEachFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := run(t, harnessOptions{ctx: ctx, config: []string{dir}, recorder: &transport.Recorder{Reply: exe0002Unreachable}},
 		"secrets", "push", "-n", "exe[1-3]", "-y")
 	wantCode(t, err, exitcode.Transport)
@@ -66,7 +65,7 @@ command secrets push: failed (transport): 1 of 3 nodes failed: exe0002: exe0002 
       step write /etc/nslcd.keytab [hidden]: ok
   wait confirm message=write secrets onto 3 hosts: ok
 `
-	if got := strings.ReplaceAll(tree(), dir, "DIR"); got != want[1:] {
+	if got := strings.ReplaceAll(watcher.Finish(), dir, "DIR"); got != want[1:] {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want[1:])
 	}
 }
@@ -105,7 +104,7 @@ func TestProvisionStatusReportsBothHalves(t *testing.T) {
 	h := newReinstallHost(t, pxeOptions{inventory: threeNodes})
 	h.link(t, "10.0.2.1", h.exePath())
 	h.bmcs.down["exe0002"] = true
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := h.run(t, harnessOptions{ctx: ctx}, "provision", "status", "-n", "exe[0001-0003]")
 	wantCode(t, err, exitcode.Transport)
 	want := `
@@ -121,7 +120,7 @@ command provision status: failed (transport): where the reinstallation of exe000
     target exe[0001-0003]: ok
       call ssh node={} host={} timeout=30s exit=0: ok
 `
-	if got := tree(); got != want[1:] {
+	if got := watcher.Finish(); got != want[1:] {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want[1:])
 	}
 }
@@ -140,7 +139,7 @@ func TestProvisionStatusCountsANodeSshDoesNotReachAsAnswered(t *testing.T) {
 		}
 		return answer(tg, req)
 	}
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	out, err := h.run(t, harnessOptions{ctx: ctx}, "-o", "json", "provision", "status", "-n", "exe[0001-0003]")
 	if err != nil {
 		t.Fatalf("provision status: %v", err)
@@ -154,7 +153,7 @@ func TestProvisionStatusCountsANodeSshDoesNotReachAsAnswered(t *testing.T) {
       call ssh node={} host={} timeout=30s exit=255: failed (transport): {}: ssh: connect to host {} port 22: No route to host
     target exe[0001,0003]: ok
 `
-	if got := tree(); !strings.Contains(got, want[1:]) {
+	if got := watcher.Finish(); !strings.Contains(got, want[1:]) {
 		t.Errorf("progress:\n%s\nwant the uptime step and all three targets ok:\n%s", got, want[1:])
 	}
 }
@@ -171,12 +170,12 @@ func TestDoctorRemoteReportsTheCallsOfEachRole(t *testing.T) {
 		}
 		return &transport.Result{Target: tg}, nil
 	}}
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	_, _ = run(t, harnessOptions{ctx: ctx, recorder: rec}, "doctor", "--remote")
 	// How many checks failed depends on the machine as well, on whether
 	// ssh, scp and sops are installed, so the command's own line is only
 	// read for how it ended.
-	head, calls, _ := strings.Cut(tree(), "\n")
+	head, calls, _ := strings.Cut(watcher.Finish(), "\n")
 	if !strings.HasPrefix(head, "command doctor: failed (target): ") || !strings.HasSuffix(head, " checks failed") {
 		t.Errorf("the command ended %q, want it failed (target) with the count of the checks that failed", head)
 	}
@@ -222,7 +221,7 @@ func TestADryRunLooksUpItsGroupsAndRecordsTheRest(t *testing.T) {
 		t.Errorf("a dry run sent %q to %s", req.Argv, tg)
 		return &transport.Result{Target: tg}, nil
 	}}
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := run(t, harnessOptions{ctx: ctx, recorder: rec}, "node", "hw", "--dry-run", "-n", "@slurm:batch")
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +234,7 @@ command node hw [dry-run]: ok
     target exe[0001-0002]: ok
       call ssh node={} host={} timeout=10m0s [dry-run]: skipped: dry run: not sent
 `
-	if got := tree(); got != want[1:] {
+	if got := watcher.Finish(); got != want[1:] {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want[1:])
 	}
 }
@@ -247,7 +246,6 @@ command node hw [dry-run]: ok
 func TestProgressLeavesTheOutputAlone(t *testing.T) {
 	isolateHome(t)
 	t.Setenv("BMC_PASSWORD", "s3cret")
-	fakeStagger(t, func(time.Duration) bool { return false })
 	fakeRedfish(t, func(req *http.Request) (*http.Response, error) {
 		switch processorOf(req) {
 		case "exe0002":
@@ -296,7 +294,7 @@ func TestProgressLeavesTheOutputAlone(t *testing.T) {
 				}
 				return "ok"
 			})}
-			h, err := run(t, opts, append(noSlurm, "bmc", "power", "on", "--ipmi", "--batch", "3", "-y", "-n", "exe[1-9]")...)
+			h, err := run(t, opts, append(noSlurm, "--set", "safety.powerOnStagger=1ms", "bmc", "power", "on", "--ipmi", "--batch", "3", "-y", "-n", "exe[1-9]")...)
 			return h, "", err
 		}},
 		{"a reinstall that fails a reset", func(t *testing.T, opts harnessOptions) (*harness, string, error) {
@@ -330,7 +328,7 @@ func TestProgressLeavesTheOutputAlone(t *testing.T) {
 func watchEvents(t *testing.T) (ctx context.Context, done func() (string, []progress.Event)) {
 	t.Helper()
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 	return progress.WithBus(context.Background(), bus), func() (string, []progress.Event) {
 		t.Helper()
 		bus.Close()

@@ -19,11 +19,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 )
 
 // fakeDNS serves a fixed zone over UDP on the loopback address and returns
@@ -296,6 +296,46 @@ func TestDNSAliasesFailWhenAReverseLookupFails(t *testing.T) {
 	}
 }
 
+// The progress of dns aliases names each target by what is looked up, the
+// alias or the address, and so do the failures in its summary. Before
+// go-clikit named a target with no node by its item, the targets had empty
+// names: "target : ok", and "1 of 2 failed: " named none.
+func TestDNSAliasesNameTheirTargets(t *testing.T) {
+	t.Parallel()
+	server := (&dnsServer{
+		zone: map[string][]dnsmessage.Resource{
+			"submit.hpc.example.org.": {
+				aRR("submit.hpc.example.org.", "10.0.3.1"),
+				aRR("submit.hpc.example.org.", "10.0.3.2"),
+			},
+			"1.3.0.10.in-addr.arpa.": {ptrRR("1.3.0.10.in-addr.arpa.", "sub0001.hpc.example.org.")},
+		},
+		failing: map[string]dnsmessage.RCode{"2.3.0.10.in-addr.arpa.": dnsmessage.RCodeServerFailure},
+	}).serve(t)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
+	_, err := run(t, harnessOptions{ctx: ctx}, "dns", "aliases",
+		"--set", "services.dns.server="+server, "--set", `services.dns.aliases=["submit", "gone"]`)
+	wantCode(t, err, exitcode.TargetFailed)
+	want := `
+command dns aliases: failed (target): 1 aliases did not resolve; the reverse entry of 1 of 2 addresses could not be read
+  step read the reverse entries total=2 limit=16 [fold]: failed (target): 1 of 2 failed: 10.0.3.2
+    target 10.0.3.1: ok
+      call dns host=SERVER timeout=5s message=PTR 1.3.0.10.in-addr.arpa: ok
+    target 10.0.3.2: failed (target): SERVER answered ServerFailure
+      call dns host=SERVER timeout=5s message=PTR 2.3.0.10.in-addr.arpa: ok
+  step resolve the aliases total=2 limit=16 [fold]: failed (target): 1 of 2 failed: gone.hpc.example.org
+    target gone.hpc.example.org: failed (target): no such host
+      call dns host=SERVER timeout=5s message=A {}: ok
+      call dns host=SERVER timeout=5s message=AAAA {}: ok
+    target submit.hpc.example.org: ok
+      call dns host=SERVER timeout=5s message=A {}: ok
+      call dns host=SERVER timeout=5s message=AAAA {}: ok
+`
+	if got := strings.ReplaceAll(watcher.Finish(), server, "SERVER"); got != want[1:] {
+		t.Errorf("progress:\n%s\nwant:\n%s", got, want[1:])
+	}
+}
+
 // TestDNSServerTakesAnIPv6Address is the report's 12.12: an IPv6 server
 // without brackets or port failed every lookup with "too many colons".
 func TestDNSServerTakesAnIPv6Address(t *testing.T) {
@@ -523,7 +563,7 @@ func TestDNSLookupReportsEachName(t *testing.T) {
 		silent: map[string]bool{"exe0003.hpc.example.org.": true},
 	}
 	server := s.serve(t)
-	ctx, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	_, err := run(t, harnessOptions{ctx: ctx}, "dns", "lookup", "-n", "exe[0001-0003]",
 		"--set", "services.dns.server="+server, "--set", "services.dns.timeout=200ms")
 	wantCode(t, err, exitcode.TargetFailed)
@@ -539,7 +579,7 @@ command dns lookup: failed (target): 2 of 3 names did not resolve
     target exe0003: failed (timeout): SERVER did not answer within 200ms
       call dns host=SERVER timeout=200ms message=A {}: failed (timeout): SERVER did not answer within 200ms
 `
-	if got := strings.ReplaceAll(tree(), server, "SERVER"); got != want[1:] {
+	if got := strings.ReplaceAll(watcher.Finish(), server, "SERVER"); got != want[1:] {
 		t.Errorf("progress:\n%s\nwant:\n%s", got, want[1:])
 	}
 }
@@ -553,7 +593,7 @@ func TestDNSLookupStopsWhenInterrupted(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		s.silent[fmt.Sprintf("exe%04d.hpc.example.org.", i)] = true
 	}
-	watched, tree := progresstest.Watch(context.Background(), t, byExitCode)
+	watched, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	ctx, cancel := context.WithCancel(watched)
 	defer cancel()
 	// The interrupt comes once both names under way have been asked.
@@ -578,7 +618,7 @@ func TestDNSLookupStopsWhenInterrupted(t *testing.T) {
 	if got := s.asked.Load(); got != 2 {
 		t.Errorf("%d queries were sent, want only those of the two names under way when the interrupt came", got)
 	}
-	if got := tree(); !strings.Contains(got, "was interrupted before it was answered") || strings.Contains(got, "did not answer within") {
+	if got := watcher.Finish(); !strings.Contains(got, "was interrupted before it was answered") || strings.Contains(got, "did not answer within") {
 		t.Errorf("progress:\n%s\nwant the queries cut short to say they were interrupted", got)
 	}
 }

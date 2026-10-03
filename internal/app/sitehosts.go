@@ -7,8 +7,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // checkSiteHosts refuses a selection with a name that is not a host of the

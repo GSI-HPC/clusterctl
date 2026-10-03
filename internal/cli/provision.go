@@ -22,6 +22,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-nodeset"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -32,13 +34,11 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/output"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/secrets"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 func newSecretsCommand(r *root) *cobra.Command {
@@ -150,11 +150,11 @@ This overwrites files on the nodes, so it asks first.
 			for k := range targets {
 				written[k], nodes[k] = make([]*transport.Result, len(files)), k
 			}
-			outcomes := fanout.Map(a.Context(), nodes, fanout.Options[int]{
+			outcomes, _ := fanout.Map(a.Context(), nodes, fanout.MapOptions[int]{
 				Step:  "write the secrets",
 				Limit: a.Spec.Fanout.Max,
-				Describe: func(k int) (node, host, role string) {
-					return targets[k].Name, targets[k].Host, targets[k].Role
+				Describe: func(k int) fanout.Item {
+					return fanout.Item{Node: targets[k].Name, Host: targets[k].Host, Role: targets[k].Role}
 				},
 				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, k int) (struct{}, error) {
@@ -176,7 +176,7 @@ This overwrites files on the nodes, so it asks first.
 			for i, file := range files {
 				for k, tg := range targets {
 					res := written[k][i]
-					if fanout.IsSkipped(res.Err) {
+					if errors.Is(res.Err, progress.ErrSkipped) {
 						t.Add(tg.Name, file.Target, "skipped: "+res.Err.Error())
 						continue
 					}
@@ -277,7 +277,7 @@ func (p secretPush) node(ctx context.Context, tg transport.Target, written []*tr
 	end := func(i int, res *transport.Result) {
 		written[i] = res
 		switch {
-		case fanout.IsSkipped(res.Err):
+		case errors.Is(res.Err, progress.ErrSkipped):
 			steps[i].Skip(res.Err.Error())
 		case res.Failed():
 			steps[i].End(pushError(res))
@@ -314,7 +314,7 @@ func (p secretPush) node(ctx context.Context, tg transport.Target, written []*tr
 			start(i)
 		}
 		if gone && i > next {
-			end(i, &transport.Result{Target: tg, ExitCode: -1, Err: fanout.Skip(leftOut(pushError(res)))})
+			end(i, &transport.Result{Target: tg, ExitCode: -1, Err: progress.Skip(leftOut(pushError(res)))})
 			continue
 		}
 		end(i, res)
@@ -385,7 +385,7 @@ func notPushed(tg transport.Target, written []*transport.Result, why error) {
 			continue
 		}
 		if missing && nodeUnreachable(why) {
-			written[i] = &transport.Result{Target: tg, ExitCode: -1, Err: fanout.Skip(leftOut(why))}
+			written[i] = &transport.Result{Target: tg, ExitCode: -1, Err: progress.Skip(leftOut(why))}
 			continue
 		}
 		written[i] = &transport.Result{Target: tg, ExitCode: -1, Err: why}

@@ -6,8 +6,8 @@
 // of their results, the bound on each host, and the exit code a fan-out
 // that failed somewhere asks for.
 //
-// The pools themselves, Each, Map and Batches, are those of
-// internal/clikit/fanout, which knows no program; this package gives them
+// The pools themselves, Each, Map and Batches, are those of go-clikit's
+// fanout package, which knows no program; this package gives them
 // clusterctl's name, its rule for the class of an error (exitcode.Class)
 // and the error its commands exit with (Summarize).
 //
@@ -26,11 +26,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-nodeset"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
-	"github.com/GSI-HPC/clusterctl/nodeset"
 )
 
 // defaultStep names the step of an executor that names none.
@@ -72,7 +73,9 @@ func (e *Executor) Run(ctx context.Context, targets []transport.Target, req tran
 // on Map, and is reported as Map reports its work. A panic in the runner or
 // in build becomes the target's failure rather than the end of the process.
 func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, build func(transport.Target) transport.Request) []*transport.Result {
-	outcomes := Map(ctx, targets, Options[transport.Target]{
+	// The step's error is not needed: the caller sums up the results with
+	// FailureError.
+	outcomes, _ := Map(ctx, targets, MapOptions[transport.Target]{
 		Step:     cmp.Or(e.Step, defaultStep),
 		Flags:    e.Flags,
 		Limit:    e.Max,
@@ -105,8 +108,8 @@ func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, buil
 }
 
 // describeTarget says what a display names a target by.
-func describeTarget(t transport.Target) (node, host, role string) {
-	return cmp.Or(t.Name, t.Host), t.Host, t.Role
+func describeTarget(t transport.Target) Item {
+	return Item{Node: cmp.Or(t.Name, t.Host), Host: t.Host, Role: t.Role}
 }
 
 // resultError is the error a target is reported with: the result's own, or

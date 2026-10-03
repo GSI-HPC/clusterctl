@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GSI-HPC/clusterctl/nodeset"
+	"github.com/GSI-HPC/go-nodeset"
 )
 
 // JobState is what Slurm said about the nodes of a power action.

@@ -13,10 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/progresstest"
+
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/progress"
-	"github.com/GSI-HPC/clusterctl/internal/progress/progresstest"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
@@ -447,7 +448,7 @@ func TestTheRunnersReportEveryCall(t *testing.T) {
 	for _, dryRun := range []bool{false, true} {
 		t.Run(fmt.Sprintf("dry run %v", dryRun), func(t *testing.T) {
 			c := &progresstest.Capture{}
-			bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+			bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 			ctx := progress.WithBus(context.Background(), bus)
 			a, err := app.New(ctx, app.Streams{StateDir: t.TempDir(), CacheDir: t.TempDir()}, app.Options{
 				ConfigFiles: []string{exampleDir},
@@ -485,7 +486,7 @@ func TestTheRunnersReportEveryCall(t *testing.T) {
 // answered it, and nests the ssh call when the host was asked.
 func TestARemoteFileIsReportedWithWhereItCameFrom(t *testing.T) {
 	c := &progresstest.Capture{}
-	bus := progress.NewBus(progress.Options{Sinks: []progress.Sink{c}})
+	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 	ctx := progress.WithBus(context.Background(), bus)
 	rec := &transport.Recorder{Reply: func(tg transport.Target, req transport.Request) (*transport.Result, error) {
 		if req.Argv[len(req.Argv)-1] == "/missing" {

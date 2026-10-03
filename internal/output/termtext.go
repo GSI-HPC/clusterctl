@@ -3,12 +3,12 @@
 
 package output
 
-import "github.com/GSI-HPC/clusterctl/internal/termtext"
+import "github.com/GSI-HPC/go-clikit/termtext"
 
-// EscapeText is termtext.EscapeText: untrusted text made safe for a
+// EscapeText is termtext.EscapeLines: untrusted text made safe for a
 // terminal, its lines kept.
-func EscapeText(s string) string { return termtext.EscapeText(s) }
+func EscapeText(s string) string { return termtext.EscapeLines(s) }
 
-// EscapeCell is termtext.EscapeCell: untrusted text made safe for one line
+// EscapeCell is termtext.Escape: untrusted text made safe for one line
 // of a terminal.
-func EscapeCell(s string) string { return termtext.EscapeCell(s) }
+func EscapeCell(s string) string { return termtext.Escape(s) }

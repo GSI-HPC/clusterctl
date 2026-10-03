@@ -245,11 +245,12 @@ jobs:
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   # Each fuzz job runs a set number of executions, about a minute's worth,
-  # or half a minute's for termtext, rather than a set time. With a
-  # duration, the fuzzing coordinator in Go's testing package races its own
-  # deadline: when -fuzztime runs out it can report the deadline as the
-  # failure, "context deadline exceeded" with no input, as it did on a
-  # change that touched none of the parsers. A count has no deadline.
+  # rather than a set time. With a duration, the fuzzing coordinator in Go's
+  # testing package races its own deadline: when -fuzztime runs out it can
+  # report the deadline as the failure, "context deadline exceeded" with no
+  # input, as it did on a change that touched none of the parsers. A count
+  # has no deadline. The node set parser, the progress sanitiser and the
+  # terminal escaper are fuzzed in the CI of go-nodeset and go-clikit.
   #
   # -fuzzminimizetime caps how long each input found is minimized. CI keeps
   # no corpus, so every run starts cold and finds many, and with all four
@@ -257,26 +258,27 @@ jobs:
   # a count makes the run wait out. A failing input is still written, if
   # less minimized; a local run minimizes it fully. timeout-minutes bounds
   # a target that has become slow, which is a failure of its own.
-  fuzz:
-    name: Fuzz the node set parser
+  fuzz-nodeexpr:
+    name: Fuzz the node set guard
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
 
-      # Folding has to be idempotent: the printed form of a set must parse
-      # back into the same set. A short run on every change catches a
-      # regression; the corpus is where the long runs live.
+      # Every expression clusterctl is given passes the check in nodeexpr
+      # before go-nodeset reads it, so for any input the check has to name
+      # the hosts go-nodeset names and refuse nothing go-nodeset reads but a
+      # range without its last bound.
       - name: Fuzz
-        run: go test ./nodeset/ -run '^$' -fuzz FuzzParseFold -fuzztime 4000000x -fuzzminimizetime 1000x
+        run: go test ./internal/nodeexpr/ -run '^$' -fuzz FuzzParse -fuzztime 4500000x -fuzzminimizetime 1000x
 
       - name: Upload the failing input
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-corpus
-          path: nodeset/testdata/fuzz/
+          name: fuzz-corpus-nodeexpr
+          path: internal/nodeexpr/testdata/fuzz/
 
   fuzz-dhcp:
     name: Fuzz the DHCP parser
@@ -318,50 +320,6 @@ jobs:
         with:
           name: fuzz-corpus-config
           path: internal/config/testdata/fuzz/
-
-  fuzz-progress:
-    name: Fuzz the progress sanitiser
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-go
-
-      # Every line a node prints and every error reaches a live display
-      # through Sanitize, so no input may leave anything in what it returns
-      # that a terminal would act on, or make it longer than its bound.
-      - name: Fuzz
-        run: go test ./internal/progress/ -run '^$' -fuzz FuzzSanitize -fuzztime 2000000x -fuzzminimizetime 1000x
-
-      - name: Upload the failing input
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: fuzz-corpus-progress
-          path: internal/progress/testdata/fuzz/
-
-  fuzz-termtext:
-    name: Fuzz the terminal escaper
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-go
-
-      # Every text from elsewhere is escaped by termtext before a terminal
-      # sees it, so no input may leave a rune the escape policy names in
-      # what it returns, and Truncate must never reach past its columns.
-      - name: Fuzz the escapers
-        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzEscape -fuzztime 800000x -fuzzminimizetime 1000x
-      - name: Fuzz Truncate
-        run: go test ./internal/termtext/ -run '^$' -fuzz FuzzTruncate -fuzztime 2000000x -fuzzminimizetime 1000x
-
-      - name: Upload the failing input
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: fuzz-corpus-termtext
-          path: internal/termtext/testdata/fuzz/
 
   # The release ships a static binary, so the release targets have to build
   # without cgo on every change rather than at tag time; an operating system
