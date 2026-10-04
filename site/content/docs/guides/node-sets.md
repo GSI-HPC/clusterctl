@@ -217,8 +217,9 @@ reads the same however it is reached.
 its `all` command prints, or else what its groups name together, as
 `@a,@b,...` would. Each group is evaluated on its own, so the `!` in
 `b: "exe[3-4]!exe2"` takes `exe2` out of `b` alone, not out of the groups
-before it. A group whose value holds `!`, `&` or `^` goes in by its name, so
-when that name holds a space, a comma, one of those operators or a bracket,
+before it, and a group whose brackets do not balance is an error rather than
+taking in the group after it. Such a group goes in by its name, so when that
+name holds whitespace of any kind, a comma, `!`, `&`, `^` or a bracket,
 `@source:*` is an error.
 
 A cached answer is kept per site, cluster and context, per host and per exact

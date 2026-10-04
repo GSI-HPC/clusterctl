@@ -251,6 +251,28 @@ func TestAllEvaluatesEachGroupOnItsOwn(t *testing.T) {
 	if ns, err := nodeexpr.ParseWith("@odd:*", groups.New(opts)); err == nil {
 		t.Errorf("ParseWith(\"@odd:*\") = %q, want the group \"b c\" refused", ns)
 	}
+
+	// Any Unicode space is refused, as a space is: the parser trims them
+	// from the ends of a term, so @spaced:b followed by a no-break space
+	// would name the group b.
+	for _, name := range []string{"b ", "b\v", "b\f", "b\u0085", "b c"} {
+		opts.Spec.Sources["spaced"] = v1alpha1.GroupSource{Static: map[string]string{"b": "exe9", name: "exe[1-3]!exe2"}}
+		if ns, err := nodeexpr.ParseWith("@spaced:*", groups.New(opts)); err == nil {
+			t.Errorf("ParseWith(\"@spaced:*\") = %q, want the group %q refused", ns, name)
+		}
+	}
+
+	// A group whose brackets do not balance is evaluated on its own too,
+	// and so is an error, where it took the comma and the next group into
+	// its range: exe[1 and 3] were exe[1,3] together.
+	opts.Spec.Sources["unbalanced"] = v1alpha1.GroupSource{Static: map[string]string{"a": "exe[1", "b": "3]", "c": "exe7"}}
+	if ns, err := nodeexpr.ParseWith("@unbalanced:*", groups.New(opts)); err == nil {
+		t.Errorf("ParseWith(\"@unbalanced:*\") = %q, want the unbalanced groups refused", ns)
+	}
+	opts.Spec.Sources["unbalanced"] = v1alpha1.GroupSource{Static: map[string]string{"a b": "exe[1", "c": "3]"}}
+	if ns, err := nodeexpr.ParseWith("@unbalanced:*", groups.New(opts)); err == nil {
+		t.Errorf("ParseWith(\"@unbalanced:*\") = %q, want the group \"a b\" refused", ns)
+	}
 }
 
 func TestGroupsOf(t *testing.T) {
