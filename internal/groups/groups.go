@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/GSI-HPC/go-nodeset"
@@ -367,22 +368,52 @@ func (r *Resolver) union(ctx context.Context, source string, names []string) (st
 
 // unionOperand writes a group's expression as one operand of the union All
 // returns, which is evaluated as one expression, left to right: as it is
-// when it holds no operator but the union, and otherwise as a reference to
-// the group, which the parser evaluates on its own, so that the operator
-// does not apply to every group before it. A name the parser would not read
-// back as that one reference is refused, since a reference split at a comma
-// or a space would name other hosts.
+// when it holds no operator but the union and its brackets balance, and
+// otherwise as a reference to the group, which the parser evaluates on its
+// own, so that the operator does not apply to every group before it and an
+// open bracket does not take in the group after it. A group is refused when
+// its name, or its source's, might not read back as that one reference,
+// since such a reference could name other hosts. go-nodeset's MapResolver
+// does the same since v1.0.1.
 func unionOperand(source, group, expr string) (string, error) {
-	if !strings.ContainsAny(expr, "!&^") {
+	if !strings.ContainsAny(expr, "!&^") && balanced(expr) {
 		return expr, nil
 	}
-	const splits = " \t\r\n,!&^[]"
-	if group == "" || group == "*" || strings.ContainsAny(group, splits) ||
-		strings.ContainsAny(source, splits+":") {
-		return "", fmt.Errorf("source %q: the group %q holds a set operator and cannot be referred to by its name, "+
-			"so @%s:* cannot evaluate it on its own", source, group, source)
+	if group == "" || group == "*" || !referable(group) || !referable(source) || strings.Contains(source, ":") {
+		return "", fmt.Errorf("source %q: the group %q holds a set operator or an unbalanced bracket, "+
+			"and %q might not read back as that group, so %q cannot evaluate it on its own",
+			source, group, "@"+source+":"+group, "@"+source+":*")
 	}
 	return "@" + source + ":" + group, nil
+}
+
+// balanced reports whether every bracket of an expression is closed, as the
+// parser counts them. A group whose brackets do not balance would otherwise
+// take the comma after it, and the group after that, into its range.
+func balanced(expr string) bool {
+	depth := 0
+	for i := 0; i < len(expr); i++ {
+		switch expr[i] {
+		case '[':
+			depth++
+		case ']':
+			if depth--; depth < 0 {
+				return false
+			}
+		}
+	}
+	return depth == 0
+}
+
+// referable reports whether a name is free of what the parser splits a term
+// at, or trims from it: whitespace of any kind, a comma, an operator and a
+// bracket. A group named "a" followed by a no-break space would be read back
+// as the group "a". Some of the names it refuses would read back, such as
+// one with a space inside; they are refused all the same.
+func referable(name string) bool {
+	return !strings.ContainsFunc(name, func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune(",!&^[]", r)
+	})
 }
 
 // List implements nodeset.Lister.

@@ -98,8 +98,10 @@ each evaluated on its own as `@a,@b` evaluates them. The resolver hands the
 parser one expression, which is read left to right, so a group whose value
 holds `!`, `&` or `^` goes into it as the reference `@source:group` rather
 than as its value, where the operator would apply to every group before it.
-A name that would not read back as that one reference, one holding a space,
-a comma, an operator or a bracket, is refused.
+So does a group whose brackets do not balance, which would take in the group
+after it, so that `@source:*` is the error the group is on its own. A name
+that might not read back as that one reference, one holding whitespace of
+any kind, a comma, an operator or a bracket, is refused.
 
 A reference without a group name, `@` or `@rack:`, is refused before any
 source is asked: `empty group name in @rack:`. A source that reads a node
