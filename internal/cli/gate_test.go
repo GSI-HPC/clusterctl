@@ -495,18 +495,19 @@ func TestFanoutBelowOneIsRefused(t *testing.T) {
 // exe[1-$N] with N empty leaves exe[1-], and @rack:$R with R empty leaves
 // @rack:. go-nodeset reads the first as exe1 and hands the second to the
 // group source, which would answer with every node that has a rack. Each is
-// refused as a usage error, with the message clusterctl's own parser gave,
-// before any host or group source is asked.
+// refused as a usage error before any host or group source is asked: the
+// first by go-nodeset, with the message clusterctl's own parser gave, the
+// second by the group resolver.
 func TestASelectionWithoutALastBoundOrAGroupNameIsRefused(t *testing.T) {
 	t.Parallel()
 	for expr, want := range map[string]string{
 		"exe[1-]":          `in "exe[1-]": the range "1-" has no last bound`,
 		"exe[1-,5]":        `in "exe[1-,5]": the range "1-" has no last bound`,
 		"wlm01,exe[0001-]": `in "exe[0001-]": the range "0001-" has no last bound`,
-		"@":                "empty group name in @",
-		"@rack:":           "empty group name in @rack:",
-		"@inventory:":      "empty group name in @inventory:",
-		"@slurm:":          "empty group name in @slurm:",
+		"@":                "group @: the group name is empty",
+		"@rack:":           "group @rack:: the group name is empty",
+		"@inventory:":      "group @inventory:: the group name is empty",
+		"@slurm:":          "group @slurm:: the group name is empty",
 	} {
 		t.Run(expr, func(t *testing.T) {
 			t.Parallel()
@@ -533,7 +534,7 @@ func TestProtectedHostsEntryWithoutALastBoundOrAGroupNameIsRefused(t *testing.T)
 	t.Parallel()
 	for entry, want := range map[string]string{
 		"exe[0001-]": `in "exe[0001-]": the range "0001-" has no last bound`,
-		"\"@rack:\"": "empty group name in @rack:",
+		"\"@rack:\"": "group @rack:: the group name is empty",
 	} {
 		t.Run(entry, func(t *testing.T) {
 			t.Parallel()

@@ -66,7 +66,7 @@ func TestASelectionWithoutALastBoundOrAGroupNameIsRefused(t *testing.T) {
 	f := start(t, setup{})
 	for expr, want := range map[string]string{
 		"exe[1-]": `in "exe[1-]": the range "1-" has no last bound`,
-		"@rack:":  "empty group name in @rack:",
+		"@rack:":  "group @rack:: the group name is empty",
 	} {
 		if msg := f.refused(t, "select_nodes", map[string]any{"expression": expr}); !strings.Contains(msg, want) {
 			t.Errorf("select_nodes %s: message = %q, want %q", expr, msg, want)

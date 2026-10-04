@@ -58,7 +58,7 @@ empty becomes `@rack:`, which is an error rather than every node in a rack:
 
 ```console
 $ clusterctl node select '@rack:'
-clusterctl: empty group name in @rack:
+clusterctl: group @rack:: the group name is empty
 ```
 
 ## Folding and expanding

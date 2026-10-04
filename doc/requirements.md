@@ -29,7 +29,7 @@ hardware, and **deferred** when it is deliberately not done.
 
 | | Requirement | Where | State |
 | --- | --- | --- | --- |
-| R10 | Parse ClusterShell node set syntax | go-nodeset `Parse`, through `nodeexpr` | met |
+| R10 | Parse ClusterShell node set syntax | go-nodeset `Parse` and `ParseWith` | met |
 | R11 | Fold and expand idempotently | go-nodeset `String`, `Expand` | met |
 | R12 | Set operations evaluated left to right | go-nodeset `Parse` | met |
 | R13 | Groups from node attributes, tables and commands | `groups` | met |

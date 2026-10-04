@@ -19,12 +19,12 @@ and [testing.md](https://github.com/GSI-HPC/go-clikit/blob/v0.2.0/doc/testing.md
 describe: their fuzz targets, the ClusterShell corpus and the comparison with
 ClusterShell itself among them. clusterctl tests what it adds to them: the
 refusal of a range without its last bound, go-nodeset's since v1.0.1, and of
-a group reference without a name, in the node set a command selects, from
-`-n`, its arguments or an MCP tool, in `safety.protectedHosts`, in the nodes
-of the inventory and of its `bootPath` rules, in what a group source answers,
-in a node name the inventory is asked for and in the first column
-`-o nodeset` and `-o name` read; its group sources; and what each command
-reports.
+a group reference without a name, the resolver's, in the node set a command
+selects, from `-n`, its arguments or an MCP tool, in `safety.protectedHosts`,
+in the nodes of the inventory and of its `bootPath` rules, in what a group
+source answers, in a node name the inventory is asked for and in the first
+column `-o nodeset` and `-o name` read; its group sources; and what each
+command reports.
 
 **A real shell** checks the quoting. `shellquote` is the one place where being
 subtly wrong is invisible until it eats a production command, so every vector
@@ -32,9 +32,9 @@ in the test is quoted, run through `sh -c 'printf %s\n ...'`, and compared with
 what went in.
 
 **Fuzz targets** check what must hold for any input. `FuzzParseWith` in
-`internal/nodeexpr` holds the check in front of go-nodeset to go-nodeset:
-whatever the expression, it names the hosts go-nodeset names, and refuses
-what go-nodeset refuses and, besides, only a group reference without a name.
+`internal/nodeexpr` holds the side-by-side lookup of groups to go-nodeset's
+one after the other: whatever the expression, it names the same hosts, or
+fails with the same error.
 CI runs it on every change, and
 `go test ./internal/nodeexpr/ -fuzz FuzzParseWith` runs it locally. Another
 checks that the DHCP parser never panics on any input. CI runs it for about a

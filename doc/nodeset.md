@@ -19,11 +19,9 @@ This document lists what clusterctl adds to the language. How an expression
 becomes nodes, from the group sources to the inventory's names, is
 [selection.md](selection.md).
 
-## Where an expression is checked
+## Where groups are resolved
 
-clusterctl resolves groups only through `internal/nodeexpr`, whose
-`ParseWith` refuses a reference without a group name, as described below,
-before go-nodeset reads the expression. That covers:
+clusterctl resolves groups through `internal/groups`, in:
 
 - the node set a command is asked to select: `-n`, the arguments that name
   nodes, `CLUSTERCTL_NODES` and the node sets of the MCP tools;
@@ -33,12 +31,12 @@ before go-nodeset reads the expression. That covers:
 
 Everything else clusterctl reads as a node set, such as the `nodes` of
 `NodeInventory` documents and of `bootPath` rules, or the node names read from
-Slurm, goes to go-nodeset as it is, without a resolver, so go-nodeset refuses
-every group reference in it.
+Slurm, goes to go-nodeset without a resolver, so go-nodeset refuses every
+group reference in it.
 
-Such a reference in what a group source answered names the group, as in
-`group @bad: empty group name in @rack:`. go-nodeset's own errors in a group's
-expression do not: `in "exe[1-]": the range "1-" has no last bound`.
+An error go-nodeset finds in what a group source answered does not name the
+group: `in "exe[1-]": the range "1-" has no last bound`. An error of the
+resolver does, as in `group @rack:: the group name is empty`.
 
 ## A range needs its last bound
 
@@ -51,11 +49,11 @@ hazard is the shell's: `-n "exe[1-$N]"` with `N` empty or unset arrives as
 
 ## A reference names a group
 
-`@`, `@:` and `@source:`, a reference without a group name, are refused
-wherever groups are resolved, `empty group name in @rack:`, and
-`internal/groups` refuses an empty name itself as well. go-nodeset hands the
-empty name to the resolver, and a source that reads a node attribute would
-answer it with every node that carries the attribute: `-n "@rack:$RACK"` with
+`@`, `@:` and `@source:`, a reference without a group name, are refused by
+`internal/groups` before it asks any source,
+`group @rack:: the group name is empty`. go-nodeset hands the empty name to
+the resolver, and a source that reads a node attribute would answer it with
+every node that carries the attribute: `-n "@rack:$RACK"` with
 `RACK` empty would select every node in a rack. An `exec` source would run its
 command with an empty `$GROUP`.
 
@@ -76,7 +74,10 @@ else searches the sources in order, as `@compute` does.
 The groups an expression names are looked up side by side before it is
 evaluated, `fanout.PerHost` at a time, a level of nesting at a time:
 `internal/groups` answers them through `nodeexpr.BatchResolver`, since every
-lookup of an `exec` source is a round trip to a host.
+lookup of an `exec` source is a round trip to a host. go-nodeset asks for one
+group after the other, so `internal/nodeexpr` reads the references of each
+level itself first. An expression that fails at one group may so have had
+the other groups of its level looked up already; a lookup only reads.
 
 ## Steps are read but not written
 
