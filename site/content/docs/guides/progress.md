@@ -271,9 +271,9 @@ from one release to the next. The other values are the ones the table lists.
 The version changes only when what a key or a value means does: keys and
 values may be added under version 1, so a reader leaves out those it does not
 know rather than failing on them. go-clikit's
-[`progress/testdata/log-v1.jsonl`](https://github.com/GSI-HPC/go-clikit/blob/v0.1.0/progress/testdata/log-v1.jsonl)
+[`progress/testdata/log-v1.jsonl`](https://github.com/GSI-HPC/go-clikit/blob/v0.2.0/progress/testdata/log-v1.jsonl)
 is version 1, line for line, with every value of every key the table lists,
-and its [event log reference](https://github.com/GSI-HPC/go-clikit/blob/v0.1.0/doc/event-log.md)
+and its [event log reference](https://github.com/GSI-HPC/go-clikit/blob/v0.2.0/doc/event-log.md)
 describes the format for programs.
 
 A key with nothing to say is left out. A span can say only what the table
