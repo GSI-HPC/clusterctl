@@ -38,7 +38,7 @@ subsystems it drives and calls them itself, with what `app` built.
 
 | Package | Owns |
 | --- | --- |
-| `internal/nodeexpr` | Reading the node set expressions clusterctl is given ([nodeset.md](nodeset.md)): go-nodeset parses them, once this package has refused a range without its last bound and a group reference without a name, and the groups an expression names are looked up side by side through a `Batch`. |
+| `internal/nodeexpr` | Reading the node set expressions clusterctl resolves groups in ([nodeset.md](nodeset.md)): go-nodeset parses them, once this package has refused a group reference without a name, and the groups an expression names are looked up side by side through a `Batch`. |
 | `internal/apis/v1alpha1` | The configuration document kinds and the effective configuration they merge into. |
 | `internal/config` | Finding, validating, merging and resolving configuration, and remembering where every value came from. |
 | `internal/inventory` | What is known about the nodes: attributes, racks, addresses, boot paths. |
@@ -88,7 +88,7 @@ subsystems it drives and calls them itself, with what `app` built.
 
 | Package | Owns |
 | --- | --- |
-| `github.com/GSI-HPC/go-nodeset` | The node set language ([its reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md)): parsing, folding, expansion, set operations, and group references through a resolver the caller supplies, `internal/groups` here. |
+| `github.com/GSI-HPC/go-nodeset` | The node set language ([its reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/language.md)): parsing, folding, expansion, set operations, and group references through a resolver the caller supplies, `internal/groups` here. |
 | `github.com/GSI-HPC/go-clikit/progress` | Reporting the work under way: its steps, targets and calls as spans carried in the context, and every change to one as an event for a display, an agent or the event log. |
 | `github.com/GSI-HPC/go-clikit/progress/display` | Showing the progress of a command on its standard error, as the live tree or the counter on a terminal or as plain lines, the summary left once it has ended, and the writers that keep the command's own output clear of them. |
 | `github.com/GSI-HPC/go-clikit/fanout` | The pools: working on many items at once, bounded and in order, or in batches with a pause between them, and reporting the work as it goes. It knows no program: the program's name, its rule for the class of an error and the error a step ends with come from its options or from the Bus. |

@@ -266,12 +266,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
 
-      # Every expression clusterctl is given passes the check in nodeexpr
-      # before go-nodeset reads it, so for any input the check has to name
-      # the hosts go-nodeset names and refuse nothing go-nodeset reads but a
-      # range without its last bound.
+      # Every expression clusterctl resolves groups in passes the check in
+      # nodeexpr before go-nodeset reads it, so for any input the check has
+      # to name the hosts go-nodeset names and refuse nothing go-nodeset
+      # reads but a group reference without a name.
       - name: Fuzz
-        run: go test ./internal/nodeexpr/ -run '^$' -fuzz FuzzParse -fuzztime 4500000x -fuzzminimizetime 1000x
+        run: go test ./internal/nodeexpr/ -run '^$' -fuzz FuzzParseWith -fuzztime 4500000x -fuzzminimizetime 1000x
 
       - name: Upload the failing input
         if: failure()

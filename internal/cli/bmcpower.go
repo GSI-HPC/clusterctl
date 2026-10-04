@@ -23,7 +23,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
-	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 )
@@ -819,7 +818,7 @@ func (r *bmcRun) ipmiAccount(ctx context.Context, backend *ipmi.Backend, nodes [
 		// bmcSet has refused a name the check refuses; one that got here
 		// would be left out, its nodes reported as never answered, rather
 		// than read as another host.
-		_ = nodeexpr.Add(bmcs, p.bmc[node])
+		_ = bmcs.Add(p.bmc[node])
 		byBMC[p.bmc[node]] = append(byBMC[p.bmc[node]], node)
 	}
 	for _, node := range nodes {

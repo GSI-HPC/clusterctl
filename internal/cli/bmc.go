@@ -21,7 +21,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
-	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
@@ -663,7 +662,7 @@ so --dry-run sweeps too.`,
 				if len(fields) == 0 {
 					continue
 				}
-				_ = nodeexpr.Add(alive, fields[0])
+				_ = alive.Add(fields[0])
 			}
 			alive = alive.Intersection(bmcs)
 			t := output.NewTable(output.Cols("BMC", "STATE")...)
@@ -775,7 +774,7 @@ func pinsToForget(a *app.App, pins map[string]string, args []string) ([]pinToFor
 			}
 		}
 		drops = append(drops, pinToForget{host: host, fingerprint: fingerprint})
-		return nodeexpr.Add(targets, node)
+		return targets.Add(node)
 	}
 	for _, arg := range args {
 		host, ok := recordedPin(pins, arg)

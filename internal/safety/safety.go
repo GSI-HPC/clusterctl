@@ -25,7 +25,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
-	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 )
 
 // Gate decides whether a destructive action may go ahead.
@@ -38,7 +37,7 @@ type Gate struct {
 	// under the names the targets of an action are given. It is called the
 	// first time the protected hosts are needed, not when the gate is built,
 	// so that an entry naming a group asks its source only when a command
-	// is about to change something. NewGate sets nodeexpr.Parse.
+	// is about to change something. NewGate sets nodeset.Parse.
 	Resolve func(expr string) (*nodeset.NodeSet, error)
 	// Known are the nodes the site knows. When it is set, an action on a
 	// name outside it is refused unless Force is set: a name the site does
@@ -90,7 +89,7 @@ func NewGate(spec v1alpha1.SafetySpec, resolve func(expr string) (*nodeset.NodeS
 			spec.PowerOnBatch)
 	}
 	if resolve == nil {
-		resolve = nodeexpr.Parse
+		resolve = func(expr string) (*nodeset.NodeSet, error) { return nodeset.Parse(expr) }
 	}
 	return &Gate{
 		ProtectedHosts: append([]string(nil), spec.ProtectedHosts...),
@@ -108,7 +107,7 @@ func (g *Gate) Protected() (*nodeset.NodeSet, error) {
 		for i, expr := range g.ProtectedHosts {
 			resolve := g.Resolve
 			if resolve == nil {
-				resolve = nodeexpr.Parse
+				resolve = func(expr string) (*nodeset.NodeSet, error) { return nodeset.Parse(expr) }
 			}
 			ns, err := resolve(expr)
 			if err != nil {

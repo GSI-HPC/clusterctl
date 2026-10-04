@@ -19,7 +19,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
-	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -327,7 +326,7 @@ func (sl slurmReads) merge(ns *nodeset.NodeSet, byName map[string]*nodeView, err
 			errs["jobs"] = sl.jobs.err.Error()
 		}
 		for _, j := range sl.jobs.value {
-			on, err := nodeexpr.Parse(j.Nodes)
+			on, err := nodeset.Parse(j.Nodes)
 			if err != nil {
 				continue
 			}

@@ -28,7 +28,8 @@ runs Slurm clusters in Docker, set out to report its progress the same way,
 from a library that other programs import too.
 
 Both moved, with their history, into modules of GSI-HPC:
-[go-nodeset](https://github.com/GSI-HPC/go-nodeset), released as v1.0.0, and
+[go-nodeset](https://github.com/GSI-HPC/go-nodeset), released as v1.0.0 and
+required here at v1.0.1, and
 [go-clikit](https://github.com/GSI-HPC/go-clikit), released as v0.1.0 and
 required here at v0.2.0, which requires go-nodeset v1.0.0 and
 `golang.org/x/text` and nothing else. Both are licensed under Apache-2.0,
@@ -45,19 +46,19 @@ carry every change:
 
 | Commit | In clusterctl | In the release |
 | --- | --- | --- |
-| `7fd3c03` | `exe[1-]` and `exe[1-,5]` are refused: the range has no last bound (#96) | not in go-nodeset v1.0.0, which reads them as `exe1` and `exe[1,5]`, as clusterctl v0.4.0 did |
-| `36b2321` | `@source:*` of a source without an `all` command evaluates each group on its own, in `MapResolver` and in `internal/groups` | not in go-nodeset's `MapResolver`; `internal/groups` keeps its own |
+| `7fd3c03` | `exe[1-]` and `exe[1-,5]` are refused: the range has no last bound (#96) | in go-nodeset v1.0.1; v1.0.0 reads them as `exe1` and `exe[1,5]`, as clusterctl v0.4.0 did |
+| `36b2321` | `@source:*` of a source without an `all` command evaluates each group on its own, in `MapResolver` and in `internal/groups` | in go-nodeset v1.0.1's `MapResolver`, not v1.0.0's; `internal/groups` keeps its own, with the two further fixes of v1.0.1 |
 | `a32487d` | a pair at the end of a set is folded with autostep 2 | go-nodeset folds steps as ClusterShell does; clusterctl asks for none |
 | `a41301e` | the failures of a pool are collected in linear time | in go-clikit |
 | `8772c92` | `nodeset.Batch` and `BatchResolver`: the groups an expression names are looked up side by side | not in go-nodeset |
 | `e9ece56`, `a110101`, `29d9b45`, `3e1c176`, `ac403ee` | the tree's work for each event and each frame is cut for steps of tens of thousands of targets | in go-clikit v0.2.0, not v0.1.0 |
 
-go-nodeset v1.0.0 also differs from clusterctl's parser, at v0.4.0 as at
-`c781f6e`, in one place no commit here changed: that parser refused `@` and
-`@source:`, a reference without a group name, before it asked the resolver,
-and go-nodeset hands the empty name to the resolver. clusterctl's sources
-that read a node attribute answer an empty name with every node that carries
-the attribute.
+go-nodeset, at v1.0.0 as at v1.0.1, also differs from clusterctl's parser,
+at v0.4.0 as at `c781f6e`, in one place no commit here changed: that parser
+refused `@` and `@source:`, a reference without a group name, before it asked
+the resolver, and go-nodeset hands the empty name to the resolver.
+clusterctl's sources that read a node attribute answer an empty name with
+every node that carries the attribute.
 
 ## Decision
 
@@ -81,27 +82,25 @@ keeps no copy of either.
   `exitcode.Class` is every Bus's `BusOptions.Classify`; `internal/groups`
   resolves the groups, `@source:*` included; and `cli` chooses the display
   and writes the event log.
-- **Text from outside reaches go-nodeset through `internal/nodeexpr`.** Its
-  `Parse`, `ParseWith` and `Add` are the only way clusterctl parses such
-  text, and they check it before go-nodeset reads it: the node set a command
-  is asked to select, from `-n`, its arguments, `CLUSTERCTL_NODES` or an MCP
-  tool; `safety.protectedHosts`; the nodes of `NodeInventory` documents and
-  of `bootPath` rules; the expression every group source answers, the groups
-  it names and each group of `@source:*` included; the first column that
-  `-o nodeset` and `-o name` read; a node name with brackets that the
-  inventory is asked for; and the node names read from Slurm, from the
-  naming and service processor host templates and from a remote command's
-  output. A name that `sinfo --Node` prints, checked first to be a single
-  host name without brackets, is added to a set as it is.
-- **A range without its last bound stays refused.** `exe[1-]`, `exe[1-,5]`
-  and `exe[1-/2]` are refused as they were, with
-  `in "exe[1-]": the range "1-" has no last bound`.
+- **Groups are resolved through `internal/nodeexpr`.** Its `ParseWith` is
+  the only way clusterctl parses an expression with a resolver, and it
+  checks the expression, and what each group answers, before go-nodeset
+  reads it: the node set a command is asked to select, from `-n`, its
+  arguments, `CLUSTERCTL_NODES` or an MCP tool; `safety.protectedHosts`; and
+  the expression every group source answers, the groups it names and each
+  group of `@source:*` included. What clusterctl parses without a resolver,
+  such as the nodes of `NodeInventory` documents, goes to go-nodeset as it
+  is, which refuses every group reference in it.
+- **A range without its last bound stays refused**, by go-nodeset since
+  v1.0.1: `exe[1-]`, `exe[1-,5]` and `exe[1-/2]` are refused as they were,
+  with `in "exe[1-]": the range "1-" has no last bound`.
 - **A reference without a group name is refused**, wherever groups are
   resolved, with `empty group name in @rack:`, and `internal/groups` refuses
   an empty name itself as well. Without it, `-n "@rack:$RACK"` with `RACK`
   empty would select every node in a rack, and an `exec` source would run its
-  command with an empty `$GROUP`. An error in what a group answered names the
-  group: `group @bad: in "exe[1-]": the range "1-" has no last bound`.
+  command with an empty `$GROUP`. Such a reference in what a group answered
+  names the group, `group @bad: empty group name in @rack:`; go-nodeset's own
+  errors in a group's expression do not, as clusterctl's parser's did not.
 - **The groups of an expression are still looked up side by side.**
   `nodeexpr.Batch`, `BatchResolver` and `Prefetch` are the side-by-side
   lookup of `8772c92`; `internal/groups`' `Resolver` implements
@@ -110,7 +109,7 @@ keeps no copy of either.
 - **The libraries' tests stay with them.** The fuzz targets of the node set
   parser, the sanitiser and the escaper, the ClusterShell corpus and the
   comparison with ClusterShell itself run in the CI of go-nodeset and
-  go-clikit. clusterctl fuzzes its own check, `nodeexpr.FuzzParse`, against
+  go-clikit. clusterctl fuzzes its own check, `nodeexpr.FuzzParseWith`, against
   go-nodeset, and its tests hold every command's events to
   `progresstest.Check`, as before.
 - **Dependabot proposes each of the two modules in a pull request of its
@@ -141,10 +140,11 @@ keeps no copy of either.
 - The code stays GSI's and first-party, so the reasons of 0002 and 0021 for
   owning it hold: a corner case is fixed where it is found, and no
   third-party module enters the build.
-- The two refusals are kept because a selection that names too many nodes or
-  too few is the hazard 0002 owned the engine for. They live in one package,
-  in front of every parse of outside text, so that removing them once
-  go-nodeset refuses the same is one change.
+- The refusal of a reference without a group name is kept because a
+  selection that names too many nodes is the hazard 0002 owned the engine
+  for. It lives in one package, in front of every parse that resolves
+  groups, so that the refusal of a range without its last bound, which
+  lived there too until go-nodeset v1.0.1 refused it, went in one change.
 
 ## Costs
 
@@ -175,12 +175,11 @@ keeps no copy of either.
   a target whose `Describe` gives no node as `fmt.Sprint` prints the item, a
   change its notes do not list; and the event log's first line names
   `"program":"clusterctl"`, a key version 1 allows.
-- **Two fixes are clusterctl's until go-nodeset has them.** go-nodeset v1.0.0
-  reads `exe[1-]` as `exe1`, which ClusterShell refuses and its list of
-  differences does not name, and its `MapResolver.All` joins the groups of a
-  source into one expression. clusterctl refuses the first itself and does not
-  use the second. The empty group name is clusterctl's to refuse in any case,
-  since what a group means is the resolver's to decide.
+- **The empty group name is clusterctl's to refuse**, since what a group
+  means is the resolver's to decide, and go-nodeset hands it on.
+- **`internal/groups` keeps its own `@source:*`.** It does not use
+  `MapResolver.All`, so a fix to how that joins the groups of a source is
+  ported by hand, as the two of go-nodeset v1.0.1 were.
 - **A fix to the runtime is a release of another repository first.** A bug
   that shows in clusterctl's tree is fixed in go-clikit, released and then
   taken here; until then clusterctl works around it in its own code, or
@@ -198,8 +197,6 @@ keeps no copy of either.
 
 ## Reconsider when
 
-- go-nodeset refuses a range without its last bound: then that check in
-  `internal/nodeexpr` goes;
 - go-nodeset looks up the groups of an expression side by side: then
   `nodeexpr.Batch` goes;
 - or go-clikit reaches v1, and its updates can travel with the others.

@@ -22,7 +22,6 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
-	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 )
 
 // Node is everything the inventory knows about one machine.
@@ -135,7 +134,7 @@ func FromDocuments(docs ...Document) (*Inventory, error) {
 	for d, doc := range docs {
 		for i, entry := range doc.Spec.Nodes {
 			label := entryRef{docs, d, i}
-			ns, err := nodeexpr.Parse(entry.Nodes)
+			ns, err := nodeset.Parse(entry.Nodes)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", label, err)
 			}
@@ -466,14 +465,7 @@ func (inv *Inventory) Lookup(name string) (*Node, bool) {
 	if n, ok := inv.nodes[name]; ok {
 		return n, true
 	}
-	// The name may have been written with different padding, or as a
-	// one-host range such as exe[0001]. go-nodeset reads exe[1-] as exe1,
-	// so a bracketed name is checked the way every other expression is.
-	if strings.ContainsAny(name, "[]") {
-		if _, err := nodeexpr.Parse(name); err != nil {
-			return nil, false
-		}
-	}
+	// The name may have been written with different padding.
 	canonical, ok := inv.all.Canonical(name)
 	if !ok {
 		return nil, false
@@ -622,7 +614,7 @@ func (b *BootPaths) Of(node string) (string, bool, error) {
 	b.once.Do(func() {
 		b.sets = make([]*nodeset.NodeSet, len(b.rules))
 		for i, rule := range b.rules {
-			ns, err := nodeexpr.Parse(rule.Nodes)
+			ns, err := nodeset.Parse(rule.Nodes)
 			if err != nil {
 				b.err = fmt.Errorf("boot path rule %d: %w", i+1, err)
 				return

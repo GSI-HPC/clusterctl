@@ -6,7 +6,7 @@
 Every command that takes `-n`, and every MCP tool that takes a node set, turns
 an expression into nodes the same way. The expression is written in the node
 set language of [go-nodeset](https://github.com/GSI-HPC/go-nodeset), which its
-[language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md)
+[language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/language.md)
 describes, and parsed by that module's `nodeset` package;
 [nodeset.md](nodeset.md) lists what clusterctl refuses beyond it. This
 document covers what clusterctl adds around it: the
@@ -82,7 +82,7 @@ An `exec` source is given an **argument vector**, not a command line, and
 semicolon stays a group name.
 
 Groups may refer to groups, and a cycle is reported rather than looping;
-go-nodeset's [language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md#groups)
+go-nodeset's [language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/language.md#groups)
 says how deep. A bare `@group` inside a group of a named source is looked up
 in that source, as ClusterShell does: with `compute: "@exe"` in the source
 `static`, `@static:compute` asks `static` for `exe`, and fails when it has
@@ -91,7 +91,7 @@ as well. A table that names its sources, as `compute: "@inventory:exe"` does,
 reads the same however it is reached. What a source answers is held to what
 the expression naming it is held to ([nodeset.md](nodeset.md)), so a group
 `bad` whose value is `exe[1-]` is refused as the expression `exe[1-]` is:
-`group @bad: in "exe[1-]": the range "1-" has no last bound`.
+`in "exe[1-]": the range "1-" has no last bound`.
 
 `@source:*` of a source without an `all` command is the union of its groups,
 each evaluated on its own as `@a,@b` evaluates them. The resolver hands the
@@ -149,7 +149,7 @@ host name.
 ## One machine, one spelling
 
 In the node set language padding is not part of a host's identity
-([go-nodeset](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md#padding-is-not-part-of-a-hosts-identity)): `exe1` and
+([go-nodeset](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/language.md#padding-is-not-part-of-a-hosts-identity)): `exe1` and
 `exe0001` are one host. This is what lets an administrator type `exe1` and
 reach the machine an inventory wrote as `exe0001`, and see it under the name
 the site gave it, because a selection is canonicalised against the inventory.

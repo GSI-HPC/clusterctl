@@ -20,7 +20,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/naming"
-	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/redfish"
 )
 
@@ -144,7 +143,7 @@ func (a *App) BMCHosts(nodes *nodeset.NodeSet) (*nodeset.NodeSet, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := nodeexpr.Add(out, host); err != nil {
+		if err := out.Add(host); err != nil {
 			return nil, exitcode.Errorf(exitcode.Usage,
 				"the service processor %q of node %q is not a valid host name: %w", host, node, err)
 		}

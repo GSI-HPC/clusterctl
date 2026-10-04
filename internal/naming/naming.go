@@ -15,7 +15,6 @@ import (
 	"github.com/GSI-HPC/go-nodeset"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
-	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/tmpl"
 )
 
@@ -190,7 +189,7 @@ func (n *Namer) mapSet(ns *nodeset.NodeSet, f func(string) (string, error)) (*no
 		if err != nil {
 			return nil, err
 		}
-		if err := nodeexpr.Add(out, name); err != nil {
+		if err := out.Add(name); err != nil {
 			return nil, fmt.Errorf("the name %q of node %q is not a valid host name: %w", name, node, err)
 		}
 	}
