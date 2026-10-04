@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-nodeset"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -255,10 +256,10 @@ func (s *Server) describeNodes(ctx context.Context, _ *mcp.CallToolRequest, in d
 // Holding them for a node's every lookup left the Slurm reads on the same
 // host waiting for the groups of four nodes.
 func readGroups(r *reads, names []string) ([]map[string][]string, error) {
-	outcomes, _ := fanout.Map(r.ctx, names, fanout.MapOptions[string]{
+	outcomes, _ := fanout.Map(r.ctx, names, pool.MapOptions[string]{
 		Step:     "read the groups",
 		Limit:    fanout.PerHost,
-		Describe: func(name string) fanout.Item { return fanout.Item{Node: name} },
+		Describe: func(name string) pool.Item { return pool.Item{Node: name} },
 		PanicLog: r.a.WorkerDiag,
 	}, func(ctx context.Context, name string) (map[string][]string, error) {
 		return r.a.Groups.GroupsOfContext(ctx, name)

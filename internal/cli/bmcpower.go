@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/GSI-HPC/go-nodeset"
 
@@ -119,11 +120,11 @@ func redfishEach[T any](ctx context.Context, a *app.App, step string, names []st
 			sendable = append(sendable, i)
 		}
 	}
-	outcomes, _ := fanout.Map(ctx, sendable, fanout.MapOptions[int]{
+	outcomes, _ := fanout.Map(ctx, sendable, pool.MapOptions[int]{
 		Step:  step,
 		Limit: redfishLimit(a),
-		Describe: func(i int) fanout.Item {
-			return fanout.Item{Node: calls[i].node, Host: calls[i].client.Host}
+		Describe: func(i int) pool.Item {
+			return pool.Item{Node: calls[i].node, Host: calls[i].client.Host}
 		},
 		PanicLog: a.WorkerDiag,
 	}, func(ctx context.Context, i int) (struct{}, error) {
@@ -684,7 +685,7 @@ func (r *bmcRun) failed(nodes []string, transport string, err error) []bmcResult
 func (r *bmcRun) redfish(ctx context.Context, a *app.App, names []string, clients []*redfish.Client, changes bool,
 	do func(context.Context, string, *redfish.Client) (string, error)) []redfishCall[string] {
 	calls := newRedfishCalls[string](names, clients)
-	fanout.Each(ctx, len(calls), redfishLimit(a), func(i int) {
+	pool.Each(ctx, len(calls), redfishLimit(a), func(i int) {
 		t := r.targets[calls[i].node]
 		t.span.Run()
 		calls[i].sent = true
@@ -762,7 +763,7 @@ func (r *bmcRun) prepareIPMI(ctx context.Context, a *app.App, names []string) fu
 	}
 	return func() []bmcResult {
 		started := make([]bool, len(runnable))
-		fanout.Each(ctx, len(runnable), bound, func(k int) {
+		pool.Each(ctx, len(runnable), bound, func(k int) {
 			i := runnable[k]
 			started[k] = true
 			live := *backends[i]
@@ -921,7 +922,7 @@ func batched(action string) bool {
 // are reported as not tried. An interrupt stops it too, and what was not
 // sent is reported as such, after a batch that failed as well, since the
 // interrupt is what left it out then: a batch it cut short fails too. The
-// batches are those of fanout.Batches, reported under its step, "power
+// batches are those of pool.Batches, reported under its step, "power
 // <action>", each with its nodes as its targets, and showing no limit, for
 // the reason run gives.
 func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch int, stagger time.Duration) []bmcResult {
@@ -934,7 +935,7 @@ func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch 
 		verb = "power cycling"
 	}
 	var results []bmcResult
-	batches := fanout.Batches(ctx, p.nodes, fanout.BatchOptions{
+	batches := pool.Batches(ctx, p.nodes, pool.BatchOptions{
 		Step:  "power " + action,
 		Size:  batch,
 		Pause: stagger,
@@ -954,7 +955,7 @@ func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch 
 			continue
 		}
 		outcome, state, err := outcomeNotSent, "not sent", errNotSent()
-		if errors.Is(b.Err, fanout.ErrNotTried) {
+		if errors.Is(b.Err, pool.ErrNotTried) {
 			outcome, state, err = outcomeNotTried, "not tried", b.Err
 		}
 		for _, node := range b.Nodes.Expand() {

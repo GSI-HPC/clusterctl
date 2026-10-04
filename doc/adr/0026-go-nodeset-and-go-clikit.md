@@ -76,9 +76,13 @@ keeps no copy of either.
   `progress/display` and `progress/progresstest`; `internal/termtext` is
   `termtext`, whose `EscapeCell` and `EscapeText` are `Escape` and
   `EscapeLines`; and `internal/clikit/fanout` is `fanout`.
-- **What is clusterctl's stays here.** `internal/fanout` gives the pools
+- **What is clusterctl's stays here.** `internal/fanout` holds the
+  executor that runs a request on many hosts, the status and grouping of its
+  results, the bound on each host, and the `Map` that gives a pool
   clusterctl's name, the class of an error by its exit code and
-  `fanout.Summarize` ([0020](0020-one-exit-code-rule-for-many-hosts.md));
+  `fanout.Summarize` ([0020](0020-one-exit-code-rule-for-many-hosts.md)).
+  It passes nothing of go-clikit's on: the options, `Each`, `Batches` and
+  the types are taken from go-clikit's `fanout`, imported as `pool`.
   `exitcode.Class` is every Bus's `BusOptions.Classify`; `internal/groups`
   resolves the groups, `@source:*` included; and `cli` chooses the display
   and writes the event log.

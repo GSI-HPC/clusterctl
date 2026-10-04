@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-nodeset"
 	"golang.org/x/term"
 
@@ -330,7 +331,7 @@ func New(ctx context.Context, streams Streams, opts Options) (*App, error) {
 	// --set, the environment and the overrides tables, which it does not
 	// see. Only a value nothing set at all falls back to the default.
 	if o, set := resolved.Tree.Origin("fanout.max"); !set && a.Spec.Fanout.Max == 0 {
-		a.Spec.Fanout.Max = fanout.DefaultLimit
+		a.Spec.Fanout.Max = pool.DefaultLimit
 	} else if a.Spec.Fanout.Max < 1 {
 		return nil, exitcode.Errorf(exitcode.Usage, "%s: fanout.max is %d; it must be at least 1",
 			o, a.Spec.Fanout.Max)

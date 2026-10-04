@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -152,7 +153,7 @@ func probing(pause time.Duration) func(context.Context, app.Streams) *cobra.Comm
 		for i := range nodes {
 			nodes[i] = fmt.Sprintf("exe%d", i+1)
 		}
-		fanout.Map(cmd.Context(), nodes, fanout.MapOptions[string]{Step: "probe the nodes", Limit: 1},
+		fanout.Map(cmd.Context(), nodes, pool.MapOptions[string]{Step: "probe the nodes", Limit: 1},
 			func(context.Context, string) (struct{}, error) {
 				time.Sleep(pause)
 				return struct{}{}, nil
@@ -263,7 +264,7 @@ func TestProgressOfStepsInTurnOnlyGrows(t *testing.T) {
 	w := &wire{}
 	f := start(t, setup{wire: w, command: tree(func(cmd *cobra.Command) error {
 		for _, name := range []string{"read the power state", "read the uptime"} {
-			fanout.Map(cmd.Context(), []string{"exe1", "exe2"}, fanout.MapOptions[string]{Step: name, Limit: 1},
+			fanout.Map(cmd.Context(), []string{"exe1", "exe2"}, pool.MapOptions[string]{Step: name, Limit: 1},
 				func(context.Context, string) (struct{}, error) { return struct{}{}, nil })
 		}
 		return nil

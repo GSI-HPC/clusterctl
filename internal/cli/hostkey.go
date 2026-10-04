@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-nodeset"
 	"github.com/spf13/cobra"
 
@@ -89,10 +90,10 @@ func scanTargets(ctx context.Context, a *app.App, ns *nodeset.NodeSet, bmc bool,
 		return cmp.Compare(boolRank(x.err == nil), boolRank(y.err == nil))
 	})
 
-	outcomes, _ := fanout.Map(ctx, scans, fanout.MapOptions[scan]{
+	outcomes, _ := fanout.Map(ctx, scans, pool.MapOptions[scan]{
 		Step:     "scan the host keys",
 		Limit:    a.Spec.Fanout.Max,
-		Describe: func(s scan) fanout.Item { return fanout.Item{Node: s.node, Host: s.host} },
+		Describe: func(s scan) pool.Item { return pool.Item{Node: s.node, Host: s.host} },
 		PanicLog: a.WorkerDiag,
 	}, func(ctx context.Context, s scan) ([]hostkeys.Entry, error) {
 		if s.err != nil {

@@ -264,11 +264,12 @@ such as `describe_nodes`, holds its sessions to one host to the same four.
 Every such pool is one loop, `fanout.Each`, which starts nothing once the
 command is interrupted, and `fanout.Map` runs any kind of work on it, the
 executor's among them, an item that needs a place on a host as well waiting
-for it queued. Both are go-clikit's `fanout`, to which `internal/fanout`
-gives clusterctl's name, the class of an error by its exit code and
-`fanout.Summarize`, the error a step ends with, which asks for the
-exit code `exitcode.Worst` gives its items' errors and names them as a node
-set, or as a list where a name is not one host name. Each kind of work has a
+for it queued. Both are go-clikit's `fanout`, which the code imports as
+`pool`. `internal/fanout`'s `Map` runs go-clikit's with clusterctl's name,
+the class of an error by its exit code and `fanout.Summarize`, the error a
+step ends with, which asks for the exit code `exitcode.Worst` gives its
+items' errors and names them as a node set, or as a list where a name is not
+one host name. Each kind of work has a
 bound of its own, which
 `fanout.max` in the configuration does not change and a lower `--fanout`
 lowers, through `App.Bound`

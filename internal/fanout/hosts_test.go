@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 
@@ -127,7 +128,7 @@ func TestMapWaitsQueuedForWhatAnItemNeeds(t *testing.T) {
 	hosts := &fanout.Hosts{}
 	calls := &fanouttest.InFlight{Hold: fanout.PerHost + 1}
 	refused := errors.New("no place for exe2")
-	outcomes, _ := fanout.Map(ctx, nodes(8), fanout.MapOptions[string]{
+	outcomes, _ := fanout.Map(ctx, nodes(8), pool.MapOptions[string]{
 		Step:  "check",
 		Limit: 8,
 		Acquire: func(ctx context.Context, node string) (func(), error) {
