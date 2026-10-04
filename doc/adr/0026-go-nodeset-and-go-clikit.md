@@ -29,9 +29,10 @@ from a library that other programs import too.
 
 Both moved, with their history, into modules of GSI-HPC:
 [go-nodeset](https://github.com/GSI-HPC/go-nodeset), released as v1.0.0, and
-[go-clikit](https://github.com/GSI-HPC/go-clikit), released as v0.1.0, which
-requires go-nodeset v1.0.0 and `golang.org/x/text` and nothing else. Both are
-licensed under Apache-2.0, which GSI, as the copyright holder of the code
+[go-clikit](https://github.com/GSI-HPC/go-clikit), released as v0.1.0 and
+required here at v0.2.0, which requires go-nodeset v1.0.0 and
+`golang.org/x/text` and nothing else. Both are licensed under Apache-2.0,
+which GSI, as the copyright holder of the code
 ([0016](0016-copyright-holder.md)), grants for its copy. Both release from
 signed tags, verified as clusterctl's are
 ([0023](0023-ssh-or-openpgp-release-tags.md)), and the notes of a release are
@@ -49,7 +50,7 @@ carry every change:
 | `a32487d` | a pair at the end of a set is folded with autostep 2 | go-nodeset folds steps as ClusterShell does; clusterctl asks for none |
 | `a41301e` | the failures of a pool are collected in linear time | in go-clikit |
 | `8772c92` | `nodeset.Batch` and `BatchResolver`: the groups an expression names are looked up side by side | not in go-nodeset |
-| `e9ece56`, `a110101`, `29d9b45`, `3e1c176`, `ac403ee` | the tree's work for each event and each frame is cut for steps of tens of thousands of targets | not in go-clikit v0.1.0 |
+| `e9ece56`, `a110101`, `29d9b45`, `3e1c176`, `ac403ee` | the tree's work for each event and each frame is cut for steps of tens of thousands of targets | in go-clikit v0.2.0, not v0.1.0 |
 
 go-nodeset v1.0.0 also differs from clusterctl's parser, at v0.4.0 as at
 `c781f6e`, in one place no commit here changed: that parser refused `@` and
@@ -174,20 +175,6 @@ keeps no copy of either.
   a target whose `Describe` gives no node as `fmt.Sprint` prints the item, a
   change its notes do not list; and the event log's first line names
   `"program":"clusterctl"`, a key version 1 allows.
-- **The live tree is slower on large steps.** The five changes that cut the
-  tree's cost are not in go-clikit v0.1.0. Measured on one machine, best of
-  three runs, the events of a fan-out cost its tree about four to five times
-  what they cost clusterctl's at 16,000 targets and five to nine times at
-  30,000: ending 16,000 targets takes 422 ms rather than 93 ms, and a run
-  that draws a frame every 100 events 1.4 s rather than 0.3 s at 16,000
-  targets and 5.0 s rather than 1.0 s at 30,000. Each frame costs more as
-  well: about 5 ms rather than 0.6 ms while 16,000 targets run, and about
-  3.7 ms rather than 0.01 ms once a step of 16,000 targets has ended, for
-  every frame the run draws after it. All of it is spent under the Bus's
-  lock, which every worker that reports an event waits on. The counter, the
-  plain lines and the event log are unaffected. A patch that carries the
-  five changes to go-clikit has been prepared, and has yet to be proposed
-  there.
 - **Two fixes are clusterctl's until go-nodeset has them.** go-nodeset v1.0.0
   reads `exe[1-]` as `exe1`, which ClusterShell refuses and its list of
   differences does not name, and its `MapResolver.All` joins the groups of a
@@ -215,5 +202,4 @@ keeps no copy of either.
   `internal/nodeexpr` goes;
 - go-nodeset looks up the groups of an expression side by side: then
   `nodeexpr.Batch` goes;
-- go-clikit carries the tree's work for large steps;
 - or go-clikit reaches v1, and its updates can travel with the others.
