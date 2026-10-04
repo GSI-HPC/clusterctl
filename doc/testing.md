@@ -14,29 +14,30 @@ and validation, naming, the inventory, quoting, output formatting, the DHCP
 parser, the host key store and the safety gate. The node set engine, the
 progress runtime and its displays, the escaper and the pools are go-nodeset's
 and go-clikit's, and are tested there, as their
-[testing.md](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/testing.md)
+[testing.md](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/testing.md)
 and [testing.md](https://github.com/GSI-HPC/go-clikit/blob/v0.2.0/doc/testing.md)
 describe: their fuzz targets, the ClusterShell corpus and the comparison with
 ClusterShell itself among them. clusterctl tests what it adds to them: the
-refusal of a range without its last bound and of a group reference without a
-name, in the node set a command selects, from `-n`, its arguments or an MCP
-tool, in `safety.protectedHosts`, in the nodes of the inventory and of its
-`bootPath` rules, in what a group source answers, in a node name the
-inventory is asked for and in the first column `-o nodeset` and `-o name`
-read; its group sources; and what each command reports.
+refusal of a range without its last bound, go-nodeset's since v1.0.1, and of
+a group reference without a name, in the node set a command selects, from
+`-n`, its arguments or an MCP tool, in `safety.protectedHosts`, in the nodes
+of the inventory and of its `bootPath` rules, in what a group source answers,
+in a node name the inventory is asked for and in the first column
+`-o nodeset` and `-o name` read; its group sources; and what each command
+reports.
 
 **A real shell** checks the quoting. `shellquote` is the one place where being
 subtly wrong is invisible until it eats a production command, so every vector
 in the test is quoted, run through `sh -c 'printf %s\n ...'`, and compared with
 what went in.
 
-**Fuzz targets** check what must hold for any input. `FuzzParse` in
+**Fuzz targets** check what must hold for any input. `FuzzParseWith` in
 `internal/nodeexpr` holds the check in front of go-nodeset to go-nodeset:
 whatever the expression, it names the hosts go-nodeset names, and refuses
-what go-nodeset refuses and, besides, only a range without its last bound.
+what go-nodeset refuses and, besides, only a group reference without a name.
 CI runs it on every change, and
-`go test ./internal/nodeexpr/ -fuzz FuzzParse` runs it locally. Another checks
-that the DHCP parser never panics on any input. CI runs it for about a
+`go test ./internal/nodeexpr/ -fuzz FuzzParseWith` runs it locally. Another
+checks that the DHCP parser never panics on any input. CI runs it for about a
 minute's worth of executions, and
 `go test ./internal/dhcp/ -fuzz FuzzParse` runs it locally.
 `FuzzParseDocuments` checks that reading a configuration file never panics,

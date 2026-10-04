@@ -386,9 +386,9 @@ func TestAGroupsRangeWithoutItsLastBoundIsRefused(t *testing.T) {
 	}}
 	r := groups.New(opts)
 	for expr, want := range map[string]string{
-		"@static:open":  `group @static:open: in "exe[1-]": the range "1-" has no last bound`,
-		"@static:outer": `group @open: in "exe[1-]": the range "1-" has no last bound`,
-		"@open":         `group @open: in "exe[1-]": the range "1-" has no last bound`,
+		"@static:open":  `in "exe[1-]": the range "1-" has no last bound`,
+		"@static:outer": `in "exe[1-]": the range "1-" has no last bound`,
+		"@open":         `in "exe[1-]": the range "1-" has no last bound`,
 	} {
 		if ns, err := nodeexpr.ParseWith(expr, r); err == nil || err.Error() != want {
 			t.Errorf("ParseWith(%q) = %v, %v; want the error %q", expr, ns, err, want)

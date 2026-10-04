@@ -111,7 +111,7 @@ fmt.Println(ns)          // exe[0001-0002,0004-0010]
 fmt.Println(ns.Len())    // 9
 ```
 
-Its [language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md)
+Its [language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/language.md)
 describes the language and the rules chosen where it differs from ClusterShell;
 [`doc/nodeset.md`](doc/nodeset.md) says what clusterctl adds to it.
 

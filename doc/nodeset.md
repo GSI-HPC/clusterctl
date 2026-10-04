@@ -6,11 +6,11 @@
 A node set expression names a set of hosts, in ClusterShell's syntax.
 clusterctl reads it with [go-nodeset](https://github.com/GSI-HPC/go-nodeset),
 at the release `go.mod` requires. The
-[language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/language.md)
+[language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/language.md)
 of that release describes the syntax, the rules chosen where an
 implementation has to choose, every place where it differs from ClusterShell,
 and the limits; its
-[testing.md](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.0/doc/testing.md)
+[testing.md](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/testing.md)
 says how the engine is tested.
 [ADR 0026](adr/0026-go-nodeset-and-go-clikit.md) says why the engine is a
 module of its own.
@@ -21,38 +21,33 @@ becomes nodes, from the group sources to the inventory's names, is
 
 ## Where an expression is checked
 
-clusterctl hands go-nodeset no text from outside but through
-`internal/nodeexpr`, whose `Parse`, `ParseWith` and `Add` refuse what the two
-sections below describe before go-nodeset reads it. That covers:
+clusterctl resolves groups only through `internal/nodeexpr`, whose
+`ParseWith` refuses a reference without a group name, as described below,
+before go-nodeset reads the expression. That covers:
 
 - the node set a command is asked to select: `-n`, the arguments that name
   nodes, `CLUSTERCTL_NODES` and the node sets of the MCP tools;
 - `safety.protectedHosts`;
-- the `nodes` of `NodeInventory` documents and of `bootPath` rules;
-- the expression every group source answers, the groups it names in turn and
-  each group of `@source:*` included;
-- the first column that `-o nodeset` and `-o name` read, such as the host
-  patterns of the known hosts file that `hostkey list` prints;
-- a node name with brackets that the inventory is asked for, as by
-  `node rack`;
-- and the node names read from Slurm, a drain reason or a node list of
-  `squeue`, from the naming templates and the host templates of the service
-  processors, and from the output of a remote command.
+- and the expression every group source answers, the groups it names in turn
+  and each group of `@source:*` included.
 
-A node name that `sinfo --Node` prints, checked first to be a single host
-name without brackets, is added to a set as it is.
+Everything else clusterctl reads as a node set, such as the `nodes` of
+`NodeInventory` documents and of `bootPath` rules, or the node names read from
+Slurm, goes to go-nodeset as it is, without a resolver, so go-nodeset refuses
+every group reference in it.
 
-An error in what a group source answered names the group, as in
-`group @bad: in "exe[1-]": the range "1-" has no last bound`.
+Such a reference in what a group source answered names the group, as in
+`group @bad: empty group name in @rack:`. go-nodeset's own errors in a group's
+expression do not: `in "exe[1-]": the range "1-" has no last bound`.
 
 ## A range needs its last bound
 
 `exe[1-]`, `exe[1-,5]` and `exe[1-/2]` are refused,
 `in "exe[1-]": the range "1-" has no last bound`, as ClusterShell refuses
-them; go-nodeset v1.0.0 reads the first two as `exe1` and `exe[1,5]`, and
-refuses the third with an error of its own. The hazard is the shell's:
-`-n "exe[1-$N]"` with `N` empty or unset arrives as `exe[1-]`, and a command
-meant for many nodes would run on one.
+them. go-nodeset refuses them itself since v1.0.1; v1.0.0 read the first two
+as `exe1` and `exe[1,5]`, and clusterctl refused them in front of it. The
+hazard is the shell's: `-n "exe[1-$N]"` with `N` empty or unset arrives as
+`exe[1-]`, and a command meant for many nodes would run on one.
 
 ## A reference names a group
 
@@ -67,10 +62,11 @@ command with an empty `$GROUP`.
 ## Groups are clusterctl's
 
 The groups are resolved by clusterctl's own sources, not by go-nodeset's
-`MapResolver`, and two of their answers differ from that resolver's: a group
-no source defines is an error rather than no hosts, and `@source:*` evaluates
-each group of a source on its own rather than joining their expressions into
-one, which is read left to right ([selection.md](selection.md#groups)).
+`MapResolver`, and a group no source defines is an error rather than no
+hosts, as that resolver answers. `@source:*` evaluates each group of a source
+on its own, as that resolver does since go-nodeset v1.0.1, rather than
+joining their expressions into one, which is read left to right
+([selection.md](selection.md#groups)).
 
 A bare `@group` inside a group of a named source is looked up in that source,
 as go-nodeset and ClusterShell do: with `compute: "@exe"` in the source

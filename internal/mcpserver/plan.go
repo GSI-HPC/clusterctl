@@ -20,7 +20,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
@@ -646,7 +645,7 @@ func answerText(p safety.Preview, content map[string]any) string {
 func nodesWithJobs(jobs []slurm.Job, ns *nodeset.NodeSet) *nodeset.NodeSet {
 	out := nodeset.New()
 	for _, j := range jobs {
-		on, err := nodeexpr.Parse(j.Nodes)
+		on, err := nodeset.Parse(j.Nodes)
 		if err != nil {
 			continue
 		}

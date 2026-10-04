@@ -17,7 +17,6 @@ import (
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/nodeexpr"
 	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/slurm"
@@ -214,7 +213,7 @@ func reasonNamesNodes(a *app.App, reason string) bool {
 	if a.Inventory == nil {
 		return false
 	}
-	ns, err := nodeexpr.Parse(strings.Join(names, " "))
+	ns, err := nodeset.Parse(strings.Join(names, " "))
 	if err != nil {
 		return false
 	}
