@@ -208,9 +208,8 @@ func (r *Resolver) Resolve(source, group string) (string, error) {
 	// go-nodeset hands on every reference, @ and @rack: included. Asked for
 	// a group without a name, an attribute source would answer with every
 	// node that carries the attribute, and a source that runs a command
-	// would run it with an empty $GROUP. nodeexpr refuses such a reference
-	// before it gets here; a caller that parses with go-nodeset alone is
-	// refused here.
+	// would run it with an empty $GROUP, so it is refused here, before any
+	// source is asked.
 	if group == "" {
 		return "", errors.New("the group name is empty")
 	}

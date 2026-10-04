@@ -104,10 +104,11 @@ that might not read back as that one reference, one holding whitespace of
 any kind, a comma, an operator or a bracket, is refused.
 
 A reference without a group name, `@` or `@rack:`, is refused before any
-source is asked: `empty group name in @rack:`. A source that reads a node
-attribute would answer it with every node that carries the attribute, so
-`-n "@rack:$RACK"` with `RACK` empty would otherwise select every node in a
-rack, and an `exec` source would run its command with an empty `$GROUP`.
+source is asked for it: `group @rack:: the group name is empty`. A source
+that reads a node attribute would answer it with every node that carries the
+attribute, so `-n "@rack:$RACK"` with `RACK` empty would otherwise select
+every node in a rack, and an `exec` source would run its command with an
+empty `$GROUP`.
 
 ## Names are host names
 

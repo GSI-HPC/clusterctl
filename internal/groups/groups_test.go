@@ -307,9 +307,9 @@ func TestUnknownGroupIsReported(t *testing.T) {
 // A group without a name is what @rack:$R leaves behind when R is empty.
 // An attribute source would answer it with every node that carries the
 // attribute, and a source that runs a command would run it with an empty
-// group, so the resolver refuses it before it asks any source, also when
-// the expression was parsed by go-nodeset alone. Through nodeexpr, the
-// reference is refused before the resolver is asked.
+// group, so the resolver refuses it before it asks any source, whether the
+// expression was parsed by go-nodeset alone or through nodeexpr, whose Batch
+// never looks such a reference up side by side.
 func TestAGroupWithoutANameIsRefused(t *testing.T) {
 	t.Parallel()
 	rec := &transport.Recorder{Responses: []*transport.Result{{Stdout: "exe1\n"}}}
@@ -330,11 +330,11 @@ func TestAGroupWithoutANameIsRefused(t *testing.T) {
 		}
 	}
 	for expr, want := range map[string]string{
-		"@":           "empty group name in @",
-		"@rack:":      "empty group name in @rack:",
-		"@inventory:": "empty group name in @inventory:",
-		"@slurm:":     "empty group name in @slurm:",
-		"exe1,@rack:": "empty group name in @rack:",
+		"@":           "group @: the group name is empty",
+		"@rack:":      "group @rack:: the group name is empty",
+		"@inventory:": "group @inventory:: the group name is empty",
+		"@slurm:":     "group @slurm:: the group name is empty",
+		"exe1,@rack:": "group @rack:: the group name is empty",
 	} {
 		if ns, err := nodeexpr.ParseWith(expr, r); err == nil || err.Error() != want {
 			t.Errorf("nodeexpr.ParseWith(%q) = %v, %v; want the error %q", expr, ns, err, want)

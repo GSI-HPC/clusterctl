@@ -38,7 +38,7 @@ subsystems it drives and calls them itself, with what `app` built.
 
 | Package | Owns |
 | --- | --- |
-| `internal/nodeexpr` | Reading the node set expressions clusterctl resolves groups in ([nodeset.md](nodeset.md)): go-nodeset parses them, once this package has refused a group reference without a name, and the groups an expression names are looked up side by side through a `Batch`. |
+| `internal/nodeexpr` | Looking up the groups a node set expression names side by side ([nodeset.md](nodeset.md)): a level of nesting at a time, through a `Batch`, before go-nodeset evaluates the expression and asks for one group after the other. |
 | `internal/apis/v1alpha1` | The configuration document kinds and the effective configuration they merge into. |
 | `internal/config` | Finding, validating, merging and resolving configuration, and remembering where every value came from. |
 | `internal/inventory` | What is known about the nodes: attributes, racks, addresses, boot paths. |

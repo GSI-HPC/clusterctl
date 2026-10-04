@@ -82,36 +82,35 @@ keeps no copy of either.
   `exitcode.Class` is every Bus's `BusOptions.Classify`; `internal/groups`
   resolves the groups, `@source:*` included; and `cli` chooses the display
   and writes the event log.
-- **Groups are resolved through `internal/nodeexpr`.** Its `ParseWith` is
-  the only way clusterctl parses an expression with a resolver, and it
-  checks the expression, and what each group answers, before go-nodeset
-  reads it: the node set a command is asked to select, from `-n`, its
-  arguments, `CLUSTERCTL_NODES` or an MCP tool; `safety.protectedHosts`; and
-  the expression every group source answers, the groups it names and each
-  group of `@source:*` included. What clusterctl parses without a resolver,
-  such as the nodes of `NodeInventory` documents, goes to go-nodeset as it
-  is, which refuses every group reference in it.
+- **Groups are resolved by `internal/groups`**, through
+  `nodeexpr.ParseWith`, in the node set a command is asked to select, from
+  `-n`, its arguments, `CLUSTERCTL_NODES` or an MCP tool; in
+  `safety.protectedHosts`; and in the expression every group source answers,
+  the groups it names and each group of `@source:*` included. What
+  clusterctl parses without a resolver, such as the nodes of
+  `NodeInventory` documents, goes to go-nodeset as it is, which refuses
+  every group reference in it.
 - **A range without its last bound stays refused**, by go-nodeset since
   v1.0.1: `exe[1-]`, `exe[1-,5]` and `exe[1-/2]` are refused as they were,
   with `in "exe[1-]": the range "1-" has no last bound`.
-- **A reference without a group name is refused**, wherever groups are
-  resolved, with `empty group name in @rack:`, and `internal/groups` refuses
-  an empty name itself as well. Without it, `-n "@rack:$RACK"` with `RACK`
-  empty would select every node in a rack, and an `exec` source would run its
-  command with an empty `$GROUP`. Such a reference in what a group answered
-  names the group, `group @bad: empty group name in @rack:`; go-nodeset's own
-  errors in a group's expression do not, as clusterctl's parser's did not.
+- **A reference without a group name is refused** by `internal/groups`,
+  before it asks any source: `group @rack:: the group name is empty`.
+  Without it, `-n "@rack:$RACK"` with `RACK` empty would select every node
+  in a rack, and an `exec` source would run its command with an empty
+  `$GROUP`. go-nodeset's own errors in a group's expression do not name the
+  group, as clusterctl's parser's did not.
 - **The groups of an expression are still looked up side by side.**
   `nodeexpr.Batch`, `BatchResolver` and `Prefetch` are the side-by-side
   lookup of `8772c92`; `internal/groups`' `Resolver` implements
   `BatchResolver`, `fanout.PerHost` at a time, and `nodeexpr.ParseWith`
-  prefetches each level of nesting.
+  prefetches each level of nesting. It is all that `internal/nodeexpr`
+  holds.
 - **The libraries' tests stay with them.** The fuzz targets of the node set
   parser, the sanitiser and the escaper, the ClusterShell corpus and the
   comparison with ClusterShell itself run in the CI of go-nodeset and
-  go-clikit. clusterctl fuzzes its own check, `nodeexpr.FuzzParseWith`, against
-  go-nodeset, and its tests hold every command's events to
-  `progresstest.Check`, as before.
+  go-clikit. clusterctl fuzzes its side-by-side lookup,
+  `nodeexpr.FuzzParseWith`, against go-nodeset's one after the other, and
+  its tests hold every command's events to `progresstest.Check`, as before.
 - **Dependabot proposes each of the two modules in a pull request of its
   own**, outside the group of the other modules. A release of either can
   change what clusterctl prints, a minor release of go-clikit, at v0, can
@@ -142,9 +141,10 @@ keeps no copy of either.
   third-party module enters the build.
 - The refusal of a reference without a group name is kept because a
   selection that names too many nodes is the hazard 0002 owned the engine
-  for. It lives in one package, in front of every parse that resolves
-  groups, so that the refusal of a range without its last bound, which
-  lived there too until go-nodeset v1.0.1 refused it, went in one change.
+  for. It is the resolver's, since what a group means is the resolver's to
+  decide, and every expression clusterctl resolves groups in reaches
+  `internal/groups`. The refusal of a range without its last bound was kept
+  in `internal/nodeexpr` until go-nodeset v1.0.1 refused it.
 
 ## Costs
 
@@ -177,6 +177,12 @@ keeps no copy of either.
   `"program":"clusterctl"`, a key version 1 allows.
 - **The empty group name is clusterctl's to refuse**, since what a group
   means is the resolver's to decide, and go-nodeset hands it on.
+- **The side-by-side lookup reads references outside go-nodeset.**
+  `internal/nodeexpr` splits each level into its references as go-nodeset
+  splits its terms, which a change to go-nodeset's syntax has to be followed
+  by; `FuzzParseWith` holds the two to the same answers. An expression that
+  fails at one group may have had the other groups of its level looked up
+  already.
 - **`internal/groups` keeps its own `@source:*`.** It does not use
   `MapResolver.All`, so a fix to how that joins the groups of a source is
   ported by hand, as the two of go-nodeset v1.0.1 were.
@@ -198,5 +204,5 @@ keeps no copy of either.
 ## Reconsider when
 
 - go-nodeset looks up the groups of an expression side by side: then
-  `nodeexpr.Batch` goes;
+  `internal/nodeexpr` goes;
 - or go-clikit reaches v1, and its updates can travel with the others.

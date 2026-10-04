@@ -259,17 +259,17 @@ jobs:
   # less minimized; a local run minimizes it fully. timeout-minutes bounds
   # a target that has become slow, which is a failure of its own.
   fuzz-nodeexpr:
-    name: Fuzz the node set guard
+    name: Fuzz the side-by-side group lookup
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
 
-      # Every expression clusterctl resolves groups in passes the check in
-      # nodeexpr before go-nodeset reads it, so for any input the check has
-      # to name the hosts go-nodeset names and refuse nothing go-nodeset
-      # reads but a group reference without a name.
+      # nodeexpr looks up the groups of each level of an expression side by
+      # side before go-nodeset evaluates it, so for any input it has to name
+      # the hosts, or fail with the error, that go-nodeset's lookup one
+      # after the other does.
       - name: Fuzz
         run: go test ./internal/nodeexpr/ -run '^$' -fuzz FuzzParseWith -fuzztime 4500000x -fuzzminimizetime 1000x
 
