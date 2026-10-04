@@ -11,7 +11,6 @@ import (
 
 	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress"
-	"github.com/GSI-HPC/go-nodeset"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -21,41 +20,6 @@ import (
 // work panicked and in the error it becomes.
 const program = "clusterctl"
 
-// DefaultLimit is used when nothing configures the fan-out.
-const DefaultLimit = pool.DefaultLimit
-
-// MapOptions say how Map works on its items and how it reports them, as
-// go-clikit's fanout has them.
-type MapOptions[T any] = pool.MapOptions[T]
-
-// Item is what MapOptions.Describe says of an item.
-type Item = pool.Item
-
-// Outcome is what the work for one item came to.
-type Outcome[R any] = pool.Outcome[R]
-
-// Summary is what the items of a fan-out came to, as Summarize is given it.
-type Summary = pool.Summary
-
-// Failed is one item that failed, as Summary lists it.
-type Failed = pool.Failed
-
-// BatchOptions say how Batches splits a node set and reports its work.
-type BatchOptions = pool.BatchOptions
-
-// Batch is what came of one batch of Batches.
-type Batch = pool.Batch
-
-// ErrNotTried is the error of a batch that was not run because one before it
-// failed.
-var ErrNotTried = pool.ErrNotTried
-
-// Each calls work with every index below n, at most limit at a time, as
-// go-clikit's fanout.Each does.
-func Each(ctx context.Context, n, limit int, work func(i int)) {
-	pool.Each(ctx, n, limit, work)
-}
-
 // Map is go-clikit's fanout.Map as clusterctl runs it: a panic is
 // clusterctl's, and the error it becomes asks for the exit code of a target
 // that failed, as Recovered's does; the class of an error that says none of
@@ -63,14 +27,14 @@ func Each(ctx context.Context, n, limit int, work func(i int)) {
 // error, which names the items by o.Noun and asks for the exit code the
 // worst of the items' errors does, and which Map returns as well. A
 // MapOptions that sets the program, the class or the summary keeps it.
-func Map[T, R any](ctx context.Context, items []T, o MapOptions[T], fn func(ctx context.Context, item T) (R, error)) ([]Outcome[R], error) {
+func Map[T, R any](ctx context.Context, items []T, o pool.MapOptions[T], fn func(ctx context.Context, item T) (R, error)) ([]pool.Outcome[R], error) {
 	o.Program = cmp.Or(o.Program, program)
 	if o.Classify == nil {
 		o.Classify = exitcode.Class
 	}
 	if o.Summarize == nil {
 		noun := o.Noun
-		o.Summarize = func(s Summary) error { return Summarize(noun, s) }
+		o.Summarize = func(s pool.Summary) error { return Summarize(noun, s) }
 	}
 	out, err := pool.Map(ctx, items, o, fn)
 	for i := range out {
@@ -80,11 +44,6 @@ func Map[T, R any](ctx context.Context, items []T, o MapOptions[T], fn func(ctx 
 		}
 	}
 	return out, err
-}
-
-// Batches runs a node set in batches, as go-clikit's fanout.Batches does.
-func Batches(ctx context.Context, nodes *nodeset.NodeSet, o BatchOptions, run func(ctx context.Context, batch *nodeset.NodeSet) error) []Batch {
-	return pool.Batches(ctx, nodes, o, run)
 }
 
 // Recovered turns a panic in the work for one target into that target's
@@ -101,7 +60,7 @@ func Recovered(log io.Writer, target string, v any) error {
 // failed. Its progress class is that of the code, not of whichever of the
 // items' errors says a class first, or canceled when s.Canceled says that
 // every item that failed ended canceled. It is nil when none failed.
-func Summarize(noun string, s Summary) error {
+func Summarize(noun string, s pool.Summary) error {
 	err := pool.Failure(noun, s)
 	if err == nil {
 		return nil
@@ -135,9 +94,9 @@ func (c classed) ProgressClass() progress.Class { return c.class }
 // still tell a cancellation from a failure. It is nil when every target
 // succeeded.
 func FailureError(results []*transport.Result) error {
-	s := Summary{Total: len(results)}
+	s := pool.Summary{Total: len(results)}
 	for _, r := range Failures(results) {
-		s.Failed = append(s.Failed, Failed{Name: r.Target.Name, Err: r.Err})
+		s.Failed = append(s.Failed, pool.Failed{Name: r.Target.Name, Err: r.Err})
 	}
 	return Summarize("hosts", s)
 }

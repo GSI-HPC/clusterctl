@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 	"github.com/GSI-HPC/go-nodeset"
@@ -40,7 +41,7 @@ func TestMapStepSaysTheClassOfItsExitCode(t *testing.T) {
 	t.Parallel()
 
 	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
-	fanout.Map(ctx, nodes(3), fanout.MapOptions[string]{Step: "copy", Limit: 1},
+	fanout.Map(ctx, nodes(3), pool.MapOptions[string]{Step: "copy", Limit: 1},
 		func(_ context.Context, node string) (struct{}, error) {
 			switch node {
 			case "exe1":
@@ -142,7 +143,7 @@ func TestThePoolsAreClusterctls(t *testing.T) {
 	t.Parallel()
 
 	var log strings.Builder
-	outcomes, _ := fanout.Map(context.Background(), nodes(1), fanout.MapOptions[string]{PanicLog: &log},
+	outcomes, _ := fanout.Map(context.Background(), nodes(1), pool.MapOptions[string]{PanicLog: &log},
 		func(context.Context, string) (struct{}, error) { panic("boom") })
 	err := outcomes[0].Err
 	if exitcode.From(err) != exitcode.TargetFailed || !exitcode.Has(err) ||
@@ -155,7 +156,7 @@ func TestThePoolsAreClusterctls(t *testing.T) {
 
 	// go-clikit recovers a panic in Acquire as well, and it is
 	// clusterctl's all the same.
-	outcomes, _ = fanout.Map(context.Background(), nodes(1), fanout.MapOptions[string]{
+	outcomes, _ = fanout.Map(context.Background(), nodes(1), pool.MapOptions[string]{
 		PanicLog: io.Discard,
 		Acquire:  func(context.Context, string) (func(), error) { panic("boom") },
 	}, func(context.Context, string) (struct{}, error) { return struct{}{}, nil })
@@ -173,11 +174,11 @@ func TestThePoolsAreClusterctls(t *testing.T) {
 	}
 
 	var ran []int
-	fanout.Each(context.Background(), 3, 1, func(i int) { ran = append(ran, i) })
+	pool.Each(context.Background(), 3, 1, func(i int) { ran = append(ran, i) })
 	if len(ran) != 3 {
 		t.Errorf("Each ran %v, want every index", ran)
 	}
-	batches := fanout.Batches(context.Background(), nodeset.MustParse("exe[1-2]"), fanout.BatchOptions{Step: "power on"},
+	batches := pool.Batches(context.Background(), nodeset.MustParse("exe[1-2]"), pool.BatchOptions{Step: "power on"},
 		func(context.Context, *nodeset.NodeSet) error { return progress.Skip("dry run") })
 	if len(batches) != 1 || !errors.Is(batches[0].Err, progress.ErrSkipped) {
 		t.Errorf("Batches = %+v, want one batch left out on purpose", batches)
@@ -212,7 +213,7 @@ func TestMapEndsCanceledWhenInterrupted(t *testing.T) {
 			watched, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 			ctx, cancel := context.WithCancel(watched)
 			defer cancel()
-			outcomes, err := fanout.Map(ctx, nodes(3), fanout.MapOptions[string]{Step: "copy", Limit: 1, Noun: "hosts"},
+			outcomes, err := fanout.Map(ctx, nodes(3), pool.MapOptions[string]{Step: "copy", Limit: 1, Noun: "hosts"},
 				func(ctx context.Context, node string) (struct{}, error) {
 					switch node {
 					case "exe1":

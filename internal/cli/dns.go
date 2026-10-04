@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/dns/dnsmessage"
@@ -490,11 +491,11 @@ nodes whatever order the answers came in.
 			}
 
 			ctx := a.Context()
-			outcomes, _ := fanout.Map(ctx, lookups, fanout.MapOptions[int]{
+			outcomes, _ := fanout.Map(ctx, lookups, pool.MapOptions[int]{
 				Step:  "resolve the names",
 				Limit: a.Bound(a.Spec.Services.DNS.MaxConcurrent),
-				Describe: func(i int) fanout.Item {
-					return fanout.Item{Node: nodes[i], Host: hosts[i]}
+				Describe: func(i int) pool.Item {
+					return pool.Item{Node: nodes[i], Host: hosts[i]}
 				},
 				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, i int) (dnsAnswer, error) {
@@ -506,7 +507,7 @@ nodes whatever order the answers came in.
 			}
 
 			// The answers are listed in the order of the nodes.
-			answers := make([]*fanout.Outcome[dnsAnswer], len(nodes))
+			answers := make([]*pool.Outcome[dnsAnswer], len(nodes))
 			for k, i := range lookups {
 				answers[i] = &outcomes[k]
 			}
@@ -593,10 +594,10 @@ command, as an alias that does not resolve does.`,
 			// alias of a login pool asked its every address in a row.
 			ctx := a.Context()
 			limit := a.Bound(a.Spec.Services.DNS.MaxConcurrent)
-			resolved, _ := fanout.Map(ctx, names, fanout.MapOptions[string]{
+			resolved, _ := fanout.Map(ctx, names, pool.MapOptions[string]{
 				Step:     "resolve the aliases",
 				Limit:    limit,
-				Describe: func(name string) fanout.Item { return fanout.Item{Host: name} },
+				Describe: func(name string) pool.Item { return pool.Item{Host: name} },
 				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, name string) (dnsAnswer, error) {
 				chain, addresses, err := res.lookupHost(ctx, name)
@@ -618,10 +619,10 @@ command, as an alias that does not resolve does.`,
 			// The reverse lookup turns an address back into the machines
 			// behind the alias, which is the answer that matters here. An
 			// address without a reverse entry is an answer, and no failure.
-			reversed, _ := fanout.Map(ctx, addresses, fanout.MapOptions[string]{
+			reversed, _ := fanout.Map(ctx, addresses, pool.MapOptions[string]{
 				Step:     "read the reverse entries",
 				Limit:    limit,
-				Describe: func(address string) fanout.Item { return fanout.Item{Host: address} },
+				Describe: func(address string) pool.Item { return pool.Item{Host: address} },
 				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, address string) ([]string, error) {
 				hosts, err := res.lookupAddr(ctx, address)
@@ -633,7 +634,7 @@ command, as an alias that does not resolve does.`,
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			reverse := make(map[string]*fanout.Outcome[[]string], len(addresses))
+			reverse := make(map[string]*pool.Outcome[[]string], len(addresses))
 			for i, address := range addresses {
 				reverse[address] = &reversed[i]
 			}

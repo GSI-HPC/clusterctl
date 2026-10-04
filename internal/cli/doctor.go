@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -336,11 +337,11 @@ func remoteChecks(ctx context.Context, a *app.App) []check {
 	}
 
 	hosts := &fanout.Hosts{}
-	outcomes, _ := fanout.Map(ctx, asked, fanout.MapOptions[int]{
+	outcomes, _ := fanout.Map(ctx, asked, pool.MapOptions[int]{
 		Step:  "check the roles",
 		Limit: a.Spec.Fanout.Max,
-		Describe: func(i int) fanout.Item {
-			return fanout.Item{Node: roles[i], Host: targets[i].Host, Role: roles[i]}
+		Describe: func(i int) pool.Item {
+			return pool.Item{Node: roles[i], Host: targets[i].Host, Role: roles[i]}
 		},
 		PanicLog: a.WorkerDiag,
 		Acquire: func(ctx context.Context, i int) (func(), error) {

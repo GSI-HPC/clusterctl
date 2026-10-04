@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/GSI-HPC/go-nodeset"
 
@@ -247,7 +248,7 @@ func (r *Resolver) Resolve(source, group string) (string, error) {
 func (r *Resolver) ResolveAll(refs []nodeexpr.GroupRef) []nodeexpr.GroupAnswer {
 	answers := make([]nodeexpr.GroupAnswer, len(refs))
 	looked := make([]bool, len(refs))
-	fanout.Each(r.ctx, len(refs), fanout.PerHost, func(i int) {
+	pool.Each(r.ctx, len(refs), fanout.PerHost, func(i int) {
 		answers[i].Expr, answers[i].Err = r.Resolve(refs[i].Source, refs[i].Group)
 		looked[i] = true
 	})
@@ -334,15 +335,15 @@ func (r *Resolver) All(source string) (string, error) {
 // one union, in the order of names. The first failure starts no further
 // lookup, ends those under way and is what union returns.
 func (r *Resolver) union(ctx context.Context, source string, names []string) (string, error) {
-	pool, stop := context.WithCancel(ctx)
+	lookups, stop := context.WithCancel(ctx)
 	defer stop()
 	parts := make([]string, len(names))
 	var (
 		mu     sync.Mutex
 		failed error
 	)
-	fanout.Each(pool, len(names), fanout.PerHost, func(i int) {
-		one, err := r.resolveIn(pool, source, names[i])
+	pool.Each(lookups, len(names), fanout.PerHost, func(i int) {
+		one, err := r.resolveIn(lookups, source, names[i])
 		if err == nil {
 			parts[i], err = unionOperand(source, names[i], one)
 		}
@@ -557,7 +558,7 @@ func (r *Resolver) groupsIn(ctx context.Context, name, node string) ([]string, e
 	exprs := make([]string, len(groups))
 	lookupErrs := make([]error, len(groups))
 	looked := make([]bool, len(groups))
-	fanout.Each(ctx, len(groups), fanout.PerHost, func(i int) {
+	pool.Each(ctx, len(groups), fanout.PerHost, func(i int) {
 		exprs[i], lookupErrs[i] = r.resolveIn(ctx, name, groups[i])
 		looked[i] = true
 	})

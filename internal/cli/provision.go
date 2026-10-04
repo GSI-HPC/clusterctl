@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/GSI-HPC/go-nodeset"
 	"github.com/spf13/cobra"
@@ -150,11 +151,11 @@ This overwrites files on the nodes, so it asks first.
 			for k := range targets {
 				written[k], nodes[k] = make([]*transport.Result, len(files)), k
 			}
-			outcomes, _ := fanout.Map(a.Context(), nodes, fanout.MapOptions[int]{
+			outcomes, _ := fanout.Map(a.Context(), nodes, pool.MapOptions[int]{
 				Step:  "write the secrets",
 				Limit: a.Spec.Fanout.Max,
-				Describe: func(k int) fanout.Item {
-					return fanout.Item{Node: targets[k].Name, Host: targets[k].Host, Role: targets[k].Role}
+				Describe: func(k int) pool.Item {
+					return pool.Item{Node: targets[k].Name, Host: targets[k].Host, Role: targets[k].Role}
 				},
 				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, k int) (struct{}, error) {

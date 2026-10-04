@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strings"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/GSI-HPC/go-nodeset"
 
@@ -75,7 +76,7 @@ func (e *Executor) Run(ctx context.Context, targets []transport.Target, req tran
 func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, build func(transport.Target) transport.Request) []*transport.Result {
 	// The step's error is not needed: the caller sums up the results with
 	// FailureError.
-	outcomes, _ := Map(ctx, targets, MapOptions[transport.Target]{
+	outcomes, _ := Map(ctx, targets, pool.MapOptions[transport.Target]{
 		Step:     cmp.Or(e.Step, defaultStep),
 		Flags:    e.Flags,
 		Limit:    e.Max,
@@ -108,8 +109,8 @@ func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, buil
 }
 
 // describeTarget says what a display names a target by.
-func describeTarget(t transport.Target) Item {
-	return Item{Node: cmp.Or(t.Name, t.Host), Host: t.Host, Role: t.Role}
+func describeTarget(t transport.Target) pool.Item {
+	return pool.Item{Node: cmp.Or(t.Name, t.Host), Host: t.Host, Role: t.Role}
 }
 
 // resultError is the error a target is reported with: the result's own, or

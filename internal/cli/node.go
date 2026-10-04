@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -239,7 +240,7 @@ command fail, after what the other sources answered has been printed.`,
 			sources := a.Groups.Sources()
 			lists := make([][]string, len(sources))
 			listErrs := make([]error, len(sources))
-			fanout.Each(ctx, len(sources), a.Spec.Fanout.Max, func(i int) {
+			pool.Each(ctx, len(sources), a.Spec.Fanout.Max, func(i int) {
 				lists[i], listErrs[i] = a.Groups.List(sources[i])
 			})
 			if err := ctx.Err(); err != nil {
@@ -254,7 +255,7 @@ command fail, after what the other sources answered has been printed.`,
 			}
 			exprs := make([]string, len(all))
 			errs := make([]error, len(all))
-			fanout.Each(ctx, len(all), a.Spec.Fanout.Max, func(i int) {
+			pool.Each(ctx, len(all), a.Spec.Fanout.Max, func(i int) {
 				exprs[i], errs[i] = a.Groups.Resolve(all[i].source, all[i].name)
 			})
 			if err := ctx.Err(); err != nil {
