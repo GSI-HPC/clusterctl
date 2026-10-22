@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/GSI-HPC/go-clikit/cobratree"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 )
 
@@ -25,6 +27,9 @@ func TestFrom(t *testing.T) {
 		{"uncoded error is a target failure", plain, exitcode.TargetFailed},
 		{"coded error keeps its code", exitcode.Errorf(exitcode.Usage, "bad flag"), exitcode.Usage},
 		{"wrapped coded error keeps its code", fmt.Errorf("context: %w", exitcode.Wrap(exitcode.Transport, plain)), exitcode.Transport},
+		{"a usage error of the command line", cobratree.Usagef("unknown command %q", "gte"), exitcode.Usage},
+		{"a wrapped usage error", fmt.Errorf("help: %w", cobratree.Usage(plain)), exitcode.Usage},
+		{"a code over a usage error", exitcode.Wrap(exitcode.Transport, cobratree.Usage(plain)), exitcode.Transport},
 		{"wrap of nil stays nil", exitcode.Wrap(exitcode.Transport, nil), exitcode.OK},
 	}
 
