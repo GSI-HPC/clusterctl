@@ -6,11 +6,11 @@
 A node set expression names a set of hosts, in ClusterShell's syntax.
 clusterctl reads it with [go-nodeset](https://github.com/GSI-HPC/go-nodeset),
 at the release `go.mod` requires. The
-[language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/language.md)
+[language reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.1.0/doc/language.md)
 of that release describes the syntax, the rules chosen where an
 implementation has to choose, every place where it differs from ClusterShell,
 and the limits; its
-[testing.md](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/testing.md)
+[testing.md](https://github.com/GSI-HPC/go-nodeset/blob/v1.1.0/doc/testing.md)
 says how the engine is tested.
 [ADR 0026](adr/0026-go-nodeset-and-go-clikit.md) says why the engine is a
 module of its own.

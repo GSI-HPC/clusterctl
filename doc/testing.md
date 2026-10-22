@@ -14,8 +14,8 @@ and validation, naming, the inventory, quoting, output formatting, the DHCP
 parser, the host key store and the safety gate. The node set engine, the
 progress runtime and its displays, the escaper and the pools are go-nodeset's
 and go-clikit's, and are tested there, as their
-[testing.md](https://github.com/GSI-HPC/go-nodeset/blob/v1.0.1/doc/testing.md)
-and [testing.md](https://github.com/GSI-HPC/go-clikit/blob/v0.2.0/doc/testing.md)
+[testing.md](https://github.com/GSI-HPC/go-nodeset/blob/v1.1.0/doc/testing.md)
+and [testing.md](https://github.com/GSI-HPC/go-clikit/blob/v0.5.0/doc/testing.md)
 describe: their fuzz targets, the ClusterShell corpus and the comparison with
 ClusterShell itself among them. clusterctl tests what it adds to them: the
 refusal of a range without its last bound, go-nodeset's since v1.0.1, and of
