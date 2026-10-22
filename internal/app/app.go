@@ -26,7 +26,6 @@ import (
 	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/progress/cliprogress"
 	"github.com/GSI-HPC/go-nodeset"
-	"golang.org/x/term"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/config"
@@ -123,9 +122,9 @@ func fileStreams(in, out, errOut *os.File) Streams {
 		In:       in,
 		Out:      out,
 		Err:      errOut,
-		IsTTY:    term.IsTerminal(int(in.Fd())),
-		OutIsTTY: term.IsTerminal(int(out.Fd())),
-		ErrIsTTY: term.IsTerminal(int(errOut.Fd())),
+		IsTTY:    cliprogress.IsTerminal(in),
+		OutIsTTY: cliprogress.IsTerminal(out),
+		ErrIsTTY: cliprogress.IsTerminal(errOut),
 	}
 	if streams.ErrIsTTY {
 		streams.Size = func() (int, int, error) { return cliprogress.TerminalSize(errOut) }
