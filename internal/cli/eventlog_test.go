@@ -372,3 +372,68 @@ func TestAnEventLogThatCannotBeWrittenFailsNothing(t *testing.T) {
 		t.Errorf("standard error:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// With neither the flag nor the variable naming a log, each command appends
+// to activity.jsonl in the state directory. The variable, even set to
+// nothing, and the flag take its place, and a log larger than the limit is
+// moved aside to its name with ".1".
+func TestTheDefaultEventLog(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	path := filepath.Join(state, "activity.jsonl")
+	runIn := func(t *testing.T, args ...string) {
+		t.Helper()
+		if _, err := run(t, harnessOptions{unwatched: true, stateDir: state}, append(args, "node", "fqdn", "-n", "exe1")...); err != nil {
+			t.Fatalf("node fqdn: %v", err)
+		}
+	}
+
+	t.Run("the variable", func(t *testing.T) {
+		t.Setenv(config.EnvProgressLog, "")
+		runIn(t)
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("%s=\"\" left %s", config.EnvProgressLog, path)
+		}
+	})
+	t.Run("the flag", func(t *testing.T) {
+		other := filepath.Join(t.TempDir(), "other.jsonl")
+		runIn(t, "--progress-log", other)
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("--progress-log left %s", path)
+		}
+		if len(logLines(t, other)) == 0 {
+			t.Errorf("--progress-log wrote nothing to %s", other)
+		}
+	})
+	t.Run("neither", func(t *testing.T) {
+		runIn(t)
+		runIn(t)
+		traces := 0
+		for _, line := range logLines(t, path) {
+			if line["type"] == "trace" {
+				traces++
+			}
+		}
+		if traces != 2 {
+			t.Errorf("%d runs in %s, want 2", traces, path)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("%s has mode %v, want 0600", path, info.Mode().Perm())
+		}
+	})
+	t.Run("rotation", func(t *testing.T) {
+		if err := os.WriteFile(path, make([]byte, defaultLogLimit+1), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runIn(t)
+		if info, err := os.Stat(path + ".1"); err != nil || info.Size() != defaultLogLimit+1 {
+			t.Errorf("%s.1 = %v, %v, want the log moved aside", path, info, err)
+		}
+		if info, err := os.Stat(path); err != nil || info.Size() >= defaultLogLimit {
+			t.Errorf("%s = %v, %v, want a new log", path, info, err)
+		}
+	})
+}

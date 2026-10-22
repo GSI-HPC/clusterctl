@@ -198,7 +198,8 @@ for its place, and sends what it counts to the client as MCP progress
 notifications when the client asks for them, all of them before the call's
 result; the call's trace goes into the audit log with each entry it writes.
 
-`--progress-log`, or `CLUSTERCTL_PROGRESS_LOG`, adds a `progress.Log` to the
+`--progress-log`, or `CLUSTERCTL_PROGRESS_LOG`, or the default log
+`activity.jsonl` of the state directory when neither is given, adds a `progress.Log` to the
 Bus, beside the display or without one, so `cli` makes a Bus whenever either
 is wanted. The log writes each event as one line of JSON, version 1 of its
 format, with the run it belongs to, into a buffer under the Bus's lock, and

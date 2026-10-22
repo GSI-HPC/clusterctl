@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/GSI-HPC/go-clikit/progress/cliprogress"
+	"github.com/GSI-HPC/go-clikit/progress/display"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/config"
@@ -168,6 +170,27 @@ func takeTraceContext() (traceparent, tracestate string) {
 	return traceparent, tracestate
 }
 
+// defaultLogLimit is the size at which the default event log is moved aside,
+// so that the log and its copy take up about twice this at most.
+const defaultLogLimit = 8 << 20
+
+// defaultLog returns the event log every command appends to when neither
+// --progress-log nor CLUSTERCTL_PROGRESS_LOG names one: activity.jsonl in
+// the state directory. CLUSTERCTL_PROGRESS_LOG set to nothing asks for no
+// log, so it leaves none. Like the state directory, the file is the user's
+// alone.
+func (r *root) defaultLog() string {
+	if _, set := os.LookupEnv(config.EnvProgressLog); set || r.streams.StateDir == "" {
+		return ""
+	}
+	// A state directory that cannot be made leaves the log out, as the
+	// default log is never worth a complaint.
+	if err := os.MkdirAll(r.streams.StateDir, 0o700); err != nil {
+		return ""
+	}
+	return filepath.Join(r.streams.StateDir, "activity.jsonl")
+}
+
 // startProgress starts the progress of a command; the tests replace it to
 // draw the frames themselves, on a clock of their own.
 var startProgress = cliprogress.Start
@@ -203,6 +226,8 @@ func (r *root) progressOptions() cliprogress.Options {
 			Flag: "--progress-log", Given: r.progressLogGiven != nil && r.progressLogGiven(), Value: r.progressLog,
 			Variable: config.EnvProgressLog, Env: os.Getenv(config.EnvProgressLog),
 		},
+		DefaultLog: r.defaultLog(),
+		RotateAt:   defaultLogLimit,
 		LogOptions: progress.LogOptions{Version: version.Get().Version},
 		Stderr:     r.streams.Err,
 		Notes:      diag,
@@ -212,6 +237,7 @@ func (r *root) progressOptions() cliprogress.Options {
 		Size:       r.streams.Size,
 		Foreground: r.streams.Foreground,
 		ASCII:      !cliprogress.UTF8Locale(os.Getenv),
+		Theme:      cliprogress.ThemeFor(display.Classic, r.streams.ErrIsTTY, os.Getenv),
 		Noun:       hostCount,
 		Trace: func() progress.TraceContext {
 			tc, _ := progress.ParseTraceContext(r.traceparent, r.tracestate)

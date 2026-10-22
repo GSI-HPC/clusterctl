@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GSI-HPC/go-clikit/progress/cliprogress"
+	"github.com/GSI-HPC/go-clikit/progress/display"
 	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -38,6 +39,8 @@ func fakeDisplays(t *testing.T) *displays {
 	saved := startProgress
 	startProgress = func(ctx context.Context, o cliprogress.Options) (*cliprogress.Run, error) {
 		o.Now, o.Manual, o.ASCII = c.now, true, false
+		// The look is the kit's to test; these tests compare the text.
+		o.Theme = display.Theme{}
 		run, err := cliprogress.Start(ctx, o)
 		if err == nil && run.Mode() != cliprogress.ModeNone {
 			c.mu.Lock()
@@ -740,5 +743,45 @@ clusterctl: setting the machines to boot from the network once failed: exe0002: 
 `
 	if got := out.errOut.String(); got != want {
 		t.Errorf("standard error:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The displays are drawn in the colours the terminal shows, as NO_COLOR,
+// COLORTERM and TERM say, and in none where standard error is no terminal.
+func TestTheDisplaysAreDrawnInTheColoursOfTheTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		terminal bool
+		env      map[string]string
+		want     display.Colours
+	}{
+		{"16 colours", true, map[string]string{"TERM": "xterm"}, display.Colours16},
+		{"256 colours", true, map[string]string{"TERM": "xterm-256color"}, display.Colours256},
+		{"COLORTERM", true, map[string]string{"TERM": "xterm", "COLORTERM": "truecolor"}, display.Colours256},
+		{"NO_COLOR", true, map[string]string{"TERM": "xterm", "NO_COLOR": "1"}, display.NoColours},
+		{"no terminal", false, map[string]string{"TERM": "xterm"}, display.NoColours},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, name := range []string{"TERM", "COLORTERM", "NO_COLOR"} {
+				t.Setenv(name, tc.env[name])
+			}
+			var got display.Theme
+			saved := startProgress
+			startProgress = func(ctx context.Context, o cliprogress.Options) (*cliprogress.Run, error) {
+				got = o.Theme
+				return cliprogress.Start(ctx, o)
+			}
+			t.Cleanup(func() { startProgress = saved })
+			opts := harnessOptions{unwatched: true}
+			if tc.terminal {
+				opts.streams = onTerminal(false)
+			}
+			if _, err := run(t, opts, "node", "fqdn", "-n", "exe1"); err != nil {
+				t.Fatal(err)
+			}
+			if got.Colours() != tc.want {
+				t.Errorf("the theme draws in %v, want %v", got.Colours(), tc.want)
+			}
+		})
 	}
 }
