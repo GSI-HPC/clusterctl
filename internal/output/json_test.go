@@ -41,6 +41,7 @@ func wholeJSON(t *testing.T, v any) string {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,8 @@ func wholeJSON(t *testing.T, v any) string {
 // byte, what encoding the whole list at once wrote: nested lists and maps,
 // empty ones, HTML characters, elements that marshal themselves through
 // their pointer or their value, and the values that are no list of
-// elements, a []byte, an empty or nil slice, a list that marshals itself.
+// elements, a []byte, an empty or nil slice, a list that marshals itself. The HTML characters
+// stay as they are, which cliout.WriteJSON does on purpose.
 func TestJSONListsAreWrittenAsTheWholeWouldBe(t *testing.T) {
 	t.Parallel()
 	results := []*transport.Result{

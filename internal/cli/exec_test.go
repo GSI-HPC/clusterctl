@@ -16,6 +16,7 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
+	"github.com/GSI-HPC/clusterctl/internal/output"
 	"github.com/GSI-HPC/clusterctl/internal/safety"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
@@ -334,7 +335,7 @@ func TestResultsTableShowsTheNodesOwnError(t *testing.T) {
 		exited(tg, 3, "Unit slurmd.service could not be found.\n"),
 		unreachable(transport.Target{Name: "exe0004"}),
 	})
-	rows := table.Objects()
+	rows := output.Objects(table)
 	if got, want := rows[0]["error"], "Unit slurmd.service could not be found."; got != want {
 		t.Errorf("ERROR = %q, want %q", got, want)
 	}

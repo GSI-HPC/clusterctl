@@ -73,7 +73,7 @@ List the encrypted files and where each one lands on a node.`,
 				}
 				t.Add(source, s.Target, s.Mode, owner)
 			}
-			t.Caption = fmt.Sprintf("%d secrets", t.Len())
+			t.Caption = fmt.Sprintf("%d secrets", len(t.Rows))
 			return a.Print(output.Result{Table: t, Object: a.Spec.Services.Cinc.Secrets})
 		}))
 }
@@ -574,8 +574,8 @@ plaintext. The caption of the table names the sops that decrypts.
 			}
 			// Which sops decrypts, and whether it can: it is not needed to
 			// list the documents, so only --decrypt fails without it.
-			t.Caption = fmt.Sprintf("%d Secret documents", t.Len())
-			if t.Len() > 0 {
+			t.Caption = fmt.Sprintf("%d Secret documents", len(t.Rows))
+			if len(t.Rows) > 0 {
 				if found, err := a.Sops().Find(a.Context()); err == nil {
 					t.Caption += ", decrypted with sops " + found.Version + " at " + found.Path
 				} else {
@@ -586,7 +586,7 @@ plaintext. The caption of the table names the sops that decrypts.
 				return err
 			}
 			if failed > 0 {
-				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d Secret documents failed the check", failed, t.Len())
+				return exitcode.Errorf(exitcode.TargetFailed, "%d of %d Secret documents failed the check", failed, len(t.Rows))
 			}
 			return nil
 		}))
