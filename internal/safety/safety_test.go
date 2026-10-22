@@ -589,3 +589,17 @@ func TestProtectedInFindsWhatItFound(t *testing.T) {
 		}
 	}
 }
+
+// The answer is read up to its newline and no further, so that what follows
+// it on standard input is left for the command, as a pipe feeding both is.
+func TestTheAnswerLeavesTheRestOfTheInput(t *testing.T) {
+	t.Parallel()
+	g, _ := gate(t, "y\nthe rest\n")
+	if err := g.Confirm(action("drain", "exe[1-2]")); err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	rest, err := io.ReadAll(g.In)
+	if err != nil || string(rest) != "the rest\n" {
+		t.Errorf("input left = %q, %v, want the line after the answer", rest, err)
+	}
+}

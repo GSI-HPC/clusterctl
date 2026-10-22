@@ -54,7 +54,7 @@ func (t *terminal) String() string {
 // question too.
 func TestTheGateIsReportedAsAWait(t *testing.T) {
 	t.Parallel()
-	const asked = "[suspend]|About to drain 2 hosts: exe[1-2]\n|Continue? [y/N]"
+	const asked = "[suspend]|About to drain 2 hosts: exe[1-2]\nContinue? [y/N]"
 	for _, tc := range []struct {
 		name   string
 		setup  func(g *safety.Gate, cancel func())
