@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/cobratree"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -222,16 +223,7 @@ are about to do and ask before doing it.`),
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: false},
-		Args:              noSubcommand,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
 	}
-	// A flag that cannot be parsed is a usage error, whichever command it
-	// was given to: the subcommands ask their parents for this function.
-	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
-		return exitcode.Wrap(exitcode.Usage, err)
-	})
 
 	flags := cmd.PersistentFlags()
 	flags.StringSliceVar(&r.configFiles, "config", nil,
@@ -285,92 +277,13 @@ are about to do and ask before doing it.`),
 		newMCPCommand(r),
 		newVersionCommand(r),
 	)
-	builtins(cmd, r.streams)
+	// The completion scripts are written to the output the root has when the
+	// tree is made, not when it runs.
+	cmd.SetOut(r.streams.Out)
+	cobratree.Strict(cmd, nil)
 	annotateEffects(cmd)
-	usageArgs(cmd)
 	traceLeaves(cmd, r)
 	return cmd, r
-}
-
-// builtins adds cobra's help and completion commands to the tree now, rather
-// than when it runs, so that the argument checks below cover them: cobra's
-// own completion printed its help and succeeded for a shell it does not know,
-// and its help printed the root help and succeeded for a topic that names no
-// command.
-func builtins(cmd *cobra.Command, streams app.Streams) {
-	// The completion scripts are written to the output the root has when the
-	// command is made, not when it runs.
-	cmd.SetOut(streams.Out)
-	cmd.InitDefaultHelpCmd()
-	cmd.InitDefaultCompletionCmd()
-	for _, sub := range cmd.Commands() {
-		switch sub.Name() {
-		case "help":
-			sub.Args = helpTopic
-		case "completion":
-			// A group, like every other: without a function of its own
-			// cobra prints its help before any argument is looked at.
-			sub.Args = noSubcommand
-			sub.RunE = func(c *cobra.Command, _ []string) error {
-				return c.Help()
-			}
-		}
-	}
-}
-
-// noSubcommand is the argument check of a command that only holds
-// subcommands. A word that names none of them is refused, rather than
-// handed to the command, which would print its help and succeed: a script
-// that misspelt "drain" would go on to its next step.
-func noSubcommand(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 {
-		return nil
-	}
-	return exitcode.Errorf(exitcode.Usage, "unknown command %q for %q%s",
-		args[0], cmd.CommandPath(), suggest(cmd, args[0]))
-}
-
-// helpTopic is the argument check of the help command. The topic has to name
-// a command, all of it: cobra's help prints the root help for a topic it
-// cannot find, and the help of the nearest command for one with words left
-// over, and succeeds either way.
-func helpTopic(cmd *cobra.Command, args []string) error {
-	found, rest, err := cmd.Root().Find(args)
-	if err == nil && found != nil && len(rest) == 0 {
-		return nil
-	}
-	topic := strings.Join(args, " ")
-	if err != nil || found == nil || len(rest) == 0 {
-		return exitcode.Errorf(exitcode.Usage, "unknown help topic %q", topic)
-	}
-	return exitcode.Errorf(exitcode.Usage, "unknown help topic %q: unknown command %q for %q%s",
-		topic, rest[0], found.CommandPath(), suggest(found, rest[0]))
-}
-
-// suggest names the subcommands of cmd that word is probably a misspelling
-// of, ready to append to a message.
-func suggest(cmd *cobra.Command, word string) string {
-	if cmd.SuggestionsMinimumDistance <= 0 {
-		cmd.SuggestionsMinimumDistance = 2
-	}
-	if found := cmd.SuggestionsFor(word); len(found) > 0 {
-		return "; did you mean " + strings.Join(found, " or ") + "?"
-	}
-	return ""
-}
-
-// usageArgs makes every argument check in the tree report a usage error.
-// cobra's own checks, such as cobra.ExactArgs, return plain errors, which
-// would otherwise exit 1, the code for a target that failed.
-func usageArgs(cmd *cobra.Command) {
-	if check := cmd.Args; check != nil {
-		cmd.Args = func(c *cobra.Command, args []string) error {
-			return exitcode.Default(exitcode.Usage, check(c, args))
-		}
-	}
-	for _, sub := range cmd.Commands() {
-		usageArgs(sub)
-	}
 }
 
 // Execute runs the command tree and returns the process exit code.

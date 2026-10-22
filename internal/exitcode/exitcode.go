@@ -11,6 +11,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/GSI-HPC/go-clikit/cobratree"
 )
 
 const (
@@ -78,6 +80,9 @@ func From(err error) int {
 	var coded *Error
 	if errors.As(err, &coded) {
 		return coded.Code
+	}
+	if cobratree.IsUsage(err) {
+		return Usage
 	}
 	return TargetFailed
 }
