@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GSI-HPC/go-clikit/progress/cliprogress"
+
 	"github.com/GSI-HPC/clusterctl/internal/config"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -174,10 +176,10 @@ func TestTheEventLogIsWrittenWithEveryDisplay(t *testing.T) {
 		terminal bool
 		lines    bool
 	}{
-		{progressNone, false, false},
-		{progressPlain, false, false},
-		{progressCounter, true, false},
-		{progressTTY, true, true},
+		{cliprogress.ModeNone.String(), false, false},
+		{cliprogress.ModePlain.String(), false, false},
+		{cliprogress.ModeCounter.String(), true, false},
+		{cliprogress.ModeTTY.String(), true, true},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			c := fakeDisplays(t)

@@ -91,6 +91,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | `github.com/GSI-HPC/go-nodeset` | The node set language ([its reference](https://github.com/GSI-HPC/go-nodeset/blob/v1.1.0/doc/language.md)): parsing, folding, expansion, set operations, and group references through a resolver the caller supplies, `internal/groups` here. |
 | `github.com/GSI-HPC/go-clikit/progress` | Reporting the work under way: its steps, targets and calls as spans carried in the context, and every change to one as an event for a display, an agent or the event log. |
 | `github.com/GSI-HPC/go-clikit/progress/display` | Showing the progress of a command on its standard error, as the live tree or the counter on a terminal or as plain lines, the summary left once it has ended, and the writers that keep the command's own output clear of them. |
+| `github.com/GSI-HPC/go-clikit/progress/cliprogress` | What `--progress` and `--progress-log` take and do: the words and the rule that picks a display from them and from what `cli` found out about the streams, the Bus, display, summary and event log of one command made and taken down in order, and the private file of the event log. It reads no environment: `cli` passes what it read. |
 | `github.com/GSI-HPC/go-clikit/fanout` | The pools: working on many items at once, bounded and in order, or in batches with a pause between them, and reporting the work as it goes. It knows no program: the program's name, its rule for the class of an error and the error a step ends with come from its options or from the Bus. |
 | `github.com/GSI-HPC/go-clikit/termtext` | Escaping untrusted text for a terminal (`EscapeLines`, `Escape`), and the columns text takes there (`Width`, `Truncate`). |
 
@@ -161,7 +162,7 @@ credential helper that can reach the terminal runs, or sops looks for its
 keys there.
 
 What a command's progress looks like is `cli`'s choice, by `--progress` and
-`CLUSTERCTL_PROGRESS`: the live tree of `progress/display` or its counter,
+`CLUSTERCTL_PROGRESS`, which `cli` reads and hands to `cliprogress.Start`: the live tree of `progress/display` or its counter,
 drawn only on a standard error that is a terminal, its plain lines, which need
 none, or nothing. The tree and the counter own the bottom rows of the
 terminal, the region, redrawn from the display's own goroutine; the tree reads
@@ -201,8 +202,7 @@ Bus, beside the display or without one, so `cli` makes a Bus whenever either
 is wanted. The log writes each event as one line of JSON, version 1 of its
 format, with the run it belongs to, into a buffer under the Bus's lock, and
 the buffer out in whole lines, when it is full, as a step ends, and a second
-after a line was kept at the latest, to a file `fileutil.AppendPrivate`
-opens: created readable by its owner alone, and not written when anyone else
+after a line was kept at the latest, to a file `cliprogress` opens: created readable by its owner alone, and not written when anyone else
 can read or write it, which refuses the command, before it runs, when the
 flag named the file, and is said once on standard error when the variable
 did. It copies each part of an event by name, and a test fails when

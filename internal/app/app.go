@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -25,6 +24,7 @@ import (
 	"time"
 
 	pool "github.com/GSI-HPC/go-clikit/fanout"
+	"github.com/GSI-HPC/go-clikit/progress/cliprogress"
 	"github.com/GSI-HPC/go-nodeset"
 	"golang.org/x/term"
 
@@ -128,12 +128,10 @@ func fileStreams(in, out, errOut *os.File) Streams {
 		ErrIsTTY: term.IsTerminal(int(errOut.Fd())),
 	}
 	if streams.ErrIsTTY {
-		streams.Size = func() (int, int, error) { return term.GetSize(int(errOut.Fd())) }
-		streams.Foreground = foreground(errOut)
+		streams.Size = func() (int, int, error) { return cliprogress.TerminalSize(errOut) }
+		streams.Foreground = func() bool { return cliprogress.InForeground(errOut) }
 	}
-	if info, err := out.Stat(); err == nil {
-		streams.OutIsPipe = info.Mode()&(fs.ModeNamedPipe|fs.ModeSocket) != 0
-	}
+	streams.OutIsPipe = cliprogress.IsPipe(out)
 	return streams
 }
 

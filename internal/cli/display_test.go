@@ -12,7 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/GSI-HPC/go-clikit/progress/display"
+	"github.com/GSI-HPC/go-clikit/progress/cliprogress"
 	"github.com/GSI-HPC/go-clikit/progress/progresstest"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
@@ -27,7 +27,7 @@ import (
 type displays struct {
 	mu    sync.Mutex
 	modes []string
-	last  interface{ Draw() }
+	last  *cliprogress.Run
 	clock time.Time
 }
 
@@ -35,28 +35,19 @@ type displays struct {
 func fakeDisplays(t *testing.T) *displays {
 	t.Helper()
 	c := &displays{clock: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)}
-	saved, savedClock := startDisplay, displayClock
-	startDisplay = func(mode string, term *display.Terminal, interrupted <-chan struct{}) renderer {
-		var shown interface {
-			renderer
-			Draw()
+	saved := startProgress
+	startProgress = func(ctx context.Context, o cliprogress.Options) (*cliprogress.Run, error) {
+		o.Now, o.Manual, o.ASCII = c.now, true, false
+		run, err := cliprogress.Start(ctx, o)
+		if err == nil && run.Mode() != cliprogress.ModeNone {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			c.modes = append(c.modes, run.Mode().String())
+			c.last = run
 		}
-		switch mode {
-		case progressPlain:
-			shown = display.NewPlain(term, display.PlainOptions{Now: c.now, Noun: hostCount})
-		case progressTTY:
-			shown = display.NewTree(term, display.TreeOptions{Now: c.now, Interrupted: interrupted})
-		default:
-			shown = display.NewCounter(term, display.CounterOptions{Now: c.now})
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		c.modes = append(c.modes, mode)
-		c.last = shown
-		return shown
+		return run, err
 	}
-	displayClock = c.now
-	t.Cleanup(func() { startDisplay, displayClock = saved, savedClock })
+	t.Cleanup(func() { startProgress = saved })
 	return c
 }
 
@@ -118,27 +109,27 @@ func TestTheProgressDisplayIsDrawnWhereItCan(t *testing.T) {
 		shown    string
 		msg      string
 	}{
-		{"auto on a terminal", true, "xterm", "", nil, false, exitcode.OK, progressTTY, ""},
+		{"auto on a terminal", true, "xterm", "", nil, false, exitcode.OK, cliprogress.ModeTTY.String(), ""},
 		{"auto without a terminal", false, "xterm", "", nil, false, exitcode.OK, "", ""},
 		{"auto on a dumb terminal", true, "dumb", "", nil, false, exitcode.OK, "", ""},
-		{"tty on a terminal", true, "xterm", "", []string{"--progress", "tty"}, false, exitcode.OK, progressTTY, ""},
+		{"tty on a terminal", true, "xterm", "", []string{"--progress", "tty"}, false, exitcode.OK, cliprogress.ModeTTY.String(), ""},
 		{"tty without a terminal", false, "xterm", "", []string{"--progress", "tty"}, false, exitcode.Usage, "",
 			"--progress asks for a live tree, but standard error is not a terminal"},
 		{"tty on a dumb terminal", true, "dumb", "", []string{"--progress=tty"}, false, exitcode.Usage, "",
 			"TERM is dumb"},
-		{"counter on a terminal", true, "xterm", "", []string{"--progress", "counter"}, false, exitcode.OK, progressCounter, ""},
+		{"counter on a terminal", true, "xterm", "", []string{"--progress", "counter"}, false, exitcode.OK, cliprogress.ModeCounter.String(), ""},
 		{"counter without a terminal", false, "xterm", "", []string{"--progress", "counter"}, false, exitcode.Usage, "",
 			"--progress asks for a counter, but standard error is not a terminal"},
 		{"counter on a dumb terminal", true, "dumb", "", []string{"--progress=counter"}, false, exitcode.Usage, "",
 			"TERM is dumb"},
-		{"plain without a terminal", false, "xterm", "", []string{"--progress", "plain"}, false, exitcode.OK, progressPlain, ""},
-		{"plain on a dumb terminal", true, "dumb", "", []string{"--progress=plain"}, false, exitcode.OK, progressPlain, ""},
+		{"plain without a terminal", false, "xterm", "", []string{"--progress", "plain"}, false, exitcode.OK, cliprogress.ModePlain.String(), ""},
+		{"plain on a dumb terminal", true, "dumb", "", []string{"--progress=plain"}, false, exitcode.OK, cliprogress.ModePlain.String(), ""},
 		{"none on a terminal", true, "xterm", "", []string{"--progress", "none"}, false, exitcode.OK, "", ""},
 		{"the variable", true, "xterm", "none", nil, false, exitcode.OK, "", ""},
-		{"the variable for a counter", true, "xterm", "counter", nil, false, exitcode.OK, progressCounter, ""},
+		{"the variable for a counter", true, "xterm", "counter", nil, false, exitcode.OK, cliprogress.ModeCounter.String(), ""},
 		{"the variable without a terminal", false, "xterm", "tty", nil, false, exitcode.OK, "", ""},
 		{"the variable for a counter on a dumb terminal", true, "dumb", "counter", nil, false, exitcode.OK, "", ""},
-		{"the variable for plain lines without a terminal", false, "xterm", "plain", nil, false, exitcode.OK, progressPlain, ""},
+		{"the variable for plain lines without a terminal", false, "xterm", "plain", nil, false, exitcode.OK, cliprogress.ModePlain.String(), ""},
 		{"the flag over the variable", false, "xterm", "counter", []string{"--progress", "none"}, false, exitcode.OK, "", ""},
 		{"a value it does not know", true, "xterm", "", []string{"--progress", "tree"}, false, exitcode.Usage, "",
 			`--progress is "tree"; it takes one of auto, tty, counter, plain, none`},
@@ -181,8 +172,8 @@ func TestAutoDrawsNothingWhileTheOutputGoesIntoAPipe(t *testing.T) {
 		shown string
 	}{
 		{"auto", nil, ""},
-		{"tty", []string{"--progress", "tty"}, progressTTY},
-		{"plain", []string{"--progress", "plain"}, progressPlain},
+		{"tty", []string{"--progress", "tty"}, cliprogress.ModeTTY.String()},
+		{"plain", []string{"--progress", "plain"}, cliprogress.ModePlain.String()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := fakeDisplays(t)
@@ -229,32 +220,6 @@ func TestTheVariableFailsNoCommand(t *testing.T) {
 			}
 			if h.out.String() != quiet.out.String() {
 				t.Errorf("standard output = %q, want %q", h.out, quiet.out)
-			}
-		})
-	}
-}
-
-// The live tree draws its marks in UTF-8 only where the locale says the
-// terminal shows it, as the C library reads the locale, and in ASCII
-// elsewhere.
-func TestTheTreeDrawsInTheLocalesCharacters(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name string
-		env  map[string]string
-		want bool
-	}{
-		{"no locale", nil, false},
-		{"a UTF-8 language", map[string]string{"LANG": "en_US.UTF-8"}, true},
-		{"the C locale in UTF-8", map[string]string{"LANG": "C.utf8"}, true},
-		{"a language in Latin-1", map[string]string{"LANG": "de_DE.ISO-8859-1"}, false},
-		{"the character type over the language", map[string]string{"LANG": "en_US.UTF-8", "LC_CTYPE": "C"}, false},
-		{"all over the rest", map[string]string{"LANG": "C", "LC_CTYPE": "C", "LC_ALL": "de_DE.UTF-8"}, true},
-		{"an empty variable is none", map[string]string{"LC_ALL": "", "LANG": "en_GB.UTF-8"}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := utf8Locale(func(name string) string { return tc.env[name] }); got != tc.want {
-				t.Errorf("utf8Locale(%v) = %v, want %v", tc.env, got, tc.want)
 			}
 		})
 	}
