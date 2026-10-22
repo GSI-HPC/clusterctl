@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/GSI-HPC/go-clikit/progress"
+	"github.com/GSI-HPC/go-clikit/progress/cliprogress"
 	"github.com/GSI-HPC/go-nodeset"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -396,12 +397,10 @@ func (p Preview) Accept(answer string) error {
 		}
 		return nil
 	}
-	switch strings.ToLower(answer) {
-	case "y", "yes":
+	if cliprogress.Yes(answer) {
 		return nil
-	default:
-		return exitcode.Errorf(exitcode.Interrupted, "not confirmed, nothing was done")
 	}
+	return exitcode.Errorf(exitcode.Interrupted, "not confirmed, nothing was done")
 }
 
 // ErrDryRun is returned by Confirm when the gate is in dry run mode. A
