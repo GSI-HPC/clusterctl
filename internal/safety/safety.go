@@ -9,7 +9,6 @@
 package safety
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -265,7 +264,7 @@ func (g *Gate) Confirm(a Action) (err error) {
 	if a.Targets != nil {
 		count = a.Targets.Len()
 	}
-	ctx, wait := progress.Start(g.context(), progress.KindWait, "confirm",
+	_, wait := progress.Start(g.context(), progress.KindWait, "confirm",
 		progress.Message(fmt.Sprintf("%s %d host%s", a.Verb, count, plural(count))))
 	defer func() {
 		if IsDryRun(err) {
@@ -285,7 +284,9 @@ func (g *Gate) Confirm(a Action) (err error) {
 
 	if g.DryRun {
 		g.printf("Would %s\n", p.Summary())
-		p.printDetail(g)
+		if detail := p.detail(); detail != "" {
+			g.printf("%s", detail)
+		}
 		return ErrDryRun
 	}
 	if g.AssumeYes {
@@ -300,12 +301,9 @@ func (g *Gate) Confirm(a Action) (err error) {
 			"%s needs a confirmation but there is no terminal to ask on; pass -y to confirm in advance", a.Verb)
 	}
 
-	resume := progress.Suspend(ctx)
-	defer resume()
-	g.printf("About to %s\n", p.Summary())
-	p.printDetail(g)
-	g.printf("%s ", p.Question())
-	answer, err := g.read()
+	// What is about to happen and the question are one prompt, so that the
+	// displays are off the terminal for all of it and no more.
+	answer, err := g.ask("About to " + p.Summary() + "\n" + p.detail() + p.Question() + " ")
 	if err != nil {
 		return err
 	}
@@ -364,15 +362,17 @@ func (p Preview) Summary() string {
 	return fmt.Sprintf("%s %d host%s: %s", p.Verb, p.Count, plural(p.Count), p.Targets)
 }
 
-// printDetail prints the detail and what --force lets through, under the
-// summary.
-func (p Preview) printDetail(g *Gate) {
+// detail returns the detail and what --force lets through, a line each,
+// for under the summary.
+func (p Preview) detail() string {
+	var b strings.Builder
 	if p.Detail != "" {
-		g.printf("  %s\n", p.Detail)
+		fmt.Fprintf(&b, "  %s\n", p.Detail)
 	}
 	for _, line := range p.Forced {
-		g.printf("  %s\n", line)
+		fmt.Fprintf(&b, "  %s\n", line)
 	}
+	return b.String()
 }
 
 // Question is what the administrator is asked.
@@ -417,40 +417,25 @@ func IsDryRun(err error) bool {
 	return errors.As(err, &signal)
 }
 
-func (g *Gate) read() (string, error) {
+// ask puts the question on the gate's output and reads the answer from its
+// input, with the displays off the terminal until the answer is in. The
+// read stops when the gate's context ends.
+func (g *Gate) ask(prompt string) (string, error) {
 	if g.In == nil {
 		return "", exitcode.Errorf(exitcode.Interrupted, "nothing to read a confirmation from")
 	}
-	type answer struct {
-		line string
-		err  error
+	out := io.Discard
+	if g.Out != nil {
+		out = g.Out
 	}
-	// The read cannot be cancelled, so it is left behind when the context
-	// ends; the process is about to exit.
-	answered := make(chan answer, 1)
-	go func() {
-		line, err := bufio.NewReader(g.In).ReadString('\n')
-		answered <- answer{line, err}
-	}()
-	var got answer
-	select {
-	case got = <-answered:
-	case <-g.done():
-		g.printf("\n")
-		return "", g.interrupted()
+	line, err := cliprogress.Ask(g.context(), g.In, out, prompt)
+	if interrupted := g.interrupted(); interrupted != nil {
+		return "", interrupted
 	}
-	if got.err != nil && got.line == "" {
+	if err != nil {
 		return "", exitcode.Errorf(exitcode.Interrupted, "not confirmed, nothing was done")
 	}
-	return got.line, g.interrupted()
-}
-
-// done is closed when the gate's context ends; without one it never is.
-func (g *Gate) done() <-chan struct{} {
-	if g.Context == nil {
-		return nil
-	}
-	return g.Context.Done()
+	return line, nil
 }
 
 // context returns the gate's context, or one that never ends.
