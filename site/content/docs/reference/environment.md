@@ -11,7 +11,7 @@ weight: 2
 | `CLUSTERCTL_CONTEXT` | Selects the context, as `--context` does. |
 | `CLUSTERCTL_NODES` | The node set commands act on when neither `-n` nor a node set argument is given. An empty `-n` or node set argument is an error, never a fall-back to it. |
 | `CLUSTERCTL_PROGRESS` | How progress is shown when `--progress` is not given: `auto`, `tty`, `counter`, `plain` or `none`. Empty is `auto`, the live tree on a terminal. `plain` suits a CI job's log. Unlike the flag it fails no command: a display where none can be drawn shows nothing, and a value it does not take shows nothing, with a line on standard error. See [Progress](../../guides/progress/). |
-| `CLUSTERCTL_PROGRESS_LOG` | The file each command appends its progress events to, as JSON lines, when `--progress-log` is not given; created readable by you alone. Empty writes none. Unlike the flag it fails no command: a file that cannot be used is not written, with a line on standard error. See [the event log](../../guides/progress/#the-event-log). |
+| `CLUSTERCTL_PROGRESS_LOG` | The file each command appends its progress events to, as JSON lines, when `--progress-log` is not given; created readable by you alone. Without either, each command appends to `activity.jsonl` in the state directory, which is moved aside to `activity.jsonl.1` once it is larger than 8 MiB; set to nothing, it writes none. Unlike the flag it fails no command: a file that cannot be used is not written, with a line on standard error. See [the event log](../../guides/progress/#the-event-log). |
 | `CLUSTERCTL_FANOUT` | `fanout.max`, how many hosts ssh works on at once. Unlike `--fanout`, it leaves the service processors and the names asked at once to their own settings, `bmc.redfish.maxConcurrent`, `bmc.ipmi.maxConcurrent` and `services.dns.maxConcurrent`. |
 | `CLUSTERCTL_CONNECT_TIMEOUT` | `ssh.connectTimeout` |
 | `CLUSTERCTL_COMMAND_TIMEOUT` | `fanout.commandTimeout` |
@@ -25,8 +25,9 @@ weight: 2
 A password is never one of these. `BMC_PASSWORD` is read only because a
 credential in the configuration says `fromEnv: BMC_PASSWORD`.
 
-`NO_COLOR` and `XDG_*` are honoured in the usual way; clusterctl draws no
-colour anyway. `LC_ALL`, `LC_CTYPE` and `LANG`, the first one set, say whether
+`NO_COLOR` and `XDG_*` are honoured in the usual way. The live tree and the
+counter are drawn in 256 colours where `COLORTERM` is set or `TERM` names 256
+colours, in 16 on other terminals, and in none where `NO_COLOR` is set. `LC_ALL`, `LC_CTYPE` and `LANG`, the first one set, say whether
 the terminal shows UTF-8: in any other locale the live tree and the counter are
 drawn in ASCII.
 

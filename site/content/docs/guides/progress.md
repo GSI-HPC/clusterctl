@@ -113,7 +113,8 @@ split by `|`. While no such step runs, the line names the step or the command
 that does. It comes and goes the way the tree does, and leaves the same summary
 behind.
 
-Neither the tree nor the counter draws in colour or hides the cursor, so a
+Both draw in the colours the terminal shows (see
+[the environment](../../reference/environment/)), and neither hides the cursor, so a
 command killed while it draws leaves a terminal that works. Outside a UTF-8
 locale, as `LC_ALL`, `LC_CTYPE` or `LANG` names it, they draw with ASCII
 alone: `+` for done, `x` for failed, `>` for running and ` - ` between the
@@ -222,7 +223,10 @@ given, appends everything a command reports about its progress to `FILE`, one
 JSON object per line, whatever `--progress` shows, `none` included. It is for
 a bug report, a CI job's artifacts or a program that wants to know what a
 command did, target by target; standard output and standard error stay as
-they are.
+they are. With neither, every command appends to `activity.jsonl` in the
+state directory, which is moved aside to `activity.jsonl.1` once it is larger
+than 8 MiB; `CLUSTERCTL_PROGRESS_LOG=` set to nothing writes none, and a log
+that cannot be written is left out without a note.
 
 ```console
 $ clusterctl --progress-log run.jsonl exec -n 'exe[1-3]' -y -- uptime
