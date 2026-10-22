@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/progress"
+
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/transport"
@@ -121,12 +123,9 @@ func TestAPanicWaitsForTheQuestionAnotherNodeAsks(t *testing.T) {
 			panic("index out of range [3] with length 3")
 		case "exe0001":
 			c.mu.Lock()
-			shown := c.last.(interface {
-				Suspend()
-				Resume()
-			})
+			ctx := c.last.Context()
 			c.mu.Unlock()
-			shown.Suspend()
+			resume := progress.Suspend(ctx)
 			_, _ = io.WriteString(tty, "Password for bmc@exe0001: ")
 			close(asking)
 			<-stacked
@@ -134,7 +133,7 @@ func TestAPanicWaitsForTheQuestionAnotherNodeAsks(t *testing.T) {
 			// which it does as its panic unwinds.
 			time.Sleep(100 * time.Millisecond)
 			_, _ = io.WriteString(tty, "\n")
-			shown.Resume()
+			resume()
 		}
 		return &transport.Result{Target: tg, Stdout: "Dell|R650|Dell|0A1B|Dell|2.1|2026-01-01|MT4123\n"}, nil
 	}}

@@ -130,7 +130,7 @@ never reach either stream.
 
 **The displays** are go-clikit's, and are tested there, each frame on a
 terminal that is a buffer and a clock the test moves. The command tests here
-replace `startDisplay` with `fakeDisplays`, whose displays are drawn only when
+replace `startProgress` with `fakeDisplays`, whose displays are drawn only when
 the test says, from a fake transport's answer or a pause between batches, on a
 clock the displays' Bus reads too. So a frame or a plain line shows the same
 counts and times on every run, and no test waits for the display's second, a
