@@ -322,7 +322,7 @@ file used to answer.`,
 				object[value] = ns.String()
 				t.Add(value, ns.String(), fmt.Sprint(ns.Len()))
 			}
-			if t.Len() == 0 {
+			if len(t.Rows) == 0 {
 				return exitcode.Errorf(exitcode.Usage, "no node carries the attribute %q", key)
 			}
 			return a.Print(output.Result{Table: t, Object: object})

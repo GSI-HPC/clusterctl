@@ -4,34 +4,19 @@
 package output
 
 import (
-	"fmt"
-	"io"
 	"slices"
 	"strings"
 
-	"github.com/GSI-HPC/go-clikit/termtext"
+	"github.com/GSI-HPC/go-clikit/cliout"
 )
 
-// Column is one column of a table.
-type Column struct {
-	// Name is the heading, upper case by convention.
-	Name string
-	// Wide keeps the column out of the default table and shows it only
-	// under -o wide.
-	Wide bool
-	// Right aligns the values to the right, for counts.
-	Right bool
-}
+// Column is one column of a table: cliout.Column.
+type Column = cliout.Column
 
-// Table is a command result in rows and columns. Values are never truncated:
-// a long reason or a wide node set is worth a wrapped line, and truncation
-// has hidden the important half of a message often enough.
-type Table struct {
-	Columns []Column
-	Rows    [][]string
-	// Caption is printed under the table, for a total or a note.
-	Caption string
-}
+// Table is a command result in rows and columns: cliout.Table. Values are
+// never truncated: a long reason or a wide node set is worth a wrapped line,
+// and truncation has hidden the important half of a message often enough.
+type Table = cliout.Table
 
 // NewTable starts a table with the given headings.
 func NewTable(columns ...Column) *Table {
@@ -74,23 +59,9 @@ func (c Columns) mark(names []string, set func(*Column)) Columns {
 	return c
 }
 
-// Add appends a row. Missing cells are left empty and extra cells are kept,
-// so that a column added later does not need every call site changed.
-func (t *Table) Add(values ...string) {
-	t.Rows = append(t.Rows, values)
-}
-
-// Len reports the number of rows.
-func (t *Table) Len() int {
-	if t == nil {
-		return 0
-	}
-	return len(t.Rows)
-}
-
 // Objects renders the table as a list of objects, which is what the machine
 // formats show when a command has nothing richer to offer.
-func (t *Table) Objects() []map[string]string {
+func Objects(t *Table) []map[string]string {
 	if t == nil {
 		return nil
 	}
@@ -125,88 +96,4 @@ func fieldName(heading string) string {
 		b.WriteString(p[1:])
 	}
 	return b.String()
-}
-
-func writeTable(w io.Writer, t *Table, wide bool) error {
-	if t == nil || len(t.Columns) == 0 {
-		return nil
-	}
-	keep := make([]int, 0, len(t.Columns))
-	for i, col := range t.Columns {
-		if col.Wide && !wide {
-			continue
-		}
-		keep = append(keep, i)
-	}
-	if len(keep) == 0 {
-		return nil
-	}
-
-	// Cells are escaped before they are measured: a value from a node or a
-	// BMC may hold a newline that would start a forged row, or a control
-	// sequence that would rewrite what is already on the screen.
-	headings := make([]string, len(keep))
-	for j, i := range keep {
-		headings[j] = EscapeCell(t.Columns[i].Name)
-	}
-	rows := make([][]string, len(t.Rows))
-	for r, row := range t.Rows {
-		cells := make([]string, len(keep))
-		for j, i := range keep {
-			if i < len(row) {
-				cells[j] = EscapeCell(row[i])
-			}
-		}
-		rows[r] = cells
-	}
-
-	widths := make([]int, len(keep))
-	for j, heading := range headings {
-		widths[j] = termtext.Width(heading)
-	}
-	for _, cells := range rows {
-		for j, value := range cells {
-			if n := termtext.Width(value); n > widths[j] {
-				widths[j] = n
-			}
-		}
-	}
-
-	var b strings.Builder
-	writeRow := func(cells []string) {
-		for j := range keep {
-			value := ""
-			if j < len(cells) {
-				value = cells[j]
-			}
-			if j > 0 {
-				b.WriteString("  ")
-			}
-			pad := widths[j] - termtext.Width(value)
-			last := j == len(keep)-1
-			switch {
-			case t.Columns[keep[j]].Right:
-				b.WriteString(strings.Repeat(" ", max(pad, 0)))
-				b.WriteString(value)
-			case last:
-				// The last column is not padded, so that copying a line does
-				// not pick up trailing spaces.
-				b.WriteString(value)
-			default:
-				b.WriteString(value)
-				b.WriteString(strings.Repeat(" ", max(pad, 0)))
-			}
-		}
-		b.WriteByte('\n')
-	}
-
-	writeRow(headings)
-	for _, cells := range rows {
-		writeRow(cells)
-	}
-	if t.Caption != "" {
-		fmt.Fprintf(&b, "\n%s\n", EscapeText(t.Caption))
-	}
-	_, err := io.WriteString(w, b.String())
-	return err
 }

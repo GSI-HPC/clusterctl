@@ -910,7 +910,7 @@ a boot path may point at.`,
 			for _, line := range result.Lines() {
 				t.Add(line)
 			}
-			t.Caption = fmt.Sprintf("%d configurations under %s", t.Len(), path)
+			t.Caption = fmt.Sprintf("%d configurations under %s", len(t.Rows), path)
 			return a.Print(output.Result{Table: t, Object: result.Lines()})
 		}))
 }

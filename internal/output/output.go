@@ -10,16 +10,13 @@
 package output
 
 import (
-	"bytes"
 	"context"
-	"encoding"
-	"encoding/json"
 	"fmt"
 	"io"
-	"reflect"
 	"slices"
 	"strings"
 
+	"github.com/GSI-HPC/go-clikit/cliout"
 	"github.com/GSI-HPC/go-nodeset"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
@@ -146,7 +143,7 @@ func (f Format) WriteContext(ctx context.Context, w io.Writer, r Result) error {
 	case FormatWide:
 		return writeTable(w, r.Table, true)
 	case FormatJSON:
-		return writeJSON(w, r.object())
+		return cliout.WriteJSON(w, r.object())
 	case FormatYAML:
 		return writeYAML(w, r.object())
 	case FormatNodeset:
@@ -166,72 +163,17 @@ func (r Result) object() any {
 		return r.Object
 	}
 	if r.Table != nil {
-		return r.Table.Objects()
+		return Objects(r.Table)
 	}
 	return map[string]any{}
 }
 
-// writeJSON renders v as JSON indented by two spaces. A list is written an
-// element at a time, each encoded on its own: encoding the whole of what a
-// thousand nodes printed held it twice over, once encoded and once
-// indented, on top of the results themselves. The bytes are those the
-// whole would have been encoded to.
-func writeJSON(w io.Writer, v any) error {
-	list := reflect.ValueOf(v)
-	if !elementwise(list) {
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(v)
+// writeTable renders a table, which a result may not have.
+func writeTable(w io.Writer, t *Table, wide bool) error {
+	if t == nil {
+		return nil
 	}
-	if _, err := io.WriteString(w, "[\n"); err != nil {
-		return err
-	}
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetIndent("  ", "  ")
-	for i := range list.Len() {
-		b.Reset()
-		b.WriteString("  ")
-		// An element of a list can be addressed, so a MarshalJSON of its
-		// pointer is what encodes it there; it is handed over by address
-		// so that it is here too.
-		if err := enc.Encode(list.Index(i).Addr().Interface()); err != nil {
-			return err
-		}
-		// Encode ends the element with a newline, which follows the
-		// comma that separates it from the next.
-		if i < list.Len()-1 {
-			b.Truncate(b.Len() - 1)
-			b.WriteString(",\n")
-		}
-		if _, err := w.Write(b.Bytes()); err != nil {
-			return err
-		}
-	}
-	_, err := io.WriteString(w, "]\n")
-	return err
-}
-
-var (
-	jsonMarshaler = reflect.TypeFor[json.Marshaler]()
-	textMarshaler = reflect.TypeFor[encoding.TextMarshaler]()
-)
-
-// elementwise reports whether writeJSON writes v an element at a time: a
-// slice with elements, which encoding/json renders as a JSON array of
-// them, so not a []byte, which it renders as a string, nor a slice type
-// that marshals itself.
-func elementwise(v reflect.Value) bool {
-	if v.Kind() != reflect.Slice || v.Len() == 0 || v.Type().Elem().Kind() == reflect.Uint8 {
-		return false
-	}
-	t := v.Type()
-	for _, m := range []reflect.Type{jsonMarshaler, textMarshaler} {
-		if t.Implements(m) || reflect.PointerTo(t).Implements(m) {
-			return false
-		}
-	}
-	return true
+	return t.Write(w, wide)
 }
 
 func writeNodeset(w io.Writer, r Result) error {
