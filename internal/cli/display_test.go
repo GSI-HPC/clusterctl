@@ -380,9 +380,9 @@ func TestTheCounterIsTakenOffBeforeEveryWrite(t *testing.T) {
 		"--progress", "counter", "--fanout", "1", "exec", "-n", "exe[1-3]", "-y", "--", "uptime")
 	wantCode(t, err, exitcode.TargetFailed)
 	want := `
-<erase>run · 0/3 · 1 running · 2 queued · 0:01
-<erase>run · 1/3 · 1 running · 1 queued · 0:02
-<erase>run · 2/3 · 1 failed · 1 running · 0:03
+<erase>run · 0/3 · 1 running · 2 queued · 0:01.0
+<erase>run · 1/3 · 1 running · 1 queued · 0:02.0
+<erase>run · 2/3 · 1 failed · 1 running · 0:03.0
 <erase>exe0001: up 3 days
 exe0003: up 3 days
 exe0002: exit 1: uptime: not found
@@ -417,13 +417,13 @@ func TestTheCounterOfAPowerOnInBatches(t *testing.T) {
 		wantCode(t, err, exitcode.TargetFailed)
 		want := `powering on exe[0001-0002] (1 of 2)
 
-<erase>power on · batch 1/2 · 0/4 · 2 running · 2 queued · 0:01
+<erase>power on · batch 1/2 · 0/4 · 2 running · 2 queued · 0:01.0
 <erase>waiting 5s before the next batch
 
-<erase>power on · batch 1/2 · 2/4 · 2 queued · waiting · 0:02
+<erase>power on · batch 1/2 · 2/4 · 2 queued · waiting · 0:02.0
 <erase>powering on exe[0003-0004] (2 of 2)
 
-<erase>power on · batch 2/2 · 2/4 · 2 running · 0:03
+<erase>power on · batch 2/2 · 2/4 · 2 running · 0:03.0
 <erase>exe0001
 exe0002
 exe0003
@@ -454,11 +454,11 @@ func TestTheCounterLeavesTheQuestionAlone(t *testing.T) {
 	}
 	// The answer is not echoed here, as a terminal would echo it.
 	want := `
-<erase>slurm node drain · 0:01
+<erase>slurm node drain · 0:01.0
 <erase>About to drain 1 host: exe0007
   reason: "ticket 4711: failing DIMM"
 Continue? [y/N] 
-<erase>slurm node drain · 0:02
+<erase>slurm node drain · 0:02.0
 <erase>drained exe0007
 clusterctl: slurm node drain: done in 2.0s
 `
@@ -543,19 +543,19 @@ func TestTheTreeIsDrawnByDefault(t *testing.T) {
 	err := runOnScreen(t, screen, harnessOptions{recorder: rec}, "--fanout", "1", "exec", "-n", "exe[1-3]", "-y", "--", "uptime")
 	wantCode(t, err, exitcode.TargetFailed)
 	want := []string{`
-exec · 0:01
+exec · 0:01.0
   run  0/3 · 1 running · 2 queued
-    ▸ exe0001  1s/10m  ssh
+    ▸ exe0001  1.0s/10m  ssh
 `, `
-exec · 0:02
+exec · 0:02.0
   run  1/3 · 1 running · 1 queued
-    ▸ exe0002  1s/10m  ssh
+    ▸ exe0002  1.0s/10m  ssh
     ✓ exe0001
 `, `
-exec · 0:03
+exec · 0:03.0
   run  2/3 · 1 failed · 1 running
     ✗ exe0002  target: {} ({}): command exited 1
-    ▸ exe0003  1s/10m  ssh
+    ▸ exe0003  1.0s/10m  ssh
     ✓ exe0001
 `}
 	for i, frame := range frames {
@@ -600,14 +600,14 @@ func TestTheTreeLeavesTheQuestionAlone(t *testing.T) {
 		t.Fatalf("slurm node drain failed: %v", err)
 	}
 	want := []string{`
-slurm node drain · 0:01
-  ssh login  1s/10m
+slurm node drain · 0:01.0
+  ssh login  1.0s/10m
 `, `
 About to drain 1 host: exe0007
   reason: "ticket 4711: failing DIMM"
 Continue? [y/N] y
-slurm node drain · 0:02
-  ssh login  1s/10m
+slurm node drain · 0:02.0
+  ssh login  1.0s/10m
 `}
 	for i, frame := range frames {
 		if i < len(want) && frame != want[i][1:] {
