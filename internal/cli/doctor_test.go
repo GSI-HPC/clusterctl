@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/doctor"
+
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
 	"github.com/GSI-HPC/clusterctl/internal/fanout/fanouttest"
@@ -19,14 +21,14 @@ import (
 )
 
 // doctorChecks runs doctor with -o json and returns its checks by name.
-func doctorChecks(t *testing.T, opts harnessOptions, args ...string) (map[string]check, *harness) {
+func doctorChecks(t *testing.T, opts harnessOptions, args ...string) (map[string]doctor.Check, *harness) {
 	t.Helper()
 	h, _ := run(t, opts, append([]string{"doctor", "-o", "json"}, args...)...)
-	var checks []check
+	var checks []doctor.Check
 	if err := json.Unmarshal(h.out.Bytes(), &checks); err != nil {
 		t.Fatalf("doctor -o json did not print JSON: %v\n%s", err, h.out)
 	}
-	out := map[string]check{}
+	out := map[string]doctor.Check{}
 	for _, c := range checks {
 		out[c.Name] = c
 	}
@@ -47,7 +49,7 @@ func TestDoctorChecksTheConfiguredIPMIBackend(t *testing.T) {
 		"--set", "bmc.ipmi.backend=ipmitool",
 		"--set", "bmc.ipmi.ipmitoolPath=/opt/ipmi/bin/ipmitool")
 	got := checks["tools on mgmt"]
-	if got.Status != statusFail || !strings.Contains(got.Detail, "/opt/ipmi/bin/ipmitool") {
+	if got.Status != doctor.StatusFailed || !strings.Contains(got.Detail, "/opt/ipmi/bin/ipmitool") {
 		t.Errorf("tools on mgmt = %+v, want the configured ipmitool missing", got)
 	}
 	if strings.Contains(got.Detail, "ipmipower") {
@@ -65,7 +67,7 @@ func TestDoctorFindsTheBackendAtItsPath(t *testing.T) {
 	checks, _ := doctorChecks(t, harnessOptions{recorder: rec}, "--remote",
 		"--set", "bmc.ipmi.backend=ipmitool",
 		"--set", "bmc.ipmi.ipmitoolPath="+bin+"/ipmitool")
-	if got := checks["tools on mgmt"]; got.Status != statusOK {
+	if got := checks["tools on mgmt"]; got.Status != doctor.StatusOK {
 		t.Errorf("tools on mgmt = %+v, want ok", got)
 	}
 }
@@ -140,7 +142,7 @@ func TestDoctorFindsAnXargsWithoutItsOptionsMissing(t *testing.T) {
 	fakeTool(t, bin, "xargs", "echo \"xargs: invalid option -- 'P'\" >&2\nexit 1\n")
 	rec, _ := shellRunner(t, bin, "fabric")
 	checks, _ := doctorChecks(t, harnessOptions{recorder: rec}, "--remote")
-	if got := checks["tools on fabric"]; got.Status != statusFail || got.Detail != "missing: xargs -0 -P" {
+	if got := checks["tools on fabric"]; got.Status != doctor.StatusFailed || got.Detail != "missing: xargs -0 -P" {
 		t.Errorf("tools on fabric = %+v, want xargs -0 -P missing", got)
 	}
 }
@@ -171,9 +173,9 @@ func TestDoctorDryRunChecksTheRoles(t *testing.T) {
 			continue
 		}
 		roles++
-		want := statusOK
+		want := doctor.StatusOK
 		if name == "role dhcp" {
-			want = statusFail
+			want = doctor.StatusFailed
 		}
 		if c.Status != want {
 			t.Errorf("%s = %+v under --dry-run, want %s", name, c, want)
@@ -199,7 +201,7 @@ func TestDoctorOpensTheIdentities(t *testing.T) {
 	dir := t.TempDir()
 	checks, _ := doctorChecks(t, harnessOptions{}, "--set", `workstation.identities=["`+dir+`"]`)
 	got := checks["age identities"]
-	if got.Status != statusFail || !strings.Contains(got.Detail, "directory") {
+	if got.Status != doctor.StatusFailed || !strings.Contains(got.Detail, "directory") {
 		t.Errorf("age identities = %+v, want a directory refused", got)
 	}
 }
@@ -209,7 +211,7 @@ func TestDoctorOpensTheIdentities(t *testing.T) {
 func TestDoctorHonoursTheOutputFormatWithoutAConfiguration(t *testing.T) {
 	t.Parallel()
 	checks, _ := doctorChecks(t, harnessOptions{bare: true, config: []string{t.TempDir()}})
-	if got := checks["configuration"]; got.Status != statusFail {
+	if got := checks["configuration"]; got.Status != doctor.StatusFailed {
 		t.Errorf("configuration = %+v, want failed", got)
 	}
 }
@@ -230,7 +232,7 @@ esac
 `)
 	checks, _ := doctorChecks(t, harnessOptions{}, "--set", "ssh.binary="+bin+"/ssh")
 	got := checks["generated ssh configuration"]
-	if got.Status != statusFail || !strings.Contains(got.Detail, "Bad configuration option: forwardagnet") {
+	if got.Status != doctor.StatusFailed || !strings.Contains(got.Detail, "Bad configuration option: forwardagnet") {
 		t.Errorf("generated ssh configuration = %+v, want the bad option named", got)
 	}
 }
@@ -255,14 +257,14 @@ func TestDoctorStopsAskingSSHWhenInterrupted(t *testing.T) {
 // the order it printed them, one "name | status | detail" line each.
 func doctorRemoteRows(t *testing.T, h *harness) string {
 	t.Helper()
-	var checks []check
+	var checks []doctor.Check
 	if err := json.Unmarshal(h.out.Bytes(), &checks); err != nil {
 		t.Fatalf("doctor -o json did not print JSON: %v\n%s", err, h.out)
 	}
 	var rows []string
 	for _, c := range checks {
 		if strings.HasPrefix(c.Name, "role ") || strings.HasPrefix(c.Name, "tools on ") {
-			rows = append(rows, c.Name+" | "+c.Status+" | "+c.Detail)
+			rows = append(rows, c.Name+" | "+string(c.Status)+" | "+c.Detail)
 		}
 	}
 	return strings.Join(rows, "\n") + "\n"
