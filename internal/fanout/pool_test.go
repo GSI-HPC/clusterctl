@@ -69,7 +69,7 @@ func TestExecutorReportsItsTargets(t *testing.T) {
 
 	ctx, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 	rec := &transport.Recorder{ByTarget: map[string]*transport.Result{"exe2": {ExitCode: 1}}}
-	e := &fanout.Executor{Runner: rec, Max: 2, Flags: progress.ShowLines}
+	e := &fanout.Executor{Runner: rec, Max: 2, Flags: progress.FlagShowLines}
 	results := e.Run(ctx, targets("exe1", "exe2", "exe3"), transport.Request{Argv: []string{"uptime"}})
 	if got := len(fanout.Failures(results)); got != 1 {
 		t.Errorf("%d targets failed, want 1", got)

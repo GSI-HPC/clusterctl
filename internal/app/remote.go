@@ -35,7 +35,7 @@ func (a *App) RemoteFile(ctx context.Context, role, path string, ttl time.Durati
 	if err != nil {
 		return nil, err
 	}
-	ctx, read := progress.Start(ctx, progress.KindCall, "read "+path, progress.WithFlags(progress.Hidden),
+	ctx, read := progress.Start(ctx, progress.KindCall, "read "+path, progress.Flagged(progress.FlagHidden),
 		progress.Role(role), progress.Host(target.Host))
 	cache := "miss"
 	defer func() { read.End(err, progress.Cache(cache)) }()

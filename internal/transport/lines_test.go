@@ -35,7 +35,7 @@ func (l *lineLog) add(st progress.Stream, line string) {
 func (l *lineLog) String() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return fmt.Sprintf("stdout %q, stderr %q", l.lines[progress.Stdout], l.lines[progress.Stderr])
+	return fmt.Sprintf("stdout %q, stderr %q", l.lines[progress.StreamStdout], l.lines[progress.StreamStderr])
 }
 
 // A parser is handed each line of both streams that ended, without its
@@ -81,7 +81,7 @@ func TestRunShowsTheLastLineBeforeItsCallEnds(t *testing.T) {
 	c := &progresstest.Capture{Lines: true}
 	bus := progress.NewBus(progress.BusOptions{Sinks: []progress.Sink{c}})
 	ctx, step := progress.Start(progress.WithBus(context.Background(), bus), progress.KindStep, "exec",
-		progress.WithFlags(progress.ShowLines))
+		progress.Flagged(progress.FlagShowLines))
 	runner := transport.Traced(fakeClient(t, `printf 'one\n'; printf '\033]52;c;aGk=\007partial'`), false)
 	result, err := runner.Run(ctx, target, transport.Request{Argv: []string{"true"}})
 	if err != nil || result.Failed() {

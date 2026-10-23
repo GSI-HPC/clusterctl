@@ -176,7 +176,7 @@ func (r *Resolver) readOnce(ctx context.Context, name string, done chan struct{}
 	// source; what was read is not. A lookup answered from memory reads
 	// nothing and is not reported.
 	ctx, lookup := progress.Start(ctx, progress.KindCall, "credential "+name,
-		progress.WithFlags(progress.Hidden), progress.Source(sourceKind(spec.Password)))
+		progress.Flagged(progress.FlagHidden), progress.Source(sourceKind(spec.Password)))
 	password, err := r.read(ctx, name, spec.Password)
 	// A password that cannot be read is the configuration's to fix, as the
 	// commands report it, not a host's refusal.

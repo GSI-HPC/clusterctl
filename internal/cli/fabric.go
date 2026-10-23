@@ -343,7 +343,7 @@ func (p *portTargets) startNext() {
 // A port answered for before its turn, which it gets only when another's
 // line was lost, ends where it is, and the running ones stay as they are.
 func (p *portTargets) answered(stream progress.Stream, line string) {
-	if stream != progress.Stdout {
+	if stream != progress.StreamStdout {
 		return
 	}
 	i, answer, ok := portAnswer(line, len(p.spans))
@@ -429,7 +429,7 @@ reason it stopped. It only reads, so --dry-run asks the fabric too.
 			// leaves nothing to show, and so does an interrupt: the ports
 			// not asked yet would read as if they had not answered.
 			ctx, step := progress.Start(a.Context(), progress.KindStep, "query ports",
-				progress.WithFlags(progress.Fold), progress.Total(len(entries)), progress.Limit(fanout.PerHost))
+				progress.Flagged(progress.FlagFold), progress.Total(len(entries)), progress.Limit(fanout.PerHost))
 			ports := newPortTargets(ctx, entries)
 			ports.start()
 			result, runErr := a.ReadOnRole(ctx, role, transport.Request{

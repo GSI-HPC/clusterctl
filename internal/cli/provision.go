@@ -154,8 +154,8 @@ This overwrites files on the nodes, so it asks first.
 			outcomes, _ := fanout.Map(a.Context(), nodes, pool.MapOptions[int]{
 				Step:  "write the secrets",
 				Limit: a.Spec.Fanout.Max,
-				Describe: func(k int) pool.Item {
-					return pool.Item{Node: targets[k].Name, Host: targets[k].Host, Role: targets[k].Role}
+				Describe: func(k int) pool.ItemInfo {
+					return pool.ItemInfo{Node: targets[k].Name, Host: targets[k].Host, Role: targets[k].Role}
 				},
 				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, k int) (struct{}, error) {
@@ -273,7 +273,7 @@ func newSecretPush(a *app.App, files []v1alpha1.SecretFile, contents [][]byte) s
 func (p secretPush) node(ctx context.Context, tg transport.Target, written []*transport.Result) error {
 	steps := make([]*progress.Span, len(p.files))
 	start := func(i int) {
-		_, steps[i] = progress.Start(ctx, progress.KindStep, "write "+p.files[i].Target, progress.WithFlags(progress.Hidden))
+		_, steps[i] = progress.Start(ctx, progress.KindStep, "write "+p.files[i].Target, progress.Flagged(progress.FlagHidden))
 	}
 	end := func(i int, res *transport.Result) {
 		written[i] = res
@@ -294,7 +294,7 @@ func (p secretPush) node(ctx context.Context, tg transport.Target, written []*tr
 	next := 0
 	start(0)
 	res := p.run(ctx, tg, func(stream progress.Stream, line string) {
-		if stream != progress.Stdout || next == len(p.files) {
+		if stream != progress.StreamStdout || next == len(p.files) {
 			return
 		}
 		if reported, ok := secretReported(tg, next, line); ok {
@@ -1048,7 +1048,7 @@ This changes the nodes, so it asks first.`,
 			// What the run prints is what it is watched for, so a display
 			// may show it as it arrives.
 			executor := a.Executor()
-			executor.Flags = progress.ShowLines
+			executor.Flags = progress.FlagShowLines
 			for _, res := range executor.RunEach(a.Context(), ready, func(t transport.Target) transport.Request {
 				return a.Collect(transport.Request{Argv: argv[t.Name], Timeout: max(a.Timeout().Get(), cincRunTimeout)})
 			}) {
@@ -1137,7 +1137,7 @@ commands that remove it.
 			// rather than halfway through. These lookups are plumbing a
 			// display shows only when they fail or take long.
 			var plan *reinstallPlan
-			if err := inStep(a.Context(), "resolve", progress.Hidden, func(ctx context.Context) (err error) {
+			if err := inStep(a.Context(), "resolve", progress.FlagHidden, func(ctx context.Context) (err error) {
 				plan, err = planReinstall(ctx, a, ns, bootPath, keepKeys)
 				return err
 			}); err != nil {
@@ -1155,7 +1155,7 @@ commands that remove it.
 				checking sync.WaitGroup
 			)
 			checking.Go(func() {
-				pathsErr = inStep(paths, "check the boot paths", progress.Hidden, func(ctx context.Context) error {
+				pathsErr = inStep(paths, "check the boot paths", progress.FlagHidden, func(ctx context.Context) error {
 					return checkBootLinks(ctx, a, plan.role, plan.root, plan.links)
 				})
 			})

@@ -86,9 +86,9 @@ func (r *root) inSpan(cmd *cobra.Command, args []string, run func(*cobra.Command
 	}
 	var flags progress.Flags
 	if r.dryRun {
-		flags = progress.DryRun
+		flags = progress.FlagDryRun
 	}
-	ctx, span := progress.Start(ctx, progress.KindCommand, commandPath(cmd), progress.WithFlags(flags))
+	ctx, span := progress.Start(ctx, progress.KindCommand, commandPath(cmd), progress.Flagged(flags))
 	returned := false
 	defer func() {
 		switch {
@@ -109,10 +109,10 @@ func (r *root) inSpan(cmd *cobra.Command, args []string, run func(*cobra.Command
 }
 
 // inStep runs fn as a step of the work ctx carries, named name, with the
-// flags given, and ends the step with what fn returned: progress.Hidden
+// flags given, and ends the step with what fn returned: progress.FlagHidden
 // for the lookups a command makes before it asks or changes anything.
 func inStep(ctx context.Context, name string, flags progress.Flags, fn func(context.Context) error) error {
-	ctx, step := progress.Start(ctx, progress.KindStep, name, progress.WithFlags(flags))
+	ctx, step := progress.Start(ctx, progress.KindStep, name, progress.Flagged(flags))
 	err := fn(ctx)
 	step.End(err)
 	return err

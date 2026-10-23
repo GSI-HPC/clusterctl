@@ -28,7 +28,7 @@ import (
 type displays struct {
 	mu    sync.Mutex
 	modes []string
-	last  *cliprogress.Run
+	last  *cliprogress.Session
 	clock time.Time
 }
 
@@ -37,7 +37,7 @@ func fakeDisplays(t *testing.T) *displays {
 	t.Helper()
 	c := &displays{clock: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)}
 	saved := startProgress
-	startProgress = func(ctx context.Context, o cliprogress.Options) (*cliprogress.Run, error) {
+	startProgress = func(ctx context.Context, o cliprogress.Options) (*cliprogress.Session, error) {
 		o.Now, o.Manual, o.ASCII = c.now, true, false
 		// The look is the kit's to test; these tests compare the text.
 		o.Theme = display.Theme{}
@@ -753,13 +753,13 @@ func TestTheDisplaysAreDrawnInTheColoursOfTheTerminal(t *testing.T) {
 		name     string
 		terminal bool
 		env      map[string]string
-		want     display.Colours
+		want     display.Colors
 	}{
-		{"16 colours", true, map[string]string{"TERM": "xterm"}, display.Colours16},
-		{"256 colours", true, map[string]string{"TERM": "xterm-256color"}, display.Colours256},
-		{"COLORTERM", true, map[string]string{"TERM": "xterm", "COLORTERM": "truecolor"}, display.Colours256},
-		{"NO_COLOR", true, map[string]string{"TERM": "xterm", "NO_COLOR": "1"}, display.NoColours},
-		{"no terminal", false, map[string]string{"TERM": "xterm"}, display.NoColours},
+		{"16 colours", true, map[string]string{"TERM": "xterm"}, display.Colors16},
+		{"256 colours", true, map[string]string{"TERM": "xterm-256color"}, display.Colors256},
+		{"COLORTERM", true, map[string]string{"TERM": "xterm", "COLORTERM": "truecolor"}, display.Colors256},
+		{"NO_COLOR", true, map[string]string{"TERM": "xterm", "NO_COLOR": "1"}, display.ColorsNone},
+		{"no terminal", false, map[string]string{"TERM": "xterm"}, display.ColorsNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, name := range []string{"TERM", "COLORTERM", "NO_COLOR"} {
@@ -767,7 +767,7 @@ func TestTheDisplaysAreDrawnInTheColoursOfTheTerminal(t *testing.T) {
 			}
 			var got display.Theme
 			saved := startProgress
-			startProgress = func(ctx context.Context, o cliprogress.Options) (*cliprogress.Run, error) {
+			startProgress = func(ctx context.Context, o cliprogress.Options) (*cliprogress.Session, error) {
 				got = o.Theme
 				return cliprogress.Start(ctx, o)
 			}
@@ -779,8 +779,8 @@ func TestTheDisplaysAreDrawnInTheColoursOfTheTerminal(t *testing.T) {
 			if _, err := run(t, opts, "node", "fqdn", "-n", "exe1"); err != nil {
 				t.Fatal(err)
 			}
-			if got.Colours() != tc.want {
-				t.Errorf("the theme draws in %v, want %v", got.Colours(), tc.want)
+			if got.Colors() != tc.want {
+				t.Errorf("the theme draws in %v, want %v", got.Colors(), tc.want)
 			}
 		})
 	}
