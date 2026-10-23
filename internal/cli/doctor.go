@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/doctor"
 	pool "github.com/GSI-HPC/go-clikit/fanout"
 	"github.com/GSI-HPC/go-clikit/fsutil"
 	"github.com/spf13/cobra"
@@ -28,19 +29,10 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/transport"
 )
 
-// check is one thing doctor looked at.
-type check struct {
-	Name   string `json:"name" yaml:"name"`
-	Status string `json:"status" yaml:"status"`
-	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
+// finding is one check that has no remediation to offer.
+func finding(name string, status doctor.Status, detail string) doctor.Check {
+	return doctor.Check{Name: name, Status: status, Detail: detail}
 }
-
-// The statuses a check can report.
-const (
-	statusOK   = "ok"
-	statusWarn = "warning"
-	statusFail = "failed"
-)
 
 func newDoctorCommand(r *root) *cobra.Command {
 	var remote bool
@@ -61,11 +53,11 @@ too.
 		cobra.NoArgs,
 		func(cmd *cobra.Command, _ []string) error {
 			streams := r.streams
-			var checks []check
+			var checks []doctor.Check
 
 			a, err := r.App()
 			if err != nil {
-				checks = append(checks, check{"configuration", statusFail, err.Error()})
+				checks = append(checks, finding("configuration", doctor.StatusFailed, err.Error()))
 				// Without a configuration there is no App to print through,
 				// but -o was still asked for: a caller parsing JSON must not
 				// be handed a table.
@@ -76,8 +68,8 @@ too.
 				return printChecks(nil, format, streams, checks)
 			}
 			checks = append(checks,
-				check{"configuration", statusOK, fmt.Sprintf("context %s, cluster %s, site %s",
-					a.Resolved.Context.Name, a.Resolved.ClusterName, a.Resolved.SiteName)},
+				finding("configuration", doctor.StatusOK, fmt.Sprintf("context %s, cluster %s, site %s",
+					a.Resolved.Context.Name, a.Resolved.ClusterName, a.Resolved.SiteName)),
 			)
 			checks = append(checks, localChecks(a)...)
 			if remote {
@@ -90,25 +82,25 @@ too.
 	return cmd
 }
 
-func localChecks(a *app.App) []check {
-	var checks []check
+func localChecks(a *app.App) []doctor.Check {
+	var checks []doctor.Check
 
 	// The ssh client is what everything runs through.
 	if path, err := exec.LookPath(a.SSH.Binary()); err != nil {
-		checks = append(checks, check{"ssh client", statusFail, a.SSH.Binary() + " is not in PATH"})
+		checks = append(checks, finding("ssh client", doctor.StatusFailed, a.SSH.Binary()+" is not in PATH"))
 	} else {
-		checks = append(checks, check{"ssh client", statusOK, path + " " + sshVersion(a.Context(), path)})
+		checks = append(checks, finding("ssh client", doctor.StatusOK, path+" "+sshVersion(a.Context(), path)))
 	}
 	if _, err := exec.LookPath(a.SSH.ScpBinary()); err != nil {
-		checks = append(checks, check{"scp client", statusWarn, a.SSH.ScpBinary() + " is not in PATH; copy will not work"})
+		checks = append(checks, finding("scp client", doctor.StatusWarning, a.SSH.ScpBinary()+" is not in PATH; copy will not work"))
 	} else {
-		checks = append(checks, check{"scp client", statusOK, ""})
+		checks = append(checks, finding("scp client", doctor.StatusOK, ""))
 	}
 
 	// The generated configuration has to be writable, and the host key file
 	// has to exist for strict checking to mean anything.
 	if path, err := a.SSH.ConfigPath(); err != nil {
-		checks = append(checks, check{"generated ssh configuration", statusFail, err.Error()})
+		checks = append(checks, finding("generated ssh configuration", doctor.StatusFailed, err.Error()))
 	} else {
 		checks = append(checks, sshConfigCheck(a, path))
 	}
@@ -116,19 +108,19 @@ func localChecks(a *app.App) []check {
 	known := a.Path(a.Spec.SSH.KnownHostsFile)
 	switch known {
 	case "":
-		checks = append(checks, check{"host key file", statusFail,
-			"none is configured; set ssh.knownHostsFile"})
+		checks = append(checks, finding("host key file", doctor.StatusFailed,
+			"none is configured; set ssh.knownHostsFile"))
 	default:
 		file, err := hostkeys.Load(known)
 		switch {
 		case err != nil:
-			checks = append(checks, check{"host key file", statusFail, err.Error()})
+			checks = append(checks, finding("host key file", doctor.StatusFailed, err.Error()))
 		case len(file.Entries) == 0:
-			checks = append(checks, check{"host key file", statusWarn,
-				known + " is empty; collect keys with \"clusterctl hostkey refresh\""})
+			checks = append(checks, finding("host key file", doctor.StatusWarning,
+				known+" is empty; collect keys with \"clusterctl hostkey refresh\""))
 		default:
-			checks = append(checks, check{"host key file", statusOK,
-				fmt.Sprintf("%d entries in %s", len(file.Entries), known)})
+			checks = append(checks, finding("host key file", doctor.StatusOK,
+				fmt.Sprintf("%d entries in %s", len(file.Entries), known)))
 		}
 	}
 
@@ -137,19 +129,19 @@ func localChecks(a *app.App) []check {
 		{"cache directory", a.CacheDir},
 	} {
 		if err := fsutil.EnsureDir(dir.path); err != nil {
-			checks = append(checks, check{dir.name, statusFail, err.Error()})
+			checks = append(checks, finding(dir.name, doctor.StatusFailed, err.Error()))
 			continue
 		}
-		checks = append(checks, check{dir.name, statusOK, dir.path})
+		checks = append(checks, finding(dir.name, doctor.StatusOK, dir.path))
 	}
 
 	// The inventory is what the naming and the groups are built on.
 	if a.Inventory.Len() == 0 {
-		checks = append(checks, check{"node inventory", statusWarn,
-			"no nodes are described; groups by attribute and rack lookups will be empty"})
+		checks = append(checks, finding("node inventory", doctor.StatusWarning,
+			"no nodes are described; groups by attribute and rack lookups will be empty"))
 	} else {
-		checks = append(checks, check{"node inventory", statusOK,
-			fmt.Sprintf("%d nodes", a.Inventory.Len())})
+		checks = append(checks, finding("node inventory", doctor.StatusOK,
+			fmt.Sprintf("%d nodes", a.Inventory.Len())))
 	}
 
 	// An age identity that cannot be read only shows up when a secret is
@@ -163,10 +155,10 @@ func localChecks(a *app.App) []check {
 		}
 		switch len(unreadable) {
 		case 0:
-			checks = append(checks, check{"age identities", statusOK, fmt.Sprintf("%d readable", len(paths))})
+			checks = append(checks, finding("age identities", doctor.StatusOK, fmt.Sprintf("%d readable", len(paths))))
 		default:
-			checks = append(checks, check{"age identities", statusFail,
-				fmt.Sprintf("%d of %d cannot be read: %s", len(unreadable), len(paths), strings.Join(unreadable, "; "))})
+			checks = append(checks, finding("age identities", doctor.StatusFailed,
+				fmt.Sprintf("%d of %d cannot be read: %s", len(unreadable), len(paths), strings.Join(unreadable, "; "))))
 		}
 	}
 
@@ -174,9 +166,9 @@ func localChecks(a *app.App) []check {
 	// without one does not need it.
 	if len(a.Resolved.Bundle.Secrets) > 0 {
 		if found, err := a.Sops().Find(a.Context()); err != nil {
-			checks = append(checks, check{"sops", statusFail, err.Error()})
+			checks = append(checks, finding("sops", doctor.StatusFailed, err.Error()))
 		} else {
-			checks = append(checks, check{"sops", statusOK, found.String()})
+			checks = append(checks, finding("sops", doctor.StatusOK, found.String()))
 		}
 	}
 
@@ -184,10 +176,10 @@ func localChecks(a *app.App) []check {
 	if len(a.Spec.Tunnels) > 0 {
 		binary := cmp.Or(a.Spec.Workstation.SshuttleBinary, "sshuttle")
 		if _, err := exec.LookPath(binary); err != nil {
-			checks = append(checks, check{"sshuttle", statusWarn,
-				binary + " is not in PATH; the tunnels cannot be started"})
+			checks = append(checks, finding("sshuttle", doctor.StatusWarning,
+				binary+" is not in PATH; the tunnels cannot be started"))
 		} else {
-			checks = append(checks, check{"sshuttle", statusOK, ""})
+			checks = append(checks, finding("sshuttle", doctor.StatusOK, ""))
 		}
 	}
 
@@ -271,12 +263,12 @@ func readableFile(path string) error {
 // says. One misspelt option breaks every connection, and ssh names the
 // option on a line before the last one, which is all a failed connection
 // reports.
-func sshConfigCheck(a *app.App, path string) check {
+func sshConfigCheck(a *app.App, path string) doctor.Check {
 	const name = "generated ssh configuration"
 	binary, err := exec.LookPath(a.SSH.Binary())
 	if err != nil {
 		// The ssh client check says so already.
-		return check{name, statusWarn, path + " was not read: no ssh client"}
+		return finding(name, doctor.StatusWarning, path+" was not read: no ssh client")
 	}
 	hosts := []string{}
 	for _, role := range a.RoleNames() {
@@ -299,10 +291,10 @@ func sshConfigCheck(a *app.App, path string) check {
 			if detail == "" {
 				detail = err.Error()
 			}
-			return check{name, statusFail, fmt.Sprintf("ssh cannot read %s for %s: %s", path, host, detail)}
+			return finding(name, doctor.StatusFailed, fmt.Sprintf("ssh cannot read %s for %s: %s", path, host, detail))
 		}
 	}
-	return check{name, statusOK, path}
+	return finding(name, doctor.StatusOK, path)
 }
 
 func nonEmptyLines(s string) []string {
@@ -320,16 +312,16 @@ func nonEmptyLines(s string) []string {
 // by side, one session each, at most fanout.PerHost at a time on any one
 // host, a jump host on the way counted as well, since each session opens a
 // connection there too. The checks come back in the order of the roles.
-func remoteChecks(ctx context.Context, a *app.App) []check {
+func remoteChecks(ctx context.Context, a *app.App) []doctor.Check {
 	tools := remoteTools(a)
 	roles := a.RoleNames()
-	checks := make([][]check, len(roles))
+	checks := make([][]doctor.Check, len(roles))
 	targets := make([]transport.Target, len(roles))
 	var asked []int
 	for i, role := range roles {
 		target, err := a.Role(role)
 		if err != nil {
-			checks[i] = []check{{"role " + role, statusFail, err.Error()}}
+			checks[i] = []doctor.Check{finding("role "+role, doctor.StatusFailed, err.Error())}
 			continue
 		}
 		targets[i] = target
@@ -347,14 +339,14 @@ func remoteChecks(ctx context.Context, a *app.App) []check {
 		Acquire: func(ctx context.Context, i int) (func(), error) {
 			return hosts.Acquire(ctx, append(a.SSH.JumpHosts(targets[i].Host), targets[i].Host)...)
 		},
-	}, func(ctx context.Context, i int) ([]check, error) {
+	}, func(ctx context.Context, i int) ([]doctor.Check, error) {
 		return checkRole(ctx, a, targets[i], tools[roles[i]])
 	})
 	for k, i := range asked {
 		if checks[i] = outcomes[k].Value; checks[i] == nil {
 			// A role the command was interrupted before, or whose check
 			// panicked.
-			checks[i] = []check{{"role " + roles[i], statusFail, fmt.Sprintf("%s: %v", targets[i], outcomes[k].Err)}}
+			checks[i] = []doctor.Check{finding("role "+roles[i], doctor.StatusFailed, fmt.Sprintf("%s: %v", targets[i], outcomes[k].Err))}
 		}
 	}
 	return slices.Concat(checks...)
@@ -365,7 +357,7 @@ func remoteChecks(ctx context.Context, a *app.App) []check {
 // needs none. A session that did not reach the host fails the role; one
 // that did passes it, with the tools' check after it. The error is what the
 // role's check failed with, for a display.
-func checkRole(ctx context.Context, a *app.App, target transport.Target, wanted []string) ([]check, error) {
+func checkRole(ctx context.Context, a *app.App, target transport.Target, wanted []string) ([]doctor.Check, error) {
 	role := target.Name
 	req := transport.Request{Argv: []string{"true"}, Timeout: 20 * time.Second}
 	if len(wanted) > 0 {
@@ -389,9 +381,9 @@ func checkRole(ctx context.Context, a *app.App, target transport.Target, wanted 
 		if err == nil {
 			err = errors.New("unreachable")
 		}
-		return []check{{"role " + role, statusFail, err.Error()}}, err
+		return []doctor.Check{finding("role "+role, doctor.StatusFailed, err.Error())}, err
 	}
-	checks := []check{{"role " + role, statusOK, target.Host}}
+	checks := []doctor.Check{finding("role "+role, doctor.StatusOK, target.Host)}
 	if len(wanted) == 0 {
 		return checks, nil
 	}
@@ -399,7 +391,7 @@ func checkRole(ctx context.Context, a *app.App, target transport.Target, wanted 
 	switch missing := result.Lines(); {
 	case len(missing) > 0:
 		detail := "missing: " + strings.Join(missing, ", ")
-		return append(checks, check{tools, statusFail, detail}), errors.New(detail)
+		return append(checks, finding(tools, doctor.StatusFailed, detail)), errors.New(detail)
 	case result.Failed():
 		// The host answered, but the checks did not run to their end,
 		// such as when they ran out of time.
@@ -411,9 +403,9 @@ func checkRole(ctx context.Context, a *app.App, target transport.Target, wanted 
 		case result.Err != nil:
 			detail = result.Err.Error()
 		}
-		return append(checks, check{tools, statusWarn, detail}), nil
+		return append(checks, finding(tools, doctor.StatusWarning, detail)), nil
 	default:
-		return append(checks, check{tools, statusOK, fmt.Sprintf("%d programs present", len(wanted))}), nil
+		return append(checks, finding(tools, doctor.StatusOK, fmt.Sprintf("%d programs present", len(wanted)))), nil
 	}
 }
 
@@ -438,18 +430,12 @@ func reachedRole(result *transport.Result, err error, tools bool) bool {
 	return errors.As(result.Err, &ranOut)
 }
 
-func printChecks(a *app.App, format output.Format, streams app.Streams, checks []check) error {
+func printChecks(a *app.App, format output.Format, streams app.Streams, checks []doctor.Check) error {
 	t := output.NewTable(output.Cols("CHECK", "STATUS", "DETAIL")...)
-	failed, warned := 0, 0
 	for _, c := range checks {
-		t.Add(c.Name, c.Status, c.Detail)
-		switch c.Status {
-		case statusFail:
-			failed++
-		case statusWarn:
-			warned++
-		}
+		t.Add(c.Name, string(c.Status), c.Detail)
 	}
+	failed, warned := doctor.Count(checks)
 	t.Caption = fmt.Sprintf("%d checks, %d failed, %d warnings", len(checks), failed, warned)
 
 	result := output.Result{Table: t, Object: checks}
