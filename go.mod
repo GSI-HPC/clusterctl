@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	filippo.io/age v1.3.2
-	github.com/GSI-HPC/go-clikit v0.6.0
+	github.com/GSI-HPC/go-clikit v0.9.1-0.20261023233719-19b206c76a34
 	github.com/GSI-HPC/go-nodeset v1.1.0
 	github.com/gofrs/flock v0.13.1
 	github.com/invopop/jsonschema v0.14.0

@@ -935,7 +935,9 @@ func runPower(ctx context.Context, a *app.App, p *bmcPlan, action string, batch 
 		verb = "power cycling"
 	}
 	var results []bmcResult
-	batches := pool.Batches(ctx, p.nodes, pool.BatchOptions{
+	// The batches say how each ended, and the rows are made of them, so
+	// the error that ended the run adds nothing.
+	batches, _ := pool.Batches(ctx, p.nodes, pool.BatchOptions{
 		Step:  "power " + action,
 		Size:  batch,
 		Pause: stagger,
