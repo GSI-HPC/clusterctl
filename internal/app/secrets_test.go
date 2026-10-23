@@ -195,7 +195,7 @@ func TestADecryptionIsReportedOnce(t *testing.T) {
 	}
 
 	// Each decryption nests under what needs it, a credential read here.
-	ctx, lookup := progress.Start(a.Context(), progress.KindCall, "credential bmc", progress.WithFlags(progress.Hidden))
+	ctx, lookup := progress.Start(a.Context(), progress.KindCall, "credential bmc", progress.Flagged(progress.FlagHidden))
 	for _, key := range []string{"bmc-password", "munge-key"} {
 		if _, err := a.SecretValue(ctx, v1alpha1.SecretKeyRef{Name: "example", Key: key}); err != nil {
 			t.Fatal(err)

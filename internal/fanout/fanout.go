@@ -47,7 +47,7 @@ type Executor struct {
 	// Step names the step a display shows the targets under; empty is
 	// "run".
 	Step string
-	// Flags are given to that step, such as progress.ShowLines for a
+	// Flags are given to that step, such as progress.FlagShowLines for a
 	// command whose output is the product.
 	Flags progress.Flags
 	// PanicLog receives the stack of a panic in a worker; nil is the
@@ -109,8 +109,8 @@ func (e *Executor) RunEach(ctx context.Context, targets []transport.Target, buil
 }
 
 // describeTarget says what a display names a target by.
-func describeTarget(t transport.Target) pool.Item {
-	return pool.Item{Node: cmp.Or(t.Name, t.Host), Host: t.Host, Role: t.Role}
+func describeTarget(t transport.Target) pool.ItemInfo {
+	return pool.ItemInfo{Node: cmp.Or(t.Name, t.Host), Host: t.Host, Role: t.Role}
 }
 
 // resultError is the error a target is reported with: the result's own, or

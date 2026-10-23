@@ -93,7 +93,7 @@ func scanTargets(ctx context.Context, a *app.App, ns *nodeset.NodeSet, bmc bool,
 	outcomes, _ := fanout.Map(ctx, scans, pool.MapOptions[scan]{
 		Step:     "scan the host keys",
 		Limit:    a.Spec.Fanout.Max,
-		Describe: func(s scan) pool.Item { return pool.Item{Node: s.node, Host: s.host} },
+		Describe: func(s scan) pool.ItemInfo { return pool.ItemInfo{Node: s.node, Host: s.host} },
 		PanicLog: a.WorkerDiag,
 	}, func(ctx context.Context, s scan) ([]hostkeys.Entry, error) {
 		if s.err != nil {

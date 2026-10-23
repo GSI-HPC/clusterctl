@@ -28,11 +28,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/fsutil"
 	"github.com/GSI-HPC/go-clikit/termtext"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 )
 
 // DefaultAlgorithms are the host key algorithms collected for a host, best
@@ -566,7 +566,7 @@ func Load(path string) (*File, error) {
 // Modify reads, changes and writes a known_hosts file under a lock, so that
 // two administrators refreshing at the same time cannot lose an entry.
 func Modify(ctx context.Context, path string, change func(*File) error) error {
-	return fileutil.Update(ctx, path, 0o644, func(current []byte) ([]byte, error) {
+	return fsutil.Update(ctx, path, 0o644, func(current []byte) ([]byte, error) {
 		f, err := Parse(current)
 		if err != nil {
 			return nil, err

@@ -32,7 +32,7 @@ func (s *Server) watch(ctx context.Context, req *mcp.CallToolRequest) (context.C
 				// A notification that cannot be sent stops the
 				// notifications of the call and changes nothing about it:
 				// the client has gone, or given up on it.
-				Send: func(progress, total float64, message string) error {
+				Send: func(ctx context.Context, progress, total float64, message string) error {
 					return session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
 						ProgressToken: token, Progress: progress, Total: total, Message: message,
 					})
@@ -47,7 +47,9 @@ func (s *Server) watch(ctx context.Context, req *mcp.CallToolRequest) (context.C
 	return progress.WithBus(ctx, bus), func() {
 		bus.Close()
 		if n != nil {
-			n.Close()
+			// Only the end of the call's context makes Close fail, and
+			// then the call has no one left to tell.
+			_ = n.Close(ctx)
 		}
 	}
 }
@@ -55,7 +57,7 @@ func (s *Server) watch(ctx context.Context, req *mcp.CallToolRequest) (context.C
 // trace names the trace of the call ctx belongs to, for its audit entries.
 func trace(ctx context.Context) string {
 	if bus := progress.BusFrom(ctx); bus != nil {
-		return bus.Trace().String()
+		return bus.TraceID().String()
 	}
 	return ""
 }

@@ -44,9 +44,9 @@ func (t traced) Run(ctx context.Context, target Target, req Request) (*Result, e
 	}
 	flags := progress.Flags(0)
 	if t.dryRun {
-		flags = progress.DryRun
+		flags = progress.FlagDryRun
 	}
-	ctx, call := progress.Start(ctx, progress.KindCall, "ssh", progress.WithFlags(flags),
+	ctx, call := progress.Start(ctx, progress.KindCall, "ssh", progress.Flagged(flags),
 		progress.Node(target.Name), progress.Host(target.Host), progress.Role(target.Role),
 		progress.Timeout(req.Timeout))
 	result, err := t.next.Run(ctx, target, req)

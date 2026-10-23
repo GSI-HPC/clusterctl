@@ -259,7 +259,7 @@ func readGroups(r *reads, names []string) ([]map[string][]string, error) {
 	outcomes, _ := fanout.Map(r.ctx, names, pool.MapOptions[string]{
 		Step:     "read the groups",
 		Limit:    fanout.PerHost,
-		Describe: func(name string) pool.Item { return pool.Item{Node: name} },
+		Describe: func(name string) pool.ItemInfo { return pool.ItemInfo{Node: name} },
 		PanicLog: r.a.WorkerDiag,
 	}, func(ctx context.Context, name string) (map[string][]string, error) {
 		return r.a.Groups.GroupsOfContext(ctx, name)

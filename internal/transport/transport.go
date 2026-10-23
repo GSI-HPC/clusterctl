@@ -547,8 +547,8 @@ func (c *Client) Run(ctx context.Context, target Target, req Request) (*Result, 
 	// any of it: a parser and a display see the whole of the output,
 	// the result keeps what the bound lets it. Standard input, which
 	// carries secrets, is never looked at.
-	cmd.Stdout = progress.Tee(ctx, stdout, progress.Stdout, req.OnLine)
-	cmd.Stderr = progress.Tee(ctx, stderr, progress.Stderr, req.OnLine)
+	cmd.Stdout = progress.Tee(ctx, stdout, progress.StreamStdout, req.OnLine)
+	cmd.Stderr = progress.Tee(ctx, stderr, progress.StreamStderr, req.OnLine)
 	cmd.Stdin = req.Stdin
 	if cmd.Stdin == nil {
 		// Without this ssh inherits the terminal and a remote command may

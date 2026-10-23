@@ -122,7 +122,7 @@ func replay(ctx context.Context, req Request, r *Result) {
 	for _, out := range []struct {
 		stream progress.Stream
 		text   string
-	}{{progress.Stdout, r.Stdout}, {progress.Stderr, r.Stderr}} {
+	}{{progress.StreamStdout, r.Stdout}, {progress.StreamStderr, r.Stderr}} {
 		if out.text != "" {
 			streams.Go(func() {
 				_, _ = io.WriteString(progress.Tee(ctx, io.Discard, out.stream, req.OnLine), out.text)

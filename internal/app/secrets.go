@@ -104,7 +104,7 @@ func (a *App) SecretValues(ctx context.Context, name string) (map[string][]byte,
 		}
 	}
 	ctx, decrypt := progress.Start(ctx, progress.KindCall, "decrypt the Secret "+name,
-		progress.WithFlags(progress.Hidden), progress.Source("sops"))
+		progress.Flagged(progress.FlagHidden), progress.Source("sops"))
 	sections, err := secrets.DecryptSops(ctx, a.sopsLocked(), raw, keys, config.SecretSections())
 	if err != nil {
 		err = exitcode.Wrap(exitcode.Usage, fmt.Errorf("the Secret %q (%s): %w", name, doc.File, err))
@@ -160,7 +160,7 @@ func (a *App) SecretContent(ctx context.Context, file v1alpha1.SecretFile) ([]by
 // call, under the span ctx carries.
 func (a *App) AgeFile(ctx context.Context, path string) (_ []byte, err error) {
 	_, decrypt := progress.Start(ctx, progress.KindCall, "decrypt "+path,
-		progress.WithFlags(progress.Hidden), progress.Source("age"))
+		progress.Flagged(progress.FlagHidden), progress.Source("age"))
 	defer func() { decrypt.End(err) }()
 	ids, err := a.Identities()
 	if err != nil {

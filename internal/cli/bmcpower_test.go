@@ -827,7 +827,7 @@ func TestBMCPowerKeepsTheAnswersThatCameBeforeAnInterrupt(t *testing.T) {
 			if strings.HasPrefix(bmc, "exe0002.") {
 				answer = "connection timeout"
 			}
-			req.OnLine(progress.Stdout, bmc+": "+answer)
+			req.OnLine(progress.StreamStdout, bmc+": "+answer)
 		}
 		cancel()
 		return &transport.Result{Target: tg, ExitCode: 255, Err: exitcode.Wrap(exitcode.Interrupted, context.Canceled)}, nil
