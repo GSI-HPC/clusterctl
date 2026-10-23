@@ -744,7 +744,7 @@ func (r *Resolver) lookup(ctx context.Context, key, name string, find func(q *as
 	r.flights[key] = f
 	r.mu.Unlock()
 
-	ctx, span := progress.Start(ctx, progress.KindCall, name, progress.WithFlags(progress.Hidden))
+	ctx, span := progress.Start(ctx, progress.KindCall, name, progress.Flagged(progress.FlagHidden))
 	q := &asking{ctx: ctx}
 	defer func() {
 		r.mu.Lock()

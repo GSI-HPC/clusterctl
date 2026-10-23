@@ -340,8 +340,8 @@ func remoteChecks(ctx context.Context, a *app.App) []check {
 	outcomes, _ := fanout.Map(ctx, asked, pool.MapOptions[int]{
 		Step:  "check the roles",
 		Limit: a.Spec.Fanout.Max,
-		Describe: func(i int) pool.Item {
-			return pool.Item{Node: roles[i], Host: targets[i].Host, Role: roles[i]}
+		Describe: func(i int) pool.ItemInfo {
+			return pool.ItemInfo{Node: roles[i], Host: targets[i].Host, Role: roles[i]}
 		},
 		PanicLog: a.WorkerDiag,
 		Acquire: func(ctx context.Context, i int) (func(), error) {

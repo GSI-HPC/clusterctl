@@ -494,8 +494,8 @@ nodes whatever order the answers came in.
 			outcomes, _ := fanout.Map(ctx, lookups, pool.MapOptions[int]{
 				Step:  "resolve the names",
 				Limit: a.Bound(a.Spec.Services.DNS.MaxConcurrent),
-				Describe: func(i int) pool.Item {
-					return pool.Item{Node: nodes[i], Host: hosts[i]}
+				Describe: func(i int) pool.ItemInfo {
+					return pool.ItemInfo{Node: nodes[i], Host: hosts[i]}
 				},
 				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, i int) (dnsAnswer, error) {
@@ -597,7 +597,7 @@ command, as an alias that does not resolve does.`,
 			resolved, _ := fanout.Map(ctx, names, pool.MapOptions[string]{
 				Step:     "resolve the aliases",
 				Limit:    limit,
-				Describe: func(name string) pool.Item { return pool.Item{Host: name} },
+				Describe: func(name string) pool.ItemInfo { return pool.ItemInfo{Host: name} },
 				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, name string) (dnsAnswer, error) {
 				chain, addresses, err := res.lookupHost(ctx, name)
@@ -622,7 +622,7 @@ command, as an alias that does not resolve does.`,
 			reversed, _ := fanout.Map(ctx, addresses, pool.MapOptions[string]{
 				Step:     "read the reverse entries",
 				Limit:    limit,
-				Describe: func(address string) pool.Item { return pool.Item{Host: address} },
+				Describe: func(address string) pool.ItemInfo { return pool.ItemInfo{Host: address} },
 				PanicLog: a.WorkerDiag,
 			}, func(ctx context.Context, address string) ([]string, error) {
 				hosts, err := res.lookupAddr(ctx, address)

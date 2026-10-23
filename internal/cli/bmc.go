@@ -269,7 +269,7 @@ func checkSlurmIdle(ctx context.Context, a *app.App, nodes *nodeset.NodeSet, act
 
 	// The check is plumbing, which a display shows only when it refuses
 	// the nodes, cannot ask, or takes long.
-	ctx, step := progress.Start(ctx, progress.KindStep, "check Slurm jobs", progress.WithFlags(progress.Hidden))
+	ctx, step := progress.Start(ctx, progress.KindStep, "check Slurm jobs", progress.Flagged(progress.FlagHidden))
 	defer func() { step.End(err) }()
 	c, err := a.Slurm()
 	var jobs slurm.JobState

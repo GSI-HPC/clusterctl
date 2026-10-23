@@ -235,7 +235,7 @@ func TestProgressCountsWhatTheCallLeftOpen(t *testing.T) {
 	f := start(t, setup{wire: w, command: tree(func(cmd *cobra.Command) error {
 		// The step and three of its targets are left open.
 		ctx, _ := progress.Start(cmd.Context(), progress.KindStep, "probe the nodes",
-			progress.WithFlags(progress.Fold), progress.Total(4))
+			progress.Flagged(progress.FlagFold), progress.Total(4))
 		targets := make([]*progress.Span, 4)
 		for i := range targets {
 			node := fmt.Sprintf("exe%d", i+1)
@@ -384,8 +384,8 @@ func TestTheAuditLogNamesTheTraceOfEachCall(t *testing.T) {
 	watched.plan(t, map[string]any{"action": "resume", "nodes": "exe1"})
 	bus.Close()
 	progresstest.Check(t, c.Events())
-	if got := auditLines(t, watched.stateDir)[0]["trace"]; got != bus.Trace().String() {
-		t.Errorf("the plan recorded the trace %v, want its Bus's %s", got, bus.Trace())
+	if got := auditLines(t, watched.stateDir)[0]["trace"]; got != bus.TraceID().String() {
+		t.Errorf("the plan recorded the trace %v, want its Bus's %s", got, bus.TraceID())
 	}
 	if tree := c.Tree(); !strings.HasPrefix(tree, "command plan_change: ok\n") {
 		t.Errorf("progress:\n%s\nwant the call as a command of its own", tree)
