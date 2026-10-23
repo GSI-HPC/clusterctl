@@ -19,7 +19,7 @@ hardware, and **deferred** when it is deliberately not done.
 | R02 | Roles carry their own account, agent forwarding and jump host | `transport/sshconfig.go` | met |
 | R03 | Check every connection against one host key file | `transport/sshconfig.go` | met |
 | R04 | Collect, compare and refresh host keys without external tools | `hostkeys` | met |
-| R05 | Never lose an entry when two administrators write the file at once | `fileutil.Update` | met |
+| R05 | Never lose an entry when two administrators write the file at once | `fsutil.Update` | met |
 | R06 | Keep the system and user ssh configuration in effect | generated `Include` of `~/.ssh/config` and `/etc/ssh/ssh_config` | met |
 | R07 | Work with OpenSSH 8.0 through current | `PubkeyAcceptedKeyTypes` | met |
 | R08 | Reach networks behind a gateway through sshuttle profiles | `tunnel` | met |
