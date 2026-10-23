@@ -15,13 +15,13 @@ import (
 	"time"
 
 	pool "github.com/GSI-HPC/go-clikit/fanout"
+	"github.com/GSI-HPC/go-clikit/fsutil"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
-	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/hostkeys"
 	"github.com/GSI-HPC/clusterctl/internal/ipmi"
 	"github.com/GSI-HPC/clusterctl/internal/output"
@@ -136,7 +136,7 @@ func localChecks(a *app.App) []check {
 		{"state directory", a.StateDir},
 		{"cache directory", a.CacheDir},
 	} {
-		if err := fileutil.EnsureDir(dir.path); err != nil {
+		if err := fsutil.EnsureDir(dir.path); err != nil {
 			checks = append(checks, check{dir.name, statusFail, err.Error()})
 			continue
 		}

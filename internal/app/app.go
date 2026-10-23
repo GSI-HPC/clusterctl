@@ -24,6 +24,7 @@ import (
 	"time"
 
 	pool "github.com/GSI-HPC/go-clikit/fanout"
+	"github.com/GSI-HPC/go-clikit/fsutil"
 	"github.com/GSI-HPC/go-clikit/progress/cliprogress"
 	"github.com/GSI-HPC/go-nodeset"
 
@@ -32,7 +33,6 @@ import (
 	"github.com/GSI-HPC/clusterctl/internal/credentials"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
 	"github.com/GSI-HPC/clusterctl/internal/fanout"
-	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/groups"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 	"github.com/GSI-HPC/clusterctl/internal/inventory"
@@ -249,7 +249,7 @@ func ensureDirs(streams Streams) error {
 			}
 			return fmt.Errorf("there is no %s directory: %w", dir.name, err)
 		}
-		if err := fileutil.EnsureDir(dir.path); err != nil {
+		if err := fsutil.EnsureDir(dir.path); err != nil {
 			return fmt.Errorf("the %s directory cannot be used: %w", dir.name, err)
 		}
 	}

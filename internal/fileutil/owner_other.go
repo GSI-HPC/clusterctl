@@ -10,6 +10,6 @@ import (
 )
 
 // owner is not known where files have no Unix owner.
-func owner(fs.FileInfo) (uid, gid int, ok bool) {
-	return 0, 0, false
+func owner(fs.FileInfo) (uid int, ok bool) {
+	return 0, false
 }

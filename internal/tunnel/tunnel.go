@@ -24,8 +24,9 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/GSI-HPC/go-clikit/fsutil"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
-	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/shellquote"
 	"github.com/GSI-HPC/clusterctl/internal/tmpl"
 )
@@ -311,10 +312,10 @@ func runsWith(pid int, path string) bool {
 // cannot start the same tunnel, or stop it while it is being started.
 func (m *Manager) lock(ctx context.Context, name string) (func(), error) {
 	path := m.PIDFile(name)
-	if err := fileutil.EnsureDir(filepath.Dir(path)); err != nil {
+	if err := fsutil.EnsureDir(filepath.Dir(path)); err != nil {
 		return nil, err
 	}
-	return fileutil.Lock(ctx, path)
+	return fsutil.Lock(ctx, path, fsutil.DefaultLockWait)
 }
 
 // removeStale removes a process id file that names no tunnel, so that the

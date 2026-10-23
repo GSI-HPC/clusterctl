@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/GSI-HPC/go-clikit/fsutil"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
@@ -200,7 +201,7 @@ func refuseNonEmpty(dir string) error {
 	case !info.IsDir():
 		return exitcode.Errorf(exitcode.Usage, "%s is not a directory", dir)
 	}
-	if err := fileutil.CheckTrusted(dir); err != nil {
+	if err := fsutil.CheckTrusted(dir); err != nil {
 		return exitcode.Wrap(exitcode.Usage, fmt.Errorf("config init writes only into a directory of its own: %w", err))
 	}
 	items, err := os.ReadDir(dir)

@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2026 GSI Helmholtz Centre for Heavy Ion Research GmbH <http://www.gsi.de>
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
-// Package fileutil writes files the way a tool several administrators run at
-// once has to: completely or not at all, and under a lock when the file is
-// shared.
+// Package fileutil holds what clusterctl does with files beyond go-clikit's
+// fsutil, which writes a file whole, locks it, updates it and checks it: a
+// file created only when it is new, a file appended to under the lock of
+// fsutil, a directory checked below which clusterctl is going to create
+// one, and a cache of answers on disk.
 package fileutil
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,165 +20,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gofrs/flock"
+	"github.com/GSI-HPC/go-clikit/fsutil"
 )
-
-// ErrUntrusted is matched by errors.Is for every file or directory refused
-// because someone other than this user or root could have written it.
-var ErrUntrusted = errors.New("written by someone else")
-
-// untrustedError says which file was refused and why, and is ErrUntrusted.
-type untrustedError struct{ msg string }
-
-func (e *untrustedError) Error() string        { return e.msg }
-func (e *untrustedError) Is(target error) bool { return target == ErrUntrusted }
-
-func untrusted(format string, args ...any) error {
-	return &untrustedError{fmt.Sprintf(format, args...)}
-}
-
-// maxLinks bounds how many symbolic links a write follows, the way the
-// kernel bounds a path lookup.
-const maxLinks = 40
-
-// WriteAtomic writes data to path through a temporary file in the same
-// directory, so a reader never sees a half written file and a failure leaves
-// the previous content in place.
-//
-// A file that exists already keeps its mode and group, and its owner when
-// root writes it, so that a file several administrators share stays
-// writable by all of them; perm applies only to a new file. Write
-// permission for anyone is never kept. A symbolic link is written through
-// rather than replaced, as long as this user or root made it.
-func WriteAtomic(path string, data []byte, perm os.FileMode) error {
-	path, err := resolve(path)
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	uid, gid := -1, -1
-	switch info, err := os.Stat(path); {
-	case err == nil:
-		perm = info.Mode().Perm() &^ 0o002
-		if u, g, ok := owner(info); ok {
-			gid = g
-			if os.Geteuid() == 0 {
-				uid = u
-			}
-		}
-	case !errors.Is(err, fs.ErrNotExist):
-		return err
-	}
-
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer func() {
-		// Both are best effort: on the happy path the file has already
-		// been closed and renamed away.
-		_ = tmp.Close()
-		_ = os.Remove(name)
-	}()
-
-	if gid >= 0 {
-		if err := keepOwner(tmp, uid, gid); err != nil {
-			return fmt.Errorf("keeping the owner of %s: %w", path, err)
-		}
-	}
-	// After the change of owner, which may clear the setgid bit.
-	if err := tmp.Chmod(perm); err != nil {
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	// The rename is only durable once the content has reached the disk.
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(name, path); err != nil {
-		return err
-	}
-	// And the rename itself only once the directory has.
-	return syncDir(dir)
-}
-
-// keepOwner gives a new file the group, and the owner when uid is not -1, of
-// the file it is going to replace, unless it has them already.
-func keepOwner(f *os.File, uid, gid int) error {
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	u, g, ok := owner(info)
-	if !ok || (g == gid && (uid < 0 || u == uid)) {
-		return nil
-	}
-	return f.Chown(uid, gid)
-}
-
-// syncDir makes a change to the entries of a directory durable.
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	err = d.Sync()
-	if cerr := d.Close(); err == nil {
-		err = cerr
-	}
-	return err
-}
-
-// resolve follows the symbolic links path is, so that a write through a link
-// changes the file it points at. A link that neither this user nor root owns
-// is refused: whoever put it there would otherwise choose which file is
-// written.
-func resolve(path string) (string, error) {
-	for range maxLinks {
-		info, err := os.Lstat(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			return path, nil
-		}
-		if err != nil {
-			return "", err
-		}
-		if info.Mode()&fs.ModeSymlink == 0 {
-			return path, nil
-		}
-		if err := trustedOwner(path, info); err != nil {
-			return "", err
-		}
-		if path, err = linkTarget(path); err != nil {
-			return "", err
-		}
-	}
-	return "", fmt.Errorf("%s: too many levels of symbolic links", path)
-}
-
-// linkTarget returns the path the symbolic link path points at. A relative
-// one is read against the directory the link is really in, as the system
-// reads it: behind a linked directory, ../x is beside the directory the
-// link leads to, not beside its name.
-func linkTarget(path string) (string, error) {
-	link, err := os.Readlink(path)
-	if err != nil || filepath.IsAbs(link) {
-		return link, err
-	}
-	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, link), nil
-}
 
 // WriteNew writes data to a file that does not exist yet, and never to one
 // that does. The file is created exclusively, so one that appeared since it
@@ -203,44 +47,15 @@ func WriteNew(path string, data []byte, perm os.FileMode) (err error) {
 	return f.Close()
 }
 
-// Update reads a file, hands its content to change and writes back whatever
-// comes out, holding an exclusive lock for the whole cycle. A file that does
-// not exist yet is presented as empty.
-//
-// The known_hosts file is shared and versioned, and ssh appends to it without
-// locking, so every write clusterctl makes to it goes through here.
-func Update(ctx context.Context, path string, perm os.FileMode, change func([]byte) ([]byte, error)) error {
-	// The lock belongs to the file a link points at, so that writers
-	// going through the link and around it take the same one.
-	path, err := resolve(path)
-	if err != nil {
-		return err
-	}
-	unlock, err := Lock(ctx, path)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
-	current, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	next, err := change(current)
-	if err != nil {
-		return err
-	}
-	return WriteAtomic(path, next, perm)
-}
-
 // Locked runs fn holding the lock Update takes for a path, and hands it the
-// path the lock belongs to, a link resolved, for the same reason.
+// path the lock belongs to, a link resolved, so that writers going through
+// the link and around it take the same one.
 func Locked(ctx context.Context, path string, fn func(path string) error) error {
 	path, err := resolve(path)
 	if err != nil {
 		return err
 	}
-	unlock, err := Lock(ctx, path)
+	unlock, err := fsutil.Lock(ctx, path, fsutil.DefaultLockWait)
 	if err != nil {
 		return err
 	}
@@ -248,7 +63,54 @@ func Locked(ctx context.Context, path string, fn func(path string) error) error 
 	return fn(path)
 }
 
-// AppendSync appends data to a file, creating it as WriteAtomic does when
+// maxLinks bounds how many symbolic links resolve follows, as the system
+// bounds the lookup of a path.
+const maxLinks = 40
+
+// resolve follows the symbolic links path is, to a file that may not exist
+// yet, as fsutil does for the file it writes. A link that neither this user
+// nor root owns is refused: whoever put it there would otherwise choose
+// which file is written.
+func resolve(path string) (string, error) {
+	for range maxLinks {
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) || (err == nil && info.Mode()&fs.ModeSymlink == 0) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if err := trustedOwner(path, info); err != nil {
+			return "", err
+		}
+		link, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(link) {
+			// Read against the directory the link is really in: behind a
+			// linked directory, ../x is beside the directory it leads to.
+			dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+			if err != nil {
+				return "", err
+			}
+			link = filepath.Join(dir, link)
+		}
+		path = link
+	}
+	return "", fmt.Errorf("%s: too many levels of symbolic links", path)
+}
+
+// trustedOwner refuses a file neither this user nor root owns.
+func trustedOwner(path string, info fs.FileInfo) error {
+	if uid, ok := owner(info); ok && uid != 0 && uid != os.Geteuid() {
+		return fmt.Errorf("%s is owned by uid %d, neither this user (uid %d) nor root: %w",
+			path, uid, os.Geteuid(), fsutil.ErrUntrusted)
+	}
+	return nil
+}
+
+// AppendSync appends data to a file, creating it as fsutil.WriteAtomic does when
 // there is none, and returns once the data has reached the disk. The caller
 // holds the file's lock, from Locked.
 //
@@ -259,7 +121,7 @@ func Locked(ctx context.Context, path string, fn func(path string) error) error 
 func AppendSync(path string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
 	if errors.Is(err, fs.ErrNotExist) {
-		return WriteAtomic(path, data, perm)
+		return fsutil.WriteAtomic(path, data, perm)
 	}
 	if err != nil {
 		return err
@@ -279,173 +141,24 @@ func AppendSync(path string, data []byte, perm os.FileMode) error {
 	return f.Close()
 }
 
-// Lock takes an exclusive lock for a path and returns the function that
-// releases it. The lock lives in a sibling file, so that the locked file can
-// still be replaced atomically. A lock held elsewhere is waited for, for
-// lockWait at most, and the error then names the file and, where the system
-// tells, the process that holds the lock.
-//
-// The lock file is readable, which is all taking the lock needs, by whoever
-// can write the file: its group when the file, or while there is none yet
-// its directory, is writable by the group. A lock only its first user could
-// open would lock every other administrator out of a shared file for good.
-func Lock(ctx context.Context, path string) (func(), error) {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	perm, gid := lockMode(path)
-	name := filepath.Join(dir, "."+filepath.Base(path)+".lock")
-	lock := flock.New(name, flock.SetPermissions(perm))
-
-	wait, cancel := context.WithTimeout(ctx, lockWait)
-	defer cancel()
-	ok, err := lock.TryLockContext(wait, 50*time.Millisecond)
-	switch {
-	case ok:
-		shareLock(name, perm, gid)
-		return func() { _ = lock.Unlock() }, nil
-	case ctx.Err() != nil:
-		return nil, fmt.Errorf("waiting for the lock on %s: %w", path, ctx.Err())
-	case wait.Err() != nil:
-		holder := cmp.Or(lockHolder(name), "another process")
-		return nil, &lockTimeout{fmt.Sprintf("%s is locked by %s, which has not let go of it in %s (the lock is %s); try again once it is done",
-			path, holder, lockWait, name)}
-	default:
-		return nil, fmt.Errorf("locking %s: %w", path, err)
-	}
-}
-
-// lockWait is how long Lock waits for whoever holds a lock to let go.
-const lockWait = 30 * time.Second
-
-// lockTimeout is a lock that was not let go of in time. It is the timeout
-// the deadline it replaces was, without the deadline's words, which say
-// nothing of the lock.
-type lockTimeout struct{ msg string }
-
-func (e *lockTimeout) Error() string { return e.msg }
-func (e *lockTimeout) Unwrap() error { return context.DeadlineExceeded }
-
-// lockMode returns the mode and group a lock for path is created with: the
-// group's read and write permission is that of the file, or of its directory
-// when there is no file yet.
-func lockMode(path string) (os.FileMode, int) {
-	info, err := os.Stat(path)
-	if err != nil {
-		if info, err = os.Stat(filepath.Dir(path)); err != nil {
-			return 0o600, -1
-		}
-	}
-	gid := -1
-	if _, g, ok := owner(info); ok {
-		gid = g
-	}
-	perm := os.FileMode(0o600)
-	if info.Mode().Perm()&0o020 != 0 {
-		perm |= 0o060
-	}
-	return perm, gid
-}
-
-// shareLock gives a lock file this user created the mode and group it was
-// meant to have, which the umask and a directory without the setgid bit
-// take away. It is best effort: the lock is held either way, and only
-// another administrator's next run can be stopped by it.
-func shareLock(name string, perm os.FileMode, gid int) {
-	info, err := os.Stat(name)
-	if err != nil {
-		return
-	}
-	u, g, ok := owner(info)
-	if !ok || u != os.Geteuid() {
-		return
-	}
-	if gid >= 0 && g != gid {
-		_ = os.Chown(name, -1, gid)
-	}
-	if info.Mode().Perm() != perm {
-		_ = os.Chmod(name, perm)
-	}
-}
-
-// EnsureDir creates a directory that only its owner can write, for state
-// that holds host keys, control sockets and certificate pins, and checks the
-// one that is there already. It has to be a directory, not a link to one,
-// owned by this user and writable by nobody else: whoever else can write it
-// can replace the ssh configuration clusterctl hands to ssh.
-func EnsureDir(path string) error {
-	if !filepath.IsAbs(path) {
-		return fmt.Errorf("%q is not an absolute path", path)
-	}
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	switch {
-	case info.Mode()&fs.ModeSymlink != 0:
-		return untrusted("%s is a symbolic link, not a directory", path)
-	case !info.IsDir():
-		return fmt.Errorf("%s is not a directory", path)
-	}
-	if uid, _, ok := owner(info); ok && uid != os.Geteuid() {
-		return untrusted("%s is owned by uid %d, not by this user (uid %d)",
-			path, uid, os.Geteuid())
-	}
-	if info.Mode().Perm()&0o022 != 0 {
-		return untrusted("%s can be written by others (mode %v); run chmod go-w %s",
-			path, info.Mode().Perm(), path)
-	}
-	return nil
-}
-
-// CheckTrusted refuses a file or directory that someone other than this
-// user or root could have written: one another user owns, or one its group
-// or anyone can write. Configuration names the programs clusterctl runs, so
-// it is held to what OpenSSH holds ~/.ssh/config to. A link is followed, and
-// what it points at is checked.
-func CheckTrusted(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	if err := trustedOwner(path, info); err != nil {
-		return err
-	}
-	if info.Mode().Perm()&0o022 != 0 {
-		return untrusted("%s can be written by others than its owner (mode %v); run chmod go-w %s",
-			path, info.Mode().Perm(), path)
-	}
-	return nil
-}
-
 // CheckTrustedParent checks the directory holding path, whoever could
 // replace path. A directory with the sticky bit set may be writable by
 // anyone, the way /tmp is, because nobody can then replace or remove a file
-// another user put there.
+// another user put there; its owner still can, so it has to be this user's
+// or root's.
 func CheckTrustedParent(path string) error {
 	dir := filepath.Dir(path)
 	info, err := os.Stat(dir)
 	if err != nil {
 		return err
 	}
-	if info.Mode()&fs.ModeSticky != 0 {
-		return trustedOwner(dir, info)
+	if info.Mode()&fs.ModeSticky == 0 {
+		return fsutil.CheckTrusted(dir)
 	}
-	return CheckTrusted(dir)
-}
-
-// trustedOwner refuses a file neither this user nor root owns.
-func trustedOwner(path string, info fs.FileInfo) error {
-	uid, _, ok := owner(info)
-	if !ok || uid == 0 || uid == os.Geteuid() {
-		return nil
+	if err := trustedOwner(dir, info); err != nil {
+		return err
 	}
-	return untrusted("%s is owned by uid %d, neither this user (uid %d) nor root",
-		path, uid, os.Geteuid())
+	return fsutil.CheckTrusted(filepath.Dir(dir))
 }
 
 // ReadCache returns what WriteCache stored under key in dir, if it was
@@ -477,7 +190,7 @@ func WriteCache(dir string, key any, data []byte) {
 	path, id := cacheFile(dir, key)
 	raw, err := json.Marshal(cacheEntry{Key: id, At: time.Now(), Data: data})
 	if err == nil && len(data) > 0 {
-		_ = WriteAtomic(path, raw, 0o600)
+		_ = fsutil.WriteAtomic(path, raw, 0o600)
 	}
 }
 

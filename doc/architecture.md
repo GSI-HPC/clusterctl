@@ -54,7 +54,7 @@ subsystems it drives and calls them itself, with what `app` built.
 | `internal/shellquote` | Rendering an argument vector so a remote shell reproduces it exactly. |
 | `internal/fanout` | Working on many targets at once: the executor, the status and grouping of results, the bound on each host, and the exit code a fan-out that failed somewhere asks for, on the pools of go-clikit's `fanout`. |
 | `internal/safety` | Deciding whether a destructive action may proceed. |
-| `internal/fileutil` | Writing files atomically and under a lock, and the cache on disk. |
+| `internal/fileutil` | What go-clikit's `fsutil`, which writes files atomically, locks and checks them, does not do: a file created only when new, an append under its lock, and the cache on disk. |
 
 ### Front ends
 
