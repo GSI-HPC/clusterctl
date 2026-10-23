@@ -57,7 +57,7 @@ func (s *Server) watch(ctx context.Context, req *mcp.CallToolRequest) (context.C
 // trace names the trace of the call ctx belongs to, for its audit entries.
 func trace(ctx context.Context) string {
 	if bus := progress.BusFrom(ctx); bus != nil {
-		return bus.Trace().String()
+		return bus.TraceID().String()
 	}
 	return ""
 }

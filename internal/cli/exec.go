@@ -174,7 +174,7 @@ escapes rather than passed to the terminal.`,
 // answer is what exec is for, so a display may show it as it arrives.
 func execExecutor(a *app.App) *fanout.Executor {
 	e := a.Executor()
-	e.Flags = progress.ShowLines
+	e.Flags = progress.FlagShowLines
 	return e
 }
 

@@ -123,8 +123,8 @@ func redfishEach[T any](ctx context.Context, a *app.App, step string, names []st
 	outcomes, _ := fanout.Map(ctx, sendable, pool.MapOptions[int]{
 		Step:  step,
 		Limit: redfishLimit(a),
-		Describe: func(i int) pool.Item {
-			return pool.Item{Node: calls[i].node, Host: calls[i].client.Host}
+		Describe: func(i int) pool.ItemInfo {
+			return pool.ItemInfo{Node: calls[i].node, Host: calls[i].client.Host}
 		},
 		PanicLog: a.WorkerDiag,
 	}, func(ctx context.Context, i int) (struct{}, error) {
@@ -465,7 +465,7 @@ func (p *bmcPlan) backend(ctx context.Context, a *app.App, node string) (*ipmi.B
 // <action>", whose targets are the nodes.
 func (p *bmcPlan) runStep(ctx context.Context, a *app.App, names []string, action string) []bmcResult {
 	ctx, step := progress.Start(ctx, progress.KindStep, "power "+action,
-		progress.WithFlags(progress.Fold), progress.Total(len(names)))
+		progress.Flagged(progress.FlagFold), progress.Total(len(names)))
 	rows := p.run(ctx, a, names, action)
 	step.End(bmcExit(rows))
 	return rows
