@@ -280,7 +280,7 @@ are about to do and ask before doing it.`),
 	// The completion scripts are written to the output the root has when the
 	// tree is made, not when it runs.
 	cmd.SetOut(r.streams.Out)
-	cobratree.Strict(cmd, nil)
+	cobratree.Strict(cmd)
 	annotateEffects(cmd)
 	traceLeaves(cmd, r)
 	return cmd, r

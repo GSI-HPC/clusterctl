@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 
 	pool "github.com/GSI-HPC/go-clikit/fanout"
@@ -24,7 +25,7 @@ const program = "clusterctl"
 // clusterctl's, and the error it becomes asks for the exit code of a target
 // that failed, as Recovered's does; the class of an error that says none of
 // its own is that of its exit code; and the step ends with Summarize's
-// error, which names the items by o.Noun and asks for the exit code the
+// error, which counts the items as o.Noun says and asks for the exit code the
 // worst of the items' errors does, and which Map returns as well. A
 // MapOptions that sets the program, the class or the summary keeps it.
 func Map[T, R any](ctx context.Context, items []T, o pool.MapOptions[T], fn func(ctx context.Context, item T) (R, error)) ([]pool.Outcome[R], error) {
@@ -54,17 +55,17 @@ func Recovered(log io.Writer, target string, v any) error {
 }
 
 // Summarize is the error a fan-out that did not succeed everywhere exits
-// with: go-clikit's fanout.Failure, "k of n <noun> failed: <node set>", with
+// with: go-clikit's fanout.FailureError, "k of <noun> failed: <node set>", with
 // the code exitcode.Worst gives the items' errors, or TargetFailed when none
 // of them says, since a command that exited non-zero is a target that
 // failed. Its progress class is that of the code, not of whichever of the
 // items' errors says a class first, or canceled when s.Canceled says that
 // every item that failed ended canceled. It is nil when none failed.
-func Summarize(noun string, s pool.Summary) error {
-	err := pool.Failure(noun, s)
-	if err == nil {
+func Summarize(noun func(n int) string, s pool.Summary) error {
+	if len(s.Failed) == 0 {
 		return nil
 	}
+	err := &pool.FailureError{Summary: s, Noun: noun}
 	errs := make([]error, len(s.Failed))
 	for i, f := range s.Failed {
 		errs[i] = f.Err
@@ -76,6 +77,9 @@ func Summarize(noun string, s pool.Summary) error {
 	}
 	return &exitcode.Error{Code: code, Err: classed{err, class}}
 }
+
+// hosts counts targets as "480 hosts".
+func hosts(n int) string { return fmt.Sprintf("%d hosts", n) }
 
 // classed gives an error the progress class of its exit code.
 type classed struct {
@@ -96,7 +100,7 @@ func (c classed) ProgressClass() progress.Class { return c.class }
 func FailureError(results []*transport.Result) error {
 	s := pool.Summary{Total: len(results)}
 	for _, r := range Failures(results) {
-		s.Failed = append(s.Failed, pool.Failed{Name: r.Target.Name, Err: r.Err})
+		s.Failed = append(s.Failed, pool.FailedItem{Name: r.Target.Name, Err: r.Err})
 	}
-	return Summarize("hosts", s)
+	return Summarize(hosts, s)
 }
