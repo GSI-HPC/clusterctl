@@ -178,10 +178,13 @@ func TestThePoolsAreClusterctls(t *testing.T) {
 	if len(ran) != 3 {
 		t.Errorf("Each ran %v, want every index", ran)
 	}
-	batches := pool.Batches(context.Background(), nodeset.MustParse("exe[1-2]"), pool.BatchOptions{Step: "power on"},
+	batches, err := pool.Batches(context.Background(), nodeset.MustParse("exe[1-2]"), pool.BatchOptions{Step: "power on"},
 		func(context.Context, *nodeset.NodeSet) error { return progress.Skip("dry run") })
 	if len(batches) != 1 || !errors.Is(batches[0].Err, progress.ErrSkipped) {
 		t.Errorf("Batches = %+v, want one batch left out on purpose", batches)
+	}
+	if err != nil {
+		t.Errorf("Batches error = %v, want none for a batch left out on purpose", err)
 	}
 }
 
@@ -213,7 +216,7 @@ func TestMapEndsCanceledWhenInterrupted(t *testing.T) {
 			watched, watcher := progresstest.Watch(context.Background(), t, byExitCode)
 			ctx, cancel := context.WithCancel(watched)
 			defer cancel()
-			outcomes, err := fanout.Map(ctx, nodes(3), pool.MapOptions[string]{Step: "copy", Limit: 1, Noun: "hosts"},
+			outcomes, err := fanout.Map(ctx, nodes(3), pool.MapOptions[string]{Step: "copy", Limit: 1, Noun: func(n int) string { return fmt.Sprintf("%d hosts", n) }},
 				func(ctx context.Context, node string) (struct{}, error) {
 					switch node {
 					case "exe1":
