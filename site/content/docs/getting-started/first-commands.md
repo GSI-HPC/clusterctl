@@ -31,12 +31,13 @@ clusterctl: site.yaml is not valid:
 
 ```console
 $ clusterctl doctor
-CHECK                        STATUS   DETAIL
-configuration                ok       context cluster1, cluster cluster1, site example
-ssh client                   ok       /usr/bin/ssh OpenSSH_9.6p1
-generated ssh configuration  ok       ~/.local/state/clusterctl/ssh_config-3f9c2a1b7d4e5f60
-host key file                ok       412 entries in /etc/clusterctl/ssh-known-hosts
-node inventory               ok       1024 nodes
+✓ configuration: context cluster1, cluster cluster1, site example
+✓ ssh client: /usr/bin/ssh OpenSSH_9.6p1
+✓ generated ssh configuration: ~/.local/state/clusterctl/ssh_config-3f9c2a1b7d4e5f60
+✓ host key file: 412 entries in /etc/clusterctl/ssh-known-hosts
+✓ node inventory: 1024 nodes
+
+5 checks, 0 failed, 0 warnings
 
 $ clusterctl doctor --remote
 ```

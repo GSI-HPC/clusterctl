@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -431,25 +432,38 @@ func reachedRole(result *transport.Result, err error, tools bool) bool {
 }
 
 func printChecks(a *app.App, format output.Format, streams app.Streams, checks []doctor.Check) error {
-	t := output.NewTable(output.Cols("CHECK", "STATUS", "DETAIL")...)
-	for _, c := range checks {
-		t.Add(c.Name, string(c.Status), c.Detail)
-	}
 	failed, warned := doctor.Count(checks)
-	t.Caption = fmt.Sprintf("%d checks, %d failed, %d warnings", len(checks), failed, warned)
+	summary := fmt.Sprintf("%d checks, %d failed, %d warnings", len(checks), failed, warned)
 
-	result := output.Result{Table: t, Object: checks}
-	if a != nil {
-		if err := a.Print(result); err != nil {
-			return err
+	var err error
+	switch format.Kind {
+	case output.FormatTable, output.FormatWide:
+		err = writeChecks(streams.Out, checks, summary)
+	default:
+		result := output.Result{Object: checks}
+		if a != nil {
+			err = a.Print(result)
+		} else {
+			err = format.Write(streams.Out, result)
 		}
-	} else if err := format.Write(streams.Out, result); err != nil {
+	}
+	if err != nil {
 		return err
 	}
 	if failed > 0 {
 		return exitcode.Errorf(exitcode.TargetFailed, "%d checks failed", failed)
 	}
 	return nil
+}
+
+// writeChecks writes the checks for a person, as go-clikit's doctor.Write
+// does, and sums them up after a blank line.
+func writeChecks(w io.Writer, checks []doctor.Check, summary string) error {
+	if err := doctor.Write(w, checks); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(w, "\n%s\n", summary)
+	return err
 }
 
 // sshVersion reads the version the ssh client reports, which it prints to
