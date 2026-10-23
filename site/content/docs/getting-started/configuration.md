@@ -162,8 +162,9 @@ has to exist: a misspelled one is an error, not a file quietly left out. Of the
 two directories read without them, one that is missing is skipped.
 
 Configuration names programs clusterctl runs, so like `~/.ssh/config` it has to
-be yours or root's, and nobody else may be able to write the files or the
-directory they are in. Otherwise clusterctl refuses to read them and says
+be yours or root's, and nobody else may be able to write the files, the
+directory they are in, or any directory above it; a sticky directory such as
+`/tmp` is allowed above them. Otherwise clusterctl refuses to read them and says
 which one to `chmod go-w`. Share a site directory through version control or
 keep it owned by root, not writable by a group.
 

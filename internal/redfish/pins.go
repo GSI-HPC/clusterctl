@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GSI-HPC/go-clikit/fsutil"
 	"github.com/GSI-HPC/go-clikit/progress"
 
 	"github.com/GSI-HPC/clusterctl/internal/fileutil"
@@ -226,7 +227,7 @@ func (s *PinStore) RemoveAll(ctx context.Context, hosts []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.read = nil
-	return fileutil.Update(ctx, s.Path, 0o600, func(current []byte) ([]byte, error) {
+	return fsutil.Update(ctx, s.Path, 0o600, func(current []byte) ([]byte, error) {
 		var b strings.Builder
 		for line := range strings.SplitSeq(string(current), "\n") {
 			trimmed := strings.TrimSpace(line)

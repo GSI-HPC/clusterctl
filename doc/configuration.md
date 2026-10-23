@@ -50,8 +50,9 @@ that does not exist is a usage error, because without it the command would
 resolve to another context; only a missing directory of the built-in search
 path is skipped. And the configuration names programs clusterctl runs, so it
 is held to what OpenSSH holds `~/.ssh/config` to: owned by the user or root,
-writable by nobody else, with a sticky directory such as `/tmp` allowed to hold
-a file named on its own.
+writable by nobody else, and so is every directory above it, with a sticky
+directory such as `/tmp` allowed to hold a file named on its own. go-clikit's
+`fsutil.CheckTrusted` makes the check.
 
 ## Starting a configuration
 

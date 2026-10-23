@@ -21,9 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/fsutil"
+
 	"github.com/GSI-HPC/clusterctl/internal/apis/v1alpha1"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 	"github.com/GSI-HPC/clusterctl/internal/hostname"
 )
 
@@ -847,7 +848,7 @@ func (c *Client) writeConfig() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := fileutil.EnsureDir(c.stateDir); err != nil {
+	if err := fsutil.EnsureDir(c.stateDir); err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256(data)
@@ -855,7 +856,7 @@ func (c *Client) writeConfig() (string, error) {
 	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, data) {
 		return path, nil
 	}
-	if err := fileutil.WriteAtomic(path, data, 0o600); err != nil {
+	if err := fsutil.WriteAtomic(path, data, 0o600); err != nil {
 		return "", err
 	}
 	return path, nil

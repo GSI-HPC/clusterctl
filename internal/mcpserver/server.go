@@ -31,13 +31,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GSI-HPC/go-clikit/fsutil"
 	"github.com/GSI-HPC/go-clikit/progress"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
 	"github.com/GSI-HPC/clusterctl/internal/app"
 	"github.com/GSI-HPC/clusterctl/internal/exitcode"
-	"github.com/GSI-HPC/clusterctl/internal/fileutil"
 )
 
 // ConfirmMode says who answers the confirmation gate before a plan is
@@ -371,7 +371,7 @@ func (l *auditLog) record(e auditEntry) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if err := fileutil.EnsureDir(filepath.Dir(l.path)); err != nil {
+	if err := fsutil.EnsureDir(filepath.Dir(l.path)); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)

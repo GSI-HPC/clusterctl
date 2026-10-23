@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/GSI-HPC/clusterctl/internal/fileutil"
+	"github.com/GSI-HPC/go-clikit/fsutil"
 )
 
 // Environment variables that steer where configuration and state live, and
@@ -186,9 +186,6 @@ func expandEntries(entries []string, skipMissing bool) ([]string, error) {
 			if err := checkTrusted(entry); err != nil {
 				return nil, err
 			}
-			if err := fileutil.CheckTrustedParent(entry); err != nil {
-				return nil, fmt.Errorf("refusing to read configuration: %w", err)
-			}
 			files = append(files, entry)
 			continue
 		}
@@ -214,7 +211,7 @@ func expandEntries(entries []string, skipMissing bool) ([]string, error) {
 // clusterctl runs, ssh.binary and a password command among them, so whoever
 // can write it runs their programs with the administrator's credentials.
 func checkTrusted(path string) error {
-	if err := fileutil.CheckTrusted(path); err != nil {
+	if err := fsutil.CheckTrusted(path); err != nil {
 		return fmt.Errorf("refusing to read configuration: %w", err)
 	}
 	return nil
