@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -33,6 +34,28 @@ func doctorChecks(t *testing.T, opts harnessOptions, args ...string) (map[string
 		out[c.Name] = c
 	}
 	return out, h
+}
+
+// Doctor writes its checks as go-clikit's doctor.Write does, one line for
+// each with its mark, and sums them up after a blank line.
+func TestDoctorWritesTheChecksForAPerson(t *testing.T) {
+	t.Parallel()
+	h, _ := run(t, harnessOptions{}, "doctor")
+	lines := strings.Split(strings.TrimSuffix(h.out.String(), "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("doctor wrote %d lines, want the checks and a summary:\n%s", len(lines), h.out)
+	}
+	if !strings.HasPrefix(lines[0], "✓ configuration: ") {
+		t.Errorf("the first line is %q, want the configuration check with its mark", lines[0])
+	}
+	for _, line := range lines[:len(lines)-2] {
+		if !strings.HasPrefix(line, "✓ ") && !strings.HasPrefix(line, "! ") && !strings.HasPrefix(line, "✗ ") {
+			t.Errorf("%q does not start with the mark of a check", line)
+		}
+	}
+	if lines[len(lines)-2] != "" || !regexp.MustCompile(`^\d+ checks, \d+ failed, \d+ warnings$`).MatchString(lines[len(lines)-1]) {
+		t.Errorf("the last lines are %q, want a blank line and the summary", lines[len(lines)-2:])
+	}
 }
 
 // TestDoctorChecksTheConfiguredIPMIBackend is the report's 12.11: ipmipower
